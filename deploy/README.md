@@ -110,7 +110,7 @@ flowchart LR
 
 ## 手动安装
 
-本节适用于 Linux amd64/arm64，需准备 Docker Engine、Docker Compose Plugin、curl 和 OpenSSL，
+本节适用于 Ubuntu 等 Linux amd64 系统，需准备 Docker Engine、Docker Compose Plugin、curl 和 OpenSSL，
 并确保当前用户能访问 Docker、可通过 `sudo` 或 root 设置目录权限。一键安装入口见
 [快速开始](../README.md#一键安装)，脚本会自动完成本节准备和服务启动
 
@@ -702,7 +702,8 @@ docker compose -f deploy/compose.yaml up -d --no-deps --no-build --wait codex-pr
 - `sealed` 是构建封口标记，不是密码学签名。普通上传、URL 或 GitHub 安装不能获得 `builtin` 身份，独立教学示例也不例外
 
 部署须保留完整的二进制、Web 资源与官方插件目录；不要手动修改制品元数据或迁移 checksum 绕过校验。
-macOS arm64 提供构建产物；部署前需验证目标平台的插件运行与上游调用，不能只以打包成功判断可用
+发行镜像与二进制仅提供 Linux amd64，Ubuntu 服务器推荐使用 Docker Compose 部署。
+直接运行二进制时需满足构建所用 Debian Bookworm 的 glibc 等运行库要求，不能仅凭 CPU 架构判断兼容性
 
 ## 备份与恢复
 

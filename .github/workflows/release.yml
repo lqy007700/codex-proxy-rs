@@ -31,7 +31,6 @@ jobs:
       git_sha: ${{ steps.version.outputs.git_sha }}
       platform_matrix: ${{ steps.version.outputs.platform_matrix }}
       docker_matrix: ${{ steps.version.outputs.docker_matrix }}
-      non_docker_matrix: ${{ steps.version.outputs.non_docker_matrix }}
       docker_platforms: ${{ steps.version.outputs.docker_platforms }}
       previous_tag: ${{ steps.version.outputs.previous_tag }}
       prerelease: ${{ steps.version.outputs.prerelease }}
@@ -102,7 +101,6 @@ jobs:
           required_platform_keys = %w[os arch runner target binary archive]
           seen_platforms = {}
           docker_platform_jobs = []
-          non_docker_platform_jobs = []
           docker_platforms = []
           platforms.each_with_index do |platform, index|
             fail("#{platforms_path}: platforms[#{index}] must be a table") unless platform.is_a?(Hash)
@@ -120,8 +118,6 @@ jobs:
               platform["dockerPlatform"] = docker_platform
               docker_platform_jobs << platform
               docker_platforms << docker_platform
-            else
-              non_docker_platform_jobs << platform
             end
           end
 
@@ -131,7 +127,6 @@ jobs:
           fail("failed to resolve git sha") unless status.success?
           matrix = JSON.generate({ "include" => platforms })
           docker_matrix = JSON.generate({ "include" => docker_platform_jobs })
-          non_docker_matrix = JSON.generate({ "include" => non_docker_platform_jobs })
           current_sort_key = version_sort_key(version)
           tags, status = Open3.capture2("git", "tag", "--list", "#{tag_prefix}*", "--merged", "HEAD")
           fail("failed to list git tags") unless status.success?
@@ -158,7 +153,6 @@ jobs:
           puts "git_sha=#{git_sha.strip}"
           puts "platform_matrix=#{matrix}"
           puts "docker_matrix=#{docker_matrix}"
-          puts "non_docker_matrix=#{non_docker_matrix}"
           puts "docker_platforms=#{docker_platforms.join(",")}"
           puts "previous_tag=#{previous_tag}"
           puts "prerelease=#{version.split("+", 2).first.include?("-")}"
@@ -283,60 +277,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  build-binary:
-    name: build-binary (${{ matrix.os }}-${{ matrix.arch }})
-    needs: release-info
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.release-info.outputs.non_docker_matrix) }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.release-info.outputs.git_sha }}
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1a3a6d54512beeaffd394f8d516ca16f2c506a20 # 1.97
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache Cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            backend/target
-          key: cargo-v3-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('backend/Cargo.lock', 'backend/rust-toolchain.toml', 'backend/**/Cargo.toml', 'backend/.cargo/config.toml', '.github/workflows/release.yml') }}
-          restore-keys: |
-            cargo-v3-${{ runner.os }}-${{ matrix.target }}-
-
-      - name: Build binary
-        shell: bash
-        run: |
-          cargo build --release --locked --target "${{ matrix.target }}" --bin codex-proxy-rs
-          mkdir -p "../dist/binaries/${{ matrix.os }}-${{ matrix.arch }}"
-          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "../dist/binaries/${{ matrix.os }}-${{ matrix.arch }}/${{ matrix.binary }}"
-        working-directory: backend
-        env:
-          CPR_VERSION: ${{ needs.release-info.outputs.version }}
-          CPR_GIT_SHA: ${{ needs.release-info.outputs.git_sha }}
-          CPR_BUILD_TIME: ${{ needs.release-info.outputs.build_time }}
-          CPR_BUILD_TYPE: ${{ needs.release-info.outputs.build_type }}
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codex-proxy-rs-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist/binaries/${{ matrix.os }}-${{ matrix.arch }}/
-          if-no-files-found: error
-          retention-days: 1
-
   package-assets:
-    needs: [release-info, frontend, build-docker-binary, build-binary]
+    needs: [release-info, frontend, build-docker-binary]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

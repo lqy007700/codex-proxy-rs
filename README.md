@@ -41,7 +41,7 @@
 
 使用 Docker Compose 部署版本固定的发布镜像，同时启动 PostgreSQL 和 Redis
 
-以下命令适用于 Linux amd64/arm64，需要 Docker Engine、Docker Compose Plugin、curl 和 OpenSSL
+以下命令适用于 Ubuntu 等 Linux amd64 系统，需要 Docker Engine、Docker Compose Plugin、curl 和 OpenSSL
 
 已有部署请先看 [升级说明](deploy/README.md#镜像升级与源码构建)，不要覆盖原配置
 
