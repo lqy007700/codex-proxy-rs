@@ -7,8 +7,14 @@ on:
         description: 'Tag to release, for example v0.1.0'
         required: true
         type: string
+      reuse_run_id:
+        description: 'Recovery only: completed Release run with passing checks and verified build artifacts for this tag'
+        required: false
+        default: ''
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -159,7 +165,90 @@ jobs:
           puts "build_type=#{version.split("+", 2).first.include?("-exp.") ? "experimental" : "release"}"
           RUBY
 
+      - name: Validate recovery source
+        if: inputs.reuse_run_id != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SOURCE_RUN_ID: ${{ inputs.reuse_run_id }}
+          DOCKER_MATRIX: ${{ steps.version.outputs.docker_matrix }}
+        with:
+          script: |
+            const sourceId = process.env.SOURCE_RUN_ID;
+            if (!/^[1-9]\d*$/.test(sourceId) || !Number.isSafeInteger(Number(sourceId))) {
+              throw new Error('reuse_run_id must be a positive run ID');
+            }
+            const params = { ...context.repo, run_id: Number(sourceId) };
+            const { data: source } = await github.rest.actions.getWorkflowRun(params);
+            const { data: current } = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: context.runId,
+            });
+            if (source.id === context.runId || source.workflow_id !== current.workflow_id
+                || source.event !== 'workflow_dispatch' || source.status !== 'completed'
+                || !['success', 'failure'].includes(source.conclusion)) {
+              throw new Error('Recovery requires a completed run of this Release workflow');
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              ...params, filter: 'latest', per_page: 100,
+            });
+            const platforms = JSON.parse(process.env.DOCKER_MATRIX).include;
+            const requiredJobs = [
+              'release-info', 'frontend', 'quality / backend', 'quality / workflow-lint',
+              ...platforms.map(p => `build-docker-binary (${p.os}-${p.arch})`),
+              ...platforms.map(p => `build-docker-image (${p.dockerPlatform})`),
+            ];
+            // 只接受原始完整构建，不能把恢复任务中的 skipped 当作检查通过
+            for (const name of requiredJobs) {
+              const matches = jobs.filter(job => job.name === name);
+              if (matches.length !== 1 || matches[0].conclusion !== 'success') {
+                throw new Error(`Source run has no successful job: ${name}`);
+              }
+            }
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              ...params, per_page: 100,
+            });
+            const requiredArtifacts = [
+              'frontend-dist', 'plugin-release-assets',
+              ...platforms.map(p => `codex-proxy-rs-${p.os}-${p.arch}`),
+              ...platforms.map(p => `image-digest-${p.os}-${p.arch}`),
+            ];
+            for (const name of requiredArtifacts) {
+              const matches = artifacts.filter(artifact => artifact.name === name);
+              if (matches.length !== 1 || matches[0].expired) {
+                throw new Error(`Source artifact missing, expired or ambiguous: ${name}`);
+              }
+            }
+            core.info(`Validated checks and artifacts from Release run ${sourceId}`);
+
+      - name: Download recovery identity
+        if: inputs.reuse_run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: plugin-release-assets
+          path: ${{ runner.temp }}/reuse-manifest
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify recovery version and commit
+        if: inputs.reuse_run_id != ''
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_SHA: ${{ steps.version.outputs.git_sha }}
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads((Path(os.environ['RUNNER_TEMP']) / 'reuse-manifest/plugin-release-manifest.json').read_text())
+          # 封口清单将原始运行产物绑定到 tag 对应的版本与提交，拒绝跨版本复用
+          if (manifest.get('schema_version') != 1 or manifest.get('sealed') is not True
+                  or manifest.get('gateway_version') != os.environ['RELEASE_VERSION']
+                  or manifest.get('gateway_git_sha') != os.environ['RELEASE_SHA']):
+              raise SystemExit('Recovery artifacts do not match the release version and commit')
+          PY
+
       - name: Seal plugin release manifest
+        if: inputs.reuse_run_id == ''
         env:
           VERSION: ${{ steps.version.outputs.version }}
           GIT_SHA: ${{ steps.version.outputs.git_sha }}
@@ -185,6 +274,7 @@ jobs:
           RUBY
 
       - name: Upload sealed plugin assets
+        if: inputs.reuse_run_id == ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: plugin-release-assets
@@ -196,10 +286,13 @@ jobs:
     needs: [release-info]
     uses: ./.github/workflows/_quality.yml
     with:
-      ref: ${{ needs.release-info.outputs.git_sha }}
+      # 恢复时核对本轮工作流，业务源码检查复用来源运行的同一提交
+      ref: ${{ inputs.reuse_run_id != '' && github.sha || needs.release-info.outputs.git_sha }}
+      run_backend: ${{ inputs.reuse_run_id == '' }}
       run_frontend: false
 
   frontend:
+    if: inputs.reuse_run_id == ''
     needs: release-info
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -217,6 +310,7 @@ jobs:
           upload-artifact: 'true'
 
   build-docker-binary:
+    if: inputs.reuse_run_id == ''
     name: build-docker-binary (${{ matrix.os }}-${{ matrix.arch }})
     needs: release-info
     strategy:
@@ -279,9 +373,15 @@ jobs:
 
   package-assets:
     needs: [release-info, frontend, build-docker-binary]
+    # 恢复时构建任务按约定跳过，但来源核验失败仍必须阻断打包
+    if: >-
+      ${{ !cancelled() && needs.release-info.result == 'success' &&
+          (inputs.reuse_run_id != '' ||
+           (needs.frontend.result == 'success' && needs.build-docker-binary.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
+      actions: read
       contents: read
       id-token: write
       attestations: write
@@ -297,18 +397,24 @@ jobs:
         with:
           name: frontend-dist
           path: dist/frontend
+          run-id: ${{ inputs.reuse_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Linux amd64 binary artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codex-proxy-rs-linux-amd64
           path: dist/binaries/codex-proxy-rs-linux-amd64
+          run-id: ${{ inputs.reuse_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download sealed plugin assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: plugin-release-assets
           path: dist/plugin-release-assets
+          run-id: ${{ inputs.reuse_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package release assets
         shell: bash
@@ -427,6 +533,7 @@ jobs:
           compression-level: 0
 
   build-docker-image:
+    if: inputs.reuse_run_id == ''
     name: build-docker-image (${{ matrix.dockerPlatform }})
     needs: [release-info, frontend, build-docker-binary]
     strategy:
@@ -588,9 +695,15 @@ jobs:
   publish:
     # 产物准备可与测试重叠，版本标签和 GitHub Release 必须等全部质量与镜像验证通过
     needs: [release-info, quality, package-assets, build-docker-image]
+    if: >-
+      ${{ !cancelled() && needs.release-info.result == 'success' &&
+          needs.quality.result == 'success' && needs.package-assets.result == 'success' &&
+          ((inputs.reuse_run_id != '' && needs.build-docker-image.result == 'skipped') ||
+           (inputs.reuse_run_id == '' && needs.build-docker-image.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
+      actions: read
       contents: write
       packages: write
       id-token: write
@@ -614,6 +727,8 @@ jobs:
           pattern: image-digest-*
           path: dist/digests
           merge-multiple: true
+          run-id: ${{ inputs.reuse_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
