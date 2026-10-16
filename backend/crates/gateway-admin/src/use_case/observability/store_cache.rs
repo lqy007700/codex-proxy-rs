@@ -289,4 +289,12 @@ impl ObservabilityStore for CachedObservabilityStore {
     async fn list_ops_errors(&self, query: OpsErrorQuery) -> AdminStoreResult<OpsErrorPage> {
         self.inner.list_ops_errors(query).await
     }
+
+    async fn diagnostic_errors(
+        &self,
+        target: &crate::model::diagnostics::DiagnosticTarget,
+        limit: u16,
+    ) -> AdminStoreResult<Vec<crate::model::observability::OpsError>> {
+        self.inner.diagnostic_errors(target, limit).await
+    }
 }

@@ -2,7 +2,6 @@
 
 mod aggregates;
 mod records;
-pub(crate) use aggregates::AGGREGATE_COLLECTION;
 
 use super::{ObservabilityConnection, ObservabilityQueryBudget};
 use crate::{StoreError, StoreResult, postgres_unavailable};

@@ -621,7 +621,7 @@ async fn ops_errors_should_keep_account_label_and_authentication_contract() {
             "userAgent": "codex-cli/0.144.0",
             "providerErrorCode": "upstream",
             "upstreamSendState": "sent",
-            "errorDetails": "{\"error\":{\"code\":\"upstream\",\"message\":\"raw upstream marker\"}}",
+            "errorDetails": serde_json::to_string_pretty(&json!({"error": {"code": "upstream", "message": "raw upstream marker"}})).unwrap(),
             "continuationUnavailableReason": "reused_connection_lost",
             "upstreamConnectionExitReason": "tcp_reset",
             "upstreamConnectionAgeMs": 12000,
@@ -707,7 +707,7 @@ async fn diagnostics_should_keep_stable_key_and_display_name_contract() {
     );
 }
 
-fn usage_record_with_account(
+pub(super) fn usage_record_with_account(
     id: &str,
     account_id: &str,
     name: &str,
@@ -1376,4 +1376,65 @@ async fn usage_request_scope_is_validated_and_forwarded_without_changing_default
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
     }
     assert_eq!(fixture.observations.lock().unwrap().records.len(), 4);
+}
+
+pub(super) fn ops_error_record() -> gateway_admin::model::observability::OpsError {
+    use gateway_admin::model::observability::OpsError;
+    OpsError {
+        client_api_key_name: Some("Production".to_owned()),
+        source: "model_request".to_owned(),
+        event_id: "err_snapshot".to_owned(),
+        request_id: Some("req_err".to_owned()),
+        attempt_index: Some(1),
+        client_api_key_ref: Some("key_err".to_owned()),
+        component: "model_request".to_owned(),
+        operation: "responses".to_owned(),
+        protocol: Some("openai".to_owned()),
+        client_transport: Some("http_sse".to_owned()),
+        requested_model_id: Some("gpt-5.4".to_owned()),
+        service_tier: Some("priority".to_owned()),
+        endpoint: Some("/v1/responses".to_owned()),
+        provider_kind: Some("openai".to_owned()),
+        provider_account_ref: Some("acct_err".to_owned()),
+        provider_account_name: None,
+        provider_account_email: Some("err@example.invalid".to_owned()),
+        provider_account_plan_type: Some("pro".to_owned()),
+        provider_account_plan_type_display: Some("Pro".to_owned()),
+        provider_account_authentication_kind: Some("api_key".to_owned()),
+        upstream_model_id: Some("upstream-err".to_owned()),
+        upstream_transport: Some("http_sse".to_owned()),
+        failure_kind: "upstream_error".to_owned(),
+        upstream_send_state: Some("sent".to_owned()),
+        client_status_code: Some(502),
+        upstream_status_code: Some(502),
+        provider_error_code: Some("upstream".to_owned()),
+        client_response_id: None,
+        upstream_request_id: None,
+        latency_ms: Some(90),
+        message: "snapshot error".to_owned(),
+        error_details: Some(
+            r#"{"error":{"code":"upstream","message":"raw upstream marker"}}"#.to_owned(),
+        ),
+        client_ip: Some("203.0.113.8".to_owned()),
+        user_agent: Some("codex-cli/0.144.0".to_owned()),
+        reasoning_effort: Some("medium".to_owned()),
+        reasoning_preset: None,
+        request_kind: Some("root".to_owned()),
+        subagent_kind: None,
+        compact: Some(false),
+        continuation_affinity_hash: Some("affinity-hash".to_owned()),
+        continuation_previous_response_id_hash: Some("response-hash".to_owned()),
+        continuation_unavailable_reason: Some("reused_connection_lost".to_owned()),
+        upstream_connection_id: Some("connection-id".to_owned()),
+        upstream_connection_exit_reason: Some("tcp_reset".to_owned()),
+        upstream_connection_age_ms: Some(12_000),
+        upstream_connection_idle_ms: Some(4_000),
+        recovery_request_id: None,
+        recovered_at: None,
+        recovery_attempt_count: 0,
+        recovery_retry_delay_ms: None,
+        recovery_total_latency_ms: None,
+        occurred_at: Utc::now(),
+        stable_sort_id: "model_request:req_err".to_owned(),
+    }
 }

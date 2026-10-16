@@ -1,6 +1,5 @@
 //! 将调用方维护的聚合贡献合入原生统计，保留查询预算与数值边界
 
-use super::super::super::usage_data::AGGREGATE_COLLECTION;
 use super::query::ReadSelection;
 use super::*;
 use futures::TryStreamExt;

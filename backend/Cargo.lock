@@ -1746,6 +1746,7 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "regex",
  "secrecy",
  "serde",
  "serde_json",

@@ -485,6 +485,13 @@ pub trait ObservabilityStore: Send + Sync {
     ) -> AdminStoreResult<DiagnosticsObservation>;
 
     async fn list_ops_errors(&self, query: OpsErrorQuery) -> AdminStoreResult<OpsErrorPage>;
+
+    /// 按精确目标读取受控错误，不受列表时间窗口与当前页面影响
+    async fn diagnostic_errors(
+        &self,
+        target: &crate::model::diagnostics::DiagnosticTarget,
+        limit: u16,
+    ) -> AdminStoreResult<Vec<crate::model::observability::OpsError>>;
 }
 
 /// Runtime settings 与管理员 API Key 写入

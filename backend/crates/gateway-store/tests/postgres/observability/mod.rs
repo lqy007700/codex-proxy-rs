@@ -1,6 +1,5 @@
 //! 观测存储测试入口，以及查询范围、过滤与端口合同测试
 
-mod analytics;
 mod projection;
 
 use std::{
@@ -2964,4 +2963,48 @@ fn assert_percentile(actual: Option<f64>, expected: Option<f64>) {
         ),
         values => assert_eq!(values.0, values.1),
     }
+}
+
+#[tokio::test]
+async fn diagnostic_export_reads_exact_targets_and_prioritizes_final_error() {
+    use gateway_admin::model::diagnostics::DiagnosticTarget;
+    let Some(database) = TestDatabase::create("diagnostic_export").await else {
+        return;
+    };
+    seed_observability_facts(&database.pool, Utc::now())
+        .await
+        .unwrap();
+    let store = admin_observability_store(&database.pool);
+    let target = DiagnosticTarget::Request("req_observe_failed".into());
+    let errors = store.diagnostic_errors(&target, 129).await.unwrap();
+    assert_eq!(errors.len(), 2);
+    assert!(
+        errors
+            .iter()
+            .all(|error| error.request_id.as_deref() == Some("req_observe_failed"))
+    );
+    assert_eq!(errors[0].source, "model_request");
+    assert_eq!(
+        store.diagnostic_errors(&target, 1).await.unwrap()[0].source,
+        "model_request"
+    );
+    assert!(
+        store
+            .diagnostic_errors(&DiagnosticTarget::Request("unrelated".into()), 129)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    sqlx::query("update ops_events set model_request_id = null, attempt_index = null where id = 'ops_observe_retry'")
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    let errors = store
+        .diagnostic_errors(&DiagnosticTarget::Operation("ops_observe_retry".into()), 1)
+        .await
+        .unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].event_id, "ops_observe_retry");
+    assert!(errors[0].request_id.is_none());
+    database.close().await;
 }

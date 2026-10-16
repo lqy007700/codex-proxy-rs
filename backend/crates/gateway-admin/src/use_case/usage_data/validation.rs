@@ -120,28 +120,30 @@ pub(super) fn change(value: &UsageRecordChange) -> UsageDataResult<()> {
     }
     Ok(())
 }
-pub(super) fn query(value: &ListUsageRecords) -> UsageDataResult<()> {
-    if value
-        .limit
-        .is_some_and(|v| v == 0 || v > USAGE_DATA_MAX_PAGE_SIZE)
-        || value.filter.start_ms >= value.filter.end_ms
-        || chrono::DateTime::from_timestamp_millis(value.filter.start_ms).is_none()
-        || chrono::DateTime::from_timestamp_millis(value.filter.end_ms).is_none()
+pub(super) fn query(
+    filter: &UsageRecordFilter,
+    cursor: Option<&str>,
+    limit: Option<u16>,
+) -> UsageDataResult<()> {
+    if limit.is_some_and(|v| v == 0 || v > USAGE_DATA_MAX_PAGE_SIZE)
+        || filter.start_ms >= filter.end_ms
+        || chrono::DateTime::from_timestamp_millis(filter.start_ms).is_none()
+        || chrono::DateTime::from_timestamp_millis(filter.end_ms).is_none()
     {
         return Err(UsageDataError::invalid("查询时间范围或分页大小无效"));
     }
     for v in [
-        &value.filter.provider,
-        &value.filter.model,
-        &value.filter.account_ref,
-        &value.filter.client_key_ref,
+        &filter.provider,
+        &filter.model,
+        &filter.account_ref,
+        &filter.client_key_ref,
     ]
     .into_iter()
     .flatten()
     {
         text(v, 128)?;
     }
-    if value.cursor.as_ref().is_some_and(|v| v.len() > 4096) {
+    if cursor.is_some_and(|v| v.len() > 4096) {
         return Err(UsageDataError::invalid("游标过长"));
     }
     Ok(())

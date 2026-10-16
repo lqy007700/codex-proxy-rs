@@ -861,7 +861,7 @@ pub struct UsageAttempt {
     pub occurred_at: DateTime<Utc>,
 }
 
-/// 一条请求及其全部尝试
+/// 一条请求及其保留的尝试与诊断轨迹
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageDetail {
     pub trace: Option<serde_json::Value>,

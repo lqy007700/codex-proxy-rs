@@ -509,8 +509,8 @@ OAuth 恢复开关为 `host.logging.oauth_recovery`，默认关闭，与普通�
    在管理端错误列表按 ID 和时间搜索；检查平台条件并主动刷新，翻页不会推进查询时间。
    只有入口 ID 时，改用入口日志和时间定位
 3. 打开错误详情，核对上游/客户端状态、发送状态、attempt、失败阶段及后续恢复关联。
-   下载默认诊断包作为反馈材料，先看 `availability`、`attemptsComplete` 和淘汰计数；
-   该包不含原始错误正文或完整 trace data。分享前仍应检查关联 ID 等内部信息
+   下载诊断包作为反馈材料，先检查 `availability.gaps`、`exportTruncated` 以及尝试和时间线的完整性。
+   该包包含经服务端脱敏的已存上游错误与时间线，分享前仍应检查业务内容及内部信息
 4. 需要更细上下文时，在 `codex-proxy-rs-application.*.log` 及 `.log.gz` 中按网关/上游 ID
    和时间检索，结合 `attempt.started`、`attempt.failed`、`request.finished` 与 transport 阶段判断。
    **开启 `host.logging.file.enabled` 时，stdout 仅保留 `gateway_startup` 通道**；

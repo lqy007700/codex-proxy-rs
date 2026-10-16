@@ -62,11 +62,7 @@ impl UsageDataService for DefaultUsageDataService {
         &self,
         request: ListUsageAggregates,
     ) -> UsageDataResult<UsageAggregatePage> {
-        validation::query(&ListUsageRecords {
-            filter: request.filter.clone(),
-            cursor: request.cursor.clone(),
-            limit: request.limit,
-        })?;
+        validation::query(&request.filter, request.cursor.as_deref(), request.limit)?;
         self.store.list_aggregates(request).await
     }
     async fn write_aggregates(
@@ -104,7 +100,7 @@ impl UsageDataService for DefaultUsageDataService {
         self.store.get_record(request).await
     }
     async fn list_records(&self, request: ListUsageRecords) -> UsageDataResult<UsageRecordPage> {
-        validation::query(&request)?;
+        validation::query(&request.filter, request.cursor.as_deref(), request.limit)?;
         self.store.list_records(request).await
     }
     async fn write_records(

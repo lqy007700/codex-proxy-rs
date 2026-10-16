@@ -711,6 +711,7 @@ impl MemoryAccountGroupStore {
             (
                 primary_id.clone(),
                 AccountGroupRecord {
+                    allow_image_generation: true,
                     fast_mode: FastMode::Default,
                     id: primary_id,
                     name: "Alpha routing".to_owned(),
@@ -733,6 +734,7 @@ impl MemoryAccountGroupStore {
             (
                 secondary_id.clone(),
                 AccountGroupRecord {
+                    allow_image_generation: true,
                     fast_mode: FastMode::Default,
                     id: secondary_id,
                     name: "Beta routing".to_owned(),
@@ -891,6 +893,7 @@ impl AccountGroupStore for MemoryAccountGroupStore {
         let mut state = self.state.lock().expect("account groups");
         let now = Utc::now();
         let record = AccountGroupRecord {
+            allow_image_generation: command.allow_image_generation,
             fast_mode: command.fast_mode,
             id: command.id.clone(),
             name: command.name,
@@ -925,6 +928,9 @@ impl AccountGroupStore for MemoryAccountGroupStore {
         record.color = command.color;
         if let Some(fast_mode) = command.fast_mode {
             record.fast_mode = fast_mode;
+        }
+        if let Some(allowed) = command.allow_image_generation {
+            record.allow_image_generation = allowed;
         }
         record.updated_at = Utc::now();
         mutation(&mut state, command.id, true)
@@ -1381,6 +1387,27 @@ impl AccountRuntimeStore for UnusedStore {
 
 #[async_trait]
 impl ObservabilityStore for UnusedStore {
+    async fn diagnostic_errors(
+        &self,
+        target: &gateway_admin::model::diagnostics::DiagnosticTarget,
+        limit: u16,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::observability::OpsError>> {
+        let errors = self.ops_errors.lock().expect("ops errors");
+        Ok(errors
+            .iter()
+            .filter(|error| match target {
+                gateway_admin::model::diagnostics::DiagnosticTarget::Request(id) => {
+                    error.request_id.as_ref() == Some(id)
+                }
+                gateway_admin::model::diagnostics::DiagnosticTarget::Operation(id) => {
+                    &error.event_id == id && error.source == "ops_event"
+                }
+            })
+            .take(usize::from(limit))
+            .cloned()
+            .collect())
+    }
+
     fn query_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(10)
     }
@@ -1470,11 +1497,12 @@ impl ObservabilityStore for UnusedStore {
         })
     }
 
-    async fn usage_record_detail(&self, _: &str) -> AdminStoreResult<UsageDetail> {
+    async fn usage_record_detail(&self, request_id: &str) -> AdminStoreResult<UsageDetail> {
         self.usage_detail
             .lock()
             .expect("usage detail")
             .clone()
+            .filter(|detail| detail.request.id == request_id)
             .ok_or_else(|| unavailable("usage detail"))
     }
 

@@ -1,36 +1,20 @@
 <script setup lang="ts">
-import type { OpsError, OpsErrorMetadata } from '@/api'
+import type { OpsErrorMetadata } from '@/api'
 import { ZButton, ZEmpty, ZScrollbar } from '@codex-proxy/ui'
-import { Download, RefreshCw } from '@lucide/vue'
+import { RefreshCw } from '@lucide/vue'
 import { computed } from 'vue'
-import { useAsyncAction } from '@/composables/useAsyncAction'
-import { useDownload } from '@/composables/useDownload'
 import { useRequestDiagnostics } from '../composables/useRequestDiagnostics'
-import { requestDiagnosticsBundle } from '../utils/diagnosticsBundle'
+import DiagnosticsDownloadButton from './DiagnosticsDownloadButton.vue'
 import RequestTransportFailure from './RequestTransportFailure.vue'
 import UsageDetailCodePanel from './UsageDetailCodePanel.vue'
 
-const props = withDefaults(defineProps<{ requestId: string, metadata?: OpsErrorMetadata, errorRecord?: OpsError, active?: boolean }>(), { active: true })
-const { downloadJson } = useDownload()
-const { loading: exporting, run: runExport } = useAsyncAction()
+const props = withDefaults(defineProps<{ requestId: string, metadata?: OpsErrorMetadata, active?: boolean }>(), { active: true })
 const { selectedId, detail, loading, error, refresh } = useRequestDiagnostics(() => props.requestId, () => props.active)
 const trace = computed(() => detail.value?.trace)
 const events = computed(() => (trace.value?.events ?? []).map(event => ({
   ...event,
   content: JSON.stringify(event.data, null, 2),
 })))
-const selectedError = computed(() => props.errorRecord?.requestId === selectedId.value ? props.errorRecord : undefined)
-const canExport = computed(() => !loading.value && (detail.value?.requestId === selectedId.value || !!selectedError.value))
-
-function download() {
-  if (!canExport.value || exporting.value)
-    return
-  const bundle = requestDiagnosticsBundle(selectedId.value, detail.value, selectedError.value)
-  return runExport(
-    () => downloadJson(bundle, `diagnostics-${selectedId.value.replace(/[^\w-]/g, '_')}.json`),
-    { errorText: '导出诊断包失败', minimumMs: 400 },
-  )
-}
 </script>
 
 <template>
@@ -49,12 +33,7 @@ function download() {
           </template>
           刷新
         </ZButton>
-        <ZButton type="primary" variant="plain" size="small" :loading="exporting" :disabled="!canExport" @click="download">
-          <template #icon>
-            <Download :size="14" />
-          </template>
-          导出诊断包
-        </ZButton>
+        <DiagnosticsDownloadButton :request-id="selectedId" :active="active" />
       </div>
     </div>
     <p class="mt-1 mb-3 break-all font-mono text-cp-xs leading-relaxed text-cp-text-secondary">

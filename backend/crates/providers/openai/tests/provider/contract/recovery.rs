@@ -48,6 +48,13 @@ async fn service_failure_recovery_requires_open_replay_boundary() {
                 if let Some(event) = boundary_event {
                     upstream_events.push(event);
                 }
+                // 元数据可替换，但不能重新打开已被输出或未知事件关闭的恢复窗口
+                upstream_events.push(json!({
+                    "type": "response.metadata",
+                    "response_id": "resp_503",
+                    "headers": {"x-codex-turn-state": "turn-503"},
+                    "metadata": {"type": "safety_buffering", "use_cases": ["cyber"]}
+                }));
                 let last_prelude_type = upstream_events.last().unwrap()["type"].as_str().unwrap().to_owned();
                 let terminal = failure.clone();
                 let (release, released) = oneshot::channel();

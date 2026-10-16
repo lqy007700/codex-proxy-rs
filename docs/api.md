@@ -1258,12 +1258,19 @@ HTTP 和每个 WebSocket `response.create` 均使用请求开始时的分组策�
 HTTP 请求头及新建 WS 的握手提示按当时的最终出站档位构造；复用 WS 时不重发握手头，
 每个 `response.create` 仍独立应用档位策略，请求档位统计与本地费用估算使用各帧的最终出站档位
 
+分组详情和完整列表还返回 `allowImageGeneration`。创建时省略默认为 `true`，更新时省略或 `null` 保留现值。
+Client Key 任一绑定分组（包括已禁用分组）为 `false` 时，禁止生图；未绑定分组的 Key 允许生图。
+限制覆盖 Images 生成与编辑，以及 Responses 中的原生 `image_generation` 工具声明或显式工具选择，
+HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.create` 独立校验并返回对应错误事件。
+普通图片输入和 Codex 被动声明的 `image_gen` namespace 不触发拒绝；实际 Images 调用仍受限制。
+请求采用开始时冻结的权限，重试期间保持不变；attempt 中间件添加生图工具也会在发送前被策略拒绝
+
 | 方法 | 路由 | 主要 query/body | 说明 |
 | --- | --- | --- | --- |
 | `GET` | `/api/admin/account-groups` | `page`、`pageSize`、`search`、`enabled` | 分页查询分组；返回账号可用性、并发槽位（Redis 不可用时 `usedSlots=null`）及成功请求 USD 用量 |
 | `GET` | `/api/admin/account-groups/options` | `page`、`pageSize`、`search`、`enabled` | 分页查询分组选择项；item 仅返回 `id`、`name`、`color`、`enabled` |
-| `POST` | `/api/admin/account-groups/create` | `{ name, description, color, fastMode? }` | 创建空分组；`color` 严格为 `#RRGGBBAA`，返回时统一大写 |
-| `POST` | `/api/admin/account-groups/update` | `{ id, name, description, color, fastMode? }` | 更新名称、描述、颜色和 Fast 模式 |
+| `POST` | `/api/admin/account-groups/create` | `{ name, description, color, fastMode?, allowImageGeneration? }` | 创建空分组；`color` 严格为 `#RRGGBBAA`，返回时统一大写 |
+| `POST` | `/api/admin/account-groups/update` | `{ id, name, description, color, fastMode?, allowImageGeneration? }` | 更新分组信息、Fast 模式和生图权限 |
 | `POST` | `/api/admin/account-groups/enable` | `{ id }` | 启用 |
 | `POST` | `/api/admin/account-groups/disable` | `{ id }` | 禁用；已绑定 Key 保持受限，不回退到全部账号 |
 | `POST` | `/api/admin/account-groups/delete` | `{ id }` | 删除未被 Client Key 引用的组 |
@@ -1498,7 +1505,7 @@ UA、平台参数及自动 Git 上下文版本由 [OpenAI 上游客户端身份]
 
 ### 并发与排队
 
-`maxConcurrentPerAccount` 是默认账号并发上限，取值 0～4294967295；`0` 表示不限制。
+`maxConcurrentPerAccount` 是默认账号并发上限，初始值为 5，取值 0～4294967295；`0` 表示不限制。
 账号的 `concurrencyLimit: null` 继承该默认值，单独设置的正数上限仍优先生效。
 无限并发仍统计在途请求，并遵守账号可用性与 Client Key 限制
 
@@ -1558,8 +1565,7 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
   "healthWeight": 1.0,
   "latencyWeight": 0.5,
   "resetWeight": 0.0,
-  "queueWeight": 0.0,
-  "preferHigherWeight": false
+  "queueWeight": 0.0
 }
 ```
 
@@ -1573,11 +1579,8 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 设为 `0` 时沿用最短队列规则；启用后结合其余五项评分选择队列。队列人数限于当前进程，只有开启账号排队才会生效，
 不影响已入队请求的位置、队内 FIFO、容量上限或等待超时。两项默认均为 `0`
 
-`preferHigherWeight` 默认关闭。开启后，更高权重账号恢复可用时，后续允许重新选号的请求优先回切；
-同权重且可用的会话亲和继续保留。OpenAI 优先模式沿用可用的会话主账号，不因权重回切而分流。
-没有可用亲和时，在最高可用权重层内按配置评分。
-原生续写账号绑定仍是硬约束，不因回切而主动换号或触发历史重放。配置随运行设置原子保存和发布，
-新请求使用新值，已开始请求及其重试沿用原快照，无需重启
+没有可用亲和时，在最高可用权重层内按配置评分。原生续写账号绑定仍是硬约束。
+配置随运行设置原子保存和发布，新请求使用新值，已开始请求及其重试沿用原快照，无需重启
 
 ### 模型定价
 
@@ -1869,6 +1872,7 @@ errorCode, errorMessage, startedAt, completedAt, expiresAt, createdAt, updatedAt
 | `GET` | `/api/admin/usage/insights/overview` | 用量、成本与成功率洞察 |
 | `GET` | `/api/admin/usage/insights/diagnostics` | 按维度聚合诊断 |
 | `GET` | `/api/admin/operations/errors` | 运维错误分页列表 |
+| `GET` | `/api/admin/diagnostics/export` | 按 `requestId` 或 `errorId` 下载诊断 JSON 附件 |
 
 ### Dashboard 容量与账号用量
 
@@ -1922,7 +1926,8 @@ request/response/upstream ID、outcome 与搜索文本。`search` 仅供明细�
 标记来源链截断；存在附属清理失败时，`causes.cleanup` 保存各自的原因快照。
 `upstream` 保存上游正文，`redacted` 标记令牌等敏感上下文的移除；没有对应来源时为 `null`。
 稳定错误分类、原始上游 code 和该详情分别保留，不以公共错误文案代替原始原因。
-详情不出现在 Key 用量接口、普通错误信封和诊断包导出中；记录仍受异步观测写入与保留周期约束
+详情不出现在 Key 用量接口和普通错误信封中；[诊断导出](#诊断与恢复关联)在服务端重新脱敏后包含已存详情。
+记录仍受异步观测写入与保留周期约束
 
 管理端请求列表与详情分别保留 `requestedModel`（客户端请求）、`upstreamModel`（网关发送）与
 `upstreamResponseModel`（上游返回）。返回模型缺失时为 `null`，不使用请求或映射模型补齐。
@@ -2003,39 +2008,39 @@ WebSocket 握手默认请求专项计时，客户端显式提供的开关保留�
 
 ### 诊断与恢复关联
 
-详情接口按 `id` 可读取成功、失败或未完成请求，返回 `trace`（未采集记录为 `null`）和
-`relatedRequests[]`（`requestId / relation / outcome / completedAt`）；`relation` 为 `recovered_by` 或
-`recovers`。`trace` 是执行终态时的有界脱敏时间线，包含 request、attempt 和 exchange 关联、阶段、
-事件摘要及淘汰计数；普通用量列表不携带此字段。
-采集时，未知 JSON 键名与值只保留结构和摘要；事件摘要中的 `eventType` 为已知事件名称字符串、
-未知名称的 `{ bytes, sha256 }` 摘要，或缺失时的 `null`。已保存的 trace 不自动清理或回填，
-其中的 `sanitized` 标记不能作为可直接公开的保证
+详情接口按 `id` 可读取成功、失败或未完成请求，返回有界 `trace` 和 `relatedRequests[]`，供管理端查看时间线与恢复关联，列表不携带这些字段。
+`trace` 未采集时为 `null`，包含 request、attempt、exchange 关联、阶段、事件摘要及淘汰计数。
+`relatedRequests[]` 包含 `requestId / relation / outcome / completedAt`，`relation` 为 `recovered_by` 或 `recovers`。
+`attempt.failed.data` 的 `kind / sendState / upstreamStatus` 与 `diagnostic.stage / diagnostic.code` 来自 Core 和 Provider 的结构化失败事实，
+`diagnostic.message` 保存安全摘要，截断时带有 `truncated` 标记；发送状态为 `not_sent / sent / ambiguous`
 
-`attempt.failed.data` 的 `kind / sendState / upstreamStatus` 与 `diagnostic.stage / diagnostic.code`
-由 Core 错误类型与 Provider 静态诊断生成；`diagnostic.message` 保存安全摘要。展示与导出共用这些字段，
-`sendState` 为 `not_sent / sent / ambiguous`，摘要被截断时带有 `truncated` 标记
+管理员通过 `GET /api/admin/diagnostics/export` 下载 JSON 附件，必须且只能指定
+`requestId` 或 `errorId`；`errorId` 指运维错误事件 ID，无模型请求的后台错误也能导出。
+响应不使用普通 JSON 信封，设置 `Content-Disposition: attachment` 与 `Cache-Control: private, no-store`
 
-管理端下载的诊断包 `schemaVersion: 5` 用于人工反馈，不是备份或导入格式。它包含关联 ID、错误分类摘要、
-请求与错误事件各自的状态、attempt、时间线阶段、计时和上述失败分类。
-`retry.decided` 的 `retryDecision` 保留重试资格、同账号与换号判定、轮次失败抑制、重放屏障、外部副作用、
-发送状态、重试次数、剩余建连/路由/换号/瞬态预算和退避毫秒数。
-`ordinaryRetryBlockers` 为普通安全重放路径未满足的静态门禁列表，不代表续接、凭据或传输恢复也被禁止；
-`providerReplaySafe / retryProhibited / middlewareRetrySuppressed` 分别记录 Provider 重放证明、明确禁止恢复和中间件否决。
-剩余瞬态预算在本次决策消耗前记录，未使用有界策略时为 `null`；`client_retry.loaded` 的 `clientRetry.previousFailure`
-表示入场时是否读取到轮次失败标记。布尔值只接受布尔类型，计数与毫秒数只接受非负安全整数，
-重试判定的 `sendState` 保留 Core 的 `NotSent / Sent / Ambiguous`；缺失或未通过校验的字段为 `null`。
-门禁列表仅接受已知静态原因，未知项使该列表为 `null`，空列表表示普通路径的前置门禁均已满足。
-其他阶段的 `retryDecision / clientRetry` 为 `null`。判定允许重试不代表已经执行，需结合后续
-`attempt.started`、`attemptCount` 和账号确认实际重试与换号
+诊断包 `schemaVersion: 6` 用于故障分析，不是备份或导入格式。后端按目标 ID 收集请求、尝试、
+完整已存时间线、错误原因链、原始上游错误及恢复关联；前端只负责下载。
+`requests[].evidence` 保存详情、`trace`、`relatedRequests`、事发配置版本和尝试原因；
+`requests[].errors` 保存同一请求的错误记录，`error` 保存按事件 ID 选中的错误，该事件不在请求内重复导出。
+`environment.scope = export_time` 明确版本、构建与部署信息是导出时状态，不能代替事发环境
 
-诊断包兼容已有 `provider.precommit.released` 记录，其 `precommitRelease` 保留 `reason / prefetchedBytes / waitMs`，
-分别表示 Provider 释放暂存的原因、累计预取字节数和等待毫秒数，不等同于下游已提交。
-导出接受记录中的 `semantic_output / terminal / eof / grace_timeout / byte_limit`。
-数值只允许非负安全整数，缺失或未通过校验的字段为 `null`；其他事件的 `precommitRelease` 为 `null`
+`retry.decided` 的 `data` 保留重试资格、同账号与换号判定、轮次失败抑制、重放屏障、外部副作用、
+发送状态、剩余建连/路由/换号/瞬态预算和退避毫秒数。
+`ordinaryRetryBlockers` 是普通安全重放路径未满足的静态门禁，不代表续接、凭据或传输恢复也被禁止。
+瞬态剩余预算在本次决策消耗前记录；`client_retry.loaded` 保存入场时的轮次失败标记。
+`provider.precommit.released` 保存已有记录的释放原因、预取字节数和等待时间，不等同于下游已提交。
+允许重试不代表已经执行，实际重试与换号需结合后续 `attempt.started`、`attemptCount` 和账号核对
 
-诊断包不自动导出 message/raw error、任意 metadata、其他 trace event data、请求响应正文和头部。
-`availability` 与 `omitted` 明示未采集、不完整或主动省略的内容，`null` 不代表没有发生错误。
-版本、环境及原始错误片段仍需操作者另行补充并审阅脱敏
+采集阶段仍按有界 trace 合同处理未知 JSON 键和值，未知事件名称保留摘要；导出不会补造被省略的原文。
+下载端按 Provider 凭据、管理认证与传输头合同移除令牌、密钥、认证头、Cookie 和 URL 认证部分，
+移除账号联系信息及客户端 IP，保留关联 ID、错误 code/message、套餐、状态和重试事实。
+OAuth 字段依据 CPR 导出结构及官方 Codex `TokenData`，不按 `token / secret / credential` 等泛称删除业务字段。
+原始错误中可解析的嵌套 JSON 展开后脱敏；任意业务内容不属于凭据识别范围
+
+收集共享 20 秒预算，最多包含 8 个关联请求和 128 条错误记录，优先保留主请求的最终错误。
+导出另有文本、节点与深度预算，正文截断仍保留格式版本、目标和缺口；超限会写入 `exportTruncated`、`redaction.truncatedValues` 和缺口记录。
+`availability.gaps` 明示未记录、淘汰、截断、读取失败与旧记录缺少的决策事实，`omitted` 说明主动省略范围。
+异步观测尚未落盘、已过期记录、未采集的请求正文与上游内部状态无法由导出补回，`null` 不表示没有发生错误
 
 错误记录中的“已自动恢复”表示系统关联到了后续成功请求，不会把原来的失败记录改为成功。
 `upstreamSendState = ambiguous` 表示无法确认该次上游执行结果，不代表后续恢复请求失败；

@@ -211,6 +211,11 @@ async fn privacy_steps_migration_preserves_rules_and_other_settings() {
             .await
             .unwrap();
     expected_row["codex_privacy_policy_json"] = expected.clone();
+    // 完整升级还会清理自动回切字段，其余运行设置必须原样保留
+    expected_row["smart_scheduling_json"]
+        .as_object_mut()
+        .unwrap()
+        .remove("preferHigherWeight");
 
     super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
     let stored: serde_json::Value =
@@ -309,7 +314,7 @@ async fn smart_settings_upgrade_preserves_selection_and_publishes_custom_config(
     );
     let mut update = settings_with_margin(3600);
     update.values.smart_scheduling =
-        SmartSchedulingConfig::new([0.0, 2.0, 1.0, 0.5, 1.2, 2.3], true).unwrap();
+        SmartSchedulingConfig::new([0.0, 2.0, 1.0, 0.5, 1.2, 2.3]).unwrap();
     let expected = update.values.smart_scheduling;
     repository.update_runtime_settings(update).await.unwrap();
     let reloaded = repository.load_runtime_settings().await.unwrap();
@@ -1436,4 +1441,84 @@ async fn preferred_affinity_migration_defaults_to_strict_and_preserves_saved_mod
         );
         database.close().await;
     }
+}
+
+#[tokio::test]
+async fn removing_switchback_preserves_custom_weights_and_replaces_database_default() {
+    let Some(database) = TestDatabase::create_through("remove_switchback", 31).await else {
+        return;
+    };
+    let expected =
+        gateway_core::account::SmartSchedulingConfig::new([0.0, 2.0, 1.0, 0.5, 1.2, 2.3]).unwrap();
+    let mut legacy = serde_json::to_value(expected).unwrap();
+    legacy["preferHigherWeight"] = serde_json::json!(true);
+    sqlx::query("update runtime_settings set smart_scheduling_json = $1 where id = 1")
+        .bind(legacy)
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    assert_eq!(
+        repository
+            .load_runtime_settings()
+            .await
+            .unwrap()
+            .values
+            .smart_scheduling,
+        expected
+    );
+    sqlx::query("update runtime_settings set smart_scheduling_json = default where id = 1")
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        repository
+            .load_runtime_settings()
+            .await
+            .unwrap()
+            .values
+            .smart_scheduling,
+        gateway_core::account::SmartSchedulingConfig::default()
+    );
+    database.close().await;
+}
+
+#[tokio::test]
+async fn fork_upgrade_after_frozen_migrations_preserves_settings_and_adds_image_policy() {
+    let Some(database) = TestDatabase::create_through("fork_33_upgrade", 33).await else {
+        return;
+    };
+    let before: Vec<(i64, Vec<u8>)> = sqlx::query_as(
+        "select version, checksum from _sqlx_migrations where version in (32, 33) order by version",
+    )
+    .fetch_all(&database.pool)
+    .await
+    .unwrap();
+    assert_eq!(before.len(), 2);
+    sqlx::query("update runtime_settings set max_concurrent_per_account = 9, config_revision = 2, smart_scheduling_json = smart_scheduling_json || '{\"preferHigherWeight\":true}'::jsonb where id = 1")
+        .execute(&database.pool).await.unwrap();
+    sqlx::query("insert into account_groups (id, name, color, created_at, updated_at) values ('grp_00000000000000000000000000000034', 'Existing', '#2563EBFF', now(), now())")
+        .execute(&database.pool).await.unwrap();
+    super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let after: Vec<(i64, Vec<u8>)> = sqlx::query_as(
+        "select version, checksum from _sqlx_migrations where version in (32, 33) order by version",
+    )
+    .fetch_all(&database.pool)
+    .await
+    .unwrap();
+    assert_eq!(before, after);
+    let (concurrency, has_switchback): (i64, bool) = sqlx::query_as(
+        "select max_concurrent_per_account, smart_scheduling_json ? 'preferHigherWeight' from runtime_settings where id = 1",
+    ).fetch_one(&database.pool).await.unwrap();
+    assert_eq!(concurrency, 9);
+    assert!(!has_switchback);
+    let allowed: bool = sqlx::query_scalar(
+        "select allow_image_generation from account_groups where id = 'grp_00000000000000000000000000000034'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    assert!(allowed);
+    database.close().await;
 }

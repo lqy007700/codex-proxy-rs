@@ -521,6 +521,7 @@ async fn initialize_inner(
             store.settings(),
             registry.clone(),
             timezone,
+            system.clone(),
         )),
         settings,
         usage_data,

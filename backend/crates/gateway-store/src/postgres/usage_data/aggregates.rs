@@ -1,10 +1,10 @@
 //! 在既有聚合表中维护调用方贡献，主键覆盖不追加去重账本
 
+use super::super::observability::AGGREGATE_COLLECTION;
 use super::*;
 use sqlx::QueryBuilder;
 use std::collections::BTreeMap;
 
-pub(crate) const AGGREGATE_COLLECTION: &str = "usage_contribution";
 fn dimensions(key: &UsageAggregateKey) -> Vec<String> {
     let d = &key.dimensions;
     [

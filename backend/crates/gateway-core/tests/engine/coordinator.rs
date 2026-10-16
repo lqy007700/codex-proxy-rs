@@ -215,6 +215,19 @@ fn client_retry_should_skip_repeated_budget_and_clear_before_completed_delivery(
         let mut session = retry_session(&coordinator, id, operation.clone(), "key_client_1");
         assert!(block_on(session.collect_uncommitted()).is_err());
         assert_eq!(provider.contexts.lock().unwrap().len(), expected);
+        let trace = session.trace().snapshot().unwrap();
+        let decision = trace["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|event| event["stage"] == "retry.decided")
+            .unwrap();
+        assert_eq!(decision["data"]["clientRetrySuppressed"], id == "req_retry");
+        assert_eq!(decision["data"]["providerProvedReplaySafe"], true);
+        assert_eq!(decision["data"]["retryProhibited"], false);
+        assert_eq!(decision["data"]["replayBarrierReached"], false);
+        assert_eq!(decision["data"]["retryable"], false);
     }
     let mut recovered = retry_session(
         &coordinator,
@@ -4646,7 +4659,7 @@ fn terminal_rejection_should_prevent_not_sent_rotation_and_explicit_transport_re
             error = error.with_pre_delivery_transport_fallback();
         }
         assert!(error.stable_snapshot().retry_is_prohibited());
-        let (coordinator, _, provider) = coordinator(vec![Script::Stream {
+        let (coordinator, store, provider) = coordinator(vec![Script::Stream {
             account_id: "acct_first",
             items: vec![Err(error)],
         }]);
@@ -4664,6 +4677,27 @@ fn terminal_rejection_should_prevent_not_sent_rotation_and_explicit_transport_re
             Err(EngineError::Provider(_))
         ));
         assert_eq!(provider.contexts.lock().unwrap().len(), 1);
+        let state = store.state.lock().unwrap();
+        let trace: Value = serde_json::from_str(
+            state.finalizations[0]
+                .diagnostic_trace_json
+                .as_deref()
+                .unwrap(),
+        )
+        .unwrap();
+        let events = trace["events"].as_array().unwrap();
+        let failed = events
+            .iter()
+            .find(|event| event["stage"] == "attempt.failed")
+            .unwrap();
+        assert_eq!(failed["data"]["recovery"]["retryProhibited"], true);
+        let decision = events
+            .iter()
+            .find(|event| event["stage"] == "retry.decided")
+            .unwrap();
+        assert_eq!(decision["data"]["phase"], "execute");
+        assert_eq!(decision["data"]["retryable"], false);
+        assert_eq!(decision["data"]["retryProhibited"], true);
     }
 }
 
@@ -5472,6 +5506,13 @@ fn no_eligible_account_before_stream_records_failure_without_fabricating_an_atte
                 .iter()
                 .any(|event| event["stage"] == "attempt.failed")
         );
+        let decision = events
+            .iter()
+            .find(|event| event["stage"] == "retry.decided")
+            .unwrap();
+        assert_eq!(decision["data"]["phase"], "prepare");
+        assert_eq!(decision["data"]["retryable"], false);
+        assert_eq!(decision["data"]["requestSendState"], "not_sent");
         assert_eq!(events.last().unwrap()["stage"], "request.finished");
     }
 }
@@ -6855,6 +6896,29 @@ fn configured_rotation_budget_limits_actual_account_changes() {
                     .openai_session_affinity_ttl()
                     == Duration::from_secs(168 * 3600)
         }));
+        let state = store.state.lock().unwrap();
+        let trace: Value = serde_json::from_str(
+            state.finalizations[0]
+                .diagnostic_trace_json
+                .as_deref()
+                .unwrap(),
+        )
+        .unwrap();
+        let routed = trace["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["stage"] == "request.routed")
+            .unwrap();
+        assert_eq!(
+            routed["data"]["accountPolicy"]["maxAccountRotations"],
+            budget
+        );
+        assert_eq!(
+            routed["data"]["accountPolicy"]["sessionAffinityTtlMs"],
+            168 * 3600 * 1000_u64
+        );
+        drop(state);
         assert_eq!(
             store.state.lock().unwrap().finalizations[0].attempt_count,
             budget + 1

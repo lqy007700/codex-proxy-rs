@@ -2,7 +2,7 @@
 import type { UsageListRecord } from '@/api'
 import { defineTableColumns, useTableColumns, ZCard, ZIconButton, ZPageHeader, ZPagination, ZSegmented, ZSelect, ZTableColumnSettings } from '@codex-proxy/ui'
 
-import { ChevronDown, Eye } from '@lucide/vue'
+import { ChevronDown, CloudRain, Eye, List, Sun } from '@lucide/vue'
 import { shallowRef, watch } from 'vue'
 import ProviderFilter from '@/components/ProviderFilter.vue'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
@@ -24,9 +24,9 @@ const requestColumns = defineTableColumns<UsageListRecord>([
 ])
 const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(requestColumns, 'usage-requests')
 const recordViewOptions = [
-  { label: '所有请求', value: 'all' },
-  { label: '成功', value: 'success' },
-  { label: '错误', value: 'error' },
+  { label: '所有请求', value: 'all', icon: List },
+  { label: '成功', value: 'success', icon: Sun },
+  { label: '错误', value: 'error', icon: CloudRain },
 ]
 const { timeRange, timeRangeParams, refreshTimeRangeEnd, latestTimeRangeParams }
   = useUsageTimeRange()
@@ -114,7 +114,7 @@ watch(timeRange, () => {
               查看请求结果、用量与错误详情
             </p>
           </div>
-          <ZSegmented v-model="recordScope" aria-label="请求结果筛选" :options="recordViewOptions" class="w-64" />
+          <ZSegmented v-model="recordScope" aria-label="请求结果筛选" :options="recordViewOptions" class="w-72 max-w-full" />
         </div>
       </template>
 

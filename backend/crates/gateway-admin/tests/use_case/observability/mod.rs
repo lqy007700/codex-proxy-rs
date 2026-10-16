@@ -945,6 +945,14 @@ impl FixtureObservabilityStore {
 
 #[async_trait]
 impl ObservabilityStore for FixtureObservabilityStore {
+    async fn diagnostic_errors(
+        &self,
+        _target: &gateway_admin::model::diagnostics::DiagnosticTarget,
+        _limit: u16,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::observability::OpsError>> {
+        Err(super::unavailable("diagnostic errors"))
+    }
+
     fn query_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(10)
     }
