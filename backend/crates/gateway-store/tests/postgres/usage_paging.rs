@@ -62,6 +62,7 @@ async fn projected_page_counts_correct_pending_moves_deletions_and_model_or() {
                 for current_page in [1, 3, 6, 8] {
                     let page = repository
                         .list_usage_records(UsageRecordQuery {
+                            scope: Default::default(),
                             range,
                             filter: UsageRecordFilter {
                                 client_api_key_ref: Some("key_analytics".to_owned()),
@@ -125,6 +126,7 @@ async fn usage_pages_preserve_order_and_exact_totals_from_both_ends() {
         for page in 1..=5 {
             let result = repository
                 .list_usage_records(UsageRecordQuery {
+                    scope: Default::default(),
                     range,
                     filter: UsageRecordFilter {
                         client_api_key_ref: key.map(str::to_owned),
@@ -190,6 +192,7 @@ async fn usage_pages_cross_minutes_and_keep_exact_counts_after_source_changes() 
         for current_page in 1..=6 {
             let page = repository
                 .list_usage_records(UsageRecordQuery {
+                    scope: Default::default(),
                     range,
                     filter: UsageRecordFilter {
                         client_api_key_ref: Some("key_analytics".to_owned()),
@@ -278,5 +281,120 @@ async fn ops_pages_merge_sources_across_minutes_with_stable_ties() {
             "page={current_page}",
         );
     }
+    database.close().await;
+}
+
+#[tokio::test]
+async fn request_scopes_page_all_outcomes_without_changing_usage_facts() {
+    use gateway_admin::model::observability::UsageRecordScope;
+    let Some(database) = TestDatabase::create("request_scopes").await else {
+        return;
+    };
+    let start = Utc::now() - TimeDelta::hours(1);
+    let outcomes = [
+        "succeeded",
+        "failed",
+        "cancelled",
+        "incomplete",
+        "running",
+        "succeeded",
+    ];
+    for (index, outcome) in outcomes.iter().enumerate() {
+        let id = format!("scope_{index}");
+        seed(
+            &database.pool,
+            &id,
+            start + TimeDelta::seconds(index as i64),
+            &[],
+        )
+        .await;
+        sqlx::query("update model_requests set outcome=$2,completed_at=case when $2='running' then null else completed_at end,request_observation_json=request_observation_json || jsonb_build_object('error',jsonb_build_object('message','demo error')),error_details='demo error details' where id=$1")
+            .bind(&id).bind(outcome).execute(&database.pool).await.unwrap();
+    }
+    // 成功审计没有模型或用量证据时，不能进入成功用量聚合
+    sqlx::query("update model_requests set requested_model_id=null,input_tokens=null,output_tokens=null,total_tokens=null where id='scope_5'")
+        .execute(&database.pool).await.unwrap();
+    let repository = observability_repository(&database.pool);
+    let range = ObservabilityRange::new(start, start + TimeDelta::minutes(5)).unwrap();
+    for projected in [false, true] {
+        if projected {
+            super::drain_analytics(&database.pool).await;
+        }
+        for (scope, expected) in [
+            (UsageRecordScope::Usage, vec!["scope_0"]),
+            (
+                UsageRecordScope::All,
+                vec![
+                    "scope_5", "scope_4", "scope_3", "scope_2", "scope_1", "scope_0",
+                ],
+            ),
+            (UsageRecordScope::Success, vec!["scope_5", "scope_0"]),
+            (
+                UsageRecordScope::Error,
+                vec!["scope_3", "scope_2", "scope_1"],
+            ),
+        ] {
+            for current_page in 1..=4 {
+                let page = repository
+                    .list_usage_records(UsageRecordQuery {
+                        scope,
+                        range,
+                        filter: UsageRecordFilter::default(),
+                        current_page,
+                        page_size: ObservabilityPageSize::new(2).unwrap(),
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    page.total,
+                    expected.len() as u64,
+                    "{scope:?}, projected={projected}"
+                );
+                assert_eq!(
+                    page.items
+                        .iter()
+                        .map(|row| row.id.as_str())
+                        .collect::<Vec<_>>(),
+                    expected
+                        .iter()
+                        .copied()
+                        .skip((current_page as usize - 1) * 2)
+                        .take(2)
+                        .collect::<Vec<_>>()
+                );
+                for row in page.items {
+                    let index: usize = row.id.trim_start_matches("scope_").parse().unwrap();
+                    assert_eq!(row.outcome.as_str(), outcomes[index]);
+                    assert_eq!(row.error_message.as_deref(), Some("demo error"));
+                }
+            }
+        }
+        let searched = repository
+            .list_usage_records(UsageRecordQuery {
+                scope: UsageRecordScope::Error,
+                range,
+                filter: UsageRecordFilter {
+                    search: Some("scope_1".into()),
+                    ..Default::default()
+                },
+                current_page: 1,
+                page_size: ObservabilityPageSize::new(2).unwrap(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(searched.total, 1);
+        assert_eq!(searched.items[0].id, "scope_1");
+    }
+    let detail = repository.usage_record_detail("scope_1").await.unwrap();
+    assert_eq!(
+        detail.request.error_details.as_deref(),
+        Some("demo error details")
+    );
+    let summary = repository
+        .usage_summary(range, UsageRecordFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(summary.requests.total_tokens, 120);
+    assert_eq!(summary.requests.latency_count, 1);
     database.close().await;
 }

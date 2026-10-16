@@ -91,7 +91,7 @@ impl AnalyticsSnapshot<'_> {
             .push(" and mr.started_at < ")
             .push_bind(range.end);
         push_completed_usage_fact_filter(&mut query, "mr");
-        push_usage_filter(&mut query, filter, "mr");
+        push_usage_filter(&mut query, filter, "mr", false);
         query.push(" group by bucket_start");
         let rows = query
             .build()

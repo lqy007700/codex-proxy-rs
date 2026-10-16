@@ -299,11 +299,15 @@ pub(super) struct SuccessfulProbe;
 
 #[async_trait]
 impl ProxyProbe for SuccessfulProbe {
-    async fn test(&self, proxy: &OutboundProxy, detect_location: bool) -> ProxyTestResult {
-        assert_eq!(
-            proxy.expose_url(),
-            "http://test-user:private-password@proxy.example:8080/"
-        );
+    async fn test(&self, proxy: Option<&OutboundProxy>, detect_location: bool) -> ProxyTestResult {
+        if let Some(proxy) = proxy {
+            assert_eq!(
+                proxy.expose_url(),
+                "http://test-user:private-password@proxy.example:8080/"
+            );
+        } else {
+            assert!(detect_location);
+        }
         ProxyTestResult {
             location: if detect_location {
                 ProxyLocationDetection::Detected { location: serde_json::from_value(json!({"country":"JP","region":"Tokyo","city":"Tokyo","timezone":"Asia/Tokyo"})).unwrap() }
@@ -763,4 +767,26 @@ async fn manual_proxy_can_detect_location_once_without_enabling_auto_location() 
         record["lastTest"]["location"]["location"]["timezone"],
         "Asia/Tokyo"
     );
+}
+
+#[tokio::test]
+async fn direct_location_probe_requires_admin_and_does_not_save_configuration() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let endpoint = "/api/admin/proxies/probe/direct";
+    assert_eq!(
+        request(&fixture, endpoint, Some(json!({})), false).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (_, before) = request(&fixture, "/api/admin/proxies", None, true).await;
+    let settings_before = fixture.settings.settings.lock().unwrap().clone();
+    let (status, result) = request(&fixture, endpoint, Some(json!({})), true).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        result["data"]["location"],
+        json!({"status":"detected","location":{"country":"JP","region":"Tokyo","city":"Tokyo","timezone":"Asia/Tokyo"}})
+    );
+    let (_, after) = request(&fixture, "/api/admin/proxies", None, true).await;
+    assert_eq!(before["data"], after["data"]);
+    assert_eq!(settings_before, *fixture.settings.settings.lock().unwrap());
 }

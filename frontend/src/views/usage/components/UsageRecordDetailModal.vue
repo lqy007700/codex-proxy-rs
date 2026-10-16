@@ -51,6 +51,7 @@ const finalAttemptIndex = computed(() => {
   return last?.attemptIndex ?? props.record?.attemptCount
 })
 const overviewItems = computed(() => [
+  { label: '请求结果', value: props.record ? attemptOutcomeText(props.record.logicalOutcome) : '—' },
   { label: '端点', value: props.record?.route, mono: true },
   { label: '客户端传输', value: usageTransportType(props.record?.clientTransport), mono: true },
   { label: '上游传输', value: usageTransportType(props.record?.upstreamTransport), mono: true },
@@ -62,6 +63,12 @@ const overviewItems = computed(() => [
     mono: true,
   },
   { label: '总 Token', value: tokenDetails.value?.totalTokensDisplay, mono: true },
+])
+
+const errorItems = computed(() => [
+  { label: '失败分类', value: props.record?.failureClass, mono: true },
+  { label: 'Provider 错误码', value: props.record?.providerErrorCode, mono: true },
+  { label: '发送状态', value: props.record?.upstreamSendState, mono: true },
 ])
 
 const modelRouteItems = computed(() => [
@@ -370,6 +377,16 @@ const tokenDonutOption = computed<EChartsOption>(() => {
             </dd>
           </div>
         </dl>
+      </section>
+
+      <section v-if="record.failureClass || record.errorDetails || ['failed', 'cancelled', 'incomplete'].includes(record.logicalOutcome)" :class="panelClass">
+        <h3 :class="panelTitleClass">
+          错误诊断
+        </h3>
+        <UsageDetailFieldGrid :items="errorItems" />
+        <div v-if="record.errorDetails" class="mt-3">
+          <UsageDetailCodePanel title="原始错误详情" max-height="360px" :content="record.errorDetails" />
+        </div>
       </section>
 
       <section class="grid min-w-0 gap-3 lg:grid-cols-2">

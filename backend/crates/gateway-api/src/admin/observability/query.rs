@@ -29,6 +29,7 @@ impl DashboardQuery {
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageQuery {
+    pub scope: Option<String>,
     pub current_page: Option<u32>,
     pub page_size: Option<u16>,
     pub kind: Option<String>,
@@ -316,6 +317,9 @@ pub(crate) fn usage_filter(query: &UsageQuery) -> Result<domain::UsageFilter, Wi
 pub(crate) fn analytics_filter(
     query: &UsageQuery,
 ) -> Result<domain::UsageFilter, WireValidationError> {
+    if query.scope.is_some() {
+        return Err(WireValidationError::new("scope"));
+    }
     if query.search.is_some() {
         return Err(WireValidationError::new("search"));
     }
@@ -330,6 +334,13 @@ pub(crate) fn usage_command(
     let page_size_value =
         DomainPageSize::new(page_size).map_err(|_| WireValidationError::new("pageSize"))?;
     Ok(domain::UsageQuery {
+        scope: match trimmed(query.scope.as_deref()) {
+            None => domain::UsageRecordScope::Usage,
+            Some("all") => domain::UsageRecordScope::All,
+            Some("success") => domain::UsageRecordScope::Success,
+            Some("error") => domain::UsageRecordScope::Error,
+            Some(_) => return Err(WireValidationError::new("scope")),
+        },
         range: usage_range(
             query.start_time.as_deref(),
             query.end_time.as_deref(),

@@ -14,7 +14,15 @@ export function requestDiagnosticsBundle(
 ) {
   // 关联请求切换后，不能把原弹窗的错误归到另一个请求。
   const record = detail?.requestId === requestId ? detail : null
-  const error = errorRecord?.requestId === requestId ? errorRecord : null
+  const error = errorRecord?.requestId === requestId
+    ? errorRecord
+    : record && ['failed', 'cancelled', 'incomplete'].includes(record.logicalOutcome)
+      ? {
+          ...record,
+          transport: record.upstreamTransport,
+          metadata: { source: 'model_request', component: 'model_request' },
+        }
+      : null
   const trace = record?.trace
   // 请求终态与错误事件可能来自不同尝试，不用事件的值填补终态空字段。
   const request = record ?? error
@@ -140,6 +148,8 @@ export function requestDiagnosticsBundle(
       'error.providerErrorCode',
       'attempts.providerErrorCode',
       'request.message',
+      'request.errorDetails',
+      'request.providerErrorCode',
       'request.metadata',
       'trace.events.data_except_failure_classification_and_precommit_release',
       'request_and_response_headers_and_bodies',

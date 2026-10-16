@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { useTableColumns, ZCard, ZIconButton, ZPageHeader, ZPagination, ZSegmented, ZSelect, ZTableColumnSettings } from '@codex-proxy/ui'
+import type { UsageListRecord } from '@/api'
+import { defineTableColumns, useTableColumns, ZCard, ZIconButton, ZPageHeader, ZPagination, ZSegmented, ZSelect, ZTableColumnSettings } from '@codex-proxy/ui'
 
-import { Eye } from '@lucide/vue'
-import { computed, shallowRef, watch } from 'vue'
+import { ChevronDown, Eye } from '@lucide/vue'
+import { shallowRef, watch } from 'vue'
 import ProviderFilter from '@/components/ProviderFilter.vue'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
 import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
-import OpsErrorPanel from './components/OpsErrorPanel.vue'
 import UsageFilters from './components/UsageFilters.vue'
 import UsageInsightsGrid from './components/UsageInsightsGrid.vue'
+import UsageOutcomeCell from './components/UsageOutcomeCell.vue'
 import UsageRecordDetailModal from './components/UsageRecordDetailModal.vue'
 import UsageSummaryCards from './components/UsageSummaryCards.vue'
 import { useUsageRecordDetail } from './composables/useUsageRecordDetail'
@@ -16,11 +17,16 @@ import { useUsageRecordsTable } from './composables/useUsageRecordsTable'
 import { useUsageTimeRange } from './composables/useUsageTimeRange'
 import { usageTimeRangeOptions } from './constants'
 
-const recordView = shallowRef('success')
-const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(usageRecordColumns, 'usage-records')
+const statsExpanded = shallowRef(false)
+const requestColumns = defineTableColumns<UsageListRecord>([
+  { key: 'logicalOutcome', label: '请求结果', kind: 'custom', size: '2xl', hideable: false },
+  ...usageRecordColumns,
+])
+const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(requestColumns, 'usage-requests')
 const recordViewOptions = [
-  { label: '成功记录', value: 'success' },
-  { label: '错误排查', value: 'errors' },
+  { label: '所有请求', value: 'all' },
+  { label: '成功', value: 'success' },
+  { label: '错误', value: 'error' },
 ]
 const { timeRange, timeRangeParams, refreshTimeRangeEnd, latestTimeRangeParams }
   = useUsageTimeRange()
@@ -28,6 +34,7 @@ const { timeRange, timeRangeParams, refreshTimeRangeEnd, latestTimeRangeParams }
 const {
   currentPage,
   searchQuery,
+  recordScope,
   providerQuery,
   usagePagination,
   loading,
@@ -45,7 +52,6 @@ const {
 } = useUsageRecordsTable({
   timeRangeParams,
   latestTimeRangeParams,
-  active: computed(() => recordView.value === 'success'),
 })
 
 const { showDetailModal, selectedUsageRecord, handleViewDetail } = useUsageRecordDetail()
@@ -70,13 +76,28 @@ watch(timeRange, () => {
       </template>
     </ZPageHeader>
 
-    <UsageSummaryCards :summary="summary" />
-    <UsageInsightsGrid
-      v-model:diagnostic-dimension="diagnosticDimension"
-      :overview="insights.overview"
-      :diagnostics="insights.diagnostics"
-      :loading="analyticsLoading"
-    />
+    <details class="group mt-5" @toggle="statsExpanded = ($event.target as HTMLDetailsElement).open">
+      <ZCard
+        as="summary"
+        class="flex cursor-pointer list-none items-center justify-between gap-3 select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cp-primary [&::-webkit-details-marker]:hidden"
+      >
+        <span class="text-xl leading-[1.15] font-heavy text-cp-text">统计概览</span>
+        <span class="flex shrink-0 items-center gap-2 text-cp-sm font-emphasis text-cp-text-secondary">
+          <span class="group-open:hidden">展开</span>
+          <span class="hidden group-open:inline">收起</span>
+          <ChevronDown class="size-4.5 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+        </span>
+      </ZCard>
+      <template v-if="statsExpanded">
+        <UsageSummaryCards :summary="summary" />
+        <UsageInsightsGrid
+          v-model:diagnostic-dimension="diagnosticDimension"
+          :overview="insights.overview"
+          :diagnostics="insights.diagnostics"
+          :loading="analyticsLoading"
+        />
+      </template>
+    </details>
 
     <ZCard
       class="mt-5 flex flex-col"
@@ -90,16 +111,15 @@ watch(timeRange, () => {
             <p
               class="mt-1.75 mb-0 text-cp leading-[1.15] font-emphasis text-cp-text-secondary"
             >
-              成功请求与失败请求明细
+              查看请求结果、用量与错误详情
             </p>
           </div>
-          <ZSegmented v-model="recordView" aria-label="请求明细类型" :options="recordViewOptions" class="w-52" />
+          <ZSegmented v-model="recordScope" aria-label="请求结果筛选" :options="recordViewOptions" class="w-64" />
         </div>
       </template>
 
       <template #body>
         <div
-          v-show="recordView === 'success'"
           class="grid min-h-130 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3"
         >
           <UsageFilters
@@ -124,8 +144,11 @@ watch(timeRange, () => {
               :columns="visibleColumns"
               :rows="records"
               :loading="loading"
-              :empty-text="error ? `加载失败：${error}` : '暂无使用记录'"
+              :empty-text="error ? `加载失败：${error}` : '当前筛选下暂无请求'"
             >
+              <template #logicalOutcome="{ row }">
+                <UsageOutcomeCell :record="row" />
+              </template>
               <template #actions="{ row }">
                 <div class="flex items-center justify-start">
                   <ZIconButton
@@ -145,15 +168,6 @@ watch(timeRange, () => {
               @size-change="handlePageSizeChange"
             />
           </div>
-        </div>
-
-        <div v-show="recordView === 'errors'" class="min-h-130 min-w-0 flex-1">
-          <OpsErrorPanel
-            :time-range-params="timeRangeParams"
-            :latest-time-range-params="latestTimeRangeParams"
-            :provider="providerQuery"
-            :active="recordView === 'errors'"
-          />
         </div>
       </template>
     </ZCard>

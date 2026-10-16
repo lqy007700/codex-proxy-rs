@@ -28,7 +28,7 @@ async fn proxy_probe_supports_ipv4_and_ipv6_proxies_and_exit_addresses() {
             OutboundProxy::parse(&format!("http://user:password@{}", proxy_server.address()))
                 .unwrap();
         let result = HttpProxyProbe::new("http://unresolvable.invalid/ip")
-            .test(&proxy, false)
+            .test(Some(&proxy), false)
             .await;
         assert!(
             result.success,
@@ -54,7 +54,10 @@ async fn proxy_probe_rejects_auth_errors_redirects_and_invalid_or_oversized_resp
             .mount(&proxy_server)
             .await;
         let result = HttpProxyProbe::new("http://unresolvable.invalid/ip")
-            .test(&OutboundProxy::parse(&proxy_server.uri()).unwrap(), false)
+            .test(
+                Some(&OutboundProxy::parse(&proxy_server.uri()).unwrap()),
+                false,
+            )
             .await;
         assert!(!result.success);
         assert!(result.exit_ip.is_none());
@@ -72,7 +75,9 @@ async fn unavailable_proxy_never_falls_back_to_direct_connection() {
     let unused = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy = OutboundProxy::parse(&format!("http://{}", unused.local_addr().unwrap())).unwrap();
     drop(unused);
-    let result = HttpProxyProbe::new(target.uri()).test(&proxy, false).await;
+    let result = HttpProxyProbe::new(target.uri())
+        .test(Some(&proxy), false)
+        .await;
     assert!(!result.success);
 }
 
@@ -86,7 +91,7 @@ async fn invalid_certificate_configuration_should_not_fall_back_or_expose_detail
         .await;
     let result = HttpProxyProbe::new(target.uri())
         .with_client_builder(|_| Err("private-certificate-path"))
-        .test(&OutboundProxy::parse(&target.uri()).unwrap(), false)
+        .test(Some(&OutboundProxy::parse(&target.uri()).unwrap()), false)
         .await;
     assert!(!result.success);
     assert!(!result.message.contains("private-certificate-path"));
@@ -112,7 +117,7 @@ async fn dual_stack_proxy_probe_reports_both_addresses_when_available() {
         format!("{}/v4", proxy_server.uri()),
         format!("{}/v6", proxy_server.uri()),
     )
-    .test(&proxy, false)
+    .test(Some(&proxy), false)
     .await;
 
     assert!(result.success);
@@ -141,7 +146,7 @@ async fn dual_stack_proxy_probe_reports_single_stack_when_only_one_succeeds() {
         format!("{}/v4", proxy_server.uri()),
         format!("{}/v6", proxy_server.uri()),
     )
-    .test(&proxy, false)
+    .test(Some(&proxy), false)
     .await;
 
     assert!(result.success);
@@ -176,7 +181,10 @@ async fn location_lookup_uses_verified_exit_ip_without_requiring_proxy_access_to
 
     let result = HttpProxyProbe::new("http://unresolvable.invalid/ip")
         .with_location_endpoint(format!("{}/geo", location_server.uri()))
-        .test(&OutboundProxy::parse(&proxy_server.uri()).unwrap(), true)
+        .test(
+            Some(&OutboundProxy::parse(&proxy_server.uri()).unwrap()),
+            true,
+        )
         .await;
 
     assert!(result.success);
@@ -212,7 +220,10 @@ async fn location_lookup_uses_probed_ips_through_the_proxy_and_checks_both_timez
             "http://unresolvable.invalid/v6",
         )
         .with_location_endpoint("http://unresolvable.invalid/geo/")
-        .test(&OutboundProxy::parse(&proxy_server.uri()).unwrap(), true)
+        .test(
+            Some(&OutboundProxy::parse(&proxy_server.uri()).unwrap()),
+            true,
+        )
         .await;
         assert!(result.success);
         if conflict {
@@ -255,7 +266,10 @@ async fn geolocation_failure_never_turns_connectivity_into_failure_or_uses_unver
             .await;
         let result = HttpProxyProbe::new("http://unresolvable.invalid/ip")
             .with_location_endpoint("http://unresolvable.invalid/geo")
-            .test(&OutboundProxy::parse(&proxy_server.uri()).unwrap(), true)
+            .test(
+                Some(&OutboundProxy::parse(&proxy_server.uri()).unwrap()),
+                true,
+            )
             .await;
         assert!(result.success);
         assert!(matches!(
@@ -280,7 +294,96 @@ async fn disabled_geolocation_never_calls_the_location_service() {
         .await;
     let result = HttpProxyProbe::new("http://unresolvable.invalid/ip")
         .with_location_endpoint("http://unresolvable.invalid/geo")
-        .test(&OutboundProxy::parse(&proxy_server.uri()).unwrap(), false)
+        .test(
+            Some(&OutboundProxy::parse(&proxy_server.uri()).unwrap()),
+            false,
+        )
         .await;
     assert!(result.success);
+}
+
+#[tokio::test]
+async fn direct_location_probe_resolves_verified_dual_stack_addresses_and_detects_conflict() {
+    use gateway_admin::model::proxies::ProxyLocationDetection;
+    for (v6_timezone, conflict) in [("Asia/Tokyo", false), ("America/New_York", true)] {
+        let server = MockServer::start().await;
+        for (endpoint, ip) in [("/v4", "203.0.113.8"), ("/v6", "2001:db8::8")] {
+            Mock::given(path(endpoint))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ip": ip})))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        for (ip, timezone) in [("203.0.113.8", "Asia/Tokyo"), ("2001:db8::8", v6_timezone)] {
+            Mock::given(path(format!("/geo/{ip}")))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(location_response(ip, timezone)),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        let result = HttpProxyProbe::new_dual(
+            format!("{}/v4", server.uri()),
+            format!("{}/v6", server.uri()),
+        )
+        .with_location_endpoint(format!("{}/geo", server.uri()))
+        .test(None, true)
+        .await;
+        assert!(result.success);
+        assert_eq!(result.exit_ipv4.unwrap().to_string(), "203.0.113.8");
+        assert_eq!(result.exit_ipv6.unwrap().to_string(), "2001:db8::8");
+        if conflict {
+            assert_eq!(result.location, ProxyLocationDetection::Conflict);
+        } else {
+            let ProxyLocationDetection::Detected { location } = result.location else {
+                panic!("direct location missing")
+            };
+            assert_eq!(location.country, "JP");
+            assert_eq!(location.timezone.name(), "Asia/Tokyo");
+        }
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|request| !request.headers.contains_key("proxy-authorization"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn direct_location_probe_preserves_single_stack_and_does_not_retry_failed_geo_lookup() {
+    use gateway_admin::model::proxies::ProxyLocationDetection;
+    let server = MockServer::start().await;
+    Mock::given(path("/v4"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/v6"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ip":"2001:db8::8"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/geo/2001:db8::8"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let result = HttpProxyProbe::new_dual(
+        format!("{}/v4", server.uri()),
+        format!("{}/v6", server.uri()),
+    )
+    .with_location_endpoint(format!("{}/geo", server.uri()))
+    .test(None, true)
+    .await;
+    assert!(result.success);
+    assert!(result.exit_ipv4.is_none());
+    assert_eq!(result.exit_ipv6.unwrap().to_string(), "2001:db8::8");
+    assert!(matches!(
+        result.location,
+        ProxyLocationDetection::Failed { .. }
+    ));
 }

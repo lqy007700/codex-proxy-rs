@@ -262,6 +262,8 @@ pub(crate) fn usage_list_record_view(
         .clone()
         .or_else(|| record.requested_model_id.clone());
     UsageListRecordView {
+        logical_outcome: record.outcome.as_str().to_owned(),
+        message: record.error_message,
         client_api_key_name: record.client_api_key_name,
         id: record.id,
         provider: record.provider_kind,
@@ -362,6 +364,10 @@ pub(crate) fn usage_record_view(
         .or_else(|| record.requested_model_id.clone());
     let metadata = provider_metadata_fields(record.provider_metadata_json.as_deref());
     UsageRecordView {
+        error_details: record.error_details,
+        failure_class: record.error_kind,
+        provider_error_code: record.provider_error_code,
+        upstream_send_state: record.upstream_send_state,
         id: record.id.clone(),
         request_id: record.id,
         client_api_key_id: Some(record.client_api_key_ref),
@@ -450,6 +456,10 @@ pub(crate) fn provider_metadata_fields(value: Option<&str>) -> BTreeMap<String, 
     const CORE_METADATA_FIELDS: &[&str] = &[
         "protocol",
         "logicalOutcome",
+        "failureClass",
+        "providerErrorCode",
+        "upstreamSendState",
+        "errorDetails",
         "attemptCount",
         "requestedModel",
         "upstreamModel",

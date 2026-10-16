@@ -14,7 +14,6 @@ import {
   LogOut,
   Moon,
   Network,
-  Palette,
   PanelLeftClose,
   PanelLeftOpen,
   PanelsTopLeft,
@@ -76,7 +75,6 @@ const navItems = [
   { label: 'API 密钥', icon: KeyRound, path: '/keys' },
   { label: '使用统计', icon: ChartNoAxesColumn, path: '/usage' },
   { label: '插件', icon: Puzzle, path: '/plugins' },
-  { label: '主题设置', icon: Palette, path: '/theme' },
   { label: '系统设置', icon: Settings, path: '/settings' },
 ]
 const pluginNavIndex = navItems.findIndex(item => item.path === '/plugins')

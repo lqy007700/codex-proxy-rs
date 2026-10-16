@@ -172,9 +172,21 @@ pub struct UsageFilter {
     pub search: Option<String>,
 }
 
-/// 用量记录分页查询
+/// 明细列表范围，成功用量与请求审计保持独立口径
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UsageRecordScope {
+    /// 保留成功交付且有用量证据的既有统计口径
+    #[default]
+    Usage,
+    All,
+    Success,
+    Error,
+}
+
+/// 用量与请求审计共用分页，范围不影响用量聚合
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageQuery {
+    pub scope: UsageRecordScope,
     pub range: TimeRange,
     pub filter: UsageFilter,
     pub current_page: u32,
@@ -653,6 +665,8 @@ pub struct DashboardObservation {
 /// 使用记录表格的窄读模型
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageListRecord {
+    pub outcome: RequestOutcome,
+    pub error_message: Option<String>,
     pub client_api_key_name: Option<String>,
     pub id: String,
     pub endpoint: String,
@@ -752,6 +766,7 @@ pub struct UsageRecord {
     pub error_kind: Option<String>,
     pub provider_error_code: Option<String>,
     pub error_message: Option<String>,
+    pub error_details: Option<String>,
     pub retry_after_ms: Option<u64>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,

@@ -237,6 +237,7 @@ where
         .route("/api/admin/proxies/delete", post(delete::<S>))
         .route("/api/admin/proxies/test", post(test::<S>))
         .route("/api/admin/proxies/probe", post(probe::<S>))
+        .route("/api/admin/proxies/probe/direct", post(probe_direct::<S>))
 }
 
 fn revision(value: u64) -> Result<Revision, AdminError> {
@@ -465,6 +466,25 @@ where
     ))
 }
 
+async fn probe_direct<S>(
+    _: AdminAuth,
+    State(state): State<S>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let result = state
+        .admin_services()
+        .proxies()
+        .probe(None, true)
+        .await
+        .map_err(map_error)?;
+    Ok(AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(ProxyTestView::from(result)),
+    ))
+}
+
 async fn probe<S>(
     _: AdminAuth,
     State(state): State<S>,
@@ -480,7 +500,7 @@ where
     let result = state
         .admin_services()
         .proxies()
-        .probe(&proxy, request.detect_location)
+        .probe(Some(&proxy), request.detect_location)
         .await
         .map_err(map_error)?;
     Ok(AdminResponse::new(

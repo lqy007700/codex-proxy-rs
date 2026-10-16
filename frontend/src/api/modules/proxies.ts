@@ -142,3 +142,12 @@ export function probeProxy(data: { proxyUrl: string, detectLocation?: boolean })
     timeout: 25000,
   })
 }
+
+export function probeDirectLocation(options: RequestOptions = {}) {
+  return request<OutboundProxyTest>({
+    url: '/api/admin/proxies/probe/direct',
+    method: 'POST',
+    timeout: 25000,
+    ...options,
+  })
+}

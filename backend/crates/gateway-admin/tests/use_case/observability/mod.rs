@@ -1194,6 +1194,7 @@ fn observation_range(end: DateTime<Utc>) -> TimeRange {
 
 fn usage_query(now: DateTime<Utc>) -> UsageQuery {
     UsageQuery {
+        scope: Default::default(),
         range: observation_range(now),
         filter: UsageFilter::default(),
         current_page: 1,
@@ -1208,6 +1209,8 @@ fn total_record(
     now: DateTime<Utc>,
 ) -> UsageListRecord {
     UsageListRecord {
+        outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
+        error_message: None,
         client_api_key_name: Some("Production".to_owned()),
         id: id.to_owned(),
         endpoint: "/v1/responses".to_owned(),

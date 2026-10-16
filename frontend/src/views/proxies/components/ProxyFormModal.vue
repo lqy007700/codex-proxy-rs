@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { OutboundProxyRecord, OutboundProxyTest, RequestLocation } from '@/api'
-import { ZButton, ZDialog, ZForm, ZFormItem, ZIconButton, ZInput, ZSwitch } from '@codex-proxy/ui'
-import { LocateFixed, Save, Wifi } from '@lucide/vue'
+import { ZButton, ZDialog, ZForm, ZFormItem, ZInput, ZSwitch } from '@codex-proxy/ui'
+import { Save, Wifi } from '@lucide/vue'
 import { computed } from 'vue'
+import LocationDetectButton from '@/components/LocationDetectButton.vue'
 import RequestLocationFields from '@/components/RequestLocationFields.vue'
 
 const props = defineProps<{
@@ -55,20 +56,7 @@ const connectionDescription = computed(() => props.proxy
       </ZFormItem>
       <div class="flex items-center justify-between gap-3">
         <ZSwitch v-model="customLocation" label="自定义时区位置" :disabled="busy" />
-        <ZIconButton
-          size="default"
-          :aria-label="detectingLocation ? '正在解析出口位置' : '解析出口位置并填入表单'"
-          :title="detectingLocation ? '正在解析出口位置' : '解析出口位置并填入表单'"
-          :aria-busy="detectingLocation"
-          :disabled="busy"
-          @click="emit('detectLocation')"
-        >
-          <span class="relative grid size-7 place-items-center text-cp-link">
-            <span v-if="detectingLocation" class="location-ripple" aria-hidden="true" />
-            <span v-if="detectingLocation" class="location-ripple location-ripple-delayed" aria-hidden="true" />
-            <LocateFixed class="relative z-10 size-4" aria-hidden="true" />
-          </span>
-        </ZIconButton>
+        <LocationDetectButton :loading="detectingLocation" :disabled="busy" @click="emit('detectLocation')" />
       </div>
       <p v-if="testResult?.success === false" class="m-0 text-cp-sm text-cp-error-text" role="alert">
         连接测试失败：{{ testResult.message }}
@@ -100,44 +88,3 @@ const connectionDescription = computed(() => props.proxy
     </template>
   </ZDialog>
 </template>
-
-<style scoped>
-.location-ripple {
-  position: absolute;
-  width: 1.25rem;
-  height: 1.25rem;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  opacity: 0;
-  pointer-events: none;
-  animation: location-ripple 1.8s ease-out infinite forwards;
-}
-
-.location-ripple-delayed {
-  animation-delay: 0.9s;
-}
-
-@keyframes location-ripple {
-  from {
-    opacity: 0.3;
-    transform: scale(0.6);
-  }
-
-  to {
-    opacity: 0;
-    transform: scale(1.55);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .location-ripple {
-    animation: none;
-    opacity: 0.4;
-    transform: scale(1.1);
-  }
-
-  .location-ripple-delayed {
-    display: none;
-  }
-}
-</style>

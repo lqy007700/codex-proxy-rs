@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import type { UsageTimeRangeParams } from './useUsageTimeRange'
+import type { UsageRecordScope } from '@/api'
 import type { AnalyticsMetadata } from '@/api/modules/analytics'
 
 import { computed, onMounted, onScopeDispose, shallowRef, watch } from 'vue'
@@ -15,7 +16,6 @@ import { withMinimumDuration } from '@/utils/operation'
 interface UseUsageRecordsTableOptions {
   timeRangeParams: Readonly<Ref<UsageTimeRangeParams>>
   latestTimeRangeParams: () => UsageTimeRangeParams
-  active: Readonly<Ref<boolean>>
 }
 
 type UsageLoadScope = 'all' | 'table'
@@ -32,6 +32,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   const searchQuery = shallowRef('')
   const search = computed(() => searchQuery.value.trim() || undefined)
   const providerQuery = shallowRef('')
+  const recordScope = shallowRef<UsageRecordScope>('all')
   let tableParams = snapshot()
   const table = useStablePagedQuery({
     initialPageSize: 10,
@@ -59,6 +60,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
       ...options.latestTimeRangeParams(),
       provider: providerQuery.value || undefined,
       search: search.value,
+      scope: recordScope.value,
     }
   }
 
@@ -77,7 +79,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
       resetTable()
 
     await Promise.all([
-      ...(options.active.value ? [table.execute()] : []),
+      table.execute(),
       ...(scope === 'all' ? [loadUsageAnalytics(globalParams)] : []),
     ])
   }
@@ -194,18 +196,13 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     void loadUsageRecords()
   })
 
-  watch(options.active, (active) => {
-    if (active) {
-      void reloadLatestTable()
-    }
-    else {
-      table.invalidate()
-    }
+  watch(recordScope, () => {
+    void reloadLatestTable()
   })
 
   watch(search, (_value, _previous, onCleanup) => {
     const timer = setTimeout(() => {
-      if (options.active.value && tableParams.search !== search.value)
+      if (tableParams.search !== search.value)
         void reloadLatestTable()
     }, 250)
     onCleanup(() => clearTimeout(timer))
@@ -223,6 +220,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     pageSize,
     searchQuery,
     providerQuery,
+    recordScope,
     usagePagination,
     loading,
     error,

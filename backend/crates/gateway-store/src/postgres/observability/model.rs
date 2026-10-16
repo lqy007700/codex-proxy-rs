@@ -94,6 +94,7 @@ impl UsageRecordFilter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageRecordQuery {
+    pub scope: admin_observability::UsageRecordScope,
     pub range: ObservabilityRange,
     pub filter: UsageRecordFilter,
     pub current_page: u32,

@@ -51,6 +51,8 @@ function switchSection(value = 'runtime'): void {
 const {
   loading,
   saving,
+  detectingRequestLocation,
+  detectRequestLocation,
   hasChanges,
   resetSettings,
   error,
@@ -113,10 +115,10 @@ watch(section, (value) => {
       />
       <div v-if="isBasicSection || hasChanges" class="ml-auto flex items-center justify-end gap-2">
         <span v-if="hasChanges" class="mr-1 size-1.5 shrink-0 rounded-full bg-cp-warning" aria-hidden="true" />
-        <ZIconButton v-if="hasChanges" aria-label="撤销全部基础设置更改" variant="solid" :disabled="saving || loading" @click="resetSettings">
+        <ZIconButton v-if="hasChanges" aria-label="撤销全部基础设置更改" variant="solid" :disabled="saving || loading || detectingRequestLocation" @click="resetSettings">
           <Undo2 class="size-4" />
         </ZIconButton>
-        <ZButton type="primary" :loading="saving" :disabled="loading || !hasChanges || !!error" @click="saveSettings">
+        <ZButton type="primary" :loading="saving" :disabled="loading || detectingRequestLocation || !hasChanges || !!error" @click="saveSettings">
           <template #icon>
             <Save class="size-4" />
           </template>
@@ -193,7 +195,7 @@ watch(section, (value) => {
             :active="section === 'upstream'"
             :disabled="disabled"
           />
-          <RequestLocationCard v-model="form.requestLocation" v-model:enabled="form.requestLocationEnabled" :disabled="disabled" />
+          <RequestLocationCard v-model="form.requestLocation" v-model:enabled="form.requestLocationEnabled" :disabled="disabled || detectingRequestLocation" :detecting="detectingRequestLocation" @detect-location="detectRequestLocation" />
           <PrivacyPolicyCard v-model="form.codexPrivacyPolicy" :disabled="disabled" />
           <ModelAliasesCard
             :mappings="mappings"

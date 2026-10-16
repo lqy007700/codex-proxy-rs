@@ -61,10 +61,10 @@ pub trait ProxiesService: Send + Sync {
         detect_location: bool,
         context: &MutationContext,
     ) -> Result<ProxyRecord, AdminError>;
-    /// 探测未保存的连接地址，不写入代理记录或修改账号绑定
+    /// 探测未保存的代理或直连出口，不写入代理记录或修改账号绑定
     async fn probe(
         &self,
-        proxy: &OutboundProxy,
+        proxy: Option<&OutboundProxy>,
         detect_location: bool,
     ) -> Result<ProxyTestResult, AdminError>;
 }
@@ -194,7 +194,7 @@ impl ProxiesService for DefaultProxiesService {
             .transpose()
             .map_err(|_| AdminError::invalid("代理位置不合法"))?;
         command.test = if command.auto_location {
-            Some(self.probe(&command.proxy, true).await?)
+            Some(self.probe(Some(&command.proxy), true).await?)
         } else {
             None
         };
@@ -233,7 +233,7 @@ impl ProxiesService for DefaultProxiesService {
             if command.auto_location.unwrap_or(current.auto_location)
                 && (!current.auto_location || proxy != &current.proxy)
             {
-                command.test = Some(self.probe(proxy, true).await?);
+                command.test = Some(self.probe(Some(proxy), true).await?);
             }
         }
         let result = self
@@ -262,7 +262,7 @@ impl ProxiesService for DefaultProxiesService {
 
     async fn probe(
         &self,
-        proxy: &OutboundProxy,
+        proxy: Option<&OutboundProxy>,
         detect_location: bool,
     ) -> Result<ProxyTestResult, AdminError> {
         let _permit = self.test_slots.try_acquire().map_err(|_| {
@@ -292,7 +292,7 @@ impl ProxiesService for DefaultProxiesService {
         // 手动解析只为本次测试请求位置，不改变自动跟随的持久配置
         let result = self
             .probe
-            .test(&record.proxy, record.auto_location || detect_location)
+            .test(Some(&record.proxy), record.auto_location || detect_location)
             .await;
         let mutation = self
             .store

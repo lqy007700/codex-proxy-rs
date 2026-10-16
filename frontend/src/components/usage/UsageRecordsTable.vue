@@ -41,6 +41,10 @@ withDefaults(
     :loading="loading"
     :empty-text="emptyText"
   >
+    <template v-if="$slots.logicalOutcome" #logicalOutcome="scope">
+      <slot name="logicalOutcome" v-bind="scope" />
+    </template>
+
     <template #clientApiKeyName="{ displayValue }">
       <span
         class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"

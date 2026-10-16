@@ -106,7 +106,7 @@ impl ProxyStore for TestProxies {
 
 #[async_trait]
 impl ProxyProbe for TestProxies {
-    async fn test(&self, _: &OutboundProxy, _: bool) -> ProxyTestResult {
+    async fn test(&self, _: Option<&OutboundProxy>, _: bool) -> ProxyTestResult {
         panic!("unexpected proxy probe")
     }
 }

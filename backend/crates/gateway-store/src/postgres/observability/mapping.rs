@@ -41,6 +41,7 @@ pub(crate) fn store_usage_query(
     query: admin_observability::UsageQuery,
 ) -> AdminStoreResult<UsageRecordQuery> {
     Ok(UsageRecordQuery {
+        scope: query.scope,
         range: store_range(query.range).map_err(observability_error)?,
         filter: store_usage_filter(query.filter),
         current_page: query.current_page,
@@ -302,6 +303,8 @@ pub(crate) fn usage_list_record_from_row(
         cost_currency.as_deref(),
     )?;
     Ok(UsageListRecord {
+        outcome: request_outcome(&get::<String>(row, "outcome")?)?,
+        error_message: get(row, "error_message")?,
         client_api_key_name: get(row, "client_api_key_name")?,
         billing,
         id: get(row, "id")?,
@@ -415,6 +418,7 @@ pub(crate) fn usage_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<
         error_kind: get(row, "error_kind")?,
         provider_error_code: get(row, "provider_error_code")?,
         error_message: get(row, "error_message")?,
+        error_details: get(row, "error_details")?,
         retry_after_ms: optional_unsigned(row, "retry_after_ms")?,
         input_tokens: optional_unsigned(row, "input_tokens")?,
         output_tokens: optional_unsigned(row, "output_tokens")?,

@@ -82,6 +82,8 @@ export interface UsageRecordMetadata {
 }
 
 export interface UsageListRecord {
+  logicalOutcome: string
+  message: string | null
   clientApiKeyName: string | null
   id: string
   provider: string | null
@@ -116,6 +118,10 @@ export interface UsageListRecord {
 }
 
 export interface UsageRecord {
+  errorDetails: string | null
+  failureClass: string | null
+  providerErrorCode: string | null
+  upstreamSendState: string
   id: string
   requestId: string
   clientApiKeyId: string | null
@@ -497,9 +503,11 @@ interface PageQuery {
   pageSize: number
 }
 
-type UsagePageQuery = UsageRangeQuery & PageQuery & { search?: string }
+export type UsageRecordScope = 'all' | 'success' | 'error'
 
-type OpsErrorPageQuery = UsagePageQuery
+type UsagePageQuery = UsageRangeQuery & PageQuery & { search?: string, scope?: UsageRecordScope }
+
+type OpsErrorPageQuery = Omit<UsagePageQuery, 'scope'>
 
 interface UsageDetailQuery {
   id: string

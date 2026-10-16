@@ -753,6 +753,7 @@ fn usage_record_with_account(
         error_kind: None,
         provider_error_code: None,
         error_message: None,
+        error_details: None,
         retry_after_ms: None,
         input_tokens: Some(1),
         output_tokens: Some(1),
@@ -858,6 +859,8 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         .lock()
         .expect("usage records")
         .push(UsageListRecord {
+            outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
+            error_message: None,
             client_api_key_name: Some("Production".to_owned()),
             id: "request_endpoint".to_owned(),
             endpoint: "/v1/responses".to_owned(),
@@ -967,6 +970,8 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         .expect("usage response body");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("usage response JSON");
 
+    assert_eq!(value["data"]["items"][0]["logicalOutcome"], "succeeded");
+    assert!(value["data"]["items"][0]["message"].is_null());
     assert_eq!(value["data"]["items"][0]["clientApiKeyName"], "Production");
     assert_eq!(value["data"]["items"][0]["accountNotes"], "Team workspace");
     assert_eq!(
@@ -1302,4 +1307,71 @@ async fn observability_queries_reject_group_filters_and_analytics_search() {
     let observations = fixture.observations.lock().unwrap();
     assert!(observations.records.is_empty());
     assert!(observations.errors.is_empty());
+}
+
+#[tokio::test]
+async fn usage_request_scope_is_validated_and_forwarded_without_changing_default() {
+    use crate::admin::{AdminTestFixture, AdminTestState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode, header},
+    };
+    use gateway_admin::model::observability::UsageRecordScope;
+    use gateway_api::admin::observability;
+    use tower::ServiceExt as _;
+
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let router = observability::router::<AdminTestState>().with_state(fixture.state());
+    for (suffix, expected) in [
+        ("", UsageRecordScope::Usage),
+        ("?scope=all", UsageRecordScope::All),
+        ("?scope=success", UsageRecordScope::Success),
+        ("?scope=error", UsageRecordScope::Error),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/admin/usage/records{suffix}"))
+                    .header(header::COOKIE, "cpr_session=valid-session")
+                    .header("x-request-id", "req_scope_test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            fixture
+                .observations
+                .lock()
+                .unwrap()
+                .records
+                .last()
+                .unwrap()
+                .scope,
+            expected
+        );
+    }
+    for path in [
+        "/api/admin/usage/records?scope=invalid",
+        "/api/admin/usage/records/summary?scope=all",
+        "/api/admin/usage/insights/overview?scope=all",
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::COOKIE, "cpr_session=valid-session")
+                    .header("x-request-id", "req_scope_test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+    }
+    assert_eq!(fixture.observations.lock().unwrap().records.len(), 4);
 }

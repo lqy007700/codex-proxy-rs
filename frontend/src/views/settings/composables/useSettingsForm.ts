@@ -4,8 +4,8 @@ import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/a
 import { ZNotification } from '@codex-proxy/ui'
 import { cloneDeep, isEqual } from 'es-toolkit'
 
-import { computed, reactive, ref, shallowRef } from 'vue'
-import { getSettings, updateSettings } from '@/api'
+import { computed, onScopeDispose, reactive, ref, shallowRef } from 'vue'
+import { getSettings, probeDirectLocation, updateSettings } from '@/api'
 import { ApiError } from '@/api/request'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { normalizeRequestLocation, requestLocationError } from '@/utils/location'
@@ -19,6 +19,10 @@ export function useSettingsForm() {
   const loading = shallowRef(true)
   const saveAction = useAsyncAction()
   const saving = saveAction.loading
+  const detectLocationAction = useAsyncAction()
+  const detectingRequestLocation = detectLocationAction.loading
+  let locationController: AbortController | undefined
+  onScopeDispose(() => locationController?.abort())
   const error = shallowRef('')
   const mappings = ref<Array<{ requestedModel: string, upstreamModel: string }>>([])
   const smartSchedulingDefaults = shallowRef<SmartSchedulingConfig>()
@@ -69,7 +73,7 @@ export function useSettingsForm() {
     && !isEqual({ form, mappings: mappings.value }, saved.value))
 
   function resetSettings() {
-    if (!saved.value || saving.value)
+    if (!saved.value || saving.value || detectingRequestLocation.value)
       return
     const initial = cloneDeep(saved.value)
     Object.assign(form, initial.form)
@@ -170,6 +174,35 @@ export function useSettingsForm() {
     }
   }
 
+  async function detectRequestLocation() {
+    if (saving.value || loading.value || error.value)
+      return
+    await detectLocationAction.run(async () => {
+      locationController = new AbortController()
+      const result = await probeDirectLocation({ signal: locationController.signal })
+      if (locationController.signal.aborted)
+        return
+      if (!result.success) {
+        ZNotification.error({ message: result.message })
+        return
+      }
+      if (result.location.status === 'detected') {
+        form.requestLocation = { ...result.location.location }
+        form.requestLocationEnabled = true
+        ZNotification.success({ message: '已填入出口位置' })
+      }
+      else if (result.location.status === 'conflict') {
+        ZNotification.warning({ message: 'IPv4 与 IPv6 出口时区不一致，请手动填写' })
+      }
+      else if (result.location.status === 'failed') {
+        ZNotification.warning({ message: result.location.message })
+      }
+      else {
+        ZNotification.warning({ message: '未获取到出口位置' })
+      }
+    })
+  }
+
   function addMapping() {
     mappings.value = [...mappings.value, { requestedModel: '', upstreamModel: '' }]
   }
@@ -207,7 +240,7 @@ export function useSettingsForm() {
     if (!smartScheduling)
       return
     const savedSettings = saved.value
-    if (saving.value || loading.value || !savedSettings)
+    if (saving.value || loading.value || detectingRequestLocation.value || !savedSettings)
       return
     const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, responsesMaxDecompressedBodyMiB, accountAutoFreezeThreshold, accountAutoFreezeWindowSeconds, accountAutoFreezeDurationSeconds } = form
     if (!openaiAccountAffinity || maxAccountRotations === null || openaiSessionAffinityTtlHours === null || refreshMarginSeconds === null || refreshConcurrency === null || maxConcurrentPerAccount === null || openaiGuardianReservedConcurrency === null || !rotationStrategy || maxWaitingPerKey === null || maxWaitingPerAccount === null || concurrencyWaitTimeoutSeconds === null) {
@@ -341,6 +374,8 @@ export function useSettingsForm() {
   return {
     loading,
     saving,
+    detectingRequestLocation,
+    detectRequestLocation,
     hasChanges,
     resetSettings,
     error,

@@ -823,7 +823,11 @@ impl PricingSource for UnusedAdminRuntime {
 
 #[async_trait]
 impl ProxyProbe for UnusedAdminRuntime {
-    async fn test(&self, _: &gateway_core::account::OutboundProxy, _: bool) -> ProxyTestResult {
+    async fn test(
+        &self,
+        _: Option<&gateway_core::account::OutboundProxy>,
+        _: bool,
+    ) -> ProxyTestResult {
         panic!("unexpected proxy probe")
     }
 }

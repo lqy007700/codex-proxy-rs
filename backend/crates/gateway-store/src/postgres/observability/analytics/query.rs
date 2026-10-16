@@ -974,14 +974,14 @@ pub(crate) fn push_analytics_filter(
 ) {
     let mut typed = filter.clone();
     typed.search = None;
-    push_usage_filter(query, &typed, alias);
+    push_usage_filter(query, &typed, alias, false);
     if filter.search.is_some() {
         query.push(format!(" and exists(select 1 from model_request_observations searched where searched.id={alias}.id"));
         let text = UsageRecordFilter {
             search: filter.search.clone(),
             ..Default::default()
         };
-        push_usage_filter(query, &text, "searched");
+        push_usage_filter(query, &text, "searched", false);
         query.push(")");
     }
 }

@@ -788,6 +788,7 @@ Images 按请求正文的图片模型 ID 检查，不依赖文本模型目录；
 | `POST` | `/api/admin/proxies/create` | `{ name, proxyUrl, location?, autoLocation? }` | `201 { record, configRevision }` |
 | `POST` | `/api/admin/proxies/update` | `{ id, revision, name, enabled?, proxyUrl?, location?, autoLocation? }` | `{ record, configRevision }` |
 | `POST` | `/api/admin/proxies/probe` | `{ proxyUrl, detectLocation? }` | 测试未保存的地址，返回连通性及可选位置结果，不创建代理 |
+| `POST` | `/api/admin/proxies/probe/direct` | 无 | 解析网关服务器的直连出口位置，返回同一探测结果结构，不修改配置 |
 | `POST` | `/api/admin/proxies/test` | `{ id, revision, detectLocation? }` | 最新代理记录 / Proxy record with test result |
 | `POST` | `/api/admin/proxies/delete` | `{ id, revision }` | `{ configRevision }` |
 
@@ -1438,6 +1439,10 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 关联代理配置了自定义位置时优先使用代理值。保存后通过现有配置发布机制对新请求生效，
 已开始请求及其重试保持同一份全局值；普通文本、绝对时间戳和数据驻留要求不受影响
 
+上游配置页可调用 `POST /api/admin/proxies/probe/direct` 解析服务器直连出口，复用代理的 IPv4 / IPv6
+出口及位置校验规则。成功后填入四个位置字段并启用覆盖，点击“保存基础设置”后生效
+位置查询失败或双栈时区冲突时保留原表单，允许手动填写
+
 ### 隐私策略
 
 `codexPrivacyPolicy` 为必填对象，默认 `{ enabled: false, onError: "skip_rule", rules: [] }`。
@@ -1887,6 +1892,12 @@ Dashboard 返回原始 `asOf` 及 `asOfDisplay`，作为当前数据的查询锚
 request/response/upstream ID、outcome 与搜索文本。`search` 仅供明细及错误列表使用；
 汇总、洞察和诊断不接受搜索参数，管理观测接口不接受路由分组筛选。页面搜索不改变顶部统计范围
 
+`/api/admin/usage/records` 的 `scope` 省略时只返回完整交付且有用量证据的成功记录
+`all` 返回全部模型请求审计（含进行中），`success` 返回成功请求，`error` 返回失败、取消和未完成请求
+列表的 `logicalOutcome` 为请求实际结果，`message` 为可空的错误摘要，分页与总数均按所选范围计算
+非默认 `scope` 的 `search` 还支持模型执行 ID 前缀，默认用量范围保持原有搜索规则
+使用统计页默认 `scope=all`，结果筛选只影响明细，统计概览默认折叠；汇总、洞察和诊断不接受 `scope`
+
 诊断 `dimension` 可取 `model`、`account`、
 `apiKey`、`provider`、`transport`、`failureClass`、`status`。诊断按请求量降序返回最多 100 项，
 同请求量按维度标识稳定排列
@@ -1905,7 +1916,7 @@ request/response/upstream ID、outcome 与搜索文本。`search` 仅供明细�
 查询不关联当前配置，改名、修改订阅或删除配置不改变已有快照。补写的历史 Key 名称与订阅取自补写时仍存在的配置，
 不保证等于请求发生时的值；无法补齐的字段保持未知
 
-运维错误记录的 `errorDetails` 为受控诊断文本，无详情时为 `null`。
+管理端请求详情与运维错误记录的 `errorDetails` 为受控诊断文本，无详情时为 `null`。
 错误来源快照以 JSON 文本保存：`causes.messages` 按外层到内层排列本地原因，`causes.truncated`
 标记来源链截断；存在附属清理失败时，`causes.cleanup` 保存各自的原因快照。
 `upstream` 保存上游正文，`redacted` 标记令牌等敏感上下文的移除；没有对应来源时为 `null`。
@@ -1925,7 +1936,7 @@ OpenAI 优先采用服务端 `openai-model` / `x-openai-model` 报告（流内�
 不随当前密钥或账号修改、删除而改变；`%`、`_` 和 `\` 均按普通字符处理，不作为搜索通配符
 
 请求记录的 `requestId`、`upstreamRequestId` 参数按模型执行 ID 或上游 ID 精确查询；
-搜索框不匹配请求 ID，只有入口 ID 时需结合时间与入口日志定位。
+只有入口 ID 时需结合时间与入口日志定位。
 请求记录和错误列表支持按密钥名称搜索，不支持密钥值或可见前缀搜索
 
 ### 记录范围与统计口径
@@ -1944,7 +1955,7 @@ OpenAI 优先采用服务端 `openai-model` / `x-openai-model` 报告（流内�
 
 汇总与洞察中的请求数与 outcome 分布覆盖筛选范围内全部请求；token、缓存、延迟与成本聚合仅统计
 已完整交付客户端的成功推理响应。OpenAI 的 `generate: false` 连接与上下文准备记录归类为
-`requestKind: "prewarm"`，不进入用量列表、账号用量或额度预测的 Token / 费用覆盖统计，但仍可按
+`requestKind: "prewarm"`，不进入默认用量列表、账号用量或额度预测的 Token / 费用覆盖统计，但仍可按
 请求 ID 读取审计详情，响应中的额度观测仍可用于预测配对。此分类以实际 `generate` 字段为准，
 不能仅凭客户端的同名 metadata 或输出 Token 为零排除普通推理；其他 Provider 不套用该规则
 

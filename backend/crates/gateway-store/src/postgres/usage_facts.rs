@@ -7,7 +7,7 @@ use sqlx::{Postgres, QueryBuilder};
 /// `model_requests` 同时承担执行审计：包括上游已发送、但尚未收到首个事件就断开的
 /// WebSocket 请求
 /// 这些失败仍必须留给 Ops Errors 和调度健康度分析，不能混入用量、
-/// 成本、账号使用次数或请求明细
+/// 成本、账号使用次数或成功用量明细
 /// Provider 原生端点也会写入执行审计；standalone search 没有模型、Token 或费用事实，
 /// 因此不属于用量记录
 /// 图片端点由请求意图证明其用量语义，不依赖文本模型字段

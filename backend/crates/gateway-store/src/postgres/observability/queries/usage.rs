@@ -10,6 +10,7 @@ pub(crate) fn push_usage_filter(
     query: &mut QueryBuilder<Postgres>,
     filter: &UsageRecordFilter,
     alias: &str,
+    search_request_ids: bool,
 ) {
     if let Some(value) = &filter.client_api_key_ref {
         query.push(format!(" and {alias}.client_api_key_ref = "));
@@ -88,7 +89,10 @@ pub(crate) fn push_usage_filter(
             "provider_account_ref",
             "provider_account_email_snapshot",
             "provider_account_name_snapshot",
-        ] {
+        ]
+        .into_iter()
+        .chain(search_request_ids.then_some("id"))
+        {
             query.push(format!(" escape '\\' or {alias}.{column} like "));
             query.push_bind(pattern.clone());
         }
@@ -113,7 +117,7 @@ pub(crate) fn literal_prefix_pattern(value: &str) -> String {
 }
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
-    "select mr.id, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
+    "select mr.id, mr.outcome, mr.error_message, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
             mr.provider_kind, mr.provider_account_ref,
             mr.provider_account_name_snapshot as provider_account_name,
             mr.provider_account_email_snapshot as provider_account_email,
@@ -150,7 +154,7 @@ pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
             mr.attempt_count, mr.upstream_send_state, mr.downstream_committed_at,
             mr.outcome, mr.client_status_code, mr.upstream_status_code,
             mr.client_response_id, mr.upstream_request_id, mr.upstream_response_id,
-            mr.error_kind, mr.provider_error_code, mr.error_message, mr.retry_after_ms,
+            mr.error_kind, mr.provider_error_code, mr.error_message, mr.error_details, mr.retry_after_ms,
             mr.input_tokens, mr.output_tokens, mr.cached_input_tokens, mr.cache_write_input_tokens,
             mr.reasoning_output_tokens, mr.image_input_tokens, mr.image_output_tokens,
             mr.total_tokens, mr.billing_snapshot_json, mr.cost_source, mr.cost_amount::text,
@@ -176,22 +180,24 @@ pub(crate) async fn list_usage_records(
         let items = list_usage_record_items(&mut *snapshot.tx, &query, None).await?;
         let total = if items.len() < usize::from(query.page_size.get()) {
             items.len() as u64
-        } else if let Some(counts) = snapshot
-            .completed_request_counts(query.range, &query.filter)
-            .await?
+        } else if query.scope == admin_observability::UsageRecordScope::Usage
+            && let Some(counts) = snapshot
+                .completed_request_counts(query.range, &query.filter)
+                .await?
         {
             counts.values().try_fold(0_u64, |sum, count| {
                 sum.checked_add(*count)
                     .ok_or_else(|| invalid("usage count overflows u64"))
             })?
         } else {
-            count_usage_records(&mut *snapshot.tx, query.range, &query.filter).await?
+            count_usage_records(&mut *snapshot.tx, query.range, &query.filter, query.scope).await?
         };
         (total, items)
     } else {
-        let (total, page) = if let Some(counts) = snapshot
-            .completed_request_counts(query.range, &query.filter)
-            .await?
+        let (total, page) = if query.scope == admin_observability::UsageRecordScope::Usage
+            && let Some(counts) = snapshot
+                .completed_request_counts(query.range, &query.filter)
+                .await?
         {
             time_page_from_segments(
                 counts.into_iter().rev(),
@@ -260,8 +266,13 @@ async fn list_usage_record_items_at<'e, E: sqlx::Executor<'e, Database = Postgre
     statement.push_bind(page.range.start);
     statement.push(" and mr.started_at < ");
     statement.push_bind(page.range.end);
-    push_completed_usage_fact_filter(&mut statement, "mr");
-    push_usage_filter(&mut statement, &query.filter, "mr");
+    push_usage_list_scope(&mut statement, query.scope);
+    push_usage_filter(
+        &mut statement,
+        &query.filter,
+        "mr",
+        query.scope != admin_observability::UsageRecordScope::Usage,
+    );
     statement.push(if ascending {
         " order by mr.started_at, mr.id limit "
     } else {
@@ -363,8 +374,13 @@ async fn usage_time_page(
     statement.push_bind(query.range.start);
     statement.push(" and mr.started_at < ");
     statement.push_bind(query.range.end);
-    push_completed_usage_fact_filter(&mut statement, "mr");
-    push_usage_filter(&mut statement, &query.filter, "mr");
+    push_usage_list_scope(&mut statement, query.scope);
+    push_usage_filter(
+        &mut statement,
+        &query.filter,
+        "mr",
+        query.scope != admin_observability::UsageRecordScope::Usage,
+    );
     statement.push(" group by bucket_start order by bucket_start desc");
     let rows = statement
         .build()
@@ -378,6 +394,7 @@ pub(crate) async fn count_usage_records<'e, E: sqlx::Executor<'e, Database = Pos
     executor: E,
     range: ObservabilityRange,
     filter: &UsageRecordFilter,
+    scope: admin_observability::UsageRecordScope,
 ) -> StoreResult<u64> {
     let mut statement = QueryBuilder::<Postgres>::new(
         "select count(*)::bigint from model_request_observations mr where mr.started_at >= ",
@@ -385,14 +402,37 @@ pub(crate) async fn count_usage_records<'e, E: sqlx::Executor<'e, Database = Pos
     statement.push_bind(range.start);
     statement.push(" and mr.started_at < ");
     statement.push_bind(range.end);
-    push_completed_usage_fact_filter(&mut statement, "mr");
-    push_usage_filter(&mut statement, filter, "mr");
+    push_usage_list_scope(&mut statement, scope);
+    push_usage_filter(
+        &mut statement,
+        filter,
+        "mr",
+        scope != admin_observability::UsageRecordScope::Usage,
+    );
     let total = statement
         .build_query_scalar::<i64>()
         .fetch_one(executor)
         .await
         .map_err(|source| postgres_unavailable("count usage records", source))?;
     to_u64(total)
+}
+
+// 请求审计与成功用量使用不同范围，明细、计数和定位页必须共用同一谓词
+fn push_usage_list_scope(
+    query: &mut QueryBuilder<Postgres>,
+    scope: admin_observability::UsageRecordScope,
+) {
+    use admin_observability::UsageRecordScope;
+    match scope {
+        UsageRecordScope::Usage => push_completed_usage_fact_filter(query, "mr"),
+        UsageRecordScope::All => {}
+        UsageRecordScope::Success => {
+            query.push(" and mr.outcome = 'succeeded'");
+        }
+        UsageRecordScope::Error => {
+            query.push(" and mr.outcome in ('failed', 'cancelled', 'incomplete')");
+        }
+    }
 }
 
 pub(crate) async fn usage_record_detail(
