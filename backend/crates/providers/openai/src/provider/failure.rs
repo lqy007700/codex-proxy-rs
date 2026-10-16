@@ -1334,9 +1334,11 @@ fn transient_retry_policy(
         CodexFailureCategory::CapacityUnavailable => {
             Some(TransientRetryPolicy::RetryThenRotateAccount)
         }
-        // 通用服务故障不足以证明账号异常，503/server_error 仅在原账号内恢复
-        _ if failure.is_retryable_server_error() => {
-            Some(TransientRetryPolicy::RetryThenReturnError)
+        // 普通 503 共用有界恢复预算，换号不代表账号凭据或额度异常
+        _ if failure.is_retryable_service_unavailable() => {
+            Some(TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                max_total_retries: NonZeroU32::new(5).unwrap_or(NonZeroU32::MIN),
+            })
         }
         _ => None,
     }
@@ -1426,6 +1428,11 @@ pub(super) fn map_upstream_failure(
             // 服务故障只在原账号恢复，以较短的等待上限控制总延迟，并逐次采样分散重试
             TransientRetryPolicy::RetryThenReturnError => (
                 5,
+                Duration::from_secs(2),
+                crate::jitter::server_error_retry_jitter(crate::jitter::random_u64()),
+            ),
+            TransientRetryPolicy::RetryThenRotateAccountWithBudget { .. } => (
+                3,
                 Duration::from_secs(2),
                 crate::jitter::server_error_retry_jitter(crate::jitter::random_u64()),
             ),

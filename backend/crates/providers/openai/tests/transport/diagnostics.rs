@@ -70,7 +70,7 @@ fn turn_rate_limit_does_not_grant_proxy_replay_or_account_cooldown() {
 }
 
 #[test]
-fn server_error_replay_requires_explicit_503_and_unambiguous_send() {
+fn service_unavailable_replay_requires_explicit_503_and_unambiguous_send() {
     for (status, body, retryable) in [
         (
             503,
@@ -87,18 +87,18 @@ fn server_error_replay_requires_explicit_503_and_unambiguous_send() {
             r#"{"error":{"code":"server_error","type":"server_error"}}"#,
             false,
         ),
-        (503, r#"{"error":{"type":"server_error"}}"#, false),
+        (503, r#"{"error":{"type":"server_error"}}"#, true),
         (
             503,
             r#"{"error":{"code":"Vendor.Future.v2","type":"server_error"}}"#,
-            false,
+            true,
         ),
         (
             503,
             r#"{"error":{"code":"flex_unavailable","type":"server_error"}}"#,
             false,
         ),
-        (503, "server_error", false),
+        (503, "service unavailable", true),
     ] {
         for phase in [
             CodexUpstreamSendPhase::BeforePayload,

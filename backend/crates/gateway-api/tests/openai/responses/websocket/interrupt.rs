@@ -43,7 +43,10 @@ impl ClientRetryStore for RetryMarker {
 }
 
 #[derive(Default)]
-struct RetryBudgetProvider(AtomicUsize);
+struct RetryBudgetProvider {
+    calls: AtomicUsize,
+    bounded_rotation: bool,
+}
 
 #[async_trait]
 impl Provider for RetryBudgetProvider {
@@ -63,7 +66,7 @@ impl Provider for RetryBudgetProvider {
         request: ProviderRequest,
         context: AttemptContext,
     ) -> Result<ProviderStream, ProviderError> {
-        let number = self.0.fetch_add(1, Ordering::SeqCst) + 1;
+        let number = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if number <= 7 || matches!(number, 9 | 10) {
             let error = ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::Sent)
                 .with_status(503)
@@ -73,17 +76,28 @@ impl Provider for RetryBudgetProvider {
                     Bytes::from_static(br#"{"error":{"code":"server_error","message":"synthetic unavailable"}}"#),
                 ))
                 .with_transient_retry(
-                    std::num::NonZeroU32::new(5).unwrap(),
+                    std::num::NonZeroU32::new(if self.bounded_rotation { 3 } else { 5 }).unwrap(),
                     Duration::ZERO,
                     Duration::ZERO,
                     Duration::ZERO,
-                    gateway_core::error::TransientRetryPolicy::RetryThenReturnError,
+                    if self.bounded_rotation {
+                        gateway_core::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                            max_total_retries: std::num::NonZeroU32::new(5).unwrap(),
+                        }
+                    } else {
+                        gateway_core::error::TransientRetryPolicy::RetryThenReturnError
+                    },
                 );
             return Ok(ProviderStream::new(
                 ProviderCallMetadata::new(
                     request.candidate().provider().clone(),
                     request.candidate().upstream_model().unwrap().clone(),
-                    ProviderAccountId::new("acct_api_test").unwrap(),
+                    ProviderAccountId::new(match (self.bounded_rotation, number) {
+                        (true, 5) => "acct_retry_b",
+                        (true, 6) => "acct_retry_c",
+                        _ => "acct_api_test",
+                    })
+                    .unwrap(),
                     UpstreamTransport::new("websocket").unwrap(),
                 ),
                 futures::stream::iter([Err(error)]),
@@ -98,12 +112,23 @@ impl Provider for RetryBudgetProvider {
 
 #[tokio::test]
 async fn client_retry_budget_should_flow_through_http_and_live_websocket() {
-    for websocket in [false, true] {
-        let provider = Arc::new(RetryBudgetProvider::default());
+    for (websocket, bounded) in [false, true]
+        .into_iter()
+        .flat_map(|websocket| [false, true].map(|bounded| (websocket, bounded)))
+    {
+        let provider = Arc::new(RetryBudgetProvider {
+            calls: AtomicUsize::new(0),
+            bounded_rotation: bounded,
+        });
         let marker = Arc::new(RetryMarker::default());
         let execution = Arc::new(
             DefaultExecutionService::new(
-                RuntimeSnapshotHandle::new(snapshot("sk_retry_probe", "openai")),
+                RuntimeSnapshotHandle::new(crate::openai::snapshot_with_accounts(
+                    "sk_retry_probe",
+                    "openai",
+                    "key_api_test",
+                    &["acct_api_test", "acct_retry_b", "acct_retry_c"],
+                )),
                 Arc::new(SettlementPorts::default()),
                 ProviderRegistry::new([provider.clone() as Arc<dyn Provider>]).unwrap(),
                 Arc::new(InterruptAdmissions::default()),
@@ -177,7 +202,7 @@ async fn client_retry_budget_should_flow_through_http_and_live_websocket() {
                     assert!(String::from_utf8_lossy(&payload).contains("response.completed"));
                 }
             }
-            assert_eq!(provider.0.load(Ordering::SeqCst), expected_attempts);
+            assert_eq!(provider.calls.load(Ordering::SeqCst), expected_attempts);
             assert_eq!(marker.0.lock().unwrap().is_none(), success);
         }
         if let Some(mut socket) = socket {

@@ -182,21 +182,17 @@ impl CodexUpstreamFailure {
         self.category
     }
 
-    /// 明确的 503 server_error 允许有界恢复，不把普通 5xx 当作容量或账号故障
-    pub(crate) fn is_retryable_server_error(&self) -> bool {
+    /// 普通服务不可用只按明确的 503 恢复，特殊错误分类保留各自策略
+    pub(crate) fn is_retryable_service_unavailable(&self) -> bool {
         self.category == CodexFailureCategory::Unavailable
             && self.status == Some(StatusCode::SERVICE_UNAVAILABLE)
-            && self
-                .code
-                .as_deref()
-                .is_some_and(|code| code.trim().eq_ignore_ascii_case("server_error"))
     }
 
-    /// 只对明确识别的账号、容量拒绝或 503 server_error 提供重放资格
+    /// 只对明确识别的账号、容量拒绝或普通 503 提供重放资格
     #[must_use]
     pub fn replay_is_safe(&self) -> bool {
         !matches!(self.send_phase, CodexUpstreamSendPhase::Ambiguous)
-            && (self.is_retryable_server_error()
+            && (self.is_retryable_service_unavailable()
                 || matches!(
                     self.category,
                     CodexFailureCategory::ModelUnsupported

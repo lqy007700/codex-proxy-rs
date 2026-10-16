@@ -344,6 +344,7 @@ where
             recovery_account: None,
             pending_retry: None,
             transient_retry_counts: BTreeMap::new(),
+            bounded_transient_retries: 0,
             request_profiles: BTreeMap::new(),
             current: None,
             send_state_watermark: UpstreamSendState::NotSent,
@@ -429,7 +430,8 @@ struct FailureFinalization {
 
 #[derive(Debug, Clone)]
 struct PendingAttemptRetry {
-    account: crate::account::ProviderAccountId,
+    /// 有值时保持账号，为空时在退避后按排除集重新选号
+    account: Option<crate::account::ProviderAccountId>,
     transport: AttemptTransport,
     delay: Duration,
     transport_recovery: bool,
@@ -501,6 +503,8 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     pending_retry: Option<PendingAttemptRetry>,
     /// 请求内按账号累计的瞬时拒绝重试次数，不能跨请求污染账号健康状态
     transient_retry_counts: BTreeMap<crate::account::ProviderAccountId, u32>,
+    /// 分阶段业务恢复共享请求总预算，切换账号或错误码不重新获得同账号重试阶段
+    bounded_transient_retries: u32,
     /// 只在首次进入对应 Provider 时解析，避免后台发布更新改变同一请求的重试身份
     request_profiles: BTreeMap<crate::identity::ProviderKind, crate::account::OpaqueProviderData>,
     current: Option<CurrentAttempt>,
@@ -1024,7 +1028,7 @@ where
         // 请求局部恢复钉选在此被一次性消费，只绑定本次 replay attempt；
         // 外部 required_account 每次 attempt 都重新生效
         let (pinned_account, attempt_transport) = if let Some(recovery) = pending_retry {
-            (Some(recovery.account), recovery.transport)
+            (recovery.account, recovery.transport)
         } else {
             match &self.account_selection {
                 AccountSelection::Diagnostic(account) => {
@@ -1612,25 +1616,48 @@ where
             && attempt_send_state != UpstreamSendState::Ambiguous
             && provider_proved_replay_safe
             && self.routing_attempts < self.plan.max_attempts().get();
-        let suppress_transient_retry = is_return_error_retry(&error)
+        let suppress_transient_retry = tracks_client_retry_failure(&error)
             && self
                 .client_retry
                 .as_ref()
                 .is_some_and(ClientRetryGuard::has_failure);
-        let transient_retry = match error.pre_delivery_retry() {
+        let bounded_transient_retry = matches!(
+            error.pre_delivery_retry(),
+            Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
+                policy: crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget { .. },
+                ..
+            })
+        );
+        let (transient_retry, rotation_delay) = match error.pre_delivery_retry() {
             Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
                 max_retries,
                 initial_delay,
                 max_delay,
                 jitter,
-                ..
+                policy,
             }) if ordinary_retry && !suppress_transient_retry => {
-                let retries = self
-                    .transient_retry_counts
-                    .entry(current.metadata.provider_account_id().clone())
-                    .or_default();
-                if *retries < max_retries.get() {
-                    let multiplier = 1_u32.checked_shl(*retries).unwrap_or(u32::MAX);
+                let (retries, retry_allowed) = match policy {
+                    crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                        max_total_retries,
+                    } => (
+                        self.bounded_transient_retries,
+                        self.bounded_transient_retries < max_total_retries.get(),
+                    ),
+                    _ => {
+                        let retries = self
+                            .transient_retry_counts
+                            .entry(current.metadata.provider_account_id().clone())
+                            .or_default();
+                        let count = *retries;
+                        let allowed = count < max_retries.get();
+                        if allowed {
+                            *retries = retries.saturating_add(1);
+                        }
+                        (count, allowed)
+                    }
+                };
+                if retry_allowed {
+                    let multiplier = 1_u32.checked_shl(retries).unwrap_or(u32::MAX);
                     // 服务器建议优先于本地退避，不截断、不放大，也不叠加随机等待
                     let delay = error.retry_after().unwrap_or_else(|| {
                         initial_delay
@@ -1638,13 +1665,16 @@ where
                             .min(max_delay)
                             .saturating_add(jitter)
                     });
-                    *retries = retries.saturating_add(1);
-                    Some(delay)
+                    if retries < max_retries.get() {
+                        (Some(delay), None)
+                    } else {
+                        (None, Some(delay))
+                    }
                 } else {
-                    None
+                    (None, None)
                 }
             }
-            _ => None,
+            _ => (None, None),
         };
         let same_account_retry = !execution_effect_observed
             && error.retries_same_account()
@@ -1665,6 +1695,7 @@ where
             && !same_account_retry
             && transient_retry.is_none()
             && !is_return_error_retry(&error)
+            && (!bounded_transient_retry || rotation_delay.is_some())
             && transport_recovery.is_none()
             && (ordinary_retry || account_rotation_retry)
             && self.account_rotations
@@ -1716,12 +1747,16 @@ where
             "connectionRetries": self.connection_retries,
             "connectionBudgetRemainingMs": self.connection_budget.remaining().map(duration_ms),
             "executionEffectObserved": execution_effect_observed,
-            "delayMs": transient_retry.or(transport_recovery.map(|(_, delay)| delay)).map(duration_ms),
+            "delayMs": transient_retry.or(rotation_delay).or(transport_recovery.map(|(_, delay)| delay)).map(duration_ms),
+            "boundedTransientRetries": self.bounded_transient_retries,
             "downstreamCommitted": self.response_commit.committed_at().is_some(),
             "replayBarrierReached": self.replay_barrier_reached,
             "sendState": format!("{attempt_send_state:?}"),
         }));
         if retryable {
+            if bounded_transient_retry && (transient_retry.is_some() || rotation_retry) {
+                self.bounded_transient_retries = self.bounded_transient_retries.saturating_add(1);
+            }
             for event in &atomic_client_events {
                 for fact in event.canonical_facts() {
                     self.observation.observe_event(fact);
@@ -1739,14 +1774,14 @@ where
                 self.recovery_account = Some(account);
             } else if let Some(delay) = transient_retry {
                 self.pending_retry = Some(PendingAttemptRetry {
-                    account: current.metadata.provider_account_id().clone(),
+                    account: Some(current.metadata.provider_account_id().clone()),
                     transport: current.transport,
                     delay,
                     transport_recovery: false,
                 });
             } else if let Some((transport, delay)) = transport_recovery {
                 self.pending_retry = Some(PendingAttemptRetry {
-                    account: current.metadata.provider_account_id().clone(),
+                    account: Some(current.metadata.provider_account_id().clone()),
                     transport,
                     delay,
                     transport_recovery: true,
@@ -1754,6 +1789,14 @@ where
             } else if !continuation_retry {
                 self.excluded_accounts
                     .insert(current.metadata.provider_account_id().clone());
+                if let Some(delay) = rotation_delay {
+                    self.pending_retry = Some(PendingAttemptRetry {
+                        account: None,
+                        transport: AttemptTransport::Default,
+                        delay,
+                        transport_recovery: false,
+                    });
+                }
             }
             self.last_retryable_failure_events = atomic_client_events;
             self.last_retryable_failure = Some(error);
@@ -2099,7 +2142,7 @@ where
     async fn record_client_retry_failure(&mut self, error: &ProviderError) {
         // 只记录本策略的终态失败，不让其他错误改变客户端轮次的退避预算
         if self.attempts > 0
-            && is_return_error_retry(error)
+            && tracks_client_retry_failure(error)
             && let Some(guard) = &mut self.client_retry
         {
             guard.failure().await;
@@ -2405,6 +2448,17 @@ fn is_return_error_retry(error: &ProviderError) -> bool {
         error.pre_delivery_retry(),
         Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
             policy: crate::error::TransientRetryPolicy::RetryThenReturnError,
+            ..
+        })
+    )
+}
+
+fn tracks_client_retry_failure(error: &ProviderError) -> bool {
+    matches!(
+        error.pre_delivery_retry(),
+        Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
+            policy: crate::error::TransientRetryPolicy::RetryThenReturnError
+                | crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget { .. },
             ..
         })
     )

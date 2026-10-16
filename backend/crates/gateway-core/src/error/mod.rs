@@ -120,7 +120,7 @@ pub enum ContinuationRecoveryDisposition {
     ProviderReplayAllowed,
 }
 
-/// 同账号瞬态错误的恢复策略，明确重试耗尽后的去向
+/// 瞬态错误的恢复策略，明确预算范围与同账号重试耗尽后的去向
 ///
 /// Provider 按上游错误场景选择，Core 共用同一套退避与安全重放检查
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -129,6 +129,11 @@ pub enum TransientRetryPolicy {
     RetryThenRotateAccount,
     /// 同账号退避重试，耗尽后返回最后一次上游错误，不因该错误换号
     RetryThenReturnError,
+    /// 先在原账号退避，再逐次换号；两个阶段共享请求内的额外重试总预算
+    RetryThenRotateAccountWithBudget {
+        /// 换号不重置此预算，耗尽后返回最后一次上游错误
+        max_total_retries: NonZeroU32,
+    },
 }
 
 /// Provider 在下游尚未提交事件时请求的隐藏恢复方式
@@ -138,7 +143,7 @@ pub enum PreDeliveryRetry {
     AccountRotation,
     /// 上游明确拒绝后的同账号退避；耗尽动作由 Provider 显式选择
     SameAccountTransientRetry {
-        /// 每个账号在本请求中的重试上限，同时受总路由预算约束
+        /// 同账号阶段的额外重试上限，预算作用域由 policy 决定，同时受总路由预算约束
         max_retries: NonZeroU32,
         /// 指数退避的起始间隔
         initial_delay: Duration,
