@@ -401,7 +401,16 @@ fn client_retry_store_failure_or_timeout_should_preserve_original_retries_and_er
 
 #[test]
 fn client_retry_should_preserve_other_retry_policies_and_not_mark_their_failures() {
-    for seeded in [false, true] {
+    for (seeded, policy) in [false, true].into_iter().flat_map(|seeded| {
+        [
+            TransientRetryPolicy::RetryThenRotateAccount,
+            TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                max_total_retries: NonZeroU32::new(5).unwrap(),
+                track_client_retry_failure: false,
+            },
+        ]
+        .map(|policy| (seeded, policy))
+    }) {
         let markers = Arc::new(RetryMarkers::default());
         if seeded {
             markers.entries.lock().unwrap().insert(
@@ -418,7 +427,7 @@ fn client_retry_should_preserve_other_retry_policies_and_not_mark_their_failures
                     Duration::ZERO,
                     Duration::ZERO,
                     Duration::ZERO,
-                    TransientRetryPolicy::RetryThenRotateAccount,
+                    policy,
                 )
         };
         let scripts = vec![
@@ -4079,6 +4088,7 @@ fn transient_rejection() -> ProviderError {
 fn bounded_rotation_policy() -> TransientRetryPolicy {
     TransientRetryPolicy::RetryThenRotateAccountWithBudget {
         max_total_retries: NonZeroU32::new(5).unwrap(),
+        track_client_retry_failure: true,
     }
 }
 
@@ -4099,6 +4109,143 @@ fn bounded_rejection(attempt: usize) -> ProviderError {
             Duration::from_millis(1),
             bounded_rotation_policy(),
         )
+}
+
+#[test]
+fn bounded_server_error_retries_until_success() {
+    let operation = generate_operation();
+    let route_plan = plan(&operation);
+    let (coordinator, store, provider) = coordinator(vec![
+        Script::Stream {
+            account_id: "acct_first",
+            items: vec![Err(bounded_rejection(1).with_status(500))],
+        },
+        Script::Stream {
+            account_id: "acct_first",
+            items: complete_stream(None),
+        },
+    ]);
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    block_on(session.collect_uncommitted()).unwrap();
+    block_on(session.commit_downstream(Some(200))).unwrap();
+    assert_eq!(provider.contexts.lock().unwrap().len(), 2);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        store.state.lock().unwrap().finalizations[0].outcome,
+        ExecutionOutcome::Succeeded
+    );
+    drop(session);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback() {
+    let operation = generate_operation();
+    let route_plan = plan(&operation);
+    let mut scripts = Vec::new();
+    scripts.extend(
+        [
+            "acct_first",
+            "acct_first",
+            "acct_first",
+            "acct_first",
+            "acct_second",
+            "acct_other",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, account_id)| {
+            let capacity = index % 3 == 0;
+            let error = ProviderError::new(
+                if capacity {
+                    ProviderErrorKind::UpstreamCapacityUnavailable
+                } else {
+                    ProviderErrorKind::Unavailable
+                },
+                UpstreamSendState::Sent,
+            )
+            .with_status(if index % 3 == 1 { 500 } else { 503 })
+            .with_replay_safe()
+            .with_transient_retry(
+                NonZeroU32::new(3).unwrap(),
+                Duration::ZERO,
+                Duration::ZERO,
+                Duration::ZERO,
+                TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                    max_total_retries: NonZeroU32::new(5).unwrap(),
+                    track_client_retry_failure: !capacity,
+                },
+            );
+            Script::Stream {
+                account_id,
+                items: vec![Err(error)],
+            }
+        }),
+    );
+    // 在容量重试已消耗一次预算后切换传输，验证回退不能重置业务恢复次数
+    scripts.insert(
+        1,
+        Script::Stream {
+            account_id: "acct_first",
+            items: vec![Err(ProviderError::new(
+                ProviderErrorKind::Transport,
+                UpstreamSendState::NotSent,
+            )
+            .with_pre_delivery_transport_fallback())],
+        },
+    );
+    let (coordinator, _, provider) = coordinator(scripts);
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    assert!(matches!(
+        block_on(session.collect_uncommitted()),
+        Err(EngineError::Provider(_))
+    ));
+    let contexts = provider.contexts.lock().unwrap();
+    // 传输恢复仍独立消耗一次 attempt，六次业务尝试不能因类别或传输变化扩大
+    assert_eq!(contexts.len(), 7);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 6);
+    for context in &contexts[2..5] {
+        assert_eq!(context.required_account().unwrap().as_str(), "acct_first");
+        assert_eq!(context.transport(), AttemptTransport::Fallback);
+    }
+    assert!(contexts[5].required_account().is_none());
+    assert!(contexts[6].required_account().is_none());
+    let trace = session.trace().snapshot().unwrap();
+    let decisions: Vec<_> = trace["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| {
+            event["stage"] == "retry.decided"
+                && !event["data"]["boundedTransientRetriesRemaining"].is_null()
+        })
+        .map(|event| &event["data"])
+        .collect();
+    assert_eq!(decisions.len(), 6);
+    for (index, decision) in decisions.iter().enumerate() {
+        assert_eq!(decision["boundedTransientRetries"], index);
+        assert_eq!(decision["boundedTransientRetriesRemaining"], 5 - index);
+        assert_eq!(decision["retryable"], index < 5);
+        assert_eq!(decision["ordinaryRetryBlockers"], serde_json::json!([]));
+    }
+    drop(session);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 7);
 }
 
 #[test]
@@ -4350,6 +4497,30 @@ fn bounded_retry_requires_replay_proof_and_respects_delivery_and_required_accoun
             Err(EngineError::Provider(_))
         ));
         assert_eq!(provider.contexts.lock().unwrap().len(), 1);
+        let trace = session.trace().snapshot().unwrap();
+        let decision = &trace["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["stage"] == "retry.decided")
+            .unwrap()["data"];
+        let expected_blocker = if committed {
+            "replay_barrier_reached"
+        } else if required {
+            "required_account"
+        } else if send_state == UpstreamSendState::Ambiguous {
+            "ambiguous_send"
+        } else {
+            "provider_replay_unproven"
+        };
+        assert!(
+            decision["ordinaryRetryBlockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == expected_blocker)
+        );
+        assert_eq!(decision["providerReplaySafe"], proof);
     }
 }
 

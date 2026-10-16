@@ -8476,11 +8476,14 @@ async fn capacity_http_and_websocket_opening_rejections_use_bounded_business_ret
                     initial_delay,
                     max_delay,
                     jitter,
-                    policy: gateway_core::error::TransientRetryPolicy::RetryThenRotateAccount,
+                    policy: gateway_core::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                        max_total_retries, track_client_retry_failure: false,
+                    },
                 }) if max_retries.get() == 3
+                    && max_total_retries.get() == 5
                     && initial_delay == Duration::from_millis(500)
-                    && max_delay == Duration::from_secs(8)
-                    && jitter.is_zero())
+                    && max_delay == Duration::from_secs(2)
+                    && (Duration::from_millis(50)..Duration::from_millis(250)).contains(&jitter))
             );
             assert!(provider_openai::openai_failure_affects_account_score(
                 &error

@@ -133,6 +133,8 @@ pub enum TransientRetryPolicy {
     RetryThenRotateAccountWithBudget {
         /// 换号不重置此预算，耗尽后返回最后一次上游错误
         max_total_retries: NonZeroU32,
+        /// 是否记录失败轮次，并抑制同轮次后续请求的此类恢复
+        track_client_retry_failure: bool,
     },
 }
 

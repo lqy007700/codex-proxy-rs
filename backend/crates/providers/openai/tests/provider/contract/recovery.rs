@@ -5,18 +5,26 @@ use super::*;
 use gateway_core::error::TransientRetryPolicy;
 
 #[tokio::test]
-async fn service_unavailable_stream_recovery_requires_no_semantic_output() {
+async fn service_failure_recovery_requires_open_replay_boundary() {
     for websocket in [false, true] {
         for (status, code) in [
+            (Some(500), Some("server_error")),
+            (Some(500), Some("Vendor.Future.v2")),
+            (Some(500), None),
             (Some(503), Some("server_error")),
             (Some(503), Some("Vendor.Future.v2")),
             (Some(503), None),
             (None, Some("server_error")),
         ] {
-            for (response_failed, semantic_output) in [false, true]
-                .into_iter()
-                .flat_map(|failed| [false, true].map(|output| (failed, output)))
-            {
+            for (response_failed, boundary_event) in [false, true].into_iter().flat_map(|failed| {
+                [
+                    None,
+                    Some(json!({"type":"response.output_text.delta","response_id":"resp_503","item_id":"msg_503","output_index":0,"content_index":0,"delta":"hello"})),
+                    Some(json!({"type":"response.function_call_arguments.delta","item_id":"call_1","output_index":0,"delta":"{}"})),
+                    Some(json!({"type":"vendor.future.event","data":{"unknown":true}})),
+                ].map(|event| (failed, event))
+            }) {
+                let replay_closed = boundary_event.is_some();
                 let store = Arc::new(MemoryAccountStore::default());
                 create_account(&store, "acct_provider_contract").await;
                 let mut error =
@@ -37,10 +45,12 @@ async fn service_unavailable_stream_recovery_requires_no_semantic_output() {
                     json!({"type":"response.created","response":{"id":"resp_503","status":"in_progress","output":[]}}),
                     json!({"type":"response.in_progress","response":{"id":"resp_503","status":"in_progress","output":[]}}),
                 ];
-                if semantic_output {
-                    upstream_events.push(json!({"type":"response.output_text.delta","response_id":"resp_503","item_id":"msg_503","output_index":0,"content_index":0,"delta":"hello"}));
+                if let Some(event) = boundary_event {
+                    upstream_events.push(event);
                 }
-                upstream_events.push(failure.clone());
+                let last_prelude_type = upstream_events.last().unwrap()["type"].as_str().unwrap().to_owned();
+                let terminal = failure.clone();
+                let (release, released) = oneshot::channel();
                 let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
                 let base = format!("http://{}", listener.local_addr().unwrap());
                 let server = tokio::spawn(async move {
@@ -54,6 +64,8 @@ async fn service_unavailable_stream_recovery_requires_no_semantic_output() {
                                 .await
                                 .unwrap();
                         }
+                        released.await.unwrap();
+                        socket.send(Message::Text(terminal.to_string().into())).await.unwrap();
                     } else {
                         read_http_request(&mut socket).await;
                         let body = upstream_events
@@ -65,7 +77,12 @@ async fn service_unavailable_stream_recovery_requires_no_semantic_output() {
                                 )
                             })
                             .collect::<String>();
-                        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                        let terminal = gateway_protocol::openai::sse::encode_sse_event(
+                            terminal["type"].as_str().unwrap(), &terminal.to_string(),
+                        );
+                        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{body}", body.len() + terminal.len()).as_bytes()).await.unwrap();
+                        released.await.unwrap();
+                        socket.write_all(terminal.as_bytes()).await.unwrap();
                     }
                 });
                 let operation = if websocket {
@@ -80,12 +97,22 @@ async fn service_unavailable_stream_recovery_requires_no_semantic_output() {
                     )
                     .await
                     .unwrap();
-                let (mut events, mut error) = stream_failure(&mut stream).await;
+                let mut events = Vec::new();
+                // 明确验证已交付事件的屏障，不让 HTTP chunk 合并把事件留在原子失败批次
+                loop {
+                    let event = timeout(Duration::from_secs(3), stream.next()).await.unwrap().unwrap().unwrap();
+                    let last_prelude = event.wire_event().is_some_and(|wire| wire.event_type() == Some(last_prelude_type.as_str()));
+                    events.push(event);
+                    if last_prelude { break; }
+                }
+                release.send(()).unwrap();
+                let (terminal_events, mut error) = stream_failure(&mut stream).await;
+                events.extend(terminal_events);
                 assert_eq!(error.kind(), ProviderErrorKind::Unavailable);
                 assert_eq!(error.upstream_status(), status);
                 assert_eq!(error.send_state(), UpstreamSendState::Sent);
-                assert_eq!(error.replay_is_safe(), !semantic_output);
-                if semantic_output {
+                assert_eq!(error.replay_is_safe(), !replay_closed);
+                if replay_closed {
                     assert!(error.pre_delivery_retry().is_none());
                     assert!(events.iter().any(
                         |event| event.has_client_event() && !event.is_replayable_prelude()
@@ -98,7 +125,10 @@ async fn service_unavailable_stream_recovery_requires_no_semantic_output() {
                         max_delay,
                         jitter,
                         policy:
-                            TransientRetryPolicy::RetryThenRotateAccountWithBudget { max_total_retries },
+                            TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                                max_total_retries,
+                                track_client_retry_failure: true,
+                            },
                     }) = error.pre_delivery_retry()
                     else {
                         panic!("expected shared bounded service failure recovery")
@@ -136,8 +166,11 @@ async fn service_unavailable_stream_recovery_requires_no_semantic_output() {
 }
 
 #[tokio::test]
-async fn service_unavailable_503_opening_rejections_request_bounded_retry_and_keep_response() {
-    for websocket in [false, true] {
+async fn service_failure_opening_rejections_request_bounded_retry_and_keep_response() {
+    for (websocket, status) in [false, true]
+        .into_iter()
+        .flat_map(|ws| [500, 503].map(|status| (ws, status)))
+    {
         for body in [
             r#"{ "error":{"code":"server_error","type":"server_error","message":"retry later"} }"#,
             r#"{"error":{"code":"Vendor.Future.v2","message":"retry later"}}"#,
@@ -151,7 +184,7 @@ async fn service_unavailable_503_opening_rejections_request_bounded_retry_and_ke
             Mock::given(method(if websocket { "GET" } else { "POST" }))
                 .and(path("/codex/responses"))
                 .respond_with(
-                    ResponseTemplate::new(503)
+                    ResponseTemplate::new(status)
                         .insert_header("retry-after", "17")
                         .set_body_string(body),
                 )
@@ -176,14 +209,14 @@ async fn service_unavailable_503_opening_rejections_request_bounded_retry_and_ke
             assert!(matches!(
                 error.pre_delivery_retry(),
                 Some(PreDeliveryRetry::SameAccountTransientRetry {
-                    policy: TransientRetryPolicy::RetryThenRotateAccountWithBudget { max_total_retries },
+                    policy: TransientRetryPolicy::RetryThenRotateAccountWithBudget { max_total_retries, track_client_retry_failure: true },
                     max_retries,
                     ..
                 }) if max_retries.get() == 3 && max_total_retries.get() == 5
             ));
             assert_eq!(error.retry_after(), Some(Duration::from_secs(17)));
             let response = error.client_visible_upstream_response().unwrap();
-            assert_eq!(response.status(), 503);
+            assert_eq!(response.status(), status);
             assert_eq!(response.body().as_ref(), body.as_bytes());
             server.verify().await;
         }
@@ -193,7 +226,7 @@ async fn service_unavailable_503_opening_rejections_request_bounded_retry_and_ke
 #[tokio::test]
 async fn ordinary_http_and_websocket_opening_errors_remain_client_decisions() {
     for websocket in [false, true] {
-        for status in [409, 500, 502, 504] {
+        for status in [409, 502, 504] {
             let store = Arc::new(MemoryAccountStore::default());
             create_account(&store, "acct_provider_contract").await;
             let server = MockServer::start().await;
@@ -250,7 +283,8 @@ async fn ordinary_stream_failures_preserve_original_events_without_proxy_retry()
         for (status, code) in [
             (None, Some("Vendor.Future.v2")),
             (None, None),
-            (Some(500), Some("server_error")),
+            (Some(500), Some("invalid_prompt")),
+            (Some(503), Some("invalid_prompt")),
             (Some(502), Some("server_error")),
             (Some(504), Some("server_error")),
         ] {

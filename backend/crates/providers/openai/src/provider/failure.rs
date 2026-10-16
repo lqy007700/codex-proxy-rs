@@ -1330,14 +1330,14 @@ fn transient_retry_policy(
     failure: &CodexUpstreamFailure,
 ) -> Option<TransientRetryPolicy> {
     match category {
-        // 明确容量拒绝沿用既有恢复范围，同账号重试耗尽后仍可尝试其他账号
-        CodexFailureCategory::CapacityUnavailable => {
-            Some(TransientRetryPolicy::RetryThenRotateAccount)
-        }
-        // 可恢复服务故障共用有界恢复预算，换号不代表账号凭据或额度异常
-        _ if failure.is_retryable_service_unavailable() => {
+        // 容量与可恢复服务故障共享请求预算，错误类别变化不能重新获得恢复次数
+        _ if category == CodexFailureCategory::CapacityUnavailable
+            || failure.is_retryable_service_unavailable() =>
+        {
             Some(TransientRetryPolicy::RetryThenRotateAccountWithBudget {
                 max_total_retries: NonZeroU32::new(5).unwrap_or(NonZeroU32::MIN),
+                // 容量拒绝保留不受历史轮次失败抑制的恢复行为
+                track_client_retry_failure: category != CodexFailureCategory::CapacityUnavailable,
             })
         }
         _ => None,

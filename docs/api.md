@@ -2015,8 +2015,19 @@ WebSocket 握手默认请求专项计时，客户端显式提供的开关保留�
 由 Core 错误类型与 Provider 静态诊断生成；`diagnostic.message` 保存安全摘要。展示与导出共用这些字段，
 `sendState` 为 `not_sent / sent / ambiguous`，摘要被截断时带有 `truncated` 标记
 
-管理端下载的诊断包 `schemaVersion: 4` 用于人工反馈，不是备份或导入格式。它包含关联 ID、错误分类摘要、
+管理端下载的诊断包 `schemaVersion: 5` 用于人工反馈，不是备份或导入格式。它包含关联 ID、错误分类摘要、
 请求与错误事件各自的状态、attempt、时间线阶段、计时和上述失败分类。
+`retry.decided` 的 `retryDecision` 保留重试资格、同账号与换号判定、轮次失败抑制、重放屏障、外部副作用、
+发送状态、重试次数、剩余建连/路由/换号/瞬态预算和退避毫秒数。
+`ordinaryRetryBlockers` 为普通安全重放路径未满足的静态门禁列表，不代表续接、凭据或传输恢复也被禁止；
+`providerReplaySafe / retryProhibited / middlewareRetrySuppressed` 分别记录 Provider 重放证明、明确禁止恢复和中间件否决。
+剩余瞬态预算在本次决策消耗前记录，未使用有界策略时为 `null`；`client_retry.loaded` 的 `clientRetry.previousFailure`
+表示入场时是否读取到轮次失败标记。布尔值只接受布尔类型，计数与毫秒数只接受非负安全整数，
+重试判定的 `sendState` 保留 Core 的 `NotSent / Sent / Ambiguous`；缺失或未通过校验的字段为 `null`。
+门禁列表仅接受已知静态原因，未知项使该列表为 `null`，空列表表示普通路径的前置门禁均已满足。
+其他阶段的 `retryDecision / clientRetry` 为 `null`。判定允许重试不代表已经执行，需结合后续
+`attempt.started`、`attemptCount` 和账号确认实际重试与换号
+
 诊断包兼容已有 `provider.precommit.released` 记录，其 `precommitRelease` 保留 `reason / prefetchedBytes / waitMs`，
 分别表示 Provider 释放暂存的原因、累计预取字节数和等待毫秒数，不等同于下游已提交。
 导出接受记录中的 `semantic_output / terminal / eof / grace_timeout / byte_limit`。

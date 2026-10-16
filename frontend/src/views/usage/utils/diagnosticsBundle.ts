@@ -2,6 +2,23 @@ import type { OpsError, UsageRecordDetail } from '@/api'
 import { failureClassText } from './opsErrorPresentation'
 
 const precommitReleaseReasons = new Set(['semantic_output', 'terminal', 'byte_limit', 'grace_timeout', 'eof'])
+const retrySendStates = new Set(['NotSent', 'Sent', 'Ambiguous'])
+const ordinaryRetryBlockers = new Set([
+  'connection_budget_exhausted',
+  'connection_retry_requested',
+  'execution_effect_observed',
+  'required_account',
+  'continuation_active',
+  'replay_barrier_reached',
+  'delivery_pending',
+  'ambiguous_send',
+  'provider_replay_unproven',
+  'routing_budget_exhausted',
+])
+
+function booleanValue(value: unknown) {
+  return typeof value === 'boolean' ? value : null
+}
 
 function nonNegativeInteger(value: unknown) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
@@ -28,7 +45,7 @@ export function requestDiagnosticsBundle(
   const request = record ?? error
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     source: 'usage.request_diagnostics',
     exportPolicy: 'allowlisted_fields_without_payloads',
     request: {
@@ -67,7 +84,7 @@ export function requestDiagnosticsBundle(
           createdAt: error.createdAt,
         }
       : null,
-    // 只导出失败分类与缓存释放事实的白名单，正文与任意事件 data 不进入诊断包
+    // 只导出失败分类、重试判定与缓存释放事实的白名单，不复制任意事件 data
     trace: trace
       ? {
           schemaVersion: trace.schemaVersion,
@@ -91,6 +108,44 @@ export function requestDiagnosticsBundle(
                   code: event.data.diagnostic?.code ?? null,
                   upstreamStatus: event.data.upstreamStatus,
                 }
+              : null,
+            retryDecision: event.stage === 'retry.decided'
+              ? {
+                  retryable: booleanValue(event.data.retryable),
+                  continuationRetry: booleanValue(event.data.continuationRetry),
+                  sameAccountRetry: booleanValue(event.data.sameAccountRetry),
+                  accountRotationRetry: booleanValue(event.data.accountRotationRetry),
+                  ordinaryRetry: booleanValue(event.data.ordinaryRetry),
+                  ordinaryRetryBlockers: Array.isArray(event.data.ordinaryRetryBlockers)
+                    && event.data.ordinaryRetryBlockers.every(value => typeof value === 'string' && ordinaryRetryBlockers.has(value))
+                    ? event.data.ordinaryRetryBlockers
+                    : null,
+                  providerReplaySafe: booleanValue(event.data.providerReplaySafe),
+                  retryProhibited: booleanValue(event.data.retryProhibited),
+                  middlewareRetrySuppressed: booleanValue(event.data.middlewareRetrySuppressed),
+                  transportRecovery: booleanValue(event.data.transportRecovery),
+                  transientRetry: booleanValue(event.data.transientRetry),
+                  clientRetrySuppressed: booleanValue(event.data.clientRetrySuppressed),
+                  rotationRetry: booleanValue(event.data.rotationRetry),
+                  accountRotations: nonNegativeInteger(event.data.accountRotations),
+                  connectionRetry: booleanValue(event.data.connectionRetry),
+                  connectionRetries: nonNegativeInteger(event.data.connectionRetries),
+                  connectionBudgetRemainingMs: nonNegativeInteger(event.data.connectionBudgetRemainingMs),
+                  executionEffectObserved: booleanValue(event.data.executionEffectObserved),
+                  delayMs: nonNegativeInteger(event.data.delayMs),
+                  boundedTransientRetries: nonNegativeInteger(event.data.boundedTransientRetries),
+                  boundedTransientRetriesRemaining: nonNegativeInteger(event.data.boundedTransientRetriesRemaining),
+                  routingAttemptsRemaining: nonNegativeInteger(event.data.routingAttemptsRemaining),
+                  accountRotationsRemaining: nonNegativeInteger(event.data.accountRotationsRemaining),
+                  downstreamCommitted: booleanValue(event.data.downstreamCommitted),
+                  replayBarrierReached: booleanValue(event.data.replayBarrierReached),
+                  sendState: typeof event.data.sendState === 'string' && retrySendStates.has(event.data.sendState)
+                    ? event.data.sendState
+                    : null,
+                }
+              : null,
+            clientRetry: event.stage === 'client_retry.loaded'
+              ? { previousFailure: booleanValue(event.data.previousFailure) }
               : null,
             precommitRelease: event.stage === 'provider.precommit.released'
               ? {
@@ -134,7 +189,7 @@ export function requestDiagnosticsBundle(
         ? 'unknown'
         : !trace
             ? 'not_recorded'
-            : trace.events.some(event => event.stage === 'attempt.failed' || event.stage === 'provider.precommit.released')
+            : trace.events.some(event => ['attempt.failed', 'retry.decided', 'client_retry.loaded', 'provider.precommit.released'].includes(event.stage))
               ? 'stages_and_allowlisted_facts'
               : 'stages_only',
       traceEventsDropped: trace?.droppedEvents ?? null,
@@ -151,16 +206,17 @@ export function requestDiagnosticsBundle(
       'request.errorDetails',
       'request.providerErrorCode',
       'request.metadata',
-      'trace.events.data_except_failure_classification_and_precommit_release',
+      'trace.events.data_except_allowlisted_diagnostic_facts',
       'request_and_response_headers_and_bodies',
       'user_supplied_model_names',
       'account_names_emails_and_credential_names',
       'client_ip_user_agent_and_api_key',
     ],
     notes: [
-      'schemaVersion 4 仅供人工排障，null 表示未知、未采集或未通过导出校验，不代表没有发生错误',
+      'schemaVersion 5 仅供人工排障，null 表示未知、未采集或未通过导出校验，不代表没有发生错误',
       '错误摘要只使用稳定分类，不含上游错误码或原文，error 为 null 时请结合 attempts 的分类与状态',
-      '时间线导出阶段、顺序、计时、Core 记录的失败分类和 Provider 缓存释放的原因、预取字节数及等待毫秒数，不含错误原文和其他事件 data',
+      '时间线导出阶段、顺序、计时、Core 记录的失败分类、重试判定、轮次失败状态及 Provider 缓存释放事实，不含错误原文和其他事件 data',
+      'retryDecision 记录重试资格、抑制、重放屏障、预算和退避判定，不代表已经发起重试；实际重试与换号需结合后续 attempt.started、attemptCount 和账号核对',
       'attemptsComplete 不为 true 时，尝试列表不完整，没有时间线的旧记录无法补回未采集事件',
       '未自动采集网关版本、客户端版本、部署环境和故障发生时区，请另行补充',
       '关联 ID 仍可能属于内部信息，分享前请审阅，原始错误、正文和日志需另行审阅脱敏，勿直接公开',

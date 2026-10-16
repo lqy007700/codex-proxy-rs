@@ -83,6 +83,7 @@ impl Provider for RetryBudgetProvider {
                     if self.bounded_rotation {
                         gateway_core::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget {
                             max_total_retries: std::num::NonZeroU32::new(5).unwrap(),
+        track_client_retry_failure: true,
                         }
                     } else {
                         gateway_core::error::TransientRetryPolicy::RetryThenReturnError

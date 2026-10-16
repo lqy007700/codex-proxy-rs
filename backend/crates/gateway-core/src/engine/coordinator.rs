@@ -1606,16 +1606,38 @@ where
             }
             _ => None,
         };
-        let ordinary_retry = !self.connection_budget.exhausted()
-            && !connection_retry_requested
-            && !execution_effect_observed
-            && self.account_selection.required_account().is_none()
-            && self.continuation_attempt == ContinuationAttempt::None
-            && !self.replay_barrier_reached
-            && !self.delivery_pending
-            && attempt_send_state != UpstreamSendState::Ambiguous
-            && provider_proved_replay_safe
-            && self.routing_attempts < self.plan.max_attempts().get();
+        // 决策和诊断共用门禁事实，避免导出原因与实际执行条件分叉
+        let ordinary_retry_blockers: Vec<_> = [
+            (
+                self.connection_budget.exhausted(),
+                "connection_budget_exhausted",
+            ),
+            (connection_retry_requested, "connection_retry_requested"),
+            (execution_effect_observed, "execution_effect_observed"),
+            (
+                self.account_selection.required_account().is_some(),
+                "required_account",
+            ),
+            (
+                self.continuation_attempt != ContinuationAttempt::None,
+                "continuation_active",
+            ),
+            (self.replay_barrier_reached, "replay_barrier_reached"),
+            (self.delivery_pending, "delivery_pending"),
+            (
+                attempt_send_state == UpstreamSendState::Ambiguous,
+                "ambiguous_send",
+            ),
+            (!provider_proved_replay_safe, "provider_replay_unproven"),
+            (
+                self.routing_attempts >= self.plan.max_attempts().get(),
+                "routing_budget_exhausted",
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(blocked, reason)| blocked.then_some(reason))
+        .collect();
+        let ordinary_retry = ordinary_retry_blockers.is_empty();
         let suppress_transient_retry = tracks_client_retry_failure(&error)
             && self
                 .client_retry
@@ -1639,6 +1661,7 @@ where
                 let (retries, retry_allowed) = match policy {
                     crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget {
                         max_total_retries,
+                        ..
                     } => (
                         self.bounded_transient_retries,
                         self.bounded_transient_retries < max_total_retries.get(),
@@ -1707,6 +1730,7 @@ where
                 || transport_recovery.is_some()
                 || rotation_retry);
 
+        let retry_allowed_before_policy = retryable;
         let retryable = match self
             .apply_retry_policy(super::policy::RetryFacts {
                 attempt_index: current.index,
@@ -1740,6 +1764,10 @@ where
             "retryable": retryable, "continuationRetry": continuation_retry,
             "sameAccountRetry": same_account_retry, "accountRotationRetry": account_rotation_retry,
             "ordinaryRetry": ordinary_retry, "transportRecovery": transport_recovery.is_some(),
+            "ordinaryRetryBlockers": ordinary_retry_blockers,
+            "providerReplaySafe": error.replay_is_safe(),
+            "retryProhibited": error.retry_is_prohibited(),
+            "middlewareRetrySuppressed": retry_allowed_before_policy && !retryable,
             "transientRetry": transient_retry.is_some(),
             "clientRetrySuppressed": suppress_transient_retry,
             "rotationRetry": rotation_retry, "accountRotations": self.account_rotations,
@@ -1749,6 +1777,14 @@ where
             "executionEffectObserved": execution_effect_observed,
             "delayMs": transient_retry.or(rotation_delay).or(transport_recovery.map(|(_, delay)| delay)).map(duration_ms),
             "boundedTransientRetries": self.bounded_transient_retries,
+            "boundedTransientRetriesRemaining": match error.pre_delivery_retry() {
+                Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
+                    policy: crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget { max_total_retries, .. }, ..
+                }) => Some(max_total_retries.get().saturating_sub(self.bounded_transient_retries)),
+                _ => None,
+            },
+            "routingAttemptsRemaining": self.plan.max_attempts().get().saturating_sub(self.routing_attempts),
+            "accountRotationsRemaining": self.plan.account_selection_policy().max_account_rotations().saturating_sub(self.account_rotations),
             "downstreamCommitted": self.response_commit.committed_at().is_some(),
             "replayBarrierReached": self.replay_barrier_reached,
             "sendState": format!("{attempt_send_state:?}"),
@@ -2458,7 +2494,10 @@ fn tracks_client_retry_failure(error: &ProviderError) -> bool {
         error.pre_delivery_retry(),
         Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
             policy: crate::error::TransientRetryPolicy::RetryThenReturnError
-                | crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget { .. },
+                | crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                    track_client_retry_failure: true,
+                    ..
+                },
             ..
         })
     )

@@ -97,8 +97,9 @@ fn provider(error: &ProviderError) -> PluginFault {
                     TransientRetryPolicy::RetryThenRotateAccountWithBudget { .. } => "retry_then_rotate_account_with_budget",
                 },
                 });
-                if let TransientRetryPolicy::RetryThenRotateAccountWithBudget { max_total_retries } = policy {
+                if let TransientRetryPolicy::RetryThenRotateAccountWithBudget { max_total_retries, track_client_retry_failure } = policy {
                     retry["max_total_retries"] = json!(max_total_retries.get());
+                    retry["track_client_retry_failure"] = json!(track_client_retry_failure);
                 }
                 retry
             },

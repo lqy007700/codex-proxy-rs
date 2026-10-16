@@ -70,7 +70,7 @@ fn turn_rate_limit_does_not_grant_proxy_replay_or_account_cooldown() {
 }
 
 #[test]
-fn service_unavailable_replay_requires_explicit_503_and_unambiguous_send() {
+fn service_failure_replay_requires_explicit_500_or_503_and_unambiguous_send() {
     for (status, body, retryable) in [
         (
             503,
@@ -80,11 +80,16 @@ fn service_unavailable_replay_requires_explicit_503_and_unambiguous_send() {
         (
             500,
             r#"{"error":{"code":"server_error","type":"server_error"}}"#,
-            false,
+            true,
         ),
         (
             504,
             r#"{"error":{"code":"server_error","type":"server_error"}}"#,
+            false,
+        ),
+        (
+            500,
+            r#"{"error":{"code":"flex_unavailable","type":"server_error"}}"#,
             false,
         ),
         (503, r#"{"error":{"type":"server_error"}}"#, true),
