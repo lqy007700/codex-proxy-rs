@@ -1334,7 +1334,7 @@ fn transient_retry_policy(
         CodexFailureCategory::CapacityUnavailable => {
             Some(TransientRetryPolicy::RetryThenRotateAccount)
         }
-        // 普通 503 共用有界恢复预算，换号不代表账号凭据或额度异常
+        // 可恢复服务故障共用有界恢复预算，换号不代表账号凭据或额度异常
         _ if failure.is_retryable_service_unavailable() => {
             Some(TransientRetryPolicy::RetryThenRotateAccountWithBudget {
                 max_total_retries: NonZeroU32::new(5).unwrap_or(NonZeroU32::MIN),

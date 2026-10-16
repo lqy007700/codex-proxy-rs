@@ -5,18 +5,32 @@ use super::*;
 use gateway_core::error::TransientRetryPolicy;
 
 #[tokio::test]
-async fn service_unavailable_503_stream_recovery_requires_no_semantic_output() {
+async fn service_unavailable_stream_recovery_requires_no_semantic_output() {
     for websocket in [false, true] {
-        for code in [Some("server_error"), Some("Vendor.Future.v2"), None] {
-            for semantic_output in [false, true] {
+        for (status, code) in [
+            (Some(503), Some("server_error")),
+            (Some(503), Some("Vendor.Future.v2")),
+            (Some(503), None),
+            (None, Some("server_error")),
+        ] {
+            for (response_failed, semantic_output) in [false, true]
+                .into_iter()
+                .flat_map(|failed| [false, true].map(|output| (failed, output)))
+            {
                 let store = Arc::new(MemoryAccountStore::default());
                 create_account(&store, "acct_provider_contract").await;
-                let mut failure = json!({"type":"error","status":503,"error":{"code":"server_error","type":"server_error","message":"You can retry your request."}});
-                match code {
-                    Some(code) => failure["error"]["code"] = json!(code),
-                    None => {
-                        failure["error"].as_object_mut().unwrap().remove("code");
-                    }
+                let mut error =
+                    json!({"type":"server_error","message":"You can retry your request."});
+                if let Some(code) = code {
+                    error["code"] = json!(code);
+                }
+                let mut failure = if response_failed {
+                    json!({"type":"response.failed","response":{"id":"resp_503","status":"failed","error":error}})
+                } else {
+                    json!({"type":"error","sequence_number":3,"error":error})
+                };
+                if let Some(status) = status {
+                    failure["status"] = json!(status);
                 }
                 let mut upstream_events = vec![
                     json!({"type":"codex.response.metadata","metadata":{}}),
@@ -62,36 +76,38 @@ async fn service_unavailable_503_stream_recovery_requires_no_semantic_output() {
                 let mut stream = provider_with_base_url(&store, base)
                     .execute(
                         planned_request("openai", operation),
-                        context("req_server_error_503", CancellationToken::new()),
+                        context("req_service_unavailable", CancellationToken::new()),
                     )
                     .await
                     .unwrap();
                 let (mut events, mut error) = stream_failure(&mut stream).await;
                 assert_eq!(error.kind(), ProviderErrorKind::Unavailable);
-                assert_eq!(error.upstream_status(), Some(503));
+                assert_eq!(error.upstream_status(), status);
                 assert_eq!(error.send_state(), UpstreamSendState::Sent);
                 assert_eq!(error.replay_is_safe(), !semantic_output);
                 if semantic_output {
                     assert!(error.pre_delivery_retry().is_none());
-                    assert!(
-                    events
-                        .iter()
-                        .any(|event| event.has_client_event() && !event.is_replayable_prelude())
-                );
+                    assert!(events.iter().any(
+                        |event| event.has_client_event() && !event.is_replayable_prelude()
+                    ));
                 } else {
                     assert!(!error.retry_is_prohibited());
-                    assert!(
-                        matches!(error.pre_delivery_retry(), Some(PreDeliveryRetry::SameAccountTransientRetry {
+                    let Some(PreDeliveryRetry::SameAccountTransientRetry {
                         max_retries,
                         initial_delay,
                         max_delay,
                         jitter,
-                        policy: TransientRetryPolicy::RetryThenRotateAccountWithBudget { max_total_retries },
-                    }) if max_retries.get() == 3 && max_total_retries.get() == 5
-                        && initial_delay == Duration::from_millis(500)
-                        && max_delay == Duration::from_secs(2)
-                        && jitter >= Duration::from_millis(50)
-                        && jitter < Duration::from_millis(250))
+                        policy:
+                            TransientRetryPolicy::RetryThenRotateAccountWithBudget { max_total_retries },
+                    }) = error.pre_delivery_retry()
+                    else {
+                        panic!("expected shared bounded service failure recovery")
+                    };
+                    assert_eq!((max_retries.get(), max_total_retries.get()), (3, 5));
+                    assert_eq!(initial_delay, Duration::from_millis(500));
+                    assert_eq!(max_delay, Duration::from_secs(2));
+                    assert!(
+                        (Duration::from_millis(50)..Duration::from_millis(250)).contains(&jitter)
                     );
                     assert!(
                         events
@@ -231,11 +247,23 @@ async fn ordinary_http_and_websocket_opening_errors_remain_client_decisions() {
 #[tokio::test]
 async fn ordinary_stream_failures_preserve_original_events_without_proxy_retry() {
     for websocket in [false, true] {
-        for code in ["server_error", "Vendor.Future.v2"] {
+        for (status, code) in [
+            (None, Some("Vendor.Future.v2")),
+            (None, None),
+            (Some(500), Some("server_error")),
+            (Some(502), Some("server_error")),
+            (Some(504), Some("server_error")),
+        ] {
             let store = Arc::new(MemoryAccountStore::default());
             create_account(&store, "acct_provider_contract").await;
             let created = json!({"type":"response.created","response":{"id":"resp_failure","status":"in_progress","output":[]}});
-            let failed = json!({"type":"response.failed","response":{"id":"resp_failure","status":"failed","output":[],"error":{"code":code,"type":"server_error","message":"original failure","headers":{"Retry-After":"17"},"future":{"keep":true}}}});
+            let mut failed = json!({"type":"response.failed","response":{"id":"resp_failure","status":"failed","output":[],"error":{"type":"server_error","message":"original failure","headers":{"Retry-After":"17"},"future":{"keep":true}}}});
+            if let Some(code) = code {
+                failed["response"]["error"]["code"] = json!(code);
+            }
+            if let Some(status) = status {
+                failed["status_code"] = json!(status);
+            }
             let expected = vec![created.clone(), failed.clone()];
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = format!("http://{}", listener.local_addr().unwrap());
@@ -284,6 +312,7 @@ async fn ordinary_stream_failures_preserve_original_events_without_proxy_retry()
                     .all(|event| event.is_replayable_prelude())
             );
             assert!(error.retry_is_prohibited());
+            assert_eq!(error.upstream_status(), status);
             assert!(error.pre_delivery_retry().is_none());
             assert_eq!(error.retry_after(), Some(Duration::from_secs(17)));
             events.extend(error.take_atomic_client_events());

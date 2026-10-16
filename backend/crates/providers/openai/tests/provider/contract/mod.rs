@@ -8957,7 +8957,8 @@ async fn capacity_feedback_in_stream_only_counts_explicit_overload() {
                 expected_kind,
                 "unexpected error for {code}, websocket={use_websocket}, semantic_output={semantic_output}: {error:?}"
             );
-            assert_eq!(error.replay_is_safe(), capacity && !semantic_output);
+            let recoverable = capacity || code == "server_error";
+            assert_eq!(error.replay_is_safe(), recoverable && !semantic_output);
             assert_eq!(error.upstream_status(), None);
             if code == "turn_rate_limit_exceeded" {
                 assert!(error.retry_is_prohibited());
@@ -8965,7 +8966,7 @@ async fn capacity_feedback_in_stream_only_counts_explicit_overload() {
             }
             assert_eq!(
                 error.pre_delivery_retry().is_some(),
-                capacity && !semantic_output
+                recoverable && !semantic_output
             );
             assert_eq!(
                 provider_openai::openai_failure_affects_account_score(&error),
