@@ -11,6 +11,46 @@
 | 同时修改 UI 或插件 | [源码联调](#源码联调) → [启动与检查](#启动与检查) |
 | 验证本地 SDK | [本地 SDK 验证](#本地-sdk-验证) |
 | 提交跨仓库改动 | [编辑与提交](#编辑与提交) |
+| 维护个人版本与同步上游 | [main 分支维护](#main-分支维护) |
+
+## main 分支维护
+
+个人开发、上游同步和发行均使用 `main`，不要求额外维护长期开发分支。
+`origin` 指向 `git@github.com:lqy007700/codex-proxy-rs.git`，
+`upstream` 指向 `https://github.com/zyycn/codex-proxy-rs.git`；`main` 跟踪 `origin/main`，默认推送到 `origin`
+
+新克隆的工作区配置上游与默认推送目标：
+
+```bash
+git remote add upstream https://github.com/zyycn/codex-proxy-rs.git
+git config remote.pushDefault origin
+```
+
+日常改动在 `main` 完成自审与验证后提交。同步上游前先提交或妥善保存已有工作，确认工作区干净，
+再执行 `git fetch upstream` 并选择已发布的稳定 tag 合并到 `main`。
+合并时保留本仓库的安装源、更新源、镜像地址和版本规则，按变更范围重新验证后推送到 `origin`。
+同步源码不会自动发布或更新已部署实例，不使用强制覆盖将二开分支还原成上游
+
+### 版本与发布
+
+版本入口沿用 `release/version.yaml`，发行说明位于 `release/notes.md`。
+每次发布递增 `X.Y.Z` 数字版本，可附加 `+lqy007700` 区分发行身份，例如
+`3.27.2+lqy007700` → `3.27.3+lqy007700`；构建元数据不参与更新比较，不能只修改 `+...`。
+上游基线 tag 与提交 SHA 在对应 Release 说明中记录，不要求二开版本号等于上游版本号。
+合并上游时不能让本仓库发行版本倒退；未修改升级兼容合同前保持同一大版本
+
+沿用 Stable、Alpha、Beta、RC、Exp 通道，不增加自定义预发行后缀。
+发布前完成检查并准备本次说明，明确发布时再执行 `release/publish <version>`：
+该入口会更新版本文件、提交、打 tag、推送到当前分支的跟踪仓库，并触发 Release 工作流，不能作为只读检查使用。
+已发布 tag 不移动或覆盖，后续修复使用新版本
+
+首次发布前在 fork 的 Actions 页面启用工作流，并确认可以向本仓库写入 Release 与 GHCR 包。
+Release 工作流提供匹配版本的二进制、前端、插件合同清单、部署文件和校验和；
+自动安装与更新需要可公开下载的 Release 附件，无需登录拉取时还应将 GHCR 镜像包设为公开。
+只推送源码或 tag 不代表发行产物已经可用，须确认工作流完成和资源齐全
+
+日常部署使用 [管理端在线更新](../deploy/README.md#管理端在线更新)，
+从上游已有实例切换时按 [部署来源切换](../deploy/README.md#从上游部署切换到本仓库) 完成一次性配置
 
 ## 环境与依赖
 
@@ -22,7 +62,7 @@ Rust 工具链声明位于 `backend/rust-toolchain.toml`，从仓库根目录运
 `--manifest-path` 只选择 manifest，不切换 rustup 按当前目录选定的工具链
 
 ```bash
-git clone https://github.com/zyycn/codex-proxy-rs.git
+git clone git@github.com:lqy007700/codex-proxy-rs.git
 cd codex-proxy-rs
 pnpm --dir frontend install --frozen-lockfile
 ```
@@ -80,7 +120,7 @@ pnpm --dir frontend dev
 首次检出可同时下载子模块：
 
 ```bash
-git clone --recurse-submodules https://github.com/zyycn/codex-proxy-rs.git
+git clone --recurse-submodules git@github.com:lqy007700/codex-proxy-rs.git
 cd codex-proxy-rs
 ```
 

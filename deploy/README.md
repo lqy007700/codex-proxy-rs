@@ -120,11 +120,11 @@ flowchart LR
 mkdir -p codex-proxy-rs/deploy && cd codex-proxy-rs
 
 # 只解析一次最新正式版本，确保两个文件来自同一 Release。
-CPR_RELEASE_URL="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/zyycn/codex-proxy-rs/releases/latest)"
+CPR_RELEASE_URL="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/lqy007700/codex-proxy-rs/releases/latest)"
 CPR_RELEASE_TAG="${CPR_RELEASE_URL##*/}"
-curl -fsSL "https://github.com/zyycn/codex-proxy-rs/releases/download/${CPR_RELEASE_TAG}/compose.yaml" \
+curl -fsSL "https://github.com/lqy007700/codex-proxy-rs/releases/download/${CPR_RELEASE_TAG}/compose.yaml" \
   -o deploy/compose.yaml
-curl -fsSL "https://github.com/zyycn/codex-proxy-rs/releases/download/${CPR_RELEASE_TAG}/config.example.yaml" \
+curl -fsSL "https://github.com/lqy007700/codex-proxy-rs/releases/download/${CPR_RELEASE_TAG}/config.example.yaml" \
   -o deploy/config.example.yaml
 
 install -d -m 0750 .runtime/postgres .runtime/redis
@@ -607,7 +607,7 @@ exp 不进入正式版、alpha、beta 或 rc，普通实例也不能选择 Exp�
 
 版本大小遵循 [SemVer](https://semver.org/)，构建元数据 `+...` 不参与比较。未知预发行标识不提供在线更新。
 更新器先过滤不允许的目标，再选择版本最高的候选；其他通道或更高大版本领先，不影响当前发行线的更新。
-只有当前官方构建满足在线更新条件且存在允许安装的新版本时，才返回“有可用更新”。否则不显示更新标记、
+只有当前发行构建满足在线更新条件且存在允许安装的新版本时，才返回“有可用更新”。否则不显示更新标记、
 其他通道的版本及发布说明，手动检查显示“当前没有可用更新”。检查失败单独报告，不能当作没有更新
 
 alpha、beta、rc、exp 在 GitHub 标记为 Pre-release，不覆盖 GitHub Latest 或镜像 `latest`。
@@ -616,7 +616,8 @@ alpha、beta、rc、exp 在 GitHub 标记为 Pre-release，不覆盖 GitHub Late
 
 ### 管理端在线更新
 
-官方构建按上述规则在线更新；源码等非官方构建返回不支持原因，不提供可用更新。
+本仓库 Release 构建按上述规则在线更新，检查与下载来源为 `lqy007700/codex-proxy-rs`；
+源码等非发行构建返回不支持原因，不提供可用更新。
 最低受支持的在线升级起点为 **v3.18.1**。更旧版本需手动安装 v3.18.1 或新版完整发行包／镜像，
 不能依赖旧更新页面直接升级到最新版或选择已不是最新版的过渡版本。
 点击「下载并更新」后，操作日志显示下载、校验与安装过程，完成后显示「待重启」及待生效版本，重启后才使用新程序。
@@ -646,7 +647,7 @@ YAML 中显式配置的值优先于对应环境变量
 
 Compose 提供以下在线更新运行参数：
 
-- `CPR_UPDATE_REPOSITORY`：只接受 `owner/repository`；默认 `zyycn/codex-proxy-rs`
+- `CPR_UPDATE_REPOSITORY`：只接受 `owner/repository`；默认 `lqy007700/codex-proxy-rs`
 - `CPR_GITHUB_API_BASE`：正式环境必须为 `https://api.github.com/repos`
 - `CPR_UPDATE_EXE_PATH`、`CPR_WEB_DIST_DIR`：分别指向容器内二进制和前端静态目录；
   `CPR_WEB_DIST_DIR` 同时供页面服务与更新器使用，相对路径以 `deploy/config.yaml` 所在目录为基准
@@ -667,6 +668,23 @@ Release 必须提供当前 OS/架构的 `codex-proxy-rs_<version>_<os>_<arch>.ta
 .runtime/data/update.lock
 .runtime/data/update-tmp/
 ```
+
+#### 从上游部署切换到本仓库
+
+已有上游实例需要先将实际部署的 `CPR_UPDATE_REPOSITORY` 改为 `lqy007700/codex-proxy-rs`，
+等待本仓库发布更高且符合当前通道的完整版本后，再使用页面检查、下载更新和立即重启。
+同一版本号或只修改 `+...` 构建元数据不会产生可用更新
+
+Compose 部署同时将应用 `image` 改为本仓库已发布的固定版本镜像，保留原配置、端口与数据目录，
+拉取镜像后仅重建应用容器，使新的环境变量生效：
+
+```bash
+docker compose -f deploy/compose.yaml pull codex-proxy-rs
+docker compose -f deploy/compose.yaml up -d --no-deps --no-build --wait codex-proxy-rs
+```
+
+直接运行二进制时，在服务管理器的环境中设置更新仓库并重启服务，使变量生效。
+完成切换后，日常更新继续使用页面的「下载并更新」和「立即重启」；重新运行安装脚本不会替代这一步
 
 ### 插件兼容与发行目录
 

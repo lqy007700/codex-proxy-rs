@@ -6,7 +6,7 @@ umask 0077
 # 新安装使用同一个 Release 的 compose.yaml 与 config.example.yaml；
 # 已存在 deploy/config.yaml 时保留整套部署文件，不执行版本升级。
 
-REPO="zyycn/codex-proxy-rs"
+REPO="lqy007700/codex-proxy-rs"
 CPR_RELEASE_TAG="${CPR_RELEASE_TAG:-}"
 INSTALL_DIR="${INSTALL_DIR:-$PWD/codex-proxy-rs}"
 DEPLOY_DIR="${INSTALL_DIR}/deploy"
