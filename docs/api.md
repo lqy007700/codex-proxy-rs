@@ -1895,6 +1895,7 @@ request/response/upstream ID、outcome 与搜索文本。`search` 仅供明细�
 `/api/admin/usage/records` 的 `scope` 省略时只返回完整交付且有用量证据的成功记录
 `all` 返回全部模型请求审计（含进行中），`success` 返回成功请求，`error` 返回失败、取消和未完成请求
 列表的 `logicalOutcome` 为请求实际结果，`message` 为可空的错误摘要，分页与总数均按所选范围计算
+`attemptCount` 为总尝试次数，包含首次尝试；尚未发起尝试时为 `0`
 非默认 `scope` 的 `search` 还支持模型执行 ID 前缀，默认用量范围保持原有搜索规则
 使用统计页默认 `scope=all`，结果筛选只影响明细，统计概览默认折叠；汇总、洞察和诊断不接受 `scope`
 

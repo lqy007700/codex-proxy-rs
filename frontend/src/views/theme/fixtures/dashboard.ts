@@ -113,6 +113,7 @@ function previewUsageRecord(options: PreviewUsageRecordOptions): UsageListRecord
   return {
     id: options.id,
     logicalOutcome: 'succeeded',
+    attemptCount: 1,
     message: null,
     clientApiKeyName: '演示 Key',
     provider: options.provider,

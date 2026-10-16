@@ -92,7 +92,10 @@ withDefaults(
     </template>
 
     <template #userAgent="{ row }">
-      <span class="block max-w-full wrap-break-word whitespace-normal font-mono text-cp-sm leading-[1.4] font-emphasis text-cp-text-secondary">
+      <span
+        class="line-clamp-2 max-w-full wrap-break-word whitespace-normal font-mono text-cp-sm leading-[1.4] font-emphasis text-cp-text-secondary"
+        :title="usageUserAgent(row)"
+      >
         {{ usageUserAgent(row) }}
       </span>
     </template>

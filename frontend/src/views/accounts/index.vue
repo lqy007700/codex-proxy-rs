@@ -19,6 +19,7 @@ import AccountEditModal from './components/AccountEditModal.vue'
 import AccountFilters from './components/AccountFilters.vue'
 import AccountIdentityCell from './components/AccountIdentityCell.vue'
 import AccountOverviewCards from './components/AccountOverviewCards.vue'
+import AccountSchedulingSwitch from './components/AccountSchedulingSwitch.vue'
 import AccountTableActions from './components/AccountTableActions.vue'
 import AccountUsagePanel from './components/AccountUsagePanel.vue'
 import { useAccountBatchEditor } from './composables/useAccountBatchEditor'
@@ -292,16 +293,24 @@ const {
             </template>
 
             <template #status="{ row }">
-              <AccountStatusBadge
-                :status="row.status"
-                :error-reason="row.errorReason"
-                :error-message="row.errorMessage"
-                :rate-limit-recovery-display="row.quota.rateLimitRecoveryDisplay"
-                :rate-limit-reason="row.quota.rateLimitReason"
-                :recovery-probe-required="row.quota.recoveryProbeRequired"
-                :next-refresh-at="row.nextRefreshAt"
-                :next-refresh-at-display="row.nextRefreshAtDisplay"
-              />
+              <div class="flex items-center gap-2">
+                <AccountSchedulingSwitch
+                  :enabled="row.enabled"
+                  :pending="togglingSchedulingAccountIds.has(row.id)"
+                  :account-label="row.email || row.name || row.id"
+                  @toggle="handleToggleScheduling(row)"
+                />
+                <AccountStatusBadge
+                  :status="row.status"
+                  :error-reason="row.errorReason"
+                  :error-message="row.errorMessage"
+                  :rate-limit-recovery-display="row.quota.rateLimitRecoveryDisplay"
+                  :rate-limit-reason="row.quota.rateLimitReason"
+                  :recovery-probe-required="row.quota.recoveryProbeRequired"
+                  :next-refresh-at="row.nextRefreshAt"
+                  :next-refresh-at-display="row.nextRefreshAtDisplay"
+                />
+              </div>
             </template>
 
             <template #planType="{ row }">
@@ -332,7 +341,6 @@ const {
                 :recovering="recoveringAccountIds.has(row.id)"
                 :refreshing="refreshingAccountIds.has(row.id)"
                 :testing="testingConnectionIds.has(row.id)"
-                :toggling-scheduling="togglingSchedulingAccountIds.has(row.id)"
                 @edit="openAccountEdit"
                 @delete="requestDeleteAccount"
                 @download-model-catalog="handleDownloadModelCatalog"
@@ -340,7 +348,6 @@ const {
                 @refresh="handleRefresh"
                 @reauthorize="openReauthorizeAccount"
                 @test="openConnectionTest"
-                @toggle-scheduling="handleToggleScheduling"
               />
             </template>
 

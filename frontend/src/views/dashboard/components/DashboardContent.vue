@@ -83,6 +83,16 @@ const trendKind = defineModel<DashboardTrendKind>('trendKind', { required: true 
     </p>
 
     <template v-if="!analyticsError || analytics">
+      <RequestHealthTimelineCard :timeline="healthTimeline" class="mt-6" />
+
+      <AccountOverviewCard
+        :accounts="accountUsage"
+        :pool="poolSummary"
+        :capacity="capacityInfo"
+        :rotation-strategy="rotationStrategy"
+        class="mt-6"
+      />
+
       <section
         class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4 2xl:gap-6"
         aria-label="核心指标"
@@ -103,16 +113,6 @@ const trendKind = defineModel<DashboardTrendKind>('trendKind', { required: true 
         />
         <WireProfileCard :profiles="wireProfiles" />
       </section>
-
-      <AccountOverviewCard
-        :accounts="accountUsage"
-        :pool="poolSummary"
-        :capacity="capacityInfo"
-        :rotation-strategy="rotationStrategy"
-        class="mt-6"
-      />
-
-      <RequestHealthTimelineCard :timeline="healthTimeline" class="mt-6" />
 
       <UsageRecordCard :rows="usageRecords" class="mt-6" />
     </template>

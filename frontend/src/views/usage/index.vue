@@ -19,7 +19,7 @@ import { usageTimeRangeOptions } from './constants'
 
 const statsExpanded = shallowRef(false)
 const requestColumns = defineTableColumns<UsageListRecord>([
-  { key: 'logicalOutcome', label: '请求结果', kind: 'custom', size: '2xl', hideable: false },
+  { key: 'logicalOutcome', label: '请求结果', kind: 'custom', size: 'lg', hideable: false },
   ...usageRecordColumns,
 ])
 const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(requestColumns, 'usage-requests')

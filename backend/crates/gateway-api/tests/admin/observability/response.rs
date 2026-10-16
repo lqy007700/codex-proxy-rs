@@ -860,6 +860,7 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         .expect("usage records")
         .push(UsageListRecord {
             outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
+            attempt_count: 3,
             error_message: None,
             client_api_key_name: Some("Production".to_owned()),
             id: "request_endpoint".to_owned(),
@@ -971,6 +972,7 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
     let value: serde_json::Value = serde_json::from_slice(&body).expect("usage response JSON");
 
     assert_eq!(value["data"]["items"][0]["logicalOutcome"], "succeeded");
+    assert_eq!(value["data"]["items"][0]["attemptCount"], 3);
     assert!(value["data"]["items"][0]["message"].is_null());
     assert_eq!(value["data"]["items"][0]["clientApiKeyName"], "Production");
     assert_eq!(value["data"]["items"][0]["accountNotes"], "Team workspace");

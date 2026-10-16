@@ -263,6 +263,7 @@ pub(crate) fn usage_list_record_view(
         .or_else(|| record.requested_model_id.clone());
     UsageListRecordView {
         logical_outcome: record.outcome.as_str().to_owned(),
+        attempt_count: record.attempt_count,
         message: record.error_message,
         client_api_key_name: record.client_api_key_name,
         id: record.id,

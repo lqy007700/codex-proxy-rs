@@ -18,9 +18,19 @@ const outcome = computed(() => outcomes[props.record.logicalOutcome] ?? {
 
 <template>
   <div class="min-w-0 py-0.5">
-    <span class="inline-flex h-6 items-center rounded-full px-2.5 text-cp-sm leading-none font-bold" :class="outcome.tone">
-      {{ outcome.label }}
-    </span>
+    <div class="flex items-center gap-1.5 whitespace-nowrap">
+      <span class="inline-flex h-6 items-center rounded-full px-2.5 text-cp-sm leading-none font-bold" :class="outcome.tone">
+        {{ outcome.label }}
+      </span>
+      <span
+        v-if="record.logicalOutcome !== 'succeeded' || record.attemptCount !== 1"
+        class="font-mono text-cp-xs tabular-nums text-cp-text-tertiary"
+        :title="`总尝试 ${record.attemptCount} 次`"
+        :aria-label="`总尝试 ${record.attemptCount} 次`"
+      >
+        {{ record.attemptCount }} 次
+      </span>
+    </div>
     <p v-if="record.message" class="mt-1 mb-0 truncate text-cp-xs leading-[1.45] font-emphasis text-cp-text-secondary" :title="record.message">
       {{ record.message }}
     </p>

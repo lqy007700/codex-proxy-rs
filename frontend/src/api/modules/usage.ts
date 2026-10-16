@@ -83,6 +83,7 @@ export interface UsageRecordMetadata {
 
 export interface UsageListRecord {
   logicalOutcome: string
+  attemptCount: number
   message: string | null
   clientApiKeyName: string | null
   id: string

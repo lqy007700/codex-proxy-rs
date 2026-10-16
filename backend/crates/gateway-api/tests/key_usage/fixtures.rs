@@ -94,6 +94,7 @@ pub(super) async fn fixture() -> AdminTestFixture {
 fn usage_record() -> UsageListRecord {
     UsageListRecord {
         outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
+        attempt_count: 1,
         error_message: None,
         client_api_key_name: Some("Production".to_owned()),
         id: "req-visible".to_owned(),

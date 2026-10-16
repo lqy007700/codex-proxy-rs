@@ -304,6 +304,7 @@ pub(crate) fn usage_list_record_from_row(
     )?;
     Ok(UsageListRecord {
         outcome: request_outcome(&get::<String>(row, "outcome")?)?,
+        attempt_count: to_u32(get(row, "attempt_count")?)?,
         error_message: get(row, "error_message")?,
         client_api_key_name: get(row, "client_api_key_name")?,
         billing,

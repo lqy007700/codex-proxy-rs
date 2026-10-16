@@ -87,6 +87,7 @@ pub struct ImageBillingView {
 #[serde(rename_all = "camelCase")]
 pub struct UsageListRecordView {
     pub logical_outcome: String,
+    pub attempt_count: u32,
     pub message: Option<String>,
     pub client_api_key_name: Option<String>,
     pub id: String,

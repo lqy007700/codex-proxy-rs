@@ -1210,6 +1210,7 @@ fn total_record(
 ) -> UsageListRecord {
     UsageListRecord {
         outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
+        attempt_count: 1,
         error_message: None,
         client_api_key_name: Some("Production".to_owned()),
         id: id.to_owned(),

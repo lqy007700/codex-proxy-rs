@@ -299,6 +299,7 @@ async fn request_scopes_page_all_outcomes_without_changing_usage_facts() {
         "running",
         "succeeded",
     ];
+    let attempt_counts = [1_u32, 3, 2, 0, 1, 1];
     for (index, outcome) in outcomes.iter().enumerate() {
         let id = format!("scope_{index}");
         seed(
@@ -308,8 +309,8 @@ async fn request_scopes_page_all_outcomes_without_changing_usage_facts() {
             &[],
         )
         .await;
-        sqlx::query("update model_requests set outcome=$2,completed_at=case when $2='running' then null else completed_at end,request_observation_json=request_observation_json || jsonb_build_object('error',jsonb_build_object('message','demo error')),error_details='demo error details' where id=$1")
-            .bind(&id).bind(outcome).execute(&database.pool).await.unwrap();
+        sqlx::query("update model_requests set outcome=$2,attempt_count=$3,provider_kind='openai',provider_account_ref='scope_account',upstream_transport='http_sse',upstream_send_state=case when $3=0 then 'not_sent' else 'sent' end,completed_at=case when $2='running' then null else completed_at end,request_observation_json=request_observation_json || jsonb_build_object('error',jsonb_build_object('message','demo error')),error_details='demo error details' where id=$1")
+            .bind(&id).bind(outcome).bind(i32::try_from(attempt_counts[index]).unwrap()).execute(&database.pool).await.unwrap();
     }
     // 成功审计没有模型或用量证据时，不能进入成功用量聚合
     sqlx::query("update model_requests set requested_model_id=null,input_tokens=null,output_tokens=null,total_tokens=null where id='scope_5'")
@@ -365,6 +366,7 @@ async fn request_scopes_page_all_outcomes_without_changing_usage_facts() {
                 for row in page.items {
                     let index: usize = row.id.trim_start_matches("scope_").parse().unwrap();
                     assert_eq!(row.outcome.as_str(), outcomes[index]);
+                    assert_eq!(row.attempt_count, attempt_counts[index]);
                     assert_eq!(row.error_message.as_deref(), Some("demo error"));
                 }
             }

@@ -3,7 +3,7 @@ import type { Account } from '@/api'
 
 import { ZIconButton, ZMenuItem, ZPopover } from '@codex-proxy/ui'
 
-import { Download, KeyRound, MoreHorizontal, Pencil, Power, RefreshCw, RotateCcw, Trash2, Wifi } from '@lucide/vue'
+import { Download, KeyRound, MoreHorizontal, Pencil, RefreshCw, RotateCcw, Trash2, Wifi } from '@lucide/vue'
 import { computed } from 'vue'
 
 const props = defineProps<{
@@ -13,7 +13,6 @@ const props = defineProps<{
   recovering: boolean
   refreshing: boolean
   testing: boolean
-  togglingScheduling: boolean
 }>()
 const emit = defineEmits<{
   edit: [account: Account]
@@ -23,7 +22,6 @@ const emit = defineEmits<{
   refresh: [accountId: string]
   reauthorize: [account: Account]
   downloadModelCatalog: [account: Account]
-  toggleScheduling: [account: Account]
 }>()
 
 const credentialEligible = computed(() => props.account.authenticationKind === 'oauth')
@@ -66,16 +64,6 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
               <Wifi class="size-3.5 text-cp-text-quaternary" />
             </template>
             测试连接
-          </ZMenuItem>
-          <ZMenuItem
-            :loading="togglingScheduling"
-            :disabled="togglingScheduling"
-            @click.stop="(close(), emit('toggleScheduling', account))"
-          >
-            <template #icon>
-              <Power class="size-3.5 text-cp-text-quaternary" />
-            </template>
-            {{ account.enabled ? '停用调度' : '启用调度' }}
           </ZMenuItem>
           <ZMenuItem
             v-if="credentialEligible"

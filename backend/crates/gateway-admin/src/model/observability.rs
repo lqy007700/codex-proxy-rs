@@ -666,6 +666,7 @@ pub struct DashboardObservation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageListRecord {
     pub outcome: RequestOutcome,
+    pub attempt_count: u32,
     pub error_message: Option<String>,
     pub client_api_key_name: Option<String>,
     pub id: String,
