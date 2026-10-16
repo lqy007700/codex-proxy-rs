@@ -17,7 +17,7 @@ import { useUsageRecordsTable } from './composables/useUsageRecordsTable'
 import { useUsageTimeRange } from './composables/useUsageTimeRange'
 import { usageTimeRangeOptions } from './constants'
 
-const statsExpanded = shallowRef(false)
+const statsExpanded = shallowRef(true)
 const requestColumns = defineTableColumns<UsageListRecord>([
   { key: 'logicalOutcome', label: '请求结果', kind: 'custom', size: 'lg', hideable: false },
   ...usageRecordColumns,
@@ -76,29 +76,6 @@ watch(timeRange, () => {
       </template>
     </ZPageHeader>
 
-    <details class="group mt-5" @toggle="statsExpanded = ($event.target as HTMLDetailsElement).open">
-      <ZCard
-        as="summary"
-        class="flex cursor-pointer list-none items-center justify-between gap-3 select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cp-primary [&::-webkit-details-marker]:hidden"
-      >
-        <span class="text-xl leading-[1.15] font-heavy text-cp-text">统计概览</span>
-        <span class="flex shrink-0 items-center gap-2 text-cp-sm font-emphasis text-cp-text-secondary">
-          <span class="group-open:hidden">展开</span>
-          <span class="hidden group-open:inline">收起</span>
-          <ChevronDown class="size-4.5 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
-        </span>
-      </ZCard>
-      <template v-if="statsExpanded">
-        <UsageSummaryCards :summary="summary" />
-        <UsageInsightsGrid
-          v-model:diagnostic-dimension="diagnosticDimension"
-          :overview="insights.overview"
-          :diagnostics="insights.diagnostics"
-          :loading="analyticsLoading"
-        />
-      </template>
-    </details>
-
     <ZCard
       class="mt-5 flex flex-col"
     >
@@ -114,7 +91,7 @@ watch(timeRange, () => {
               查看请求结果、用量与错误详情
             </p>
           </div>
-          <ZSegmented v-model="recordScope" aria-label="请求结果筛选" :options="recordViewOptions" class="w-72 max-w-full" />
+          <ZSegmented v-model="recordScope" aria-label="请求结果筛选" :options="recordViewOptions" display="icon" class="w-30 shrink-0" />
         </div>
       </template>
 
@@ -171,6 +148,29 @@ watch(timeRange, () => {
         </div>
       </template>
     </ZCard>
+
+    <details :open="statsExpanded" class="group mt-5" @toggle="statsExpanded = ($event.target as HTMLDetailsElement).open">
+      <ZCard
+        as="summary"
+        class="flex cursor-pointer list-none items-center justify-between gap-3 select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cp-primary [&::-webkit-details-marker]:hidden"
+      >
+        <span class="text-xl leading-[1.15] font-heavy text-cp-text">统计概览</span>
+        <span class="flex shrink-0 items-center gap-2 text-cp-sm font-emphasis text-cp-text-secondary">
+          <span class="group-open:hidden">展开</span>
+          <span class="hidden group-open:inline">收起</span>
+          <ChevronDown class="size-4.5 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+        </span>
+      </ZCard>
+      <template v-if="statsExpanded">
+        <UsageSummaryCards :summary="summary" />
+        <UsageInsightsGrid
+          v-model:diagnostic-dimension="diagnosticDimension"
+          :overview="insights.overview"
+          :diagnostics="insights.diagnostics"
+          :loading="analyticsLoading"
+        />
+      </template>
+    </details>
 
     <UsageRecordDetailModal v-model="showDetailModal" :record="selectedUsageRecord" />
   </div>
