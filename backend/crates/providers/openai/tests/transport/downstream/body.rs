@@ -76,6 +76,19 @@ fn encoder_should_adapt_pi_responses_parameters_without_losing_codex_fields() {
 }
 
 #[test]
+fn chat_completion_token_budget_keeps_existing_codex_parameter_normalization() {
+    let chat = gateway_protocol::openai::chat::decode_chat_request(
+        br#"{"model":"client-model","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":1024}"#,
+    )
+    .expect("decode Chat request");
+    assert_eq!(chat.responses["max_output_tokens"], 1024);
+    let encoded = encode_downstream_request(Value::Object(chat.responses));
+    // Codex 后端拒绝该字段，兼容请求沿用现有 Provider 归一化，不承诺执行输出上限
+    assert!(encoded.body().get("max_output_tokens").is_none());
+    assert_eq!(encoded.input().len(), 1);
+}
+
+#[test]
 fn encoder_should_expand_string_input_into_user_message_item() {
     // 公开 Responses API 的字符串 input 等价于一条 user 文本消息；
     // 目标形状对照 codex-rs/protocol/src/models.rs 的 ResponseItem::Message + ContentItem::InputText

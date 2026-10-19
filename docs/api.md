@@ -263,12 +263,13 @@ Codex 的 review 等子代理请求仍使用 `/v1/responses`，并通过 `x-open
 | 工具历史 | `assistant.tool_calls[].id` 与 `tool.tool_call_id` 成对回填；流式工具使用稳定的 `index` 和客户端 `call_id` |
 | 输出格式 | 支持 `response_format.type=text/json_object/json_schema`，转换为 Responses `text.format` |
 | 推理 | `reasoning_effort` 转为 `reasoning.effort`；推理内容和加密推理项不混入 assistant 正文 |
+| 输出预算 | `max_completion_tokens` 的正整数值映射为 Responses `max_output_tokens`，`null` 沿用上游默认值；是否执行上限取决于 Provider，Codex 路径会移除该字段，不能依赖它限制生成量或费用 |
 | 用量 | JSON 返回 `usage`；`stream_options.include_usage=true` 在结束标记前返回 `choices: []` 的用量块，其他块 `usage=null` |
 | 其他参数 | 支持 `metadata`、`service_tier`、`prompt_cache_key`、`safety_identifier`；`n` 仅支持 `1`，`store` 仅支持 `false` |
 
-`temperature`、`top_p`、`max_tokens`、`max_completion_tokens`、`stop`、`logprobs`、
+`temperature`、`top_p`、`max_tokens`、`stop`、`logprobs`、
 `n>1`、旧版 `functions/function_call`、消息 `name`、音频及未知非空参数返回 `400`，
-错误的 `param` 指明字段，不能通过静默删除参数承诺未实现的上游行为。
+错误的 `param` 指明字段。
 不提供 Chat 对象存储与查询，也不把 Chat 响应 ID 用作 Responses 原生续接状态
 
 鉴权与准入失败保留 HTTP 错误状态；SSE 已开始后失败使用 `data: {"error": ...}` 与结束标记，

@@ -44,6 +44,7 @@ pub fn decode_chat_request(body: &[u8]) -> Result<ChatRequest, ChatRequestError>
             | "tools"
             | "tool_choice"
             | "parallel_tool_calls"
+            | "max_completion_tokens"
             | "reasoning_effort"
             | "response_format"
             | "metadata"
@@ -101,6 +102,16 @@ pub fn decode_chat_request(body: &[u8]) -> Result<ChatRequest, ChatRequestError>
     responses.insert("input".into(), Value::Array(input));
     responses.insert("stream".into(), json!(stream));
     responses.insert("store".into(), json!(false));
+    if let Some(value) = object.get("max_completion_tokens").filter(|v| !v.is_null()) {
+        let tokens = value.as_u64().filter(|tokens| *tokens > 0).ok_or_else(|| {
+            invalid(
+                "max_completion_tokens",
+                "max_completion_tokens must be a positive integer.",
+            )
+        })?;
+        // 两个字段均包含可见输出与推理 Token；上游差异仍由 Provider 处理
+        responses.insert("max_output_tokens".into(), json!(tokens));
+    }
     for field in [
         "metadata",
         "service_tier",

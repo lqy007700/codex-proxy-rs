@@ -76,7 +76,6 @@ fn refuses_parameters_that_cannot_be_honored_instead_of_silently_dropping_them()
     for (field, value) in [
         ("temperature", json!(0.2)),
         ("max_tokens", json!(10)),
-        ("max_completion_tokens", json!(10)),
         ("n", json!(2)),
         ("stop", json!(["END"])),
         ("logprobs", json!(true)),
@@ -90,6 +89,48 @@ fn refuses_parameters_that_cannot_be_honored_instead_of_silently_dropping_them()
             .err()
             .expect("unsupported parameter");
         assert_eq!(error.param, field);
+    }
+}
+
+#[test]
+fn maps_completion_token_budget_to_responses_output_budget() {
+    for stream in [false, true] {
+        let result = convert(
+            json!({"model":"model-a","messages":[{"role":"user","content":"hello"}],"stream":stream,"max_completion_tokens":1024}),
+        );
+        assert_eq!(result["max_output_tokens"], 1024);
+        assert!(result.get("max_completion_tokens").is_none());
+    }
+}
+
+#[test]
+fn null_completion_token_budget_keeps_the_provider_default() {
+    let result = convert(
+        json!({"model":"model-a","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":null}),
+    );
+    assert!(result.get("max_output_tokens").is_none());
+}
+
+#[test]
+fn rejects_invalid_completion_token_budgets_with_the_chat_parameter_name() {
+    for value in [
+        json!(0),
+        json!(-1),
+        json!(1.5),
+        json!("1024"),
+        json!(true),
+        json!([]),
+        json!({}),
+    ] {
+        let request = json!({"model":"model-a","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":value});
+        let error = decode_chat_request(request.to_string().as_bytes())
+            .err()
+            .expect("invalid token budget");
+        assert_eq!(error.param, "max_completion_tokens");
+        assert_eq!(
+            error.message,
+            "max_completion_tokens must be a positive integer."
+        );
     }
 }
 
