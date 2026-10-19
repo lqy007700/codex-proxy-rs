@@ -780,6 +780,8 @@ struct FixedRoutingPolicy {
 struct RetryTestPolicy {
     decision: gateway_core::engine::policy::RetryDecision,
     facts: Arc<Mutex<Vec<gateway_core::engine::policy::RetryFacts>>>,
+    observe_effect: bool,
+    fail: bool,
 }
 
 impl RequestPolicyPlan for RetryTestPolicy {
@@ -800,9 +802,19 @@ impl RequestPolicyPlan for RetryTestPolicy {
         input: gateway_core::engine::policy::RetryInput,
     ) -> BoxFuture<'static, Result<gateway_core::engine::policy::RetryDecision, RequestPolicyFault>>
     {
+        if self.observe_effect {
+            input.execution_effects().observe();
+        }
         self.facts.lock().unwrap().push(input.facts);
         let decision = self.decision;
-        Box::pin(async move { Ok(decision) })
+        let fail = self.fail;
+        Box::pin(async move {
+            if fail {
+                Err(RequestPolicyFault)
+            } else {
+                Ok(decision)
+            }
+        })
     }
 }
 
@@ -853,11 +865,21 @@ impl Provider for RetryTestProvider {
 #[test]
 fn retry_policy_can_stop_but_cannot_bypass_replay_safety() {
     use gateway_core::engine::policy::RetryDecision;
-    for (decision, send_state, replay_safe, expected_allowed, expected_calls) in [
+    for (
+        decision,
+        send_state,
+        replay_safe,
+        observe_effect,
+        fail,
+        expected_allowed,
+        expected_calls,
+    ) in [
         (
             RetryDecision::Stop,
             UpstreamSendState::NotSent,
             true,
+            false,
+            false,
             true,
             1,
         ),
@@ -865,6 +887,8 @@ fn retry_policy_can_stop_but_cannot_bypass_replay_safety() {
             RetryDecision::Retry,
             UpstreamSendState::NotSent,
             true,
+            false,
+            false,
             true,
             2,
         ),
@@ -873,6 +897,8 @@ fn retry_policy_can_stop_but_cannot_bypass_replay_safety() {
             UpstreamSendState::Ambiguous,
             true,
             false,
+            false,
+            false,
             1,
         ),
         (
@@ -880,6 +906,26 @@ fn retry_policy_can_stop_but_cannot_bypass_replay_safety() {
             UpstreamSendState::Sent,
             false,
             false,
+            false,
+            false,
+            1,
+        ),
+        (
+            RetryDecision::Retry,
+            UpstreamSendState::NotSent,
+            true,
+            true,
+            false,
+            true,
+            1,
+        ),
+        (
+            RetryDecision::Delegate,
+            UpstreamSendState::NotSent,
+            true,
+            true,
+            true,
+            true,
             1,
         ),
     ] {
@@ -903,6 +949,8 @@ fn retry_policy_can_stop_but_cannot_bypass_replay_safety() {
                     Arc::new(RetryTestPolicy {
                         decision,
                         facts: facts.clone(),
+                        observe_effect,
+                        fail,
                     }),
                 )
                 .unwrap();

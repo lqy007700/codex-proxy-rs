@@ -3,7 +3,7 @@ import type { UsageListRecord } from '@/api'
 import { ZPopover, ZScrollbar } from '@codex-proxy/ui'
 import { computed } from 'vue'
 
-const props = defineProps<{ record: UsageListRecord }>()
+const props = withDefaults(defineProps<{ record: UsageListRecord, showMessage?: boolean }>(), { showMessage: true })
 const hasIncompleteError = computed(() => props.record.logicalOutcome === 'incomplete' && !!props.record.message)
 const outcomes: Record<string, { label: string, tone: string }> = {
   succeeded: { label: '成功', tone: 'bg-cp-success-container text-cp-success-on-container' },
@@ -52,7 +52,7 @@ const outcome = computed(() => outcomes[props.record.logicalOutcome] ?? {
         {{ record.attemptCount }} 次
       </span>
     </div>
-    <p v-if="record.message && !hasIncompleteError" class="mt-1 mb-0 truncate text-cp-xs leading-[1.45] font-emphasis text-cp-text-secondary" :title="record.message">
+    <p v-if="showMessage && record.message && !hasIncompleteError" class="mt-1 mb-0 truncate text-cp-xs leading-[1.45] font-emphasis text-cp-text-secondary" :title="record.message">
       {{ record.message }}
     </p>
   </div>

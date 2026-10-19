@@ -27,6 +27,7 @@ export interface OutboundProxyTest {
 }
 
 export interface OutboundProxyRecord {
+  maxWebsocketConnections: number
   enabled: boolean
   autoLocation: boolean
   detectedLocation: DetectedProxyLocation | null
@@ -68,7 +69,57 @@ interface ProxyAccountPage {
   page: ProxyPage['page']
 }
 
-export function getProxyAccounts(data: { proxyId: string, page: number, pageSize: number, search?: string }, options: RequestOptions = {}) {
+interface ProxyListParams {
+  page: number
+  pageSize: number
+  search?: string
+}
+
+interface ProxyAccountListParams extends ProxyListParams {
+  proxyId: string
+}
+
+interface ProxyAccountRemoveParam {
+  proxyId: string
+  accountId: string
+}
+
+interface ProxyCreateParam {
+  name: string
+  proxyUrl: string
+  maxWebsocketConnections?: number
+  autoLocation?: boolean
+  location?: RequestLocation | null
+}
+
+interface ProxyIdParam {
+  id: string
+  revision: number
+}
+
+interface ProxyUpdateParam extends ProxyIdParam {
+  name: string
+  enabled?: boolean
+  maxWebsocketConnections?: number
+  proxyUrl?: string
+  autoLocation?: boolean
+  location?: RequestLocation | null
+}
+
+interface ProxyTestParam extends ProxyIdParam {
+  detectLocation?: boolean
+}
+
+interface ProxyProbeParam {
+  proxyUrl: string
+  detectLocation?: boolean
+}
+
+interface ProxyMutationResponse {
+  configRevision: number
+}
+
+export function getProxyAccounts(data: ProxyAccountListParams, options: RequestOptions = {}) {
   return request<ProxyAccountPage>({
     url: '/api/admin/proxies/accounts',
     method: 'GET',
@@ -77,20 +128,24 @@ export function getProxyAccounts(data: { proxyId: string, page: number, pageSize
   })
 }
 
-export function removeProxyAccount(data: { proxyId: string, accountId: string }) {
-  return request<{ configRevision: number }>({
+export function removeProxyAccount(data: ProxyAccountRemoveParam) {
+  return request<ProxyMutationResponse>({
     url: '/api/admin/proxies/accounts/remove',
     method: 'POST',
     data,
   })
 }
 
-interface ProxyMutation {
+export type ProxyBatchResult<T>
+  = | { status: 'succeeded', data: T }
+    | { status: 'failed', httpStatus: number, code: number, message: string }
+    | { status: 'skipped' }
+
+interface ProxyMutation extends ProxyMutationResponse {
   record: OutboundProxyRecord
-  configRevision: number
 }
 
-export function getProxies(data: { page: number, pageSize: number, search?: string }, options: RequestOptions = {}) {
+export function getProxies(data: ProxyListParams, options: RequestOptions = {}) {
   return request<ProxyPage>({
     url: '/api/admin/proxies',
     method: 'GET',
@@ -99,42 +154,44 @@ export function getProxies(data: { page: number, pageSize: number, search?: stri
   })
 }
 
-export function createProxy(data: { name: string, proxyUrl: string, autoLocation?: boolean, location?: RequestLocation | null }) {
-  return request<ProxyMutation>({
+export function createProxy(data: ProxyCreateParam[], options: RequestOptions = {}) {
+  return request<ProxyBatchResult<ProxyMutation>[]>({
     url: '/api/admin/proxies/create',
-    timeout: 25000,
     method: 'POST',
     data,
+    timeout: 25000 * Math.max(1, data.length),
+    ...options,
   })
 }
 
-export function updateProxy(data: { id: string, revision: number, name: string, enabled?: boolean, proxyUrl?: string, autoLocation?: boolean, location?: RequestLocation | null }) {
+export function updateProxy(data: ProxyUpdateParam) {
   return request<ProxyMutation>({
     url: '/api/admin/proxies/update',
-    timeout: 25000,
     method: 'POST',
     data,
+    timeout: 25000,
   })
 }
 
-export function deleteProxy(data: { id: string, revision: number }) {
-  return request<{ configRevision: number }>({
+export function deleteProxy(data: ProxyIdParam) {
+  return request<ProxyMutationResponse>({
     url: '/api/admin/proxies/delete',
     method: 'POST',
     data,
   })
 }
 
-export function testProxy(data: { id: string, revision: number, detectLocation?: boolean }) {
-  return request<OutboundProxyRecord>({
+export function testProxy(data: ProxyTestParam[], options: RequestOptions = {}) {
+  return request<ProxyBatchResult<OutboundProxyRecord>[]>({
     url: '/api/admin/proxies/test',
     method: 'POST',
     data,
-    timeout: 25000,
+    timeout: 25000 * Math.max(1, Math.ceil(data.length / 2)),
+    ...options,
   })
 }
 
-export function probeProxy(data: { proxyUrl: string, detectLocation?: boolean }) {
+export function probeProxy(data: ProxyProbeParam) {
   return request<OutboundProxyTest>({
     url: '/api/admin/proxies/probe',
     method: 'POST',

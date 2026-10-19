@@ -514,10 +514,6 @@ struct FinalState {
     upstream_response_ms: Option<u64>,
     upstream_api_overhead_ms: Option<f64>,
     upstream_engine_ms: Option<f64>,
-    upstream_engine_iapi_ttft_ms: Option<f64>,
-    upstream_engine_service_ttft_ms: Option<f64>,
-    upstream_engine_iapi_tbt_ms: Option<f64>,
-    upstream_engine_service_tbt_ms: Option<f64>,
     provider_metadata_json: Option<String>,
     cost_source: CostSource,
     cost_ticks: Option<u128>,
@@ -693,12 +689,6 @@ impl ExecutionStore for FakeStore {
                 upstream_response_ms: finalization.timings.upstream_response_ms,
                 upstream_api_overhead_ms: finalization.timings.upstream_api_overhead_ms,
                 upstream_engine_ms: finalization.timings.upstream_engine_ms,
-                upstream_engine_iapi_ttft_ms: finalization.timings.upstream_engine_iapi_ttft_ms,
-                upstream_engine_service_ttft_ms: finalization
-                    .timings
-                    .upstream_engine_service_ttft_ms,
-                upstream_engine_iapi_tbt_ms: finalization.timings.upstream_engine_iapi_tbt_ms,
-                upstream_engine_service_tbt_ms: finalization.timings.upstream_engine_service_tbt_ms,
                 provider_metadata_json: finalization.provider_metadata_json,
                 cost_source: finalization.cost.source(),
                 cost_ticks: finalization
@@ -2076,10 +2066,6 @@ fn discarded_attempt_observation_does_not_leak_into_retry_result() {
         upstream_response_ms: Some(7_000),
         upstream_api_overhead_ms: Some(120.25),
         upstream_engine_ms: Some(6400.0),
-        upstream_engine_iapi_ttft_ms: Some(650.5),
-        upstream_engine_service_ttft_ms: Some(720.25),
-        upstream_engine_iapi_tbt_ms: Some(18.45),
-        upstream_engine_service_tbt_ms: Some(20.12),
         ..ProviderResponseTimings::default()
     });
     let second_observation = ProviderResponseObservation::new(
@@ -2173,10 +2159,6 @@ fn discarded_attempt_observation_does_not_leak_into_retry_result() {
     assert_eq!(finalization.upstream_response_ms, None);
     assert_eq!(finalization.upstream_api_overhead_ms, None);
     assert_eq!(finalization.upstream_engine_ms, None);
-    assert_eq!(finalization.upstream_engine_iapi_ttft_ms, None);
-    assert_eq!(finalization.upstream_engine_service_ttft_ms, None);
-    assert_eq!(finalization.upstream_engine_iapi_tbt_ms, None);
-    assert_eq!(finalization.upstream_engine_service_tbt_ms, None);
     let contexts = provider.contexts.lock().unwrap();
     assert_eq!(contexts.len(), 2);
     assert_eq!(
@@ -3669,74 +3651,76 @@ fn exhausted_atomic_response_failed_should_deliver_only_the_last_failure_once() 
 
 #[test]
 fn empty_selection_after_atomic_failure_should_deliver_the_last_upstream_wire() {
-    let operation = generate_operation();
-    let route_plan = plan(&operation);
-    let mut failure = bare_atomic_response_failed("response-only-failed");
-    let mut events = failure.take_atomic_client_events();
-    events.push(ProviderEvent::canonical(GatewayEvent::ProviderCost(
-        ProviderReportedCost::from_usd_ticks(500).unwrap(),
-    )));
-    let failure = failure.with_atomic_client_events(events);
-    let (coordinator, store, provider) = coordinator(vec![
-        Script::ObservedStream {
-            account_id: "acct_only",
-            items: vec![Err(failure)],
-        },
-        Script::Error(ProviderError::new(
-            ProviderErrorKind::NoEligibleAccount,
-            UpstreamSendState::NotSent,
-        )),
-    ]);
-    let mut session = block_on(coordinator.start(
-        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
-        operation,
-        route_plan,
-        None,
-        None,
-        CancellationToken::new(),
-    ))
-    .expect("start execution");
+    for kind in [
+        ProviderErrorKind::NoEligibleAccount,
+        ProviderErrorKind::SessionPolicyRestricted,
+    ] {
+        let operation = generate_operation();
+        let route_plan = plan(&operation);
+        let mut failure = bare_atomic_response_failed("response-only-failed");
+        let mut events = failure.take_atomic_client_events();
+        events.push(ProviderEvent::canonical(GatewayEvent::ProviderCost(
+            ProviderReportedCost::from_usd_ticks(500).unwrap(),
+        )));
+        let failure = failure.with_atomic_client_events(events);
+        let (coordinator, store, provider) = coordinator(vec![
+            Script::ObservedStream {
+                account_id: "acct_only",
+                items: vec![Err(failure)],
+            },
+            Script::Error(ProviderError::new(kind, UpstreamSendState::NotSent)),
+        ]);
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .expect("start execution");
 
-    let terminal = block_on(session.next_event())
-        .expect("last account failure remains deliverable")
-        .expect("terminal failure batch");
-    let events = terminal.into_provider_events();
-    let failure = events
-        .iter()
-        .filter_map(ProviderEvent::wire_event)
-        .find(|wire| wire.event_type() == Some("response.failed"))
-        .expect("last upstream response.failed");
-    assert_eq!(
-        failure
-            .data()
-            .pointer("/response/id")
-            .and_then(Value::as_str),
-        Some("response-only-failed")
-    );
-    block_on(session.commit_downstream(Some(200))).expect("commit terminal failure");
-    assert!(matches!(
-        block_on(session.next_event()),
-        Err(EngineError::Provider(_))
-    ));
+        let terminal = block_on(session.next_event())
+            .expect("last account failure remains deliverable")
+            .expect("terminal failure batch");
+        let events = terminal.into_provider_events();
+        let failure = events
+            .iter()
+            .filter_map(ProviderEvent::wire_event)
+            .find(|wire| wire.event_type() == Some("response.failed"))
+            .expect("last upstream response.failed");
+        assert_eq!(
+            failure
+                .data()
+                .pointer("/response/id")
+                .and_then(Value::as_str),
+            Some("response-only-failed")
+        );
+        block_on(session.commit_downstream(Some(200))).expect("commit terminal failure");
+        assert!(matches!(
+            block_on(session.next_event()),
+            Err(EngineError::Provider(_))
+        ));
 
-    assert_eq!(provider.contexts.lock().expect("contexts lock").len(), 2);
-    assert_eq!(
-        session.budget_charge().amount_usd.scaled(),
-        500,
-        "restoring a discarded failure must not charge its usage twice"
-    );
-    let state = store.state.lock().expect("store lock");
-    assert_eq!(state.attempts.len(), 1);
-    assert_eq!(state.intermediate_failures, 1);
-    assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Incomplete);
-    assert_eq!(
-        state.finalizations[0].client_response_id.as_deref(),
-        Some("response-only-failed")
-    );
-    assert_eq!(
-        state.finalizations[0].upstream_response_id.as_deref(),
-        Some("response-only-failed")
-    );
+        assert_eq!(provider.contexts.lock().expect("contexts lock").len(), 2);
+        assert_eq!(
+            session.budget_charge().amount_usd.scaled(),
+            500,
+            "restoring a discarded failure must not charge its usage twice"
+        );
+        let state = store.state.lock().expect("store lock");
+        assert_eq!(state.attempts.len(), 1);
+        assert_eq!(state.intermediate_failures, 1);
+        assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Incomplete);
+        assert_eq!(
+            state.finalizations[0].client_response_id.as_deref(),
+            Some("response-only-failed")
+        );
+        assert_eq!(
+            state.finalizations[0].upstream_response_id.as_deref(),
+            Some("response-only-failed")
+        );
+    }
 }
 
 #[test]
@@ -5098,8 +5082,10 @@ fn transient_backoff_can_be_cancelled_before_the_next_attempt() {
 }
 
 #[test]
-fn final_capacity_exhaustion_returns_the_last_retryable_upstream_failure() {
-    for capacity_error in [
+fn final_selection_exhaustion_returns_the_last_retryable_upstream_failure() {
+    for selection_kind in [
+        ProviderErrorKind::SessionPolicyRestricted,
+        ProviderErrorKind::NoEligibleAccount,
         ProviderErrorKind::AccountCapacityUnavailable,
         ProviderErrorKind::QuotaExhausted,
         ProviderErrorKind::ConcurrencyQueueFull,
@@ -5121,15 +5107,18 @@ fn final_capacity_exhaustion_returns_the_last_retryable_upstream_failure() {
                     Some(b"application/json".to_vec()),
                     raw_body.clone(),
                 ));
+        let selection_error = ProviderError::new(selection_kind, UpstreamSendState::NotSent);
+        let selection_error = if selection_kind == ProviderErrorKind::SessionPolicyRestricted {
+            selection_error.with_retry_prohibited()
+        } else {
+            selection_error
+        };
         let (coordinator, store, provider) = coordinator(vec![
             Script::Stream {
                 account_id: "acct_first",
                 items: vec![Err(upstream_error)],
             },
-            Script::Error(ProviderError::new(
-                capacity_error,
-                UpstreamSendState::NotSent,
-            )),
+            Script::Error(selection_error),
         ]);
 
         let mut session = block_on(coordinator.start(
@@ -5172,58 +5161,60 @@ fn final_capacity_exhaustion_returns_the_last_retryable_upstream_failure() {
 }
 
 #[test]
-fn provider_infrastructure_failure_does_not_restore_the_last_upstream_failure() {
-    let operation = generate_operation();
-    let route_plan = plan(&operation);
-    let upstream_error =
-        ProviderError::new(ProviderErrorKind::Transport, UpstreamSendState::NotSent)
-            .with_pre_delivery_retry()
-            .with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
-                "upstream marker",
-                Some("upstream_marker".to_owned()),
-                Some("upstream_error".to_owned()),
-            ))
-            .with_client_visible_upstream_response(ClientVisibleUpstreamResponse::new(
-                502,
-                Some(b"application/json".to_vec()),
-                Bytes::from_static(b"{\"error\":\"upstream marker\"}"),
-            ));
-    let (coordinator, store, provider) = coordinator(vec![
-        Script::Stream {
-            account_id: "acct_first",
-            items: vec![Err(upstream_error)],
-        },
-        Script::Error(ProviderError::new(
-            ProviderErrorKind::ProviderInfrastructureUnavailable,
-            UpstreamSendState::NotSent,
-        )),
-    ]);
+fn new_terminal_failure_does_not_restore_the_last_upstream_failure() {
+    for kind in [
+        ProviderErrorKind::ProviderInfrastructureUnavailable,
+        ProviderErrorKind::InvalidRequest,
+        ProviderErrorKind::RequestPolicyDenied,
+        ProviderErrorKind::Unavailable,
+        ProviderErrorKind::Timeout,
+    ] {
+        let operation = generate_operation();
+        let route_plan = plan(&operation);
+        let upstream_error =
+            ProviderError::new(ProviderErrorKind::Transport, UpstreamSendState::NotSent)
+                .with_pre_delivery_retry()
+                .with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
+                    "upstream marker",
+                    Some("upstream_marker".to_owned()),
+                    Some("upstream_error".to_owned()),
+                ))
+                .with_client_visible_upstream_response(ClientVisibleUpstreamResponse::new(
+                    502,
+                    Some(b"application/json".to_vec()),
+                    Bytes::from_static(b"{\"error\":\"upstream marker\"}"),
+                ));
+        let (coordinator, store, provider) = coordinator(vec![
+            Script::Stream {
+                account_id: "acct_first",
+                items: vec![Err(upstream_error)],
+            },
+            Script::Error(ProviderError::new(kind, UpstreamSendState::NotSent)),
+        ]);
 
-    let mut session = block_on(coordinator.start(
-        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
-        operation,
-        route_plan,
-        None,
-        None,
-        CancellationToken::new(),
-    ))
-    .expect("start execution");
-    let error = block_on(session.collect_uncommitted())
-        .expect_err("provider infrastructure failure must remain terminal");
-    let EngineError::Provider(error) = error else {
-        panic!("expected provider error");
-    };
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .expect("start execution");
+        let error = block_on(session.collect_uncommitted())
+            .expect_err("new terminal failure must not be replaced by an earlier upstream error");
+        let EngineError::Provider(error) = error else {
+            panic!("expected provider error");
+        };
 
-    assert_eq!(
-        error.kind(),
-        ProviderErrorKind::ProviderInfrastructureUnavailable
-    );
-    assert!(error.client_visible_upstream_error().is_none());
-    assert!(error.client_visible_upstream_response().is_none());
-    assert_eq!(provider.contexts.lock().expect("contexts lock").len(), 2);
-    let state = store.state.lock().expect("store lock");
-    assert_eq!(state.intermediate_failures, 1);
-    assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Failed);
+        assert_eq!(error.kind(), kind);
+        assert!(error.client_visible_upstream_error().is_none());
+        assert!(error.client_visible_upstream_response().is_none());
+        assert_eq!(provider.contexts.lock().expect("contexts lock").len(), 2);
+        let state = store.state.lock().expect("store lock");
+        assert_eq!(state.intermediate_failures, 1);
+        assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Failed);
+    }
 }
 
 #[test]
@@ -5446,6 +5437,11 @@ fn cancellation_before_pending_delivery_commit_reaches_terminal_state() {
 #[test]
 fn no_eligible_account_before_stream_records_failure_without_fabricating_an_attempt() {
     for (kind, status, gateway_kind) in [
+        (
+            ProviderErrorKind::SessionPolicyRestricted,
+            400,
+            GatewayErrorKind::InvalidRequest,
+        ),
         (
             ProviderErrorKind::NoEligibleAccount,
             503,
@@ -6814,13 +6810,15 @@ fn provider_candidate_advance_stops_at_the_account_rotation_budget() {
 
 #[test]
 fn prepare_failure_can_forbid_provider_fallback_without_affecting_ordinary_empty_selection() {
-    for prohibited in [false, true] {
+    for (kind, prohibited, fallback) in [
+        (ProviderErrorKind::NoEligibleAccount, false, true),
+        (ProviderErrorKind::NoEligibleAccount, true, false),
+        (ProviderErrorKind::SessionPolicyRestricted, false, false),
+        (ProviderErrorKind::SessionPolicyRestricted, true, false),
+    ] {
         let operation = generate_operation();
         let route_plan = dual_provider_plan(&operation);
-        let mut error = ProviderError::new(
-            ProviderErrorKind::NoEligibleAccount,
-            UpstreamSendState::NotSent,
-        );
+        let mut error = ProviderError::new(kind, UpstreamSendState::NotSent);
         if prohibited {
             error = error.with_retry_prohibited();
         }
@@ -6848,8 +6846,8 @@ fn prepare_failure_can_forbid_provider_fallback_without_affecting_ordinary_empty
             CancellationToken::new(),
         ))
         .unwrap();
-        assert_eq!(block_on(session.collect_uncommitted()).is_err(), prohibited);
-        assert_eq!(xai.contexts.lock().unwrap().len(), usize::from(!prohibited));
+        assert_eq!(block_on(session.collect_uncommitted()).is_err(), !fallback);
+        assert_eq!(xai.contexts.lock().unwrap().len(), usize::from(fallback));
     }
 }
 

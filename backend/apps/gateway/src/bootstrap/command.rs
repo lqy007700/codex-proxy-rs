@@ -67,6 +67,7 @@ async fn execute(
     let Environment {
         host,
         mut store,
+        timezone,
         plugin_cache,
         version,
         plugin_http,
@@ -115,6 +116,16 @@ async fn execute(
         &plugin_runtime,
     ));
     or_shutdown!(plugin_runtime, services.register_settings(&settings));
+    let accounts = gateway_admin::initialize_accounts(
+        store.admin_ports().accounts(),
+        store.admin_ports().account_runtime(),
+        store.admin_ports().settings(),
+        timezone,
+        providers.admin.clone(),
+        core.snapshot_control(),
+        core.account_probe(),
+    );
+    or_shutdown!(plugin_runtime, services.register_accounts(&accounts));
     let usage_data = gateway_admin::initialize_usage_data(
         store.admin_ports().usage_data(),
         store.admin_ports().settings(),

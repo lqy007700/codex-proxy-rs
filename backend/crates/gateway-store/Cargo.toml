@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
-rust-version = "1.97"
+rust-version = "1.99.1"
 autotests = false
 
 [[test]]
@@ -37,6 +37,7 @@ url = "2.5.8"
 uuid = { version = "1.23.3", features = ["v4", "v7"] }
 
 [dev-dependencies]
+percent-encoding = "2.3"
 tempfile = "3.23"
 tokio = { version = "1.52.3", default-features = false, features = ["macros", "rt-multi-thread", "fs", "io-util", "net", "process", "time", "test-util"] }
 

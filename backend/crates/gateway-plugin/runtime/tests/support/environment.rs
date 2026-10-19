@@ -301,6 +301,16 @@ impl Environment {
                 vec![],
             )]);
         }
+        let has_retry = configuration.get("retry_decision").is_some();
+        if has_retry {
+            contributes.extend([super::contribution_for_id(
+                &plugin_id,
+                Capability::RetryPolicy,
+                vec![Stage::Retry],
+                vec![],
+                vec![],
+            )]);
+        }
         let service_worker = (has_service || has_http)
             .then(|| std::fs::read(env!("CARGO_BIN_EXE_gateway-plugin-test-middleware")).unwrap());
         let worker = service_worker.as_deref().unwrap_or_else(|| super::worker());
@@ -338,6 +348,18 @@ impl Environment {
             secrets: BTreeMap::new(),
 
             bindings: [
+                has_retry.then(|| PluginCapabilityBinding {
+                    contribution: format!("{plugin_id}.retryPolicy"),
+                    stage: "retry".into(),
+                    order: 0,
+                    failure_policy: PluginFailurePolicy::Delegate,
+                    client_key_ids: vec![],
+                    account_group_ids: vec![],
+                    provider_ids: vec![],
+                    models: vec![],
+                    event: None,
+                    identity_bindings: vec![],
+                }),
                 has_upstream_adapter.then(|| PluginCapabilityBinding {
                     contribution: format!("{plugin_id}.upstreamAdapter"),
                     stage: "upstream".into(),
@@ -433,10 +455,19 @@ impl Environment {
         &self,
         limits: RpcLimits,
     ) -> (Arc<PluginRuntime>, gateway_core::CoreBundle) {
+        self.runtime_with_providers(limits, super::native::provider_registry())
+            .await
+    }
+
+    pub async fn runtime_with_providers(
+        &self,
+        limits: RpcLimits,
+        providers: gateway_core::engine::provider::ProviderRegistry,
+    ) -> (Arc<PluginRuntime>, gateway_core::CoreBundle) {
         let runtime = self.plugin_runtime_with_limits(limits);
         let core = gateway_core::prepare(
             self.store.core_ports(),
-            super::native::provider_registry(),
+            providers,
             Some(runtime.clone()),
             Some(runtime.observer_registry()),
             Some(runtime.policy_registry()),

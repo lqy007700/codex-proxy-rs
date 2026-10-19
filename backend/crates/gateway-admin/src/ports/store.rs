@@ -109,7 +109,9 @@ pub type AdminStoreResult<T> = Result<T, AdminStoreError>;
 
 /// 账号目录与公共账号写操作
 #[async_trait]
-pub trait AccountStore: Send + Sync {
+pub trait AccountStore:
+    super::reset_credit_automation::ResetCreditAutomationStore + Send + Sync
+{
     /// 插件回调按授权 Provider/账号在数据库过滤后做稳定 cursor 分页
     async fn list_plugin_accounts(
         &self,
@@ -127,6 +129,8 @@ pub trait AccountStore: Send + Sync {
         account_id: &str,
         runtime: AccountRuntimeSnapshot,
     ) -> AdminStoreResult<Option<AccountPageItem>>;
+
+    async fn account_exists(&self, account_id: &str) -> AdminStoreResult<bool>;
 
     async fn load_account_usage(
         &self,
@@ -241,6 +245,13 @@ pub trait AccountStore: Send + Sync {
 /// 可丢失账号运行态的管理读端口；跨存储编排由 Admin application service 拥有
 #[async_trait]
 pub trait AccountRuntimeStore: Send + Sync {
+    async fn account_concurrency(
+        &self,
+        account_id: &str,
+        offset: u64,
+        limit: u32,
+    ) -> AdminStoreResult<crate::model::accounts::AccountConcurrencyPage>;
+
     async fn active_rate_limits(&self) -> AdminStoreResult<AccountRuntimeSnapshot>;
 
     async fn account_runtime(

@@ -29,7 +29,7 @@ pub struct RetryDecisionRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "decision", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "decision", rename_all = "snake_case")]
 pub enum RetryDecision {
     Delegate,
     Stop,
@@ -60,7 +60,7 @@ pub struct ModelRouteRequest {
 
 /// 模型路由决定；宿主仍会复核目标、Key 权限和模型能力
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "decision", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "decision", rename_all = "snake_case")]
 pub enum ModelRouteDecision {
     Unhandled,
     Route {
@@ -108,7 +108,7 @@ pub struct AccountScheduleRequest {
 
 /// 账号调度结果；账号租约始终由宿主在决定返回后取得
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "decision", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "decision", rename_all = "snake_case")]
 pub enum AccountScheduleDecision {
     Pick {
         account_id: String,

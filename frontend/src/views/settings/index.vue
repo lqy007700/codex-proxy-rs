@@ -2,7 +2,7 @@
 import { ZButton, ZIconButton, ZPageHeader, ZSegmented, ZSelect } from '@codex-proxy/ui'
 
 import { Save, Undo2 } from '@lucide/vue'
-import { computed, reactive, shallowRef, watch } from 'vue'
+import { computed, nextTick, reactive, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AccountAffinityCard from './components/AccountAffinityCard.vue'
@@ -15,6 +15,7 @@ import ModelAliasesCard from './components/ModelAliasesCard.vue'
 import PrivacyPolicyCard from './components/privacy/PrivacyPolicyCard.vue'
 import RequestHistoryCard from './components/RequestHistoryCard.vue'
 import RequestLocationCard from './components/RequestLocationCard.vue'
+import ResetCreditCard from './components/ResetCreditCard.vue'
 import RotationStrategyCard from './components/RotationStrategyCard.vue'
 import SettingsAccessSection from './components/SettingsAccessSection.vue'
 import TokenRefreshCard from './components/TokenRefreshCard.vue'
@@ -51,8 +52,8 @@ function switchSection(value = 'runtime'): void {
 const {
   loading,
   saving,
-  detectingRequestLocation,
-  detectRequestLocation,
+  detectingLocation,
+  detectLocation,
   hasChanges,
   resetSettings,
   error,
@@ -73,6 +74,8 @@ const {
   concurrencyWaitTimeoutSecondsValue,
   responsesMaxDecompressedBodyMiBValue,
   usageRetentionDaysValue,
+  resetCreditLeadMinutesValue,
+  resetCreditMaxWeeklyRemainingPercentValue,
   accountAutoFreezeThresholdValue,
   accountAutoFreezeWindowSecondsValue,
   accountAutoFreezeDurationSecondsValue,
@@ -83,7 +86,14 @@ const {
   loadSettings,
 } = useSettingsForm()
 
-const disabled = computed(() => saving.value || loading.value || !!error.value)
+watch(() => !loading.value && route.hash === '#reset-credits', async (ready) => {
+  if (ready) {
+    await nextTick()
+    document.getElementById('reset-credits')?.scrollIntoView({ block: 'start' })
+  }
+}, { immediate: true })
+
+const disabled = computed(() => saving.value || loading.value || detectingLocation.value || !!error.value)
 
 watch(section, (value) => {
   visited.add(value)
@@ -115,10 +125,10 @@ watch(section, (value) => {
       />
       <div v-if="isBasicSection || hasChanges" class="ml-auto flex items-center justify-end gap-2">
         <span v-if="hasChanges" class="mr-1 size-1.5 shrink-0 rounded-full bg-cp-warning" aria-hidden="true" />
-        <ZIconButton v-if="hasChanges" aria-label="撤销全部基础设置更改" variant="solid" :disabled="saving || loading || detectingRequestLocation" @click="resetSettings">
+        <ZIconButton v-if="hasChanges" aria-label="撤销全部基础设置更改" variant="solid" :disabled="saving || loading || detectingLocation" @click="resetSettings">
           <Undo2 class="size-4" />
         </ZIconButton>
-        <ZButton type="primary" :loading="saving" :disabled="loading || detectingRequestLocation || !hasChanges || !!error" @click="saveSettings">
+        <ZButton type="primary" :loading="saving" :disabled="disabled || !hasChanges" @click="saveSettings">
           <template #icon>
             <Save class="size-4" />
           </template>
@@ -185,6 +195,10 @@ watch(section, (value) => {
             v-model:schedule-time="form.accountWarmupScheduleTime"
             v-model:model="form.accountWarmupModel"
           />
+          <ResetCreditCard
+            v-model="resetCreditLeadMinutesValue"
+            v-model:max-weekly-remaining-percent="resetCreditMaxWeeklyRemainingPercentValue"
+          />
           <RequestHistoryCard v-model="usageRetentionDaysValue" />
         </template>
 
@@ -195,7 +209,13 @@ watch(section, (value) => {
             :active="section === 'upstream'"
             :disabled="disabled"
           />
-          <RequestLocationCard v-model="form.requestLocation" v-model:enabled="form.requestLocationEnabled" :disabled="disabled || detectingRequestLocation" :detecting="detectingRequestLocation" @detect-location="detectRequestLocation" />
+          <RequestLocationCard
+            v-model="form.requestLocation"
+            v-model:enabled="form.requestLocationEnabled"
+            :disabled="disabled"
+            :detecting-location="detectingLocation"
+            @detect-location="detectLocation"
+          />
           <PrivacyPolicyCard v-model="form.codexPrivacyPolicy" :disabled="disabled" />
           <ModelAliasesCard
             :mappings="mappings"

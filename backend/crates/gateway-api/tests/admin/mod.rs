@@ -646,6 +646,8 @@ impl SettingsStore for MemorySettingsStore {
                 account_warmup_enabled: false,
                 account_warmup_schedule_time: "08:00".to_owned(),
                 account_warmup_model: None,
+                reset_credit_lead_minutes: 10,
+                reset_credit_max_weekly_remaining_percent: None,
             },
         };
         *settings = updated.clone();
@@ -1130,6 +1132,15 @@ impl ClientKeyVerifier for UnusedClientKeyVerifier {
 
 #[async_trait]
 impl AccountStore for UnusedStore {
+    async fn account_exists(&self, id: &str) -> AdminStoreResult<bool> {
+        Ok(self
+            .account
+            .lock()
+            .expect("account")
+            .as_ref()
+            .is_some_and(|account| account.account.id == id))
+    }
+
     async fn list_plugin_accounts(
         &self,
         _: gateway_admin::model::provider_credentials::PluginAccountListQuery,
@@ -1348,6 +1359,32 @@ impl AccountStore for UnusedStore {
 
 #[async_trait]
 impl AccountRuntimeStore for UnusedStore {
+    async fn account_concurrency(
+        &self,
+        account_id: &str,
+        offset: u64,
+        limit: u32,
+    ) -> AdminStoreResult<gateway_admin::model::accounts::AccountConcurrencyPage> {
+        use gateway_admin::model::accounts::{AccountConcurrencyEntry, AccountConcurrencyPage};
+        assert_eq!(account_id, "acct_cooldown");
+        assert_eq!((offset, limit), (20, 20));
+        let now = "2026-10-17T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        Ok(AccountConcurrencyPage {
+            total: 21,
+            observed_at: now,
+            entries: vec![AccountConcurrencyEntry {
+                lease_id: "lease_current".into(),
+                request_id: Some("req_current".into()),
+                client_key_id: Some("key_fixture".into()),
+                client_key_name: Some("测试 Key".into()),
+                model: Some("gpt-5.4".into()),
+                client_ip: Some("2001:db8::376".into()),
+                started_at: Some(now - chrono::Duration::seconds(15)),
+                acquired_at: Some(now - chrono::Duration::seconds(5)),
+            }],
+        })
+    }
+
     async fn active_rate_limits(&self) -> AdminStoreResult<AccountRuntimeSnapshot> {
         Ok(AccountRuntimeSnapshot {
             cooldown: BTreeMap::new(),
@@ -1789,6 +1826,8 @@ fn test_runtime_settings() -> RuntimeSettings {
             account_warmup_enabled: false,
             account_warmup_schedule_time: "08:00".to_owned(),
             account_warmup_model: None,
+            reset_credit_lead_minutes: 10,
+            reset_credit_max_weekly_remaining_percent: None,
         },
     }
 }
@@ -1844,4 +1883,30 @@ fn unsupported_provider() -> ProviderAdminError {
 
 fn unavailable_system() -> SystemOperationError {
     SystemOperationError::new(SystemOperationErrorKind::Internal, "unused test operation")
+}
+
+#[async_trait]
+impl gateway_admin::ports::reset_credit_automation::ResetCreditAutomationStore for UnusedStore {
+    async fn reset_credit_automation(
+        &self,
+        _: &str,
+    ) -> AdminStoreResult<
+        Option<gateway_admin::model::reset_credit_automation::ResetCreditAutomation>,
+    > {
+        Ok(None)
+    }
+    async fn due_reset_credit_automations(
+        &self,
+        _: chrono::DateTime<chrono::Utc>,
+        _: u32,
+    ) -> AdminStoreResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+    async fn save_reset_credit_automation(
+        &self,
+        _: &gateway_admin::model::reset_credit_automation::ResetCreditAutomation,
+        _: Option<&gateway_admin::model::MutationContext>,
+    ) -> AdminStoreResult<u64> {
+        Err(unavailable("reset-credit automation"))
+    }
 }

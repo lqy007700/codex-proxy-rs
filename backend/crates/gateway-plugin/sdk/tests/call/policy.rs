@@ -1,4 +1,4 @@
-//! 验证插件路由和账号调度决策使用显式且严格的线协议值
+//! 验证插件路由和账号调度决策的类型合同与附加字段透传边界
 
 use gateway_plugin_sdk::call::policy::{
     AccountScheduleCandidate, AccountScheduleDecision, AccountScheduleRequest, ModelRouteDecision,
@@ -7,7 +7,7 @@ use gateway_plugin_sdk::call::policy::{
 use serde_json::json;
 
 #[test]
-fn route_and_scheduler_decisions_are_explicit_and_strict() {
+fn route_and_scheduler_decisions_ignore_unused_fields() {
     let route = ModelRouteRequest {
         request_id: "req_policy".into(),
         operation: "generate".into(),
@@ -31,11 +31,15 @@ fn route_and_scheduler_decisions_are_explicit_and_strict() {
         .unwrap(),
         json!({"decision":"route","provider":"openai"})
     );
-    assert!(
+    assert_eq!(
         serde_json::from_value::<ModelRouteDecision>(
             json!({"decision":"route","provider":"openai","unexpected":true})
         )
-        .is_err()
+        .unwrap(),
+        ModelRouteDecision::Route {
+            provider: Some("openai".into()),
+            model: None,
+        }
     );
 
     let schedule = AccountScheduleRequest {
@@ -84,8 +88,16 @@ fn filtered_delegation_has_an_explicit_exclusion_list() {
     for invalid in [
         json!({"decision":"delegate_filtered"}),
         json!({"decision":"delegate_filtered","exclude_account_ids":null}),
-        json!({"decision":"delegate_filtered","exclude_account_ids":[],"threshold":90}),
     ] {
         assert!(serde_json::from_value::<AccountScheduleDecision>(invalid).is_err());
     }
+    assert_eq!(
+        serde_json::from_value::<AccountScheduleDecision>(
+            json!({"decision":"delegate_filtered","exclude_account_ids":[],"threshold":90})
+        )
+        .unwrap(),
+        AccountScheduleDecision::DelegateFiltered {
+            exclude_account_ids: vec![]
+        }
+    );
 }

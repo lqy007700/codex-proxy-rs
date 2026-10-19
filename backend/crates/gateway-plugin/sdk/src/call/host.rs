@@ -352,11 +352,9 @@ impl ModelEventBatch {
         }
         let mut cursor = payload_start;
         let mut events = Vec::with_capacity(count);
-        for chunk in bytes[8..payload_start].chunks_exact(4) {
-            let length = usize::try_from(u32::from_be_bytes(
-                chunk.try_into().map_err(|_| ModelEventBatchError)?,
-            ))
-            .map_err(|_| ModelEventBatchError)?;
+        for chunk in bytes[8..payload_start].as_chunks::<4>().0 {
+            let length =
+                usize::try_from(u32::from_be_bytes(*chunk)).map_err(|_| ModelEventBatchError)?;
             let end = cursor.checked_add(length).ok_or(ModelEventBatchError)?;
             let event = bytes.get(cursor..end).ok_or(ModelEventBatchError)?;
             events.push(ExecutionEvent::decode(event).map_err(|_| ModelEventBatchError)?);

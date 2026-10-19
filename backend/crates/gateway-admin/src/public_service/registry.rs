@@ -29,6 +29,13 @@ impl Registry {
         super::settings::register(self, service)
     }
 
+    pub fn register_accounts(
+        &mut self,
+        service: &Arc<dyn crate::AccountsService>,
+    ) -> Result<(), AdminError> {
+        super::accounts::register(self, service)
+    }
+
     pub(crate) fn register<I, O>(
         &mut self,
         name: &'static str,

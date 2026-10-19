@@ -59,10 +59,6 @@ export interface UsageLatencyDetails {
   upstreamResponseMs?: number
   upstreamApiOverheadMs?: number
   upstreamEngineMs?: number
-  upstreamEngineIapiTtftMs?: number
-  upstreamEngineServiceTtftMs?: number
-  upstreamEngineIapiTbtMs?: number
-  upstreamEngineServiceTbtMs?: number
   admissionDecisionMs?: number
   accountSelectionWaitMs?: number
   capacityUsedSlots?: number
@@ -85,6 +81,8 @@ export interface UsageListRecord {
   logicalOutcome: string
   attemptCount: number
   message: string | null
+  errorCode: string | null
+  errorMessage: string | null
   clientApiKeyName: string | null
   id: string
   provider: string | null
@@ -492,8 +490,8 @@ export interface UsageDiagnosticsResponse {
 
 // 请求参数类型：仅定义 API 边界的形状，调用方不依赖显式声明。
 interface UsageRangeQuery {
-  period: 'today' | '7d' | '30d'
-  asOf: number
+  startTime: string
+  endTime: string
   provider?: string
   model?: string
   statusCode?: number
@@ -515,6 +513,8 @@ interface UsageDetailQuery {
 }
 
 type UsageDiagnosticsQuery = UsageRangeQuery & { dimension: string }
+
+type DiagnosticsDownloadParams = { requestId: string } | { errorId: string }
 
 export function getUsageRecords(data: UsagePageQuery, options: RequestOptions = {}) {
   return request<UsageRecordsResponse>({
@@ -570,7 +570,7 @@ export function getUsageRecordInsightsDiagnostics(data: UsageDiagnosticsQuery, o
   })
 }
 
-export function downloadDiagnostics(data: { requestId: string } | { errorId: string }, options: RequestOptions = {}) {
+export function downloadDiagnostics(data: DiagnosticsDownloadParams, options: RequestOptions = {}) {
   return requestRaw({
     url: '/api/admin/diagnostics/export',
     method: 'GET',

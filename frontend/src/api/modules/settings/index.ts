@@ -1,4 +1,5 @@
 import type { RequestOptions } from '../../request'
+import type { ProxyLocationDetection } from '../proxies'
 import type { CodexPrivacyPolicy } from './privacy'
 import type { ClientProfileSelection, ProviderRequestProfiles, ProviderRequestProfileUpdates, XaiClientProfileSelection } from './profiles'
 import request from '../../request'
@@ -13,6 +14,15 @@ export interface RequestLocation {
   region: string
   city: string
   timezone: string
+}
+
+export function detectRequestLocation(options: RequestOptions = {}) {
+  return request<ProxyLocationDetection>({
+    url: '/api/admin/settings/location/detect',
+    method: 'POST',
+    timeout: 25000,
+    ...options,
+  })
 }
 
 export type AccountAffinity = 'relaxed' | 'preferred' | 'strict'
@@ -67,6 +77,8 @@ export interface RuntimeSettings {
   accountWarmupEnabled: boolean
   accountWarmupScheduleTime: string
   accountWarmupModel: string | null
+  resetCreditLeadMinutes: number
+  resetCreditMaxWeeklyRemainingPercent: number | null
   updatedAt: string
   updatedAtDisplay: string
 }
@@ -146,7 +158,11 @@ export function deleteAdminApiKey() {
   })
 }
 
-export function getCodexDesktopWindowsDownloads(data: { refresh?: boolean } = {}) {
+interface CodexDesktopWindowsDownloadsParams {
+  refresh?: boolean
+}
+
+export function getCodexDesktopWindowsDownloads(data: CodexDesktopWindowsDownloadsParams = {}) {
   return request<CodexDesktopWindowsDownloads>({
     url: '/api/admin/settings/client-downloads/codex-desktop/windows',
     method: 'GET',

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { useTableColumns, ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable, ZTableColumnSettings } from '@codex-proxy/ui'
+import type { Account } from '@/api'
 
+import { useTableColumns, ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable, ZTableColumnSettings } from '@codex-proxy/ui'
 import { ChevronDown } from '@lucide/vue'
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import AccountGroupMarks from '@/components/AccountGroupMarks.vue'
 import LastUsedAtCell from '@/components/LastUsedAtCell.vue'
@@ -14,6 +15,7 @@ import AccountQuotaPanel from './components/account-quota-panel/index.vue'
 import AccountQuotaSummaryCell from './components/account-quota-summary-cell/index.vue'
 import AccountStatusBadge from './components/account-status-badge/index.vue'
 import AccountBatchEditModal from './components/AccountBatchEditModal.vue'
+import AccountConcurrencyModal from './components/AccountConcurrencyModal.vue'
 import AccountConnectionTestModal from './components/AccountConnectionTestModal.vue'
 import AccountEditModal from './components/AccountEditModal.vue'
 import AccountFilters from './components/AccountFilters.vue'
@@ -30,6 +32,13 @@ import { useAccountMutations } from './composables/useAccountMutations'
 import { useAccountsQuery } from './composables/useAccountsQuery'
 import { useAccountsTable } from './composables/useAccountsTable'
 import { accountColumns } from './constants'
+
+const concurrencyAccount = shallowRef<Account | null>(null)
+const showConcurrency = shallowRef(false)
+function openConcurrency(account: Account) {
+  concurrencyAccount.value = account
+  showConcurrency.value = true
+}
 
 const selectedIds = ref<Set<string>>(new Set())
 const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(accountColumns, 'accounts')
@@ -320,7 +329,7 @@ const {
             </template>
 
             <template #usage="{ row }">
-              <AccountQuotaSummaryCell :account="row" />
+              <AccountQuotaSummaryCell :account="row" @show-concurrency="openConcurrency(row)" />
             </template>
 
             <template #groups="{ row }">
@@ -373,6 +382,8 @@ const {
         </div>
       </template>
     </ZCard>
+
+    <AccountConcurrencyModal v-model="showConcurrency" :account="concurrencyAccount" />
 
     <AccountConnectionTestModal
       v-model="showConnectionTestModal"

@@ -400,3 +400,114 @@ async fn request_scopes_page_all_outcomes_without_changing_usage_facts() {
     assert_eq!(summary.requests.latency_count, 1);
     database.close().await;
 }
+
+#[tokio::test]
+async fn request_status_pages_share_one_request_timeline() {
+    use gateway_admin::{
+        model::{diagnostics::DiagnosticTarget, observability::UsageRecordScope},
+        ports::store::ObservabilityStore,
+    };
+
+    let Some(database) = TestDatabase::create("usage_status_pages").await else {
+        return;
+    };
+    let start = chrono::DateTime::parse_from_rfc3339("2026-09-01T10:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    // 同时刻请求按 ID 稳定排列；成功请求的中间错误不能额外占据列表行
+    for (id, outcome) in [
+        ("status_a", "succeeded"),
+        ("status_b", "failed"),
+        ("status_c", "incomplete"),
+        ("status_d", "cancelled"),
+        ("status_e", "running"),
+        ("status_f", "succeeded"),
+    ] {
+        seed(&database.pool, id, start, &[]).await;
+        sqlx::query("update model_requests set outcome=$2, provider_kind='openai', completed_at=case when $2='running' then null else completed_at end, input_tokens=case when $2='succeeded' then input_tokens else null end, output_tokens=case when $2='succeeded' then output_tokens else null end, total_tokens=case when $2='succeeded' then total_tokens else null end where id=$1")
+            .bind(id).bind(outcome).execute(&database.pool).await.unwrap();
+    }
+    sqlx::query(
+        r#"update model_requests set requested_model_id='model_status_b',request_observation_json=jsonb_set(request_observation_json,'{error}','{"providerErrorCode":"server_error","message":"The upstream service is temporarily unavailable."}'::jsonb),client_status_code=502 where id='status_b'"#,
+    )
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    for id in ["event_a", "event_b"] {
+        sqlx::query("insert into ops_events(id,model_request_id,attempt_index,level,component,operation,failure_kind,message,created_at) values($1,'status_a',1,'error','provider','request','upstream','retry evidence',$2)")
+            .bind(id).bind(start).execute(&database.pool).await.unwrap();
+    }
+    sqlx::query("insert into ops_events(id,level,component,operation,failure_kind,message,created_at) values('standalone','error','system','refresh','upstream','standalone error',$1)").bind(start).execute(&database.pool).await.unwrap();
+    super::drain_analytics(&database.pool).await;
+    let repo = observability_repository(&database.pool);
+    let range =
+        ObservabilityRange::new(start - TimeDelta::minutes(1), start + TimeDelta::minutes(5))
+            .unwrap();
+    for (scope, expected) in [
+        (UsageRecordScope::Usage, vec!["status_f", "status_a"]),
+        (
+            UsageRecordScope::FailedOrIncomplete,
+            vec!["status_c", "status_b"],
+        ),
+        (
+            UsageRecordScope::All,
+            vec![
+                "status_f", "status_e", "status_d", "status_c", "status_b", "status_a",
+            ],
+        ),
+    ] {
+        let mut actual = Vec::new();
+        for current_page in 1..=4 {
+            let page = repo
+                .list_usage_records(UsageRecordQuery {
+                    scope,
+                    range,
+                    filter: UsageRecordFilter::default(),
+                    current_page,
+                    page_size: ObservabilityPageSize::new(2).unwrap(),
+                })
+                .await
+                .unwrap();
+            assert_eq!(page.total, expected.len() as u64);
+            for item in page.items {
+                if matches!(
+                    item.outcome.as_str(),
+                    "failed" | "incomplete" | "running" | "cancelled"
+                ) {
+                    assert_eq!(item.total_tokens, None);
+                }
+                actual.push(item.id);
+            }
+        }
+        assert_eq!(actual, expected, "{scope:?}");
+    }
+    let page = repo
+        .list_usage_records(UsageRecordQuery {
+            scope: UsageRecordScope::FailedOrIncomplete,
+            range,
+            filter: UsageRecordFilter {
+                search: Some("model_status_b".into()),
+                provider_kind: Some("openai".into()),
+                ..Default::default()
+            },
+            current_page: 1,
+            page_size: ObservabilityPageSize::new(10).unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items[0].id, "status_b");
+    assert_eq!(page.items[0].client_status_code, Some(502));
+    assert_eq!(page.items[0].error_code.as_deref(), Some("server_error"));
+    assert_eq!(
+        page.items[0].error_message.as_deref(),
+        Some("The upstream service is temporarily unavailable.")
+    );
+    // 诊断包仍可按请求 ID 关联中间事件，不受列表时间范围或最终结果限制
+    let errors = super::admin_observability_store(&database.pool)
+        .diagnostic_errors(&DiagnosticTarget::Request("status_a".into()), 100)
+        .await
+        .unwrap();
+    assert_eq!(errors.len(), 2);
+    database.close().await;
+}

@@ -67,10 +67,14 @@ async fn short_retention_keeps_statistics_readable_until_each_deletion_batch_is_
     let range = ObservabilityRange::new(now - ChronoDuration::days(41), now).unwrap();
     let statistics = observability_repository(&database.pool);
     let dashboard = admin_observability_store(&database.pool);
-    let dashboard_query = DashboardQuery::new(TimeRange {
-        start: now - ChronoDuration::days(1),
-        end: now,
-    });
+    let dashboard_query = DashboardQuery::new(
+        TimeRange {
+            start: now - ChronoDuration::days(1),
+            end: now,
+        },
+        Default::default(),
+    )
+    .expect("dashboard query");
     let original = statistics
         .usage_summary(range, Default::default())
         .await

@@ -108,10 +108,10 @@ pub(crate) struct SelectCodexProviderEndpointCredential<'a> {
     pub requires_oauth: bool,
 }
 
-/// 选号使用的模型类别，区分图片资格与不涉及模型的端点
+/// 选号使用的模型类别，图片额外检查套餐资格，原生端点允许模型未知
 #[derive(Clone, Copy)]
 pub(crate) enum CodexSelectionModel<'a> {
-    NotApplicable,
+    Search(Option<&'a str>),
     Requested(&'a str),
     Image(Option<&'a str>),
 }
@@ -119,9 +119,8 @@ pub(crate) enum CodexSelectionModel<'a> {
 impl<'a> CodexSelectionModel<'a> {
     pub(crate) const fn model(self) -> Option<&'a str> {
         match self {
-            Self::NotApplicable => None,
             Self::Requested(model) => Some(model),
-            Self::Image(model) => model,
+            Self::Image(model) | Self::Search(model) => model,
         }
     }
 
@@ -150,10 +149,11 @@ impl<'a> CodexSelectionModel<'a> {
 
     pub(crate) fn allows(self, scope: &FrozenAccountScope, account: &ProviderAccountId) -> bool {
         match self {
-            Self::NotApplicable => scope.allows(account),
-            Self::Requested(model) | Self::Image(Some(model)) => scope.allows_model(account, model),
-            // 缺失、重复或不可解析的图片模型不能绕过黑白名单；不猜上游默认值
-            Self::Image(None) => {
+            Self::Requested(model) | Self::Image(Some(model)) | Self::Search(Some(model)) => {
+                scope.allows_model(account, model)
+            }
+            // 缺失、重复或不可解析的模型不能绕过黑白名单；不猜上游默认值
+            Self::Image(None) | Self::Search(None) => {
                 scope.allows(account)
                     && scope.directory().account(account).is_some_and(|account| {
                         account.model_access().mode() == AccountModelAccessMode::All
@@ -433,7 +433,7 @@ impl CodexCredentialSelector {
             .and_then(|scope| scope.state.as_ref())
             .is_some_and(|state| state.excluded_accounts().contains(&selected_account))
         {
-            return Err(CredentialSelectionError::NoEligibleCredential);
+            return Err(CredentialSelectionError::SessionPolicyRestricted);
         }
         lease.cyber_policy_scope = cyber_policy_scope;
         Ok(())
@@ -917,6 +917,25 @@ impl CodexCredentialSelector {
                         })
                     } else if quota_exhausted {
                         Err(CredentialSelectionError::QuotaExhausted)
+                    } else if cyber_policy_scope
+                        .as_ref()
+                        .and_then(|scope| scope.state.as_ref())
+                        .is_some_and(|state| {
+                            let mut effective = candidates.iter().filter(|candidate| {
+                                pinned_account
+                                    .as_ref()
+                                    .is_none_or(|id| candidate.account.id() == id)
+                            });
+                            effective.next().is_some_and(|first| {
+                                state.excluded_accounts().contains(first.account.id())
+                                    && effective.all(|candidate| {
+                                        state.excluded_accounts().contains(candidate.account.id())
+                                    })
+                            })
+                        })
+                    {
+                        // 仅明确的会话策略排除使用此分类，空池、传输和容量失败保持原分类
+                        Err(CredentialSelectionError::SessionPolicyRestricted)
                     } else {
                         Err(CredentialSelectionError::NoEligibleCredential)
                     };
@@ -959,6 +978,7 @@ impl CodexCredentialSelector {
                             context.concurrency_limit(&account),
                             request.attempt.deadline(),
                         )
+                        .with_metadata(request.attempt.lease_metadata())
                         .with_concurrency_pool(concurrency_pool)
                         .with_cancellation(request.attempt.cancellation().clone()),
                     ))
@@ -1762,6 +1782,8 @@ pub enum CredentialSelectionError {
     QueueRejected(#[from] QueueRejection),
     #[error("no eligible Codex account")]
     NoEligibleCredential,
+    #[error("upstream safety policy temporarily excludes accounts for this session")]
+    SessionPolicyRestricted,
     #[error("all eligible Codex accounts have exhausted their quota")]
     QuotaExhausted,
     #[error("Codex account capacity is unavailable")]

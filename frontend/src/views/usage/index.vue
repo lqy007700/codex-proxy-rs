@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import type { TableColumn } from '@codex-proxy/ui'
 import type { UsageListRecord } from '@/api'
-import { defineTableColumns, useTableColumns, ZCard, ZIconButton, ZPageHeader, ZPagination, ZSegmented, ZSelect, ZTableColumnSettings } from '@codex-proxy/ui'
+import { defineTableColumns, useTableColumns, ZCard, ZDatePicker, ZIconButton, ZPageHeader, ZPagination, ZSegmented, ZTableColumnSettings } from '@codex-proxy/ui'
 
 import { ChevronDown, CloudRain, Eye, List, Sun } from '@lucide/vue'
-import { shallowRef, watch } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import ProviderFilter from '@/components/ProviderFilter.vue'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
 import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
+import UsageErrorDetailModal from './components/UsageErrorDetailModal.vue'
 import UsageFilters from './components/UsageFilters.vue'
 import UsageInsightsGrid from './components/UsageInsightsGrid.vue'
 import UsageOutcomeCell from './components/UsageOutcomeCell.vue'
@@ -15,24 +17,22 @@ import UsageSummaryCards from './components/UsageSummaryCards.vue'
 import { useUsageRecordDetail } from './composables/useUsageRecordDetail'
 import { useUsageRecordsTable } from './composables/useUsageRecordsTable'
 import { useUsageTimeRange } from './composables/useUsageTimeRange'
-import { usageTimeRangeOptions } from './constants'
+import { isErrorUsageRecord } from './utils/detail'
 
 const statsExpanded = shallowRef(true)
 const requestColumns = defineTableColumns<UsageListRecord>([
   { key: 'logicalOutcome', label: '请求结果', kind: 'custom', size: 'lg', hideable: false },
   ...usageRecordColumns,
 ])
-const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(requestColumns, 'usage-requests')
 const recordViewOptions = [
   { label: '所有请求', value: 'all', icon: List },
   { label: '成功', value: 'success', icon: Sun },
   { label: '错误', value: 'error', icon: CloudRain },
 ]
-const { timeRange, timeRangeParams, refreshTimeRangeEnd, latestTimeRangeParams }
+const { timeRange, timeRangeParams, disabledDate, refreshTimeRangeEnd, latestTimeRangeParams }
   = useUsageTimeRange()
 
 const {
-  currentPage,
   searchQuery,
   recordScope,
   providerQuery,
@@ -54,11 +54,20 @@ const {
   latestTimeRangeParams,
 })
 
+const recordColumns = computed<TableColumn<UsageListRecord>[]>(() => recordScope.value === 'error'
+  ? requestColumns.flatMap(column => column.key === 'route'
+      ? [column, { key: 'errorMessage', label: '错误', kind: 'custom', size: '4xl', hideable: false }]
+      : [column])
+  : requestColumns)
+const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(recordColumns, 'usage-requests')
+
 const { showDetailModal, selectedUsageRecord, handleViewDetail } = useUsageRecordDetail()
+const detailComponent = computed(() => isErrorUsageRecord(selectedUsageRecord.value)
+  ? UsageErrorDetailModal
+  : UsageRecordDetailModal)
 
 watch(timeRange, () => {
   refreshTimeRangeEnd()
-  currentPage.value = 1
   void loadUsageRecords()
 })
 </script>
@@ -67,7 +76,16 @@ watch(timeRange, () => {
   <div class="w-full">
     <ZPageHeader title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
       <template #actions>
-        <ZSelect v-model="timeRange" :options="usageTimeRangeOptions" class="w-34" />
+        <ZDatePicker
+          v-model="timeRange"
+          type="daterange"
+          :clearable="false"
+          :editable="false"
+          :disabled-date="disabledDate"
+          single-panel
+          aria-label="统计日期范围，仅可选择最近 31 天"
+          class="w-60 max-w-full"
+        />
         <ProviderFilter
           v-model="providerQuery"
           :disabled="refreshingList"
@@ -124,13 +142,13 @@ watch(timeRange, () => {
               :empty-text="error ? `加载失败：${error}` : '当前筛选下暂无请求'"
             >
               <template #logicalOutcome="{ row }">
-                <UsageOutcomeCell :record="row" />
+                <UsageOutcomeCell :record="row" :show-message="recordScope !== 'error'" />
               </template>
               <template #actions="{ row }">
                 <div class="flex items-center justify-start">
                   <ZIconButton
                     size="small"
-                    aria-label="查看使用记录详情"
+                    :aria-label="isErrorUsageRecord(row) ? '查看错误详情' : '查看使用记录详情'"
                     @click="handleViewDetail(row)"
                   >
                     <Eye class="size-3.5" />
@@ -172,6 +190,6 @@ watch(timeRange, () => {
       </template>
     </details>
 
-    <UsageRecordDetailModal v-model="showDetailModal" :record="selectedUsageRecord" />
+    <component :is="detailComponent" v-model="showDetailModal" :record="selectedUsageRecord" />
   </div>
 </template>

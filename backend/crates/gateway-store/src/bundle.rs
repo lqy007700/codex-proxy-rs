@@ -172,6 +172,9 @@ async fn connect(
     )?);
 
     let plugins = Arc::new(postgres::PgPluginStore::new(pool.clone()));
+    if !read_only {
+        plugins.recover_abandoned_state_transitions().await?;
+    }
     let usage_data = Arc::new(postgres::PgUsageDataStore::new(
         pool.clone(),
         observability_query_budget.clone(),

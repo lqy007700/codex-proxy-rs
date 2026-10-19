@@ -118,7 +118,7 @@ impl NestedExecutionGraph {
     pub(super) fn acquire(self: &Arc<Self>) -> Result<NestedExecutionPermit, GatewayError> {
         if self
             .active
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |active| {
                 (active < MAX_CONCURRENT_NESTED_EXECUTIONS).then_some(active + 1)
             })
             .is_err()
@@ -130,7 +130,7 @@ impl NestedExecutionGraph {
         }
         if self
             .total_started
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |total| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |total| {
                 (total < MAX_NESTED_EXECUTIONS).then_some(total + 1)
             })
             .is_err()

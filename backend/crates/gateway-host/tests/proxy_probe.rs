@@ -1,4 +1,4 @@
-//! 验证代理探测的双栈地址、认证、证书与失败边界
+//! 验证代理及直连探测的双栈地址、认证、证书与失败边界
 
 use gateway_admin::ports::proxy::ProxyProbe;
 use gateway_core::account::OutboundProxy;
@@ -157,6 +157,85 @@ async fn dual_stack_proxy_probe_reports_single_stack_when_only_one_succeeds() {
 
 fn location_response(ip: &str, timezone: &str) -> serde_json::Value {
     json!({"success": true, "ip": ip, "country_code": "JP", "region": "Tokyo", "city": "Tokyo", "timezone": {"id": timezone}})
+}
+
+#[tokio::test]
+async fn direct_location_uses_verified_addresses_and_rejects_conflicting_timezones() {
+    use gateway_admin::model::proxies::ProxyLocationDetection;
+
+    for v6_timezone in [Some("Asia/Tokyo"), Some("America/New_York"), None] {
+        let server = MockServer::start().await;
+        for (endpoint, ip) in [("/v4", "203.0.113.8"), ("/v6", "2001:db8::8")] {
+            let response = if endpoint == "/v6" && v6_timezone.is_none() {
+                ResponseTemplate::new(503)
+            } else {
+                ResponseTemplate::new(200).set_body_json(json!({"ip": ip}))
+            };
+            Mock::given(path(endpoint))
+                .respond_with(response)
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        for (ip, timezone) in [
+            ("203.0.113.8", Some("Asia/Tokyo")),
+            ("2001:db8::8", v6_timezone),
+        ] {
+            if let Some(timezone) = timezone {
+                Mock::given(path(format!("/geo/{ip}")))
+                    .respond_with(
+                        ResponseTemplate::new(200).set_body_json(location_response(ip, timezone)),
+                    )
+                    .expect(1)
+                    .mount(&server)
+                    .await;
+            }
+        }
+        let result = HttpProxyProbe::new_dual(
+            format!("{}/v4", server.uri()),
+            format!("{}/v6", server.uri()),
+        )
+        .with_location_endpoint(format!("{}/geo", server.uri()))
+        .test(None, true)
+        .await;
+        assert!(result.success);
+        if v6_timezone == Some("America/New_York") {
+            assert_eq!(result.location, ProxyLocationDetection::Conflict);
+        } else {
+            let ProxyLocationDetection::Detected { location } = result.location else {
+                panic!("direct location missing")
+            };
+            assert_eq!(location.timezone.name(), "Asia/Tokyo");
+            assert_eq!(location.city, "Tokyo");
+        }
+    }
+}
+
+#[tokio::test]
+async fn direct_location_failure_does_not_retry_the_same_path_or_return_a_location() {
+    use gateway_admin::model::proxies::ProxyLocationDetection;
+
+    let server = MockServer::start().await;
+    Mock::given(path("/ip"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ip": "203.0.113.8"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/geo/203.0.113.8"))
+        .respond_with(ResponseTemplate::new(429))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let result = HttpProxyProbe::new(format!("{}/ip", server.uri()))
+        .with_location_endpoint(format!("{}/geo", server.uri()))
+        .test(None, true)
+        .await;
+    assert_eq!(
+        result.location,
+        ProxyLocationDetection::Failed {
+            message: "位置查询服务限流，请稍后手动重试".to_owned()
+        }
+    );
 }
 
 #[tokio::test]

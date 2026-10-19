@@ -21,6 +21,7 @@ pub mod freeze_recovery;
 pub mod model;
 pub mod ports;
 pub mod public_service;
+mod reset_credit_automation;
 mod use_case;
 pub use use_case::plugins::{PluginDistributionPorts, PluginManagementService, PluginsService};
 
@@ -420,13 +421,15 @@ async fn initialize_inner(
     auth.ensure_default_admin(config.default_password.expose())
         .await?;
 
-    let accounts = Arc::new(DefaultAccountsService::new(
+    let accounts = initialize_accounts(
         store.accounts(),
         store.account_runtime(),
+        store.settings(),
+        timezone,
         registry.clone(),
         snapshot.clone(),
         probe.clone(),
-    ));
+    );
     let backup_ports = store.backup();
     let backups = Arc::new(DefaultBackupService::new(
         backup_ports.repository(),
@@ -477,6 +480,7 @@ async fn initialize_inner(
     let usage_data = initialize_usage_data(store.usage_data(), store.settings(), registry.clone());
     let mut public_services = public_service::Registry::new(service_middleware);
     public_services.register_settings(&settings)?;
+    public_services.register_accounts(&accounts)?;
     public_services.register_usage_data(&usage_data)?;
     let services = AdminServices {
         timezone,
@@ -553,6 +557,33 @@ async fn initialize_inner(
     .map_err(|_| AdminError::internal("导入 Worker 注册信息不合法"))?;
     worker_contributions.push(WorkerContribution::Registration(registration));
     worker_contributions.extend(freeze_recovery_worker_contribution(freeze_recovery)?);
+    let id = WorkerId::try_new(WorkerKind::ResetCreditAutomation, "admin")
+        .map_err(|_| AdminError::internal("重置卡 Worker ID 不合法"))?;
+    let schedule = WorkerSchedule::try_new(
+        Duration::from_secs(5),
+        Duration::from_secs(5),
+        Duration::from_secs(60),
+        Duration::from_secs(90),
+        Duration::from_secs(30),
+    )
+    .map_err(|_| AdminError::internal("重置卡 Worker 调度配置不合法"))?;
+    let lease = WorkerLeaseRequest::try_new(id.clone(), Duration::from_secs(90))
+        .map_err(|_| AdminError::internal("重置卡 Worker 租约配置不合法"))?;
+    worker_contributions.push(WorkerContribution::Registration(
+        WorkerRegistration::try_new(
+            id,
+            WorkerRunnable::Scheduled {
+                schedule,
+                lease: Some(lease),
+                task: Box::new(reset_credit_automation::ResetCreditAutomationTask {
+                    accounts,
+                    store: store.accounts(),
+                    settings: store.settings(),
+                }),
+            },
+        )
+        .map_err(|_| AdminError::internal("重置卡 Worker 注册失败"))?,
+    ));
     Ok(AdminBundle {
         services,
         worker_contributions,
@@ -639,6 +670,28 @@ fn freeze_recovery_worker_contribution(
     )
     .map_err(|_| AdminError::internal("冻结恢复 Worker 注册信息不合法"))?;
     Ok(vec![WorkerContribution::Registration(registration)])
+}
+
+/// 服务端与 CLI 复用账号用例，不随命令启动后台调度
+#[must_use]
+pub fn initialize_accounts(
+    accounts: Arc<dyn ports::store::AccountStore>,
+    account_runtime: Arc<dyn ports::store::AccountRuntimeStore>,
+    settings: Arc<dyn ports::store::SettingsStore>,
+    timezone: gateway_core::time::DeploymentTimeZone,
+    providers: ProviderAdminRegistry,
+    snapshot: Arc<dyn SnapshotControl>,
+    probe: Arc<dyn AccountProbe>,
+) -> Arc<dyn AccountsService> {
+    Arc::new(DefaultAccountsService::new(
+        accounts,
+        account_runtime,
+        settings,
+        timezone,
+        providers,
+        snapshot,
+        probe,
+    ))
 }
 
 /// 设置服务不依赖 Web 管理会话，CLI 与服务器通过同一用例执行事务和发布

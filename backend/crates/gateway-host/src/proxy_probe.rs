@@ -232,7 +232,7 @@ impl HttpProxyProbe {
                             let message = res_v4
                                 .err()
                                 .or(res_v6.err())
-                                .unwrap_or("代理连接失败")
+                                .unwrap_or("出口连接失败")
                                 .to_owned();
                             ProxyTestResult {
                                 location: ProxyLocationDetection::NotRequested,

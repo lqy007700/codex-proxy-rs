@@ -31,6 +31,10 @@ sha256sum --check --strict .frozen-sha256
 
 遇到 checksum 不一致，先核对运行版本和文件来源；不要修改数据库中的 checksum 来绕过校验
 
+本发行线的连续升级保留 `0032_request_history_retention.sql`、`0033_table_naming.sql` 和
+`0034_group_image_and_scheduling.sql`，代理 WS 容量与重置卡自动化结构由 `0035_proxy_and_reset_credits.sql` 追加
+不要把其他发行线相同编号的迁移文件放入此目录，也不要覆盖已有冻结记录
+
 ## 本地测试库
 
 `gateway-store` 的 PG/Redis 集成测试需要以下环境变量，未设置时在本地
@@ -48,7 +52,8 @@ export CPR_TEST_REDIS_URL='redis://:<password>@127.0.0.1:6379'
 PostgreSQL 的临时 schema 测试连接使用异步提交，保留事务可见性、回滚和完整迁移检查
 需要验证数据库崩溃后的持久性时，使用独立数据库与生产连接配置，不复用这类 fixture
 
-运行包含 `StoreBundle` 初始化的完整集成测试时，两条测试 URL 都须包含密码，且密码满足 Store
-启动配置的 48 位十六进制要求；仅能连接数据库并不代表该初始化合同通过。专用服务使用对应测试密码，
+运行包含 `StoreBundle` 初始化的完整集成测试时，两条测试 URL 都须包含密码，原始密码须满足
+[Store 密码要求](../../deploy/README.md#手动安装)，在测试 URL 中按 URL 规则编码。
+仅能连接数据库并不代表该初始化合同通过。专用服务使用对应测试密码，
 并在测试进程中清除 `CPR_DATABASE_URL`、`CPR_REDIS_URL`、`CPR_DATABASE_PASSWORD` 和
 `CPR_REDIS_PASSWORD`，避免启动配置被部署环境覆盖

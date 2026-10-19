@@ -188,6 +188,7 @@ impl PluginCallbacks {
                 | gateway_plugin_sdk::Stage::Attempt
                 | gateway_plugin_sdk::Stage::Routing
                 | gateway_plugin_sdk::Stage::Scheduling
+                | gateway_plugin_sdk::Stage::Retry
         ) {
             return Err(denied());
         }
@@ -233,11 +234,15 @@ impl PluginCallbacks {
         &self,
         context: &CallContext,
         proxy: Option<OutboundProxy>,
+        request: Option<Arc<gateway_core::engine::extensions::RequestContext>>,
     ) -> Result<Arc<CallbackScope>, PluginFault> {
-        if !matches!(context.stage, gateway_plugin_sdk::Stage::Management) {
+        if !matches!(
+            context.stage,
+            gateway_plugin_sdk::Stage::Management | gateway_plugin_sdk::Stage::PublicManagement
+        ) {
             return Err(denied());
         }
-        self.prepare_scope(context, proxy)
+        self.prepare_scope(context, proxy, request)
     }
 
     pub(crate) fn prepare_command_line(
@@ -247,12 +252,13 @@ impl PluginCallbacks {
         if context.stage != gateway_plugin_sdk::Stage::CommandLine {
             return Err(denied());
         }
-        self.prepare_scope(context, None)
+        self.prepare_scope(context, None, None)
     }
 
     pub(crate) fn prepare_frontend_authentication(
         &self,
         context: &CallContext,
+        request: Option<Arc<gateway_core::engine::extensions::RequestContext>>,
     ) -> Result<Arc<CallbackScope>, PluginFault> {
         if context.stage != gateway_plugin_sdk::Stage::Authentication
             || context.account_id.is_some()
@@ -261,7 +267,7 @@ impl PluginCallbacks {
         {
             return Err(denied());
         }
-        self.prepare_scope(context, None)
+        self.prepare_scope(context, None, request)
     }
 
     pub(crate) async fn save_command_account(
@@ -280,11 +286,16 @@ impl PluginCallbacks {
         &self,
         context: &CallContext,
         proxy: Option<OutboundProxy>,
+        request: Option<Arc<gateway_core::engine::extensions::RequestContext>>,
     ) -> Result<Arc<CallbackScope>, PluginFault> {
-        self.register_scope(context, CallbackScope::new(context, proxy))
+        let mut scope = CallbackScope::new(context, proxy);
+        if let Some(request) = request {
+            scope.extension_scope = scope.extension_scope.with_request(request);
+        }
+        self.register_scope(context, scope)
     }
 
-    pub(crate) fn prepare_observation(
+    pub(crate) fn prepare_extensions(
         &self,
         context: &CallContext,
         extension_scope: gateway_core::engine::extensions::ExtensionCallScope,
@@ -439,14 +450,7 @@ impl CallbackHandler for PluginCallbacks {
             }
             if method == gateway_plugin_sdk::call::services::CALL_METHOD {
                 return services
-                    .call(
-                        &context,
-                        scope,
-                        call.cancellation.clone(),
-                        service_actor,
-                        params,
-                        &payload,
-                    )
+                    .call(&context, &call, service_actor, params, &payload)
                     .await;
             }
             if is_private_state {

@@ -70,7 +70,7 @@ watch([model, () => props.active], ([configuration, active], _, onCleanup) => {
     return
   const timer = setTimeout(async () => {
     try {
-      const result = await previewClientProfile(configuration)
+      const result = await previewClientProfile({ configuration })
       if (!cancelled)
         preview.value = result
     }

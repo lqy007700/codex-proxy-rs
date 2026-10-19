@@ -281,6 +281,14 @@ pub struct RetryInput {
     pub account_group_ids: Arc<[AccountGroupId]>,
     pub extension_scope: ExtensionCallScope,
     pub facts: RetryFacts,
+    execution_effects: Arc<ExecutionEffects>,
+}
+
+impl RetryInput {
+    #[must_use]
+    pub fn execution_effects(&self) -> Arc<ExecutionEffects> {
+        Arc::clone(&self.execution_effects)
+    }
 }
 
 /// 策略调用失败不携带插件原始消息，避免跨层泄漏不可信诊断
@@ -353,6 +361,7 @@ impl RequestPolicyContext {
                 account_group_ids: self.account_group_ids.clone(),
                 extension_scope: self.extension_scope.clone(),
                 facts,
+                execution_effects: Arc::clone(&self.execution_effects),
             })
             .await
             .unwrap_or_else(|_| {

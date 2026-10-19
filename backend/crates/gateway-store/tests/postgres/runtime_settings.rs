@@ -48,6 +48,8 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
             account_warmup_enabled: false,
             account_warmup_schedule_time: "08:00".to_owned(),
             account_warmup_model: None,
+            reset_credit_lead_minutes: 10,
+            reset_credit_max_weekly_remaining_percent: None,
         },
     }
 }
@@ -211,6 +213,8 @@ async fn privacy_steps_migration_preserves_rules_and_other_settings() {
             .await
             .unwrap();
     expected_row["codex_privacy_policy_json"] = expected.clone();
+    expected_row["reset_credit_lead_minutes"] = serde_json::json!(10);
+    expected_row["reset_credit_max_weekly_remaining_percent"] = serde_json::Value::Null;
     // 完整升级还会清理自动回切字段，其余运行设置必须原样保留
     expected_row["smart_scheduling_json"]
         .as_object_mut()
@@ -1520,5 +1524,83 @@ async fn fork_upgrade_after_frozen_migrations_preserves_settings_and_adds_image_
     .await
     .unwrap();
     assert!(allowed);
+}
+
+#[tokio::test]
+async fn reset_credit_weekly_threshold_upgrade_defaults_unset_and_round_trips() {
+    let Some(database) = TestDatabase::create_through("reset_weekly_threshold", 34).await else {
+        return;
+    };
+    super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    let settings = repository.load_runtime_settings().await.unwrap();
+    assert_eq!(settings.values.reset_credit_lead_minutes, 10);
+    assert_eq!(
+        settings.values.reset_credit_max_weekly_remaining_percent,
+        None
+    );
+    for threshold in [Some(70), Some(0), Some(100), None] {
+        let mut update = settings_with_margin(600);
+        update.values.reset_credit_max_weekly_remaining_percent = threshold;
+        repository.update_runtime_settings(update).await.unwrap();
+        assert_eq!(
+            repository
+                .load_runtime_settings()
+                .await
+                .unwrap()
+                .values
+                .reset_credit_max_weekly_remaining_percent,
+            threshold
+        );
+    }
+    for threshold in [-1, 101] {
+        assert!(sqlx::query("update runtime_settings set reset_credit_max_weekly_remaining_percent = $1 where id = 1")
+            .bind(threshold).execute(&database.pool).await.is_err());
+    }
+    database.close().await;
+}
+
+#[tokio::test]
+async fn fork_34_upgrade_preserves_history_accounts_proxies_and_saved_limits() {
+    let Some(database) = TestDatabase::create_through("fork_34_reset_upgrade", 34).await else {
+        return;
+    };
+    let before: Vec<(i64, Vec<u8>)> =
+        sqlx::query_as("select version, checksum from _sqlx_migrations order by version")
+            .fetch_all(&database.pool)
+            .await
+            .unwrap();
+    let now = Utc::now();
+    insert_refreshable_account(&database.pool, "acct_fork_upgrade", now, now).await;
+    sqlx::query("insert into outbound_proxies (id, name, proxy_url) values ('proxy_fork_upgrade', 'Existing', 'http://127.0.0.1:18080')")
+        .execute(&database.pool).await.unwrap();
+    sqlx::query("update provider_accounts set outbound_proxy_id = 'proxy_fork_upgrade' where id = 'acct_fork_upgrade'")
+        .execute(&database.pool).await.unwrap();
+    sqlx::query("update runtime_settings set max_concurrent_per_account = 9, config_revision = 2 where id = 1")
+        .execute(&database.pool).await.unwrap();
+    super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let after: Vec<(i64, Vec<u8>)> = sqlx::query_as(
+        "select version, checksum from _sqlx_migrations where version <= 34 order by version",
+    )
+    .fetch_all(&database.pool)
+    .await
+    .unwrap();
+    assert_eq!(before, after);
+    let (proxy, automation_unset, plan_unset, limit): (String, bool, bool, i64) = sqlx::query_as(
+        "select a.outbound_proxy_id, a.reset_credit_automation_json is null, a.reset_credit_next_run_at is null, p.max_websocket_connections from provider_accounts a join outbound_proxies p on p.id = a.outbound_proxy_id where a.id = 'acct_fork_upgrade'",
+    ).fetch_one(&database.pool).await.unwrap();
+    assert_eq!(proxy, "proxy_fork_upgrade");
+    assert!(automation_unset && plan_unset);
+    assert_eq!(limit, 0);
+    let settings = PgRuntimeSettingsRepository::new(database.pool.clone())
+        .load_runtime_settings()
+        .await
+        .unwrap();
+    assert_eq!(settings.values.max_concurrent_per_account, 9);
+    assert_eq!(settings.values.reset_credit_lead_minutes, 10);
+    assert_eq!(
+        settings.values.reset_credit_max_weekly_remaining_percent,
+        None
+    );
     database.close().await;
 }

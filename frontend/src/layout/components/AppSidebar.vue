@@ -575,6 +575,7 @@ onBeforeUnmount(() => {
             :size="isCollapsed ? 'default' : 'small'"
             aria-label="退出登录"
             type="danger"
+            :disabled="authStore.loading || !authStore.isAuthenticated"
             @click="handleLogout"
           >
             <LogOut :size="isCollapsed ? 19 : 18" />

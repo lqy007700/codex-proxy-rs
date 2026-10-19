@@ -5,6 +5,7 @@ mod facts;
 mod http;
 mod lifecycle;
 mod mounts;
+mod retry;
 mod scheduling;
 mod service;
 mod websocket;
@@ -210,6 +211,7 @@ fn operation() -> Operation {
             ["session_id", "c2VjcmV0"],
             ["thread_id", "c2VjcmV0"],
             ["X_Extension!#$%&'*+-.^_`|~", "b24="],
+            ["x-plugin opaque", "not-base64?"],
         ]
     })
     .as_object()
@@ -229,7 +231,60 @@ fn operation() -> Operation {
 }
 
 #[tokio::test]
-async fn retry_policy_uses_ordered_delegation_and_rejects_disallowed_actions() {
+async fn retry_callback_preserves_entry_snapshot_and_ancestor_scope() {
+    use crate::support::request_context::{Dispatcher, request};
+    use gateway_core::{
+        engine::policy::{RetryDecision, RetryFacts},
+        error::ProviderErrorKind,
+        upstream::UpstreamSendState,
+    };
+    let (_cache, runtime) = setup(vec![InstanceFixture {
+        id: "retry-source",
+        configuration: serde_json::json!({"dispatch_on_method":"policy.retry_decision", "retry_decision":{"decision":"stop"}}),
+        bindings: vec![binding("test.example.retryPolicy", "retry", 0, PluginFailurePolicy::Delegate)],
+    }]).await;
+    let dispatcher = Arc::new(Dispatcher::default());
+    let port: Arc<dyn gateway_core::engine::middleware::http::Dispatcher> = dispatcher.clone();
+    runtime.bind_http(&port).unwrap();
+    let request = request();
+    let extensions = ExtensionCallScope::default()
+        .with_request(request.clone())
+        .extending("ancestor".into())
+        .unwrap();
+    let context = policy_context(&runtime, prepare(&runtime).await, "req_retry_child")
+        .with_extension_scope(extensions);
+    assert_eq!(
+        context
+            .retry_decision(RetryFacts {
+                attempt_index: NonZeroU32::MIN,
+                provider: ProviderKind::new("openai").unwrap(),
+                model: Some("gpt-test".into()),
+                error_kind: ProviderErrorKind::RateLimited,
+                upstream_status: Some(429),
+                send_state: UpstreamSendState::NotSent,
+                remaining_routing_attempts: 1,
+                remaining_deadline: Duration::from_secs(3),
+                retry_allowed: true,
+            })
+            .await,
+        RetryDecision::Stop
+    );
+    {
+        let calls = dispatcher.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert!(Arc::ptr_eq(
+            &calls[0].extensions.shared_request().unwrap(),
+            &request
+        ));
+        assert!(calls[0].extensions.contains("ancestor"));
+        assert!(calls[0].extensions.contains("retry-source"));
+        assert_eq!(calls[0].request_id, "req_retry_child");
+    }
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn retry_policy_preserves_decisions_and_leaves_replay_safety_to_core() {
     use gateway_core::{
         engine::policy::{RetryDecision, RetryFacts},
         error::ProviderErrorKind,
@@ -249,12 +304,12 @@ async fn retry_policy_uses_ordered_delegation_and_rejects_disallowed_actions() {
         (
             serde_json::json!({"decision":"retry"}),
             false,
-            RetryDecision::Stop,
+            RetryDecision::Retry,
         ),
         (
             serde_json::json!({"decision":"retry","account_id":"acct_forbidden"}),
             true,
-            RetryDecision::Stop,
+            RetryDecision::Retry,
         ),
     ] {
         let records = tempfile::tempdir().unwrap();
@@ -453,7 +508,8 @@ async fn model_router_preserves_order_and_exposes_complete_request_data() {
             {"name":"authorization","value_base64":"c2VjcmV0"},
             {"name":"session_id","value_base64":"c2VjcmV0"},
             {"name":"thread_id","value_base64":"c2VjcmV0"},
-            {"name":"x_extension!#$%&'*+-.^_`|~","value_base64":"b24="}
+            {"name":"x_extension!#$%&'*+-.^_`|~","value_base64":"b24="},
+            {"name":"x-plugin opaque","value_base64":"not-base64?"}
         ])
     );
     assert!(!lines[1].to_string().contains("secret"));
@@ -1537,7 +1593,7 @@ impl CapabilitiesNext {
 
 #[tokio::test]
 async fn sdk_capability_declarations_require_request_stage() {
-    for (version, attempt) in [(4, false), (4, true)] {
+    for (version, attempt) in [(5, false), (5, true)] {
         let stage = if attempt {
             Stage::Attempt
         } else {

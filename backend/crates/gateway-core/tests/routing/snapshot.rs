@@ -202,12 +202,16 @@ fn contributed_alias_uses_the_same_target_for_listing_profiles_and_routing() {
 }
 
 #[test]
-fn contributed_alias_rejects_collisions_chains_and_missing_targets_before_publication() {
+fn contributed_alias_business_data_does_not_block_publication_or_native_routing() {
+    let mut unknown_provider = alias("plugin-model", "upstream-model");
+    unknown_provider.provider = ProviderKind::new("unregistered").unwrap();
     for aliases in [
         vec![alias("upstream-model", "upstream-model")],
         vec![alias("configured", "upstream-model")],
         vec![alias("plugin-model", "configured")],
         vec![alias("plugin-model", "missing")],
+        vec![alias("plugin-model", "plugin-model")],
+        vec![unknown_provider],
         vec![
             alias("plugin-model", "other"),
             alias("other", "plugin-model"),
@@ -217,11 +221,69 @@ fn contributed_alias_rejects_collisions_chains_and_missing_targets_before_public
             alias("plugin-model", "upstream-model"),
         ],
     ] {
+        let count = aliases.len();
+        let handle =
+            gateway_core::runtime::RuntimeSnapshotHandle::new(compile_aliases(vec![]).unwrap());
+        handle.publish(
+            compile_aliases(aliases).expect("plugin business data must not prevent publication"),
+        );
+        let snapshot = handle.acquire().unwrap();
+        assert_eq!(snapshot.extensions().unwrap().model_aliases().len(), count);
+        let native = PublicModelId::new("upstream-model").unwrap();
+        assert!(snapshot.contains_public_model_for_scope(&native, &snapshot.all_account_scope()));
+        let plan = snapshot
+            .plan(
+                &native,
+                &super::operation(),
+                snapshot.all_account_scope(),
+                &Default::default(),
+            )
+            .unwrap();
+        assert_eq!(plan.candidates()[0].provider().as_str(), "alpha");
         assert_eq!(
-            compile_aliases(aliases).unwrap_err(),
-            RuntimeSnapshotCompileError::InvalidExtensionModels
+            plan.candidates()[0].upstream_model().unwrap().as_str(),
+            "upstream-model"
         );
     }
+}
+
+#[test]
+fn contributed_alias_is_resolved_once_and_preserves_the_first_matching_entry() {
+    let snapshot = compile_aliases(vec![
+        alias("duplicate", "first-target"),
+        alias("duplicate", "upstream-model"),
+        alias("self", "self"),
+        alias("left", "right"),
+        alias("right", "left"),
+        alias("configured", "plugin-target"),
+        alias("to-configured", "configured"),
+    ])
+    .unwrap();
+    assert_eq!(snapshot.mapped_model("duplicate"), "first-target");
+    assert_eq!(snapshot.mapped_model("self"), "self");
+    assert_eq!(snapshot.mapped_model("left"), "right");
+    assert_eq!(snapshot.mapped_model("right"), "left");
+    assert_eq!(snapshot.mapped_model("configured"), "plugin-target");
+    assert_eq!(snapshot.mapped_model("to-configured"), "configured");
+}
+
+#[test]
+fn contributed_alias_unknown_provider_is_a_request_routing_error() {
+    let mut unknown_provider = alias("plugin-model", "upstream-model");
+    unknown_provider.provider = ProviderKind::new("unregistered").unwrap();
+    let snapshot = compile_aliases(vec![unknown_provider]).unwrap();
+    let model = PublicModelId::new("plugin-model").unwrap();
+    assert!(!snapshot.contains_public_model_for_scope(&model, &snapshot.all_account_scope()));
+    assert!(
+        snapshot
+            .plan(
+                &model,
+                &super::operation(),
+                snapshot.all_account_scope(),
+                &Default::default(),
+            )
+            .is_err()
+    );
 }
 
 impl ExtensionPreparationPort for CountingExtensionPreparation {

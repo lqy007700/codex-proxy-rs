@@ -117,7 +117,7 @@ pub(crate) fn literal_prefix_pattern(value: &str) -> String {
 }
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
-    "select mr.id, mr.outcome, mr.attempt_count, mr.error_message, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
+    "select mr.id, mr.outcome, mr.attempt_count, mr.provider_error_code as error_code, mr.error_message, mr.client_status_code, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
             mr.provider_kind, mr.provider_account_ref,
             mr.provider_account_name_snapshot as provider_account_name,
             mr.provider_account_email_snapshot as provider_account_email,
@@ -132,7 +132,7 @@ pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
             mr.transport_decision_wait_ms, mr.connect_ms, mr.headers_ms,
             mr.first_event_ms, mr.first_reasoning_ms, mr.first_text_ms, mr.first_token_ms,
             mr.provider_processing_ms, mr.upstream_response_ms,
-            mr.upstream_api_overhead_ms, mr.upstream_engine_ms, mr.upstream_engine_iapi_ttft_ms, mr.upstream_engine_service_ttft_ms, mr.upstream_engine_iapi_tbt_ms, mr.upstream_engine_service_tbt_ms, mr.latency_ms, mr.admission_decision_ms,
+            mr.upstream_api_overhead_ms, mr.upstream_engine_ms, mr.latency_ms, mr.admission_decision_ms,
             mr.account_selection_wait_ms, mr.capacity_used_slots, mr.capacity_total_slots,
             host(mr.client_ip) as client_ip, mr.user_agent,
             mr.reasoning_effort, mr.reasoning_preset, mr.subagent_kind, mr.compact,
@@ -161,7 +161,7 @@ pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
             mr.cost_currency, mr.transport_decision_wait_ms, mr.connect_ms, mr.headers_ms,
             mr.first_event_ms, mr.first_reasoning_ms, mr.first_text_ms, mr.first_token_ms,
             mr.provider_processing_ms, mr.upstream_response_ms,
-            mr.upstream_api_overhead_ms, mr.upstream_engine_ms, mr.upstream_engine_iapi_ttft_ms, mr.upstream_engine_service_ttft_ms, mr.upstream_engine_iapi_tbt_ms, mr.upstream_engine_service_tbt_ms, mr.latency_ms, mr.admission_decision_ms,
+            mr.upstream_api_overhead_ms, mr.upstream_engine_ms, mr.latency_ms, mr.admission_decision_ms,
             mr.account_selection_wait_ms, mr.capacity_used_slots, mr.capacity_total_slots,
             host(mr.client_ip) as client_ip,
             mr.user_agent, mr.reasoning_effort, mr.reasoning_preset, mr.request_kind,
@@ -431,6 +431,9 @@ fn push_usage_list_scope(
         }
         UsageRecordScope::Error => {
             query.push(" and mr.outcome in ('failed', 'cancelled', 'incomplete')");
+        }
+        UsageRecordScope::FailedOrIncomplete => {
+            query.push(" and mr.outcome in ('failed', 'incomplete')");
         }
     }
 }

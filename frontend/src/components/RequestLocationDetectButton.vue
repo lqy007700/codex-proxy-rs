@@ -3,7 +3,7 @@ import { ZIconButton } from '@codex-proxy/ui'
 import { LocateFixed } from '@lucide/vue'
 
 defineProps<{ loading: boolean, disabled?: boolean }>()
-const emit = defineEmits<{ click: [] }>()
+const emit = defineEmits<{ detect: [] }>()
 </script>
 
 <template>
@@ -13,7 +13,7 @@ const emit = defineEmits<{ click: [] }>()
     :title="loading ? '正在解析出口位置' : '解析出口位置并填入表单'"
     :aria-busy="loading"
     :disabled="disabled || loading"
-    @click="emit('click')"
+    @click="emit('detect')"
   >
     <span class="relative grid size-7 place-items-center text-cp-link">
       <span v-if="loading" class="location-ripple" aria-hidden="true" />

@@ -225,8 +225,6 @@ pub enum RuntimeSnapshotCompileError {
     RevisionChanged,
     #[error("runtime snapshot contains invalid frozen data")]
     InvalidData,
-    #[error("extension model aliases conflict with the provider catalog or model mappings")]
-    InvalidExtensionModels,
     #[error("provider model catalog changed while the snapshot was compiling")]
     CatalogChanged,
 }
@@ -378,7 +376,6 @@ impl RuntimeSnapshotCompiler {
                         observed_generations
                     })
                     .with_extensions(extensions);
-                snapshot.validate_extension_models()?;
                 return Ok(snapshot);
             }
         }
@@ -653,45 +650,6 @@ impl RuntimeSnapshot {
         self.model_aliases()
             .iter()
             .find(|alias| alias.id.as_str() == model)
-    }
-
-    fn validate_extension_models(&self) -> Result<(), RuntimeSnapshotCompileError> {
-        let mut ids = BTreeSet::new();
-        for alias in self.model_aliases() {
-            let valid = ids.insert(&alias.id)
-                && self.providers.contains(&alias.provider)
-                && !self
-                    .settings
-                    .values
-                    .model_mappings
-                    .contains_key(alias.id.as_str())
-                && !self
-                    .settings
-                    .values
-                    .model_mappings
-                    .contains_key(alias.target.as_str())
-                && !self
-                    .settings
-                    .values
-                    .model_mappings
-                    .values()
-                    .any(|target| target == alias.id.as_str())
-                && self.model_alias(alias.target.as_str()).is_none()
-                && !self.provider_models.values().any(|models| {
-                    models
-                        .keys()
-                        .any(|model| model.as_str() == alias.id.as_str())
-                })
-                && self
-                    .provider_models
-                    .get(&alias.provider)
-                    .is_some_and(|models| models.contains_key(&alias.target));
-            if !valid {
-                tracing::warn!(owner = %alias.owner, model = %alias.id, "插件模型别名与宿主目录或映射冲突，拒绝发布候选快照");
-                return Err(RuntimeSnapshotCompileError::InvalidExtensionModels);
-            }
-        }
-        Ok(())
     }
 
     #[must_use]

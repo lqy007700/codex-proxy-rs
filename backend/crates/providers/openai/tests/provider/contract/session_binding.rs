@@ -2,6 +2,132 @@
 
 use super::*;
 
+#[tokio::test]
+async fn cyber_policy_session_exclusion_has_actionable_non_retryable_error() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_subagent_a").await;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/codex/responses"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": {"code":"cyber_policy","type":"invalid_request_error","message":"synthetic policy rejection"}
+        })))
+        .mount(&server).await;
+    let provider = provider_with_affinity_and_base_url(
+        &store,
+        Arc::new(MemorySessionAffinity::default()),
+        server.uri(),
+    );
+    let request = || planned_request("openai", turn_request("policy-session", "policy-turn"));
+    let mut stream = provider
+        .clone()
+        .execute(
+            request(),
+            context("req_policy_first", CancellationToken::new()),
+        )
+        .await
+        .unwrap();
+    let first_error = loop {
+        match stream.next().await {
+            Some(Err(error)) => break error,
+            Some(Ok(_)) => {}
+            None => panic!("upstream rejection must surface"),
+        }
+    };
+    assert_eq!(first_error.upstream_status(), Some(400));
+    assert_eq!(
+        first_error
+            .client_visible_upstream_error()
+            .unwrap()
+            .message(),
+        "synthetic policy rejection"
+    );
+    assert!(
+        first_error
+            .error_details()
+            .unwrap()
+            .contains("synthetic policy rejection")
+    );
+    let error = provider
+        .clone()
+        .execute(
+            request(),
+            context("req_policy_retry", CancellationToken::new()),
+        )
+        .await
+        .err()
+        .expect("excluded session must fail before upstream");
+    assert_eq!(error.kind(), ProviderErrorKind::SessionPolicyRestricted);
+    assert!(error.retry_is_prohibited());
+    let visible = error
+        .client_visible_upstream_error()
+        .expect("actionable client message");
+    assert_eq!(visible.code(), Some("cyber_policy"));
+    assert!(visible.message().contains("Do not repeatedly retry"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    // 可见但不属于固定账号范围的候选不能掩盖会话限制
+    create_account(&store, "acct_subagent_b").await;
+    let pinned = AttemptContext::new(
+        RequestAttemptContext::new(
+            ModelRequestId::new("req_policy_pinned").unwrap(),
+            ClientApiKeyId::new("key_openai_contract").unwrap(),
+        )
+        .with_request_location(Some(global_request_location())),
+        NonZeroU32::MIN,
+        SystemTime::now() + Duration::from_secs(5),
+        account_policy(),
+        AccountAttemptContext::new(
+            BTreeSet::new(),
+            Some(ProviderAccountId::new("acct_subagent_a").unwrap()),
+            None,
+        )
+        .with_account_scope(contract_account_scope()),
+        None,
+        CancellationToken::new(),
+    );
+    let error = provider
+        .clone()
+        .execute(request(), pinned)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ProviderErrorKind::SessionPolicyRestricted);
+    assert!(error.retry_is_prohibited());
+    assert_eq!(
+        error.client_visible_upstream_error().unwrap().code(),
+        Some("cyber_policy")
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    // 其他账号仍可用于该会话时，不能误报全部账号受限
+    let available = provider
+        .clone()
+        .execute(
+            request(),
+            context("req_policy_available", CancellationToken::new()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        available.metadata().provider_account_id().as_str(),
+        "acct_subagent_b"
+    );
+    drop(available);
+    // 会话限制不能影响同一密钥的其他会话
+    store
+        .set_enabled(&ProviderAccountId::new("acct_subagent_b").unwrap(), false)
+        .await
+        .unwrap();
+    drop(
+        provider
+            .execute(
+                planned_request("openai", turn_request("unrelated-session", "other-turn")),
+                context("req_other_session", CancellationToken::new()),
+            )
+            .await
+            .unwrap(),
+    );
+}
+
 #[derive(Debug)]
 struct ChangeTurnMetadata(&'static [u8]);
 
@@ -76,7 +202,7 @@ async fn final_middleware_session_header_cannot_use_another_sessions_account() {
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
-fn turn_request(session: &str, turn: &str) -> Operation {
+pub(super) fn turn_request(session: &str, turn: &str) -> Operation {
     Operation::Generate(GenerateRequest::from_protocol_payload(
         ProtocolPayload::json_object("openai", json!({
             "model":"gpt-5.4", "input":"hello",
