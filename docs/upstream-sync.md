@@ -9,8 +9,8 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 核对日期 | 2026-10-19 |
-| 本仓库发行版本 | `v3.30.3+lqy007700`，当前源码包含尚未发版的改动 |
-| 发行提交 | `dd665d148d856b6ce8924a43a2c5755ac08dcf19` |
+| 本仓库源码版本 | 以 [`release/version.yaml`](../release/version.yaml) 为准 |
+| 已公开发行 | 以 [本仓库 Releases](https://github.com/lqy007700/codex-proxy-rs/releases) 为准，tag 存在不代表构建与发布成功 |
 | 上游稳定基线 | `v3.29.4`，`bad2a245ab3522f8332d39b0c4ea3d7fb6a61f43` |
 | 合并提交 | 在 `main` 执行 `git log -1 --merges --oneline` 查看 |
 | 核对过的上游 main | `bad2a245ab3522f8332d39b0c4ea3d7fb6a61f43`，与目标稳定版一致 |
