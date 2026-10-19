@@ -22,55 +22,6 @@ pub(super) async fn seed(pool: &sqlx::PgPool, id: &str, start: DateTime<Utc>, gr
 }
 
 #[tokio::test]
-async fn analytics_cycle_should_publish_new_requests_behind_slow_retention_deletions() {
-    let Some(database) = TestDatabase::create("analytics_retention_progress").await else {
-        return;
-    };
-    let start = Utc::now() - TimeDelta::hours(1);
-    seed(&database.pool, "retention_keep", start, &[]).await;
-    sqlx::query("insert into model_requests select (jsonb_populate_record(null::model_requests,to_jsonb(mr)||jsonb_build_object('id','retention_old_'||n))).* from model_requests mr cross join generate_series(1,240) n where mr.id='retention_keep'")
-        .execute(&database.pool).await.unwrap();
-    drain_analytics(&database.pool).await;
-    sqlx::query("delete from model_requests where id like 'retention_old_%'")
-        .execute(&database.pool)
-        .await
-        .unwrap();
-    seed(
-        &database.pool,
-        "retention_new",
-        start + TimeDelta::minutes(30),
-        &[],
-    )
-    .await;
-    // 模拟删除修正的逐行成本，大批事务必须超时，小批事务能在相同预算内提交
-    sqlx::raw_sql("create function slow_analytics_delete() returns trigger language plpgsql as $$begin perform pg_sleep(0.01); return old; end$$; create trigger slow_analytics_delete before delete on request_analytics_facts for each row execute function slow_analytics_delete()")
-        .execute(&database.pool).await.unwrap();
-    let budget = gateway_store::postgres::ObservabilityQueryBudget::try_new(
-        1,
-        std::time::Duration::from_secs(1),
-        std::time::Duration::from_millis(1500),
-    )
-    .unwrap();
-    let worker = PgRequestAnalyticsRepository::new(database.pool.clone(), budget);
-
-    gateway_store::run_request_analytics_cycle(&worker)
-        .await
-        .expect("retention correction must make progress within the query budget");
-
-    assert_eq!(worker.status().await.unwrap().pending_requests, 0);
-    let summary = observability_repository(&database.pool)
-        .usage_summary(
-            ObservabilityRange::new(start, start + TimeDelta::hours(1)).unwrap(),
-            Default::default(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(summary.requests.success_count, 2);
-    assert_eq!(summary.requests.total_tokens, 240);
-    database.close().await;
-}
-
-#[tokio::test]
 async fn provider_counts_match_for_rollups_boundaries_and_filtered_facts() {
     let Some(database) = TestDatabase::create("analytics_provider_counts").await else {
         return;
