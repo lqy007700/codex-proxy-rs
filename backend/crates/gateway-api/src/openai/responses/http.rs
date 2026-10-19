@@ -392,6 +392,19 @@ async fn execution_middleware_response(
     }
 }
 
+/// 共享执行交付守卫；调用方在外层转换并校验自己的客户端协议
+pub(crate) async fn execution_response(
+    started: StartedExecution,
+    connection_guard: Option<Box<dyn ConnectionGuard>>,
+) -> Result<MiddlewareResponse, MiddlewareError> {
+    execution_middleware_response(
+        started,
+        connection_guard,
+        ResponseValidationFacts::default(),
+    )
+    .await
+}
+
 async fn buffered_execution_middleware_response(
     session: Box<dyn ExecutionSession>,
     validation: ResponseValidationFacts,

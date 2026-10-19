@@ -7,7 +7,7 @@
 | 查找内容 | 入口 |
 | --- | --- |
 | 鉴权与响应 | [公共约定](#1-鉴权与公共约定) · [浏览器会话与 Key 自助页](#4-浏览器认证) |
-| 客户端协议 | [Responses、Images、模型与 Provider 操作](#3-openai-数据面与模型目录) · [额度查询](#api-key-额度查询) |
+| 客户端协议 | [Responses、Chat、Images、模型与 Provider 操作](#3-openai-数据面与模型目录) · [额度查询](#api-key-额度查询) |
 | 账号与授权范围 | [账号](#5-账号) · [代理](#独立代理管理--managed-proxies) · [分组](#6-账号分组) · [Client Key](#7-client-key) |
 | 系统与运维 | [健康检查](#2-健康检查) · [运行设置](#8-运行设置) · [备份](#9-备份) · [统计与诊断](#10-dashboard用量与错误) · [版本与更新](#11-版本更新与重启) |
 | 插件 | [安装包与来源](#安装包与来源) · [运行实例](#121-运行实例) · [管理扩展](#122-管理扩展页面与原始-api) |
@@ -194,6 +194,7 @@ WebSocket message 和 frame 不设置网关私有长度上限；协议可接受�
 | 方法 | 路由 | 说明 |
 | --- | --- | --- |
 | `POST` | `/v1/responses` | OpenAI Responses JSON；`stream=true` 返回 SSE，否则返回完整 JSON |
+| `POST` | `/v1/chat/completions` | Chat Completions 兼容接口；通过 Responses 执行，支持 JSON 与 SSE |
 | `GET` | `/v1/responses` | 通过 HTTP Upgrade 建立 Responses WebSocket |
 | `POST` | `/v1/alpha/search` | Codex standalone web search；JSON 请求与响应正文原样转发 |
 | `POST` | `/v1/images/generations` | 通过 OpenAI Provider 发起图像生成；JSON 请求与响应正文原样转发 |
@@ -246,6 +247,37 @@ multipart 的 `image` 和 `image[]` 上传按出现顺序组成 `images` 数组�
 
 Codex 的 review 等子代理请求仍使用 `/v1/responses`，并通过 `x-openai-subagent` 请求头携带子代理类型；
 网关不提供独立的子代理请求路径
+
+### Chat Completions
+
+`POST /v1/chat/completions` 使用同一 Client Key、模型映射、账号范围、并发和额度策略。
+必填 `model` 与非空 `messages`；省略 `stream` 或设为 `false` 返回 `chat.completion`，
+`stream=true` 返回 `chat.completion.chunk` SSE，最后以 `data: [DONE]` 结束。
+请求记录保留 `/v1/chat/completions` 入口，Token 和费用由同一上游执行结算
+
+| 字段或能力 | 合同 |
+| --- | --- |
+| 消息 | 支持 `system`、`developer`、`user`、`assistant`、`tool`，保留历史顺序；多轮请求提交完整 `messages` |
+| 内容 | 字符串与 `text` 内容块，`assistant` 支持拒答；`user` 支持 `image_url: {url, detail?}`，包括 URL 与 data URL，图片能力由上游模型决定 |
+| 工具 | 支持 `tools[].type=function`、`tool_choice`、`parallel_tool_calls`；工具未声明 `strict` 时保持非严格模式 |
+| 工具历史 | `assistant.tool_calls[].id` 与 `tool.tool_call_id` 成对回填；流式工具使用稳定的 `index` 和客户端 `call_id` |
+| 输出格式 | 支持 `response_format.type=text/json_object/json_schema`，转换为 Responses `text.format` |
+| 推理 | `reasoning_effort` 转为 `reasoning.effort`；推理内容和加密推理项不混入 assistant 正文 |
+| 用量 | JSON 返回 `usage`；`stream_options.include_usage=true` 在结束标记前返回 `choices: []` 的用量块，其他块 `usage=null` |
+| 其他参数 | 支持 `metadata`、`service_tier`、`prompt_cache_key`、`safety_identifier`；`n` 仅支持 `1`，`store` 仅支持 `false` |
+
+`temperature`、`top_p`、`max_tokens`、`max_completion_tokens`、`stop`、`logprobs`、
+`n>1`、旧版 `functions/function_call`、消息 `name`、音频及未知非空参数返回 `400`，
+错误的 `param` 指明字段，不能通过静默删除参数承诺未实现的上游行为。
+不提供 Chat 对象存储与查询，也不把 Chat 响应 ID 用作 Responses 原生续接状态
+
+鉴权与准入失败保留 HTTP 错误状态；SSE 已开始后失败使用 `data: {"error": ...}` 与结束标记，
+不补造成功的 `finish_reason`。等待首帧和流式交付期间每 15 秒发送注释心跳；首个心跳提交 HTTP `200` 后，
+后续错误通过上述流内错误表达。拒答投影为 `message.refusal` 或 `delta.refusal`，
+正常、长度与工具终态分别投影为 `stop`、`length`、`tool_calls`
+
+请求压缩沿用 [Responses 请求解压](#请求解压) 的编码与解压上限。
+原始 Chat 请求与最终 Chat 响应经过请求中间件，Provider 执行和 attempt 中间件仍使用 Responses 合同
 
 ### Responses 请求与传输
 

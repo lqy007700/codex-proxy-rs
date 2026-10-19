@@ -15,14 +15,14 @@
 
 Codex Proxy RS 是单进程、单副本运行的多 Provider AI 网关，同时提供：
 
-- 面向客户端的 OpenAI Responses、Images、standalone Search 和模型目录协议
+- 面向客户端的 OpenAI Responses、Chat Completions、Images、standalone Search 和模型目录协议
 - 面向管理员的 `/api/admin/*` 控制面和 Vue 管理端
 - 面向 Key 持有者的 `/api/key-usage/*` 用量与客户端配置接口、独立 `/key-usage` 页面，以及复用数据面认证的 `/v1/usage` 额度查询
 - 固定的 OpenAI 与 xAI 两个编译期 Provider，以及插件提供的认证、中间件和管理扩展
 - PostgreSQL 持久化、Redis 协调状态以及 S3/R2 数据库备份
 
-系统不提供 `/v1/chat/completions`，不存在 Provider Instance 层，也不支持通过复制应用容器进行多副本
-扩容。Client Key 限定账号分组，而不是绑定某个 Provider；一次请求的 Provider 候选由账号范围、模型
+系统不存在 Provider Instance 层，不支持通过复制应用容器进行多副本扩容。
+Client Key 限定账号分组，而不是绑定某个 Provider；一次请求的 Provider 候选由账号范围、模型
 能力和运行时健康共同决定
 
 ## 2. 运行拓扑
@@ -435,6 +435,12 @@ Search body 中的模型及其他字段保持原始 bytes 并由上游解释
 
 Core 只理解 `Operation`、能力要求、Provider 候选、稳定错误和 canonical event，不读取 Provider SDK
 类型。Provider 独占 credential schema、OAuth、账号选择、模型目录、额度投影和上游 transport
+
+Chat Completions 的客户端协议转换由 API 拥有，纯消息、工具和输出转换位于 `gateway-protocol`。
+API 在请求中间件之后把 Chat 转为现有 Responses `Generate`，复用执行、提交与结算守卫，
+在响应返回请求中间件前完成 Chat 编码，并在最终交付前复核响应身份与终态。
+Core 保留原入口观测但不解析 Chat 正文，Provider 和 attempt 中间件继续使用 Responses 合同，
+不新增一套账号调度、历史缓存或计量来源
 
 OpenAI 的 OAuth 与 API Key 共用现有账号和事务。API Key 的 Base URL、密钥和传输策略属于 Provider 凭据 JSON，
 随 credential revision 更新；普通详情只投影非敏感连接设置。API Key 客户端目录按账号、凭据版本和客户端版本隔离，

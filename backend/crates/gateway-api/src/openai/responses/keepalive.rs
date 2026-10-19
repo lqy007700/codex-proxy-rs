@@ -1,105 +1,27 @@
-//! 准入成功后覆盖 Responses 首帧等待；已发心跳的 HTTP 错误转为流内失败
-
-use std::future::Future;
+//! Responses 首帧保活后的 HTTP 错误投影
 
 use axum::{
-    body::{Body, BodyDataStream, Bytes, to_bytes},
-    http::{HeaderValue, StatusCode, header},
+    body::{Body, to_bytes},
+    http::header,
     response::Response,
 };
-use futures::{StreamExt as _, future::BoxFuture, stream};
 use gateway_core::engine::execution::ResponseCommit;
 use gateway_protocol::openai::sse::{
     DONE_SSE_FRAME, encode_sse_event, response_failed_sse_data_from_error_event,
     response_failed_sse_data_with_id,
 };
 use serde_json::Value;
+use std::future::Future;
 use tokio::sync::oneshot;
-
-use crate::openai::middleware::{SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_INTERVAL};
 
 pub(super) async fn response(
     response: impl Future<Output = Response> + Send + 'static,
     admitted: oneshot::Receiver<ResponseCommit>,
 ) -> Response {
-    let mut response = Box::pin(response);
-    // 鉴权、模型门禁和准入失败仍保留原 HTTP 状态，不提前建立 SSE
-    let commit = tokio::select! {
-        biased;
-        response = &mut response => return response,
-        admitted = admitted => match admitted {
-            Ok(commit) => commit,
-            Err(_) => return response.await,
-        },
-    };
-    tokio::select! {
-        biased;
-        response = &mut response => return response,
-        () = tokio::time::sleep(SSE_KEEPALIVE_INTERVAL) => {}
-    }
-    if !commit.record(Some(StatusCode::OK.as_u16())) {
-        return response.await;
-    }
-    let pending = PendingResponse::Waiting(response);
-    let stream = stream::once(async { Ok::<_, axum::Error>(SSE_KEEPALIVE_FRAME) })
-        .chain(stream::try_unfold(pending, PendingResponse::next));
-    let mut response = Response::new(Body::from_stream(stream));
-    let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/event-stream"),
-    );
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("no-cache, no-transform"),
-    );
-    headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
-    response
-}
-
-enum PendingResponse {
-    Waiting(BoxFuture<'static, Response>),
-    Streaming(BodyDataStream),
-}
-
-impl PendingResponse {
-    async fn next(mut self) -> Result<Option<(Bytes, Self)>, axum::Error> {
-        loop {
-            match &mut self {
-                Self::Waiting(response) => {
-                    // 心跳只轮询同一个 future，不取消重建首帧等待或插件调用
-                    let response = tokio::select! {
-                        biased;
-                        response = response => response,
-                        () = tokio::time::sleep(SSE_KEEPALIVE_INTERVAL) => return Ok(Some((SSE_KEEPALIVE_FRAME, self))),
-                    };
-                    let sse = response.status().is_success()
-                        && response
-                            .headers()
-                            .get(header::CONTENT_TYPE)
-                            .and_then(|value| value.to_str().ok())
-                            .and_then(|value| value.split(';').next())
-                            .is_some_and(|value| {
-                                value.trim().eq_ignore_ascii_case("text/event-stream")
-                            });
-                    let body = if sse {
-                        response.into_body()
-                    } else {
-                        stream_failure(response).await
-                    };
-                    // 正式响应的正文已经带有交付期心跳，后续只转交，不叠加定时器
-                    self = Self::Streaming(body.into_data_stream());
-                }
-                Self::Streaming(body) => {
-                    return body
-                        .next()
-                        .await
-                        .transpose()
-                        .map(|chunk| chunk.map(|chunk| (chunk, self)));
-                }
-            }
-        }
-    }
+    crate::openai::middleware::keepalive_response(response, admitted, |response| {
+        Box::pin(stream_failure(response))
+    })
+    .await
 }
 
 async fn stream_failure(response: Response) -> Body {

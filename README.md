@@ -17,7 +17,7 @@
 </div>
 
 > [!NOTE]
-> 本项目提供 Responses API，不支持 `/v1/chat/completions`，接入前请确认客户端支持 Responses 协议
+> 本项目提供 Responses API 与 `/v1/chat/completions` 兼容接口，Chat 的功能与参数范围见 [API 参考](docs/api.md#chat-completions)
 
 本仓库是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人维护版本，开发与发布均使用 `main`。
 安装包、容器镜像与管理端在线更新来自 `lqy007700/codex-proxy-rs`，维护流程见 [main 分支维护](docs/development.md#main-分支维护)
