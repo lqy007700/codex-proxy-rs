@@ -1,7 +1,7 @@
 // 验证发布恢复的来源信任、版本绑定和任务放行边界
 const assert = require('node:assert/strict');
 const { execFileSync, spawnSync } = require('node:child_process');
-const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require('node:fs');
+const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
@@ -129,4 +129,49 @@ test('发布需要本轮质量检查和打包成功，恢复模式只接受约�
     assert.equal(allowed('publish', true, { ...recovery, [name]: 'failure' }), false);
   }
   assert.equal(allowed('publish', true, recovery, true), false);
+});
+
+test('恢复使用工作流固定提交的发布工具，保留原发行版本与说明', () => {
+  const step = workflow.jobs.publish.steps.find(step => step.name === 'Load publication tooling for recovery');
+  assert.equal(step.if, "inputs.reuse_run_id != ''");
+  assert.equal(step.env.PUBLICATION_TOOLING_SHA, '${{ github.sha }}');
+  const directory = mkdtempSync(path.join(tmpdir(), 'cpr-publication-tooling-'));
+  const origin = path.join(directory, 'origin');
+  const checkout = path.join(directory, 'checkout');
+  mkdirSync(origin);
+  const git = (...args) => execFileSync('git', args, { cwd: origin, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  try {
+    git('init');
+    git('config', 'user.name', 'Release Test');
+    git('config', 'user.email', 'release-test@example.invalid');
+    git('config', 'core.hooksPath', '/dev/null');
+    mkdirSync(path.join(origin, '.github/scripts'), { recursive: true });
+    mkdirSync(path.join(origin, 'release'));
+    for (const name of ['publish-release.rb', 'release-metadata.rb'])
+      writeFileSync(path.join(origin, '.github/scripts', name), 'old tooling\n');
+    writeFileSync(path.join(origin, 'release/version.yaml'), 'version: "3.29.3+fork"\n');
+    writeFileSync(path.join(origin, 'release/notes.md'), '# v3.29.3+fork\n');
+    git('add', '.');
+    git('commit', '-m', 'release fixture');
+    const release = git('rev-parse', 'HEAD');
+    for (const name of ['publish-release.rb', 'release-metadata.rb'])
+      writeFileSync(path.join(origin, '.github/scripts', name), 'fixed tooling\n');
+    writeFileSync(path.join(origin, 'release/version.yaml'), 'version: "3.30.0+fork"\n');
+    writeFileSync(path.join(origin, 'release/notes.md'), '# v3.30.0+fork\n');
+    git('add', '.');
+    git('commit', '-m', 'future tooling fixture');
+    const tooling = git('rev-parse', 'HEAD');
+    execFileSync('git', ['clone', origin, checkout], { stdio: 'pipe' });
+    execFileSync('git', ['checkout', '--detach', release], { cwd: checkout, stdio: 'pipe' });
+    execFileSync('bash', ['-e', '-c', step.run], {
+      cwd: checkout, stdio: 'pipe', env: { ...process.env, PUBLICATION_TOOLING_SHA: tooling },
+    });
+    for (const name of ['publish-release.rb', 'release-metadata.rb'])
+      assert.equal(readFileSync(path.join(checkout, '.github/scripts', name), 'utf8'), 'fixed tooling\n');
+    assert.equal(readFileSync(path.join(checkout, 'release/version.yaml'), 'utf8'), 'version: "3.29.3+fork"\n');
+    assert.equal(readFileSync(path.join(checkout, 'release/notes.md'), 'utf8'), '# v3.29.3+fork\n');
+    assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: checkout, encoding: 'utf8' }).trim(), release);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

@@ -22,8 +22,12 @@ module ReleasePublication
     # 只把明确的缺失标签当作首次发布，鉴权和网络错误必须终止提升
     return nil if !status.success? && error.include?("#{ref}: not found")
     raise "Cannot read latest image: #{error.strip}" unless status.success?
-    versions = JSON.parse(output).values.map do |config|
-      config.fetch('config').fetch('Labels').fetch('org.opencontainers.image.version')
+    images = JSON.parse(output)
+    raise 'Image config must be a JSON object' unless images.is_a?(Hash)
+    # Buildx 单平台返回配置对象，多平台返回按平台分组的配置集合
+    configs = images.key?('config') ? [images] : images.values
+    versions = configs.map do |config|
+      ReleaseMetadata.version(config.fetch('config').fetch('Labels').fetch('org.opencontainers.image.version'))
     end.uniq
     raise 'Latest image must have one consistent version across platforms' unless versions.length == 1
     versions.first

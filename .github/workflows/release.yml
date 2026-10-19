@@ -448,6 +448,15 @@ jobs:
         with:
           ref: ${{ needs.release-info.outputs.git_sha }}
 
+      - name: Load publication tooling for recovery
+        if: inputs.reuse_run_id != ''
+        env:
+          PUBLICATION_TOOLING_SHA: ${{ github.sha }}
+        run: |
+          # 仅恢复发布工具，版本、说明和产物身份仍绑定原发行提交
+          git fetch --no-tags --depth=1 origin "$PUBLICATION_TOOLING_SHA"
+          git restore --source="$PUBLICATION_TOOLING_SHA" -- .github/scripts/publish-release.rb .github/scripts/release-metadata.rb
+
       - name: Download release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

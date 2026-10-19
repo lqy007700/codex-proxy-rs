@@ -228,7 +228,7 @@ jobs:
           ruby .github/scripts/toolchains.rb
           ruby -c backend/crates/gateway-plugin/runtime/plugin-api-lifecycle.rb
 
-      - name: Test release recovery
+      - name: Test release publication and recovery
         # 完整重建旧 tag 时，检出的源码可能尚未包含恢复测试
         if: hashFiles('release/tests/recovery.test.cjs') != ''
-        run: node --test release/tests/recovery.test.cjs
+        run: node --test release/tests/*.test.cjs
