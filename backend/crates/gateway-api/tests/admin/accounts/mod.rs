@@ -326,6 +326,21 @@ mod batch_update {
     use serde_json::json;
 
     #[test]
+    fn batch_update_accepts_credits_only_without_overwriting_other_settings() {
+        for enabled in [false, true] {
+            let request: BatchUpdateAccountsRequest = serde_json::from_value(json!({
+                "accountIds": ["acct_openai"], "allowCredits": enabled
+            }))
+            .unwrap();
+            request.validate().unwrap();
+            assert_eq!(request.allow_credits, Some(enabled));
+            assert!(request.enabled.is_none());
+            assert!(request.concurrency_limit.is_none());
+            assert!(request.weight.is_none());
+        }
+    }
+
+    #[test]
     fn batch_update_should_accept_complete_atomic_payload() {
         let request: BatchUpdateAccountsRequest = serde_json::from_value(json!({
             "accountIds": ["acct_openai", "acct_xai"],

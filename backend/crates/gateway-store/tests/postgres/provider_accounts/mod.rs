@@ -1370,6 +1370,7 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                allow_credits: None,
                 account_ids: vec!["acct_notes".to_owned()],
                 enabled: Some(false),
                 concurrency_limit: Some(None),
@@ -1605,6 +1606,7 @@ async fn account_enable_preserves_facts_and_explicit_recovery_clears_them() {
     let enabled = store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                allow_credits: None,
                 account_ids: vec!["acct_recovery".to_owned()],
                 enabled: Some(true),
                 concurrency_limit: None,
@@ -1729,6 +1731,7 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
     let result = store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                allow_credits: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
                 account_ids: account_ids.clone(),
@@ -1766,6 +1769,7 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                allow_credits: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
                 account_ids: account_ids.clone(),
@@ -2503,6 +2507,7 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
 
     let revision = repository
         .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
+            allow_credits: None,
             notes: None,
             model_access: Default::default(),
             outbound_proxy: None,
@@ -3483,6 +3488,7 @@ async fn model_access_only_batch_update_preserves_other_settings_and_survives_re
     .expect("policy");
     let store = admin_account_store(&database.pool);
     let command = BatchUpdateAccounts {
+        allow_credits: None,
         account_ids: vec![input.id.clone()],
         enabled: None,
         concurrency_limit: None,
@@ -3688,5 +3694,178 @@ async fn connection_configuration_update_preserves_credential_health() {
         );
     }
     assert_eq!(after["credential_revision"], 2);
+    database.close().await;
+}
+
+#[tokio::test]
+async fn credits_policy_updates_do_not_change_quota_facts_or_other_account_settings() {
+    let Some(database) = TestDatabase::create("account_credits_policy").await else {
+        return;
+    };
+    let repository = PgProviderAccountRepository::new(database.pool.clone());
+    let input = account("acct_credits_policy", "user-credits-policy");
+    repository
+        .insert_provider_account(input.clone())
+        .await
+        .unwrap();
+    let id = ProviderAccountId::new(input.id.clone()).unwrap();
+    let original = ProviderAccountStore::get_account(&repository, &id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!original.allow_credits());
+    let observed_at = SystemTime::now();
+    let state = QuotaState::exhausted(QuotaEvidence::CreditsAvailable, observed_at, None);
+    ProviderAccountStore::compare_and_swap_quota(
+        &repository,
+        QuotaObservation {
+            account_id: id.clone(),
+            expected_revision: original.revision(),
+            quota: OpaqueProviderData::new(serde_json::Map::new()),
+            plan_type: None,
+            observed_at,
+            state,
+        },
+    )
+    .await
+    .unwrap();
+    let store = admin_account_store(&database.pool);
+    let context = MutationContext {
+        actor: MutationActor::System,
+        request_id: "credits-policy".to_owned(),
+    };
+    let command = BatchUpdateAccounts {
+        account_ids: vec![input.id.clone()],
+        allow_credits: Some(true),
+        enabled: None,
+        concurrency_limit: None,
+        weight: None,
+        model_access: None,
+        group_ids: None,
+        outbound_proxy: None,
+    };
+    store
+        .batch_update_accounts(command.clone(), &context)
+        .await
+        .unwrap();
+    let enabled = ProviderAccountStore::get_account(&repository, &id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(enabled.allow_credits());
+    assert!(!enabled.quota().is_exhausted());
+    assert_eq!(enabled.quota_fact(), state);
+    assert_eq!(enabled.revision(), original.revision());
+    assert_eq!(enabled.weight(), original.weight());
+    assert_eq!(enabled.concurrency_limit(), original.concurrency_limit());
+    repository
+        .import_provider_accounts(ImportProviderAccounts {
+            settings: None,
+            outbound_proxy: None,
+            scope: ProviderAccountAdminScope {
+                provider_kind: "openai".to_owned(),
+            },
+            accounts: vec![input.clone()],
+            audit: audit("credits-reimport", "import", &input.id),
+        })
+        .await
+        .unwrap();
+    assert!(
+        ProviderAccountStore::get_account(&repository, &id)
+            .await
+            .unwrap()
+            .unwrap()
+            .allow_credits()
+    );
+    store
+        .batch_update_accounts(
+            BatchUpdateAccounts {
+                allow_credits: Some(false),
+                ..command
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    let disabled = ProviderAccountStore::get_account(&repository, &id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!disabled.allow_credits());
+    database.close().await;
+}
+
+#[tokio::test]
+async fn credits_policy_migration_blocks_existing_credit_backed_access_without_blocking_subscription()
+ {
+    let Some(database) = TestDatabase::create("credits_policy_upgrade").await else {
+        return;
+    };
+    let repository = PgProviderAccountRepository::new(database.pool.clone());
+    for (id, usage) in [
+        (
+            "acct_credits_normalized",
+            json!({"credits":{"has_credits":true},"rate_limits_by_limit_id":{"codex":{"allowed":true,"primary_window":{"used_percent":100}}}}),
+        ),
+        (
+            "acct_credits_legacy",
+            json!({"credits":{"unlimited":true},"rate_limit":{"allowed":false,"secondary_window":{"used_percent":100}}}),
+        ),
+        (
+            "acct_subscription_available",
+            json!({"credits":{"has_credits":true},"rate_limits_by_limit_id":{"codex":{"allowed":true,"primary_window":{"used_percent":20}}}}),
+        ),
+    ] {
+        repository
+            .insert_provider_account(account(id, id))
+            .await
+            .unwrap();
+        let observed_at = SystemTime::now();
+        ProviderAccountStore::compare_and_swap_quota(
+            &repository,
+            QuotaObservation {
+                account_id: ProviderAccountId::new(id).unwrap(),
+                expected_revision: CredentialRevision::new(1).unwrap(),
+                quota: OpaqueProviderData::new(usage.as_object().unwrap().clone()),
+                plan_type: None,
+                observed_at,
+                state: QuotaState::allowed(observed_at),
+            },
+        )
+        .await
+        .unwrap();
+    }
+    sqlx::raw_sql("alter table provider_accounts drop column allow_credits;
+        alter table provider_accounts drop constraint provider_accounts_quota_evidence_ck;
+        alter table provider_accounts add constraint provider_accounts_quota_evidence_ck check (
+            quota_evidence is null or quota_evidence in ('provider_denied','account_limit_reached','usage_limit_reached','payment_required'))")
+        .execute(&database.pool).await.unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../../../migrations/0036_account_credits_policy.sql"
+    ))
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    for (id, exhausted) in [
+        ("acct_credits_normalized", true),
+        ("acct_credits_legacy", true),
+        ("acct_subscription_available", false),
+    ] {
+        let account =
+            ProviderAccountStore::get_account(&repository, &ProviderAccountId::new(id).unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+        assert!(!account.allow_credits());
+        assert_eq!(account.quota().is_exhausted(), exhausted, "{id}");
+        assert!(
+            !account
+                .clone()
+                .with_allow_credits(true)
+                .quota()
+                .is_exhausted(),
+            "{id}"
+        );
+    }
     database.close().await;
 }

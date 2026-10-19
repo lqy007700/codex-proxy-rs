@@ -80,6 +80,14 @@ impl MemoryAccountStore {
             .expect("seed test OAuth credential");
     }
 
+    pub(crate) fn set_allow_credits(&self, id: &str, allow_credits: bool) {
+        let mut accounts = self.accounts.lock().expect("account store lock");
+        let stored = accounts
+            .get_mut(&ProviderAccountId::new(id).expect("account ID"))
+            .expect("account");
+        stored.account = stored.account.clone().with_allow_credits(allow_credits);
+    }
+
     pub(crate) fn set_oauth_transport(
         &self,
         id: &str,
@@ -395,7 +403,7 @@ impl ProviderAccountStore for MemoryAccountStore {
                 revision: next,
                 enabled: stored.account.enabled(),
                 credential_state,
-                quota: stored.account.quota(),
+                quota: stored.account.quota_fact(),
                 last_error_reason,
                 last_error_message,
                 access_token_expires_at,
@@ -447,7 +455,7 @@ impl ProviderAccountStore for MemoryAccountStore {
             return Ok(QuotaWriteOutcome::Conflict);
         }
         // 与 PostgreSQL 一致，展示快照与访问事实分别按各自观察时间隔离
-        let current = stored.account.quota();
+        let current = stored.account.quota_fact();
         let quota = if observation
             .state
             .observed_at()
@@ -533,7 +541,7 @@ impl ProviderAccountStore for MemoryAccountStore {
                 revision: stored.account.revision(),
                 enabled: stored.account.enabled(),
                 credential_state: change.credential_state,
-                quota: stored.account.quota(),
+                quota: stored.account.quota_fact(),
                 last_error_reason: change.error_reason,
                 last_error_message: change.message,
                 access_token_expires_at: stored.account.access_token_expires_at(),
@@ -557,7 +565,7 @@ impl ProviderAccountStore for MemoryAccountStore {
                 revision: stored.account.revision(),
                 enabled: stored.account.enabled(),
                 credential_state: stored.account.credential_state(),
-                quota: stored.account.quota(),
+                quota: stored.account.quota_fact(),
                 last_error_reason: stored.account.last_error_reason(),
                 last_error_message: stored.account.last_error_message().map(str::to_owned),
                 access_token_expires_at: stored.account.access_token_expires_at(),
@@ -584,7 +592,7 @@ impl ProviderAccountStore for MemoryAccountStore {
                 revision: stored.account.revision(),
                 enabled,
                 credential_state: stored.account.credential_state(),
-                quota: stored.account.quota(),
+                quota: stored.account.quota_fact(),
                 last_error_reason: stored.account.last_error_reason(),
                 last_error_message: stored.account.last_error_message().map(str::to_owned),
                 access_token_expires_at: stored.account.access_token_expires_at(),
@@ -629,7 +637,7 @@ impl AccountRebuild {
             revision: account.revision(),
             enabled: account.enabled(),
             credential_state: account.credential_state(),
-            quota: account.quota(),
+            quota: account.quota_fact(),
             last_error_reason: account.last_error_reason(),
             last_error_message: account.last_error_message().map(str::to_owned),
             access_token_expires_at: account.access_token_expires_at(),
@@ -674,6 +682,7 @@ fn rebuild_account(current: &ProviderAccount, rebuild: AccountRebuild) -> Provid
         rebuild.last_error_reason,
         rebuild.last_error_message,
     )
+    .with_allow_credits(current.allow_credits())
     .with_scheduling(current.concurrency_limit(), current.weight())
     .with_refresh_schedule(rebuild.has_refresh_token, rebuild.next_refresh_at)
     .with_outbound_proxy(current.outbound_proxy().cloned())

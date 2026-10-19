@@ -72,6 +72,7 @@ watch(hasPersonalInfo, (available) => {
           v-if="account.capabilities.resetCredits"
           :account="account"
           @consumed="emit('quotaReset', $event)"
+          @account-updated="emit('accountUpdated', $event)"
         />
         <ZIconButton
           v-if="hasForecast"

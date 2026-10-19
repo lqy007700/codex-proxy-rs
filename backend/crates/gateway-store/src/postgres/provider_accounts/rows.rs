@@ -71,6 +71,7 @@ pub struct ProviderAccountSummary {
     pub concurrency_limit: Option<AccountConcurrencyLimit>,
     pub weight: AccountWeight,
     pub model_access: gateway_core::account::AccountModelAccess,
+    pub allow_credits: bool,
     pub credential_state: CredentialState,
     pub credential_observed_at: DateTime<Utc>,
     pub quota: QuotaState,
@@ -258,6 +259,7 @@ pub struct BatchUpdateProviderAccountsAdmin {
     pub account_ids: Vec<String>,
     pub notes: Option<String>,
     pub enabled: Option<bool>,
+    pub allow_credits: Option<bool>,
     pub concurrency_limit: Option<Option<AccountConcurrencyLimit>>,
     pub weight: Option<AccountWeight>,
     pub model_access: Option<gateway_core::account::AccountModelAccess>,
@@ -326,7 +328,7 @@ impl ProviderAccountStateUpdate {
 
 pub(crate) const ACCOUNT_SELECT: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
-            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
+            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, allow_credits, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
             last_error_reason, last_error_message,
             credential_observed_at, quota_observed_at, created_at, updated_at
@@ -337,7 +339,7 @@ pub(crate) const ACCOUNT_SELECT: &str = "select coalesce(proxy_enabled, true) as
 
 pub(crate) const ACCOUNT_SELECT_BY_IDS: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
-            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
+            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, allow_credits, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
             last_error_reason, last_error_message,
             credential_observed_at, quota_observed_at, created_at, updated_at
@@ -349,7 +351,7 @@ pub(crate) const ACCOUNT_SELECT_BY_IDS: &str = "select coalesce(proxy_enabled, t
 
 pub(crate) const REFRESH_CANDIDATES_SELECT: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
-            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
+            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, allow_credits, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
             last_error_reason, last_error_message,
             credential_observed_at, quota_observed_at, created_at, updated_at
@@ -425,6 +427,7 @@ pub(crate) fn core_account_from_summary(
     )
     .with_scheduling(summary.concurrency_limit, summary.weight)
     .with_model_access(summary.model_access)
+    .with_allow_credits(summary.allow_credits)
     .with_outbound_proxy(
         summary
             .outbound_proxy
@@ -502,7 +505,8 @@ pub(crate) fn account_summary_from_row(
         .0,
         credential_state: status.credential_state,
         credential_observed_at: get(&row, "credential_observed_at")?,
-        quota: status.quota,
+        quota: quota_state_from_row(&row)?,
+        allow_credits: get(&row, "allow_credits")?,
         last_error_reason: status.last_error_reason,
         last_error_message: status.last_error_message,
         created_at: get(&row, "created_at")?,
@@ -559,6 +563,20 @@ pub(crate) fn account_status_facts_from_row(
     let credential_state = row
         .try_get::<String, _>("credential_state")
         .map_err(|source| invalid("invalid credential_state").with_source(source))?;
+    let quota = quota_state_from_row(row)?.with_credits_policy(get(row, "allow_credits")?);
+    Ok(gateway_core::account::AccountStatusFacts {
+        enabled: get(row, "enabled")?,
+        credential_state: parse_credential_state(&credential_state)?,
+        access_token_expires_at: get::<Option<DateTime<Utc>>>(row, "access_token_expires_at")?
+            .map(Into::into),
+        quota,
+        cooldown: None,
+        last_error_reason: parse_error_reason(get(row, "last_error_reason")?)?,
+        last_error_message: get(row, "last_error_message")?,
+    })
+}
+
+fn quota_state_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<QuotaState> {
     let quota_access_state = parse_quota_access_state(&get::<String>(row, "quota_access_state")?)?;
     let quota_evidence = parse_quota_evidence(get(row, "quota_evidence")?)?;
     let quota_access_observed_at = get::<Option<DateTime<Utc>>>(row, "quota_access_observed_at")?;
@@ -570,14 +588,5 @@ pub(crate) fn account_status_facts_from_row(
         quota_reset_at.map(Into::into),
     )
     .ok_or_else(|| invalid("invalid persisted quota fact"))?;
-    Ok(gateway_core::account::AccountStatusFacts {
-        enabled: get(row, "enabled")?,
-        credential_state: parse_credential_state(&credential_state)?,
-        access_token_expires_at: get::<Option<DateTime<Utc>>>(row, "access_token_expires_at")?
-            .map(Into::into),
-        quota,
-        cooldown: None,
-        last_error_reason: parse_error_reason(get(row, "last_error_reason")?)?,
-        last_error_message: get(row, "last_error_message")?,
-    })
+    Ok(quota)
 }

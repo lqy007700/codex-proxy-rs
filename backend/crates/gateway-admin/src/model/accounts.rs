@@ -123,6 +123,7 @@ pub struct AccountRecord {
     pub concurrency_limit: Option<AccountConcurrencyLimit>,
     pub weight: AccountWeight,
     pub model_access: gateway_core::account::AccountModelAccess,
+    pub allow_credits: bool,
     pub outbound_proxy: Option<gateway_core::account::OutboundProxy>,
     pub outbound_proxy_enabled: bool,
     pub credential_state: CredentialState,
@@ -242,6 +243,7 @@ pub struct AccountUpdateResult {
 pub struct BatchUpdateAccounts {
     pub account_ids: Vec<String>,
     pub enabled: Option<bool>,
+    pub allow_credits: Option<bool>,
     pub concurrency_limit: Option<Option<AccountConcurrencyLimit>>,
     pub weight: Option<AccountWeight>,
     pub model_access: Option<gateway_core::account::AccountModelAccess>,

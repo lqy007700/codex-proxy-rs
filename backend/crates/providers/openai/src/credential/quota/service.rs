@@ -201,9 +201,10 @@ impl CodexCredentialQuotaService {
         account: &ProviderAccount,
         observed_at: SystemTime,
     ) -> Result<(), CodexCredentialQuotaError> {
-        // 已经发出的并发请求可能晚于耗尽事实成功返回；真实成功仍是独立的
-        // Allowed 权威证据，但调度不会为了试探恢复而放行耗尽账号
-        if account.quota().access() == QuotaAccessState::Exhausted {
+        // 已发出的并发请求成功可以恢复普通耗尽事实，但点数支出成功不能解除本地限制
+        if account.quota().access() == QuotaAccessState::Exhausted
+            && account.quota().evidence() != Some(QuotaEvidence::CreditsAvailable)
+        {
             let outcome = self
                 .store
                 .apply_quota_access(QuotaAccessChange {
@@ -404,7 +405,11 @@ impl CodexCredentialQuotaService {
             return Ok(());
         }
         self.scheduling.observe(&snapshot);
-        if snapshot.quota().is_exhausted() {
+        if snapshot
+            .quota()
+            .with_credits_policy(account.allow_credits())
+            .is_exhausted()
+        {
             summary.exhausted += 1;
         } else {
             summary.updated += 1;

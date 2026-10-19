@@ -682,6 +682,7 @@ impl AccountsService for DefaultAccountsService {
             self.accounts
                 .batch_update_accounts(
                     BatchUpdateAccounts {
+                        allow_credits: None,
                         account_ids: vec![account_id.to_string()],
                         enabled: Some(true),
                         concurrency_limit: None,
@@ -774,6 +775,12 @@ impl AccountsService for DefaultAccountsService {
         >::new();
         for account_id in &account_ids {
             let (item, provider) = self.provider_for_account(account_id).await?;
+            if command.allow_credits.is_some()
+                && (item.account.provider_kind.as_str() != "openai"
+                    || item.account.authentication_kind != "oauth")
+            {
+                return Err(AdminError::invalid("仅 OpenAI OAuth 账号支持额度点数设置"));
+            }
             providers
                 .entry(item.account.provider_kind)
                 .or_insert_with(|| (provider, Vec::new()))

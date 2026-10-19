@@ -6,6 +6,7 @@ import { AlertTriangle, RefreshCw, TicketCheck } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import { useAccountResetCredits } from '../../composables/useAccountResetCredits'
 import AccountQuotaCredits from './Credits.vue'
+import CreditsPolicy from './CreditsPolicy.vue'
 import ResetCreditAutomation from './ResetCreditAutomation.vue'
 import UsageLimits from './UsageLimits.vue'
 
@@ -15,6 +16,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   consumed: [accountId: string]
+  accountUpdated: [account: Account]
 }>()
 
 const panelOpen = shallowRef(false)
@@ -151,6 +153,13 @@ function handleRequestConsume(creditId: string) {
         <UsageLimits :windows="account.quota.windows" />
         <AccountQuotaCredits :credits="account.quota.credits" />
       </section>
+
+      <CreditsPolicy
+        v-if="account.provider === 'openai' && account.authenticationKind === 'oauth'"
+        :key="`credits-${account.id}`"
+        :account="account"
+        @account-updated="emit('accountUpdated', $event)"
+      />
 
       <ResetCreditAutomation v-if="account.capabilities.consumeResetCredit" :key="account.id" :account-id="account.id" />
 

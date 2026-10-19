@@ -139,7 +139,7 @@ pub(super) fn reconcile_refresh(
     if refreshed.credits_usable() {
         // 点数独立于套餐窗口，恢复后不能继续携带已失效的窗口恢复进度
         refreshed.recovery = None;
-        return Ok(QuotaState::allowed(refreshed.observed_at()));
+        return Ok(refreshed.quota());
     }
     let state = if current.is_exhausted() {
         current

@@ -618,6 +618,7 @@ impl AccountStore for PgAdminAccountStore {
             .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
                 account_ids: vec![command.account_id.clone()],
                 notes: command.notes,
+                allow_credits: None,
                 enabled: Some(command.enabled),
                 concurrency_limit: Some(command.concurrency_limit),
                 weight: Some(command.weight),
@@ -761,6 +762,7 @@ impl AccountStore for PgAdminAccountStore {
         let mut changed_fields = Vec::new();
         for (changed, field) in [
             (command.enabled.is_some(), "enabled"),
+            (command.allow_credits.is_some(), "allow_credits"),
             (command.concurrency_limit.is_some(), "concurrency_limit"),
             (command.weight.is_some(), "weight"),
             (command.group_ids.is_some(), "groups"),
@@ -780,6 +782,7 @@ impl AccountStore for PgAdminAccountStore {
             .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
                 account_ids: command.account_ids,
                 notes: None,
+                allow_credits: command.allow_credits,
                 enabled: command.enabled,
                 concurrency_limit: command.concurrency_limit,
                 weight: command.weight,

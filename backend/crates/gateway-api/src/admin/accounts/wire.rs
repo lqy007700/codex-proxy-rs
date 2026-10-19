@@ -65,6 +65,7 @@ pub struct BatchUpdateAccountsRequest {
     pub outbound_proxy_url: Option<AccountProxyUpdate>,
     pub account_ids: Vec<String>,
     pub enabled: Option<bool>,
+    pub allow_credits: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_optional_nullable_limit")]
     pub concurrency_limit: Option<Option<u64>>,
     pub weight: Option<u64>,
@@ -117,7 +118,8 @@ impl BatchUpdateAccountsRequest {
             .map(parse_concurrency_limit)
             .transpose()?;
         self.weight.map(parse_account_weight).transpose()?;
-        if self.enabled.is_none()
+        if self.allow_credits.is_none()
+            && self.enabled.is_none()
             && self.concurrency_limit.is_none()
             && self.weight.is_none()
             && self.group_ids.is_none()
@@ -136,6 +138,7 @@ impl BatchUpdateAccountsRequest {
             outbound_proxy: proxy_selection(self.outbound_proxy_id, self.outbound_proxy_url)?,
             account_ids: self.account_ids,
             enabled: self.enabled,
+            allow_credits: self.allow_credits,
             concurrency_limit: self
                 .concurrency_limit
                 .map(parse_concurrency_limit)
@@ -293,6 +296,7 @@ pub struct AccountView {
     pub capacity: AccountCapacityView,
     pub weight: u16,
     pub model_access: gateway_core::account::AccountModelAccess,
+    pub allow_credits: bool,
     pub access_token_expires_at: Option<String>,
     pub access_token_expires_at_display: Option<String>,
     pub refresh_token_expires_at: Option<String>,

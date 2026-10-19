@@ -8426,6 +8426,7 @@ async fn usage_limit_failure_recovers_with_credits_without_replaying_the_failed_
     let store = Arc::new(MemoryAccountStore::default());
     let account_id = "acct_provider_contract";
     create_account(&store, account_id).await;
+    store.set_allow_credits(account_id, true);
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/codex/usage"))

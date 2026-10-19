@@ -739,7 +739,7 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 | `POST` | `/api/admin/accounts/refresh` | `{ accountId }` | 手工刷新 OAuth credential（`idToken` / `accessToken` / `refreshToken`），不刷新额度 |
 | `POST` | `/api/admin/accounts/recover` | `{ accountId }` | 停用账号只启用调度；已启用账号强制清除本地错误/额度/cooldown 事实，不访问上游 |
 | `POST` | `/api/admin/accounts/update` | `{ accountId, enabled, concurrencyLimit, weight, groupIds, notes?, modelAccess?, outboundProxyId?, outboundProxyUrl?, connection? }` | 一次更新账号设置；`connection` 支持 OpenAI OAuth 传输方式及 API Key 连接配置，见下文 |
-| `POST` | `/api/admin/accounts/batch-update` | `{ accountIds, enabled?, concurrencyLimit?, weight?, groupIds?, modelAccess?, outboundProxyId?, outboundProxyUrl? }` | 一次事务更新所选账号；仅修改提供的字段，至少提供一项修改 |
+| `POST` | `/api/admin/accounts/batch-update` | `{ accountIds, enabled?, concurrencyLimit?, weight?, groupIds?, modelAccess?, allowCredits?, outboundProxyId?, outboundProxyUrl? }` | 一次事务更新所选账号；仅修改提供的字段，至少提供一项修改 |
 | `POST` | `/api/admin/accounts/delete` | `{ provider, accountIds }` | 批量删除 1–200 个账号 |
 | `GET` | `/api/admin/accounts/quota` | `accountId` | 读取当前额度，不强制访问上游；Provider 未提供额度能力时返回空额度投影 |
 | `GET` | `/api/admin/accounts/quota-forecast` | `accountId` | 按需读取周/月容量预测、源窗口剩余估算与采样依据，不刷新上游额度 |
@@ -788,8 +788,13 @@ Codex 的 `model_catalog_json` 配置。账号设置保存不等待上游模型�
 `balance`，余额为保留上游精度的十进制字符串，未提供余额时为 `null`，明确的零余额为 `"0"`。
 OpenAI 点数随现有额度刷新和正常请求的额度信息同步，不与主动重置卡库存或百分比限额合并，
 不根据 `balance` 单独推导可用性。主动查询明确 `hasCredits=true` 或 `unlimited=true`，且无阻止
-点数支出的上限或工作区限制时，即使套餐窗口耗尽也可使用点数，并解除已有额度耗尽状态。
-真实额度拒绝后的后台回读同样支持此恢复路径，但不会自动重发本次失败请求；点数不能清除
+点数支出的上限或工作区限制时，点数可用于套餐窗口耗尽后的继续使用。
+账号字段 `allowCredits` 控制网关是否允许此类请求，默认 `false`，仅 OpenAI OAuth 账号支持。
+通过 `/api/admin/accounts/batch-update` 显式传入 `allowCredits` 更新，省略时保留设置；
+开启后允许使用可用点数，关闭时套餐额度耗尽即停止调度，额度恢复后重新参与调度。
+该设置与主动重置卡自动使用独立，重新导入、重新授权及额度刷新保留设置。
+额度信息可能延迟，已发送的请求仍可能消耗点数，本地开关不修改上游账号的点数支出设置。
+允许使用点数时，真实额度拒绝后的后台回读同样支持此恢复路径，但不会自动重发本次失败请求；点数不能清除
 凭据错误、停用或冷却状态。上游点数信息也可能延迟，后续真实拒绝仍会记录额度耗尽
 
 账号列表和详情返回 `notes`（无备注时为 `null`）。编辑时省略或 `null` 保留原备注；字符串最多 500 个 Unicode

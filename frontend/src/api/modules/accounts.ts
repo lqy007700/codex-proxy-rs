@@ -153,6 +153,7 @@ export interface Account {
   }
   weight: number
   modelAccess: AccountModelAccess
+  allowCredits: boolean
   accessTokenExpiresAt: string | null
   accessTokenExpiresAtDisplay: string | null
   refreshTokenExpiresAt: string | null
@@ -429,6 +430,7 @@ interface AccountBatchUpdateParam {
   outboundProxyId?: string
   accountIds: string[]
   enabled?: boolean
+  allowCredits?: boolean
   concurrencyLimit?: number | null
   weight?: number
   modelAccess?: AccountModelAccess

@@ -367,3 +367,54 @@ fn smart_selector_should_treat_unknown_quota_as_neutral() {
 
     assert_eq!(smart_selection_ids(&candidates), ["acct_unknown"; 20]);
 }
+
+#[test]
+fn credits_policy_blocks_preferred_accounts_until_explicitly_enabled() {
+    use gateway_core::account::{CredentialState, QuotaEvidence, QuotaState};
+    use std::time::SystemTime;
+    let now = SystemTime::now();
+    let mut credited = candidate("acct_credits", 0, Some(0));
+    credited.account = credited.account.with_account_facts(
+        true,
+        CredentialState::Ready,
+        QuotaState::exhausted(QuotaEvidence::CreditsAvailable, now, None),
+        None,
+        None,
+    );
+    assert!(!credited.account.allow_credits());
+    let mut context = context(RotationStrategy::Sticky);
+    context.preferred_account = Some(credited.account.id().clone());
+    let mut candidates = vec![credited, candidate("acct_subscription", 0, Some(100))];
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &context)
+            .unwrap()
+            .candidate()
+            .account
+            .id()
+            .as_str(),
+        "acct_subscription"
+    );
+    candidates[0].account = candidates[0].account.clone().with_allow_credits(true);
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &context)
+            .unwrap()
+            .candidate()
+            .account
+            .id()
+            .as_str(),
+        "acct_credits"
+    );
+    candidates[0].account = candidates[0].account.clone().with_allow_credits(false);
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &context)
+            .unwrap()
+            .candidate()
+            .account
+            .id()
+            .as_str(),
+        "acct_subscription"
+    );
+}

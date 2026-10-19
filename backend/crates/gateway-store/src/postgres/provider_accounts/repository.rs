@@ -124,7 +124,7 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         let rows = sqlx::query(
             "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
                     upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
-                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
+                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, allow_credits, credential_state,
                     credential_observed_at, quota_access_state, quota_evidence,
                     quota_access_observed_at, quota_reset_at,
                     quota_observed_at, last_error_reason, last_error_message, created_at, updated_at
@@ -153,7 +153,7 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         let rows = sqlx::query(
             "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
                     upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
-                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
+                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, allow_credits, credential_state,
                     credential_observed_at, quota_access_state, quota_evidence,
                     quota_access_observed_at, quota_reset_at,
                     quota_observed_at, last_error_reason, last_error_message, created_at, updated_at
@@ -528,6 +528,16 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
                 command.outbound_proxy.as_ref(),
             )
             .await?;
+            if let Some(allow_credits) = command.allow_credits {
+                sqlx::query(
+                    "update provider_accounts set allow_credits = $2 where id = any($1::text[])",
+                )
+                .bind(&command.account_ids)
+                .bind(allow_credits)
+                .execute(&mut *transaction)
+                .await
+                .map_err(|source| postgres_unavailable("set account credits policy", source))?;
+            }
             if let Some(group_ids) = &command.group_ids {
                 replace_account_group_assignments_in_transaction(
                     &mut transaction,

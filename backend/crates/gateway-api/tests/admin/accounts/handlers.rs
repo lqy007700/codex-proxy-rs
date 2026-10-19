@@ -112,6 +112,7 @@ fn account_page_item(
 
     AccountPageItem {
         account: AccountRecord {
+            allow_credits: false,
             outbound_proxy_enabled: true,
             id: "acct_cooldown".to_owned(),
             provider_kind: gateway_core::routing::ProviderKind::new("openai").unwrap(),

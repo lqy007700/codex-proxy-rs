@@ -365,6 +365,8 @@ pub enum QuotaEvidence {
     AccountLimitReached,
     UsageLimitReached,
     PaymentRequired,
+    /// 套餐额度不可用，但上游点数仍可继续使用
+    CreditsAvailable,
 }
 
 impl QuotaEvidence {
@@ -375,6 +377,7 @@ impl QuotaEvidence {
             Self::AccountLimitReached => "account_limit_reached",
             Self::UsageLimitReached => "usage_limit_reached",
             Self::PaymentRequired => "payment_required",
+            Self::CreditsAvailable => "credits_available",
         }
     }
 
@@ -385,6 +388,7 @@ impl QuotaEvidence {
             "account_limit_reached" => Some(Self::AccountLimitReached),
             "usage_limit_reached" => Some(Self::UsageLimitReached),
             "payment_required" => Some(Self::PaymentRequired),
+            "credits_available" => Some(Self::CreditsAvailable),
             _ => None,
         }
     }
@@ -513,6 +517,21 @@ impl QuotaState {
     #[must_use]
     pub fn is_exhausted(self) -> bool {
         self.access == QuotaAccessState::Exhausted
+    }
+
+    /// 点数可用性是上游事实，是否允许支出由账号设置独立决定
+    #[must_use]
+    pub const fn with_credits_policy(self, allow_credits: bool) -> Self {
+        if allow_credits && matches!(self.evidence, Some(QuotaEvidence::CreditsAvailable)) {
+            Self {
+                access: QuotaAccessState::Allowed,
+                evidence: None,
+                reset_at: None,
+                ..self
+            }
+        } else {
+            self
+        }
     }
 
     /// 判断已耗尽额度是否到达 Provider 的下一次复核时间
@@ -794,6 +813,7 @@ pub struct ProviderAccount {
     concurrency_limit: Option<AccountConcurrencyLimit>,
     weight: AccountWeight,
     model_access: super::AccountModelAccess,
+    allow_credits: bool,
     credential_state: CredentialState,
     quota: QuotaState,
     last_error_reason: Option<AccountErrorReason>,
@@ -832,6 +852,7 @@ impl ProviderAccount {
             concurrency_limit: None,
             weight: AccountWeight::DEFAULT,
             model_access: super::AccountModelAccess::all(),
+            allow_credits: false,
             credential_state: CredentialState::Unknown,
             quota: QuotaState::unknown(),
             last_error_reason: None,
@@ -998,8 +1019,26 @@ impl ProviderAccount {
     }
 
     #[must_use]
+    /// 将上游条件访问事实与本地支出设置组合为当前调度额度
     pub const fn quota(&self) -> QuotaState {
+        self.quota.with_credits_policy(self.allow_credits)
+    }
+
+    #[must_use]
+    /// 保留未应用本地支出设置的事实，用于观测合并与并发快照比较
+    pub const fn quota_fact(&self) -> QuotaState {
         self.quota
+    }
+
+    #[must_use]
+    pub const fn allow_credits(&self) -> bool {
+        self.allow_credits
+    }
+
+    #[must_use]
+    pub const fn with_allow_credits(mut self, allow_credits: bool) -> Self {
+        self.allow_credits = allow_credits;
+        self
     }
 
     #[must_use]
@@ -1063,7 +1102,7 @@ impl ProviderAccount {
                 enabled: self.enabled,
                 credential_state: self.credential_state,
                 access_token_expires_at: self.access_token_expires_at,
-                quota: self.quota,
+                quota: self.quota(),
                 cooldown,
                 last_error_reason: self.last_error_reason,
                 last_error_message: self.last_error_message.clone(),

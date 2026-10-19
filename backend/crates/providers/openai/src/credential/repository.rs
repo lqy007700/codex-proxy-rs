@@ -347,9 +347,9 @@ fn only_quota_observation_advanced(selected: &ProviderAccount, current: &Provide
     if selected == current {
         return true;
     }
-    let (before, after) = (selected.quota(), current.quota());
+    let (before, after) = (selected.quota_fact(), current.quota_fact());
     // 耗尽状态的复核时间依赖观测时刻，必须按冲突处理
-    if before.is_exhausted()
+    if selected.quota().is_exhausted()
         || before.access() != after.access()
         || before.evidence() != after.evidence()
         || before.reset_at() != after.reset_at()

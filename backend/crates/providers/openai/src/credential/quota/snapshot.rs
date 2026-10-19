@@ -349,13 +349,8 @@ pub(crate) fn parse_account_quota_snapshot(
             .cmp(&quota_source_order(right.source()))
             .then_with(|| left.key.cmp(&right.key))
     });
-    let quota = authoritative_quota_state(&object, &windows, observed_at)?;
     let credits_usable = has_usable_credits(&object);
-    let quota = if credits_usable {
-        QuotaState::allowed(observed_at)
-    } else {
-        quota
-    };
+    let quota = authoritative_quota_state(&object, &windows, observed_at, credits_usable)?;
     let recovery = object
         .get(RECOVERY_FIELD)
         .map(|value| serde_json::from_value(value.clone()))
@@ -411,6 +406,7 @@ fn authoritative_quota_state(
     usage: &Map<String, Value>,
     windows: &[CodexQuotaWindow],
     observed_at: SystemTime,
+    credits_usable: bool,
 ) -> Result<QuotaState, CodexCredentialQuotaError> {
     let Some(rate_limit) = usage
         .get(RATE_LIMITS_BY_LIMIT_ID)
@@ -444,6 +440,20 @@ fn authoritative_quota_state(
         })
         .map(SystemTime::from);
 
+    // allowed 可能包含点数放行，明确套餐限制时保留需要点数的条件访问事实
+    if credits_usable
+        && (allowed == Some(false)
+            || top_level_reached
+            || windows
+                .iter()
+                .any(|window| window.is_account_wide() && window.limit_reached()))
+    {
+        return Ok(QuotaState::exhausted(
+            QuotaEvidence::CreditsAvailable,
+            observed_at,
+            reset_at,
+        ));
+    }
     if allowed == Some(true) {
         if top_level_reached || window_reached {
             tracing::warn!(

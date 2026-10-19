@@ -84,8 +84,12 @@ impl CodexCredentialQuotaService {
             observed_at,
             &Value::Object(quota.clone()),
         )?;
-        // 这些 headers 来自一次成功推理，访问结论优先于可能滞后的百分比
-        let state = QuotaState::allowed(observed_at);
+        // 推理成功可能已经消费点数，不能据此解除套餐耗尽后的本地点数限制
+        let state = if snapshot.quota().evidence() == Some(QuotaEvidence::CreditsAvailable) {
+            snapshot.quota()
+        } else {
+            QuotaState::allowed(observed_at)
+        };
         let outcome = self
             .store
             .compare_and_swap_quota(QuotaObservation {
