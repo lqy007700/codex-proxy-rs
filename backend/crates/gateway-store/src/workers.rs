@@ -356,7 +356,8 @@ pub async fn run_request_analytics_cycle(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     let mut total = postgres::AnalyticsMaintenance::default();
     loop {
-        let result = match tokio::time::timeout_at(deadline, repository.maintain(1_000)).await {
+        // 保留期删除会跨大量历史分组，缩短单批事务以便在周期预算内持续提交
+        let result = match tokio::time::timeout_at(deadline, repository.maintain(100)).await {
             Ok(result) => result?,
             Err(source) => {
                 if total.projected_requests == 0
