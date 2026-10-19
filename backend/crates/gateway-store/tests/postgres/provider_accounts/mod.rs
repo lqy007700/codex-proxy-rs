@@ -3714,7 +3714,8 @@ async fn credits_policy_updates_do_not_change_quota_facts_or_other_account_setti
         .unwrap()
         .unwrap();
     assert!(!original.allow_credits());
-    let observed_at = SystemTime::now();
+    // 显式携带不足一微秒的部分，在不同平台都覆盖数据库时间精度转换
+    let observed_at = SystemTime::UNIX_EPOCH + Duration::new(1_700_000_000, 123_456_789);
     let state = QuotaState::exhausted(QuotaEvidence::CreditsAvailable, observed_at, None);
     ProviderAccountStore::compare_and_swap_quota(
         &repository,
@@ -3729,6 +3730,12 @@ async fn credits_policy_updates_do_not_change_quota_facts_or_other_account_setti
     )
     .await
     .unwrap();
+    // 比较两次持久化读取，避免数据库微秒精度与内存纳秒精度造成误报
+    let persisted_quota = ProviderAccountStore::get_account(&repository, &id)
+        .await
+        .unwrap()
+        .unwrap()
+        .quota_fact();
     let store = admin_account_store(&database.pool);
     let context = MutationContext {
         actor: MutationActor::System,
@@ -3754,7 +3761,7 @@ async fn credits_policy_updates_do_not_change_quota_facts_or_other_account_setti
         .unwrap();
     assert!(enabled.allow_credits());
     assert!(!enabled.quota().is_exhausted());
-    assert_eq!(enabled.quota_fact(), state);
+    assert_eq!(enabled.quota_fact(), persisted_quota);
     assert_eq!(enabled.revision(), original.revision());
     assert_eq!(enabled.weight(), original.weight());
     assert_eq!(enabled.concurrency_limit(), original.concurrency_limit());
