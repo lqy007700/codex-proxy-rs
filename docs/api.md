@@ -1328,7 +1328,11 @@ revision 变化时丢弃结果
 
 自动使用通过 `/api/admin/accounts/reset-credits/automation` 按账号开启，默认关闭；账号本身停用时暂停执行。
 GET 和 POST 均返回 `enabled`、`leadMinutes`、`nextDiscoveryAtDisplay`、`nextConsumeAtDisplay`、`lastResult`，
-时间展示沿用部署时区，无计划时为 `null`。运行设置 `resetCreditLeadMinutes` 默认 10，范围 1～1440 分钟
+时间展示沿用部署时区，无计划时为 `null`
+
+运行设置 `resetCreditLeadMinutes` 表示在重置卡到期前多少分钟尝试自动使用，默认 10，范围 1～1440 分钟，
+对所有已开启自动使用的账号生效。例如卡片 20:00 到期，设置为 10 时在 19:50 左右错峰尝试，
+实际消费仍须满足剩余周额度上限等条件；此时间不以账号套餐额度的恢复时间为参照
 
 `resetCreditMaxWeeklyRemainingPercent` 是可选的全局剩余周额度上限，范围 0～100 的整数，默认 `null` 表示不限制。
 设置后，每次新的自动消费前刷新账号周额度；剩余比例大于上限或无法确认周额度时，保留卡片并在到期前错峰重查，
