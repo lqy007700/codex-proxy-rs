@@ -2029,6 +2029,10 @@ request/response/upstream ID、outcome 与搜索文本。`search` 仅供明细�
 非默认 `scope` 的 `search` 还支持模型执行 ID 前缀，默认用量范围保持原有搜索规则
 使用统计页默认 `scope=all`，结果筛选只影响明细，统计概览位于请求明细下方且默认展开；汇总、洞察和诊断不接受 `scope`
 
+`/api/admin/usage/records` 的 `search` 支持完整时间关键词：`HH:mm:ss` 查询部署时区今天的对应时间，
+`YYYY-MM-DD HH:mm:ss` 查询指定日期的对应时间。按请求开始时间匹配整秒，包含该秒内的毫秒记录，
+时间关键词优先于查询的日期范围，其他筛选继续生效，不改变统计概览。未完成或无效的时间输入仍按普通文本搜索
+
 请求列表的 `errorCode` / `errorMessage` 提供最终请求的错误码与错误信息，未记录时为 `null`
 
 诊断 `dimension` 可取 `model`、`account`、

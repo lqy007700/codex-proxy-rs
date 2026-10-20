@@ -1304,6 +1304,152 @@ async fn observability_queries_reject_group_filters_and_analytics_search() {
 }
 
 #[tokio::test]
+async fn usage_time_search_should_override_the_picker_range_and_preserve_other_filters() {
+    use crate::admin::{AdminTestFixture, AdminTestState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode, header},
+    };
+    use gateway_admin::model::observability::UsageRecordScope;
+    use gateway_api::admin::observability;
+    use tower::ServiceExt as _;
+
+    for (timezone, search, expected) in [
+        (
+            "Asia/Shanghai",
+            "2026-10-20 14:55:30",
+            "2026-10-20T06:55:30Z",
+        ),
+        (
+            "America/New_York",
+            "2026-10-20 14:55:30",
+            "2026-10-20T18:55:30Z",
+        ),
+        (
+            "Asia/Shanghai",
+            "2026-10-20 23:59:59",
+            "2026-10-20T15:59:59Z",
+        ),
+        ("UTC", "2024-02-29 23:59:59", "2024-02-29T23:59:59Z"),
+    ] {
+        let fixture = AdminTestFixture::with_timezone(timezone.parse().unwrap()).await;
+        fixture.auth.insert_session("valid-session");
+        let response = observability::router::<AdminTestState>()
+            .with_state(fixture.state())
+            .oneshot(Request::builder()
+                .uri(format!("/api/admin/usage/records?scope=all&provider=openai&currentPage=2&pageSize=10&startTime=2026-10-01T00:00:00Z&endTime=2026-10-02T00:00:00Z&search={}", search.replace(' ', "%20")))
+                .header(header::COOKIE, "cpr_session=valid-session")
+                .header("x-request-id", "req_usage_time_search")
+                .body(Body::empty()).unwrap())
+            .await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{timezone}: {search}");
+        let observations = fixture.observations.lock().unwrap();
+        let query = observations.records.last().unwrap();
+        let start = expected.parse::<chrono::DateTime<Utc>>().unwrap();
+        assert_eq!(query.range.start, start, "{timezone}: {search}");
+        assert_eq!(query.range.end, start + chrono::Duration::seconds(1));
+        assert!(query.filter.search.is_none());
+        assert_eq!(query.filter.provider_kind.as_deref(), Some("openai"));
+        assert_eq!(query.scope, UsageRecordScope::All);
+        assert_eq!((query.current_page, query.page_size.get()), (2, 10));
+        assert!(observations.summaries.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn usage_clock_search_should_use_today_in_the_deployment_timezone() {
+    use crate::admin::{AdminTestFixture, AdminTestState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode, header},
+    };
+    use gateway_api::admin::observability;
+    use gateway_core::time::DeploymentTimeZone;
+    use tower::ServiceExt as _;
+
+    for zone in ["Asia/Shanghai", "America/Los_Angeles"] {
+        let timezone: DeploymentTimeZone = zone.parse().unwrap();
+        let fixture = AdminTestFixture::with_timezone(timezone).await;
+        fixture.auth.insert_session("valid-session");
+        let before = timezone.local(Utc::now()).date_naive();
+        let response = observability::router::<AdminTestState>()
+            .with_state(fixture.state())
+            .oneshot(Request::builder()
+                .uri("/api/admin/usage/records?scope=all&startTime=2000-01-01T00:00:00Z&endTime=2000-01-02T00:00:00Z&search=%2014:56:57%20")
+                .header(header::COOKIE, "cpr_session=valid-session")
+                .header("x-request-id", "req_usage_clock_search")
+                .body(Body::empty()).unwrap())
+            .await.unwrap();
+        let after = timezone.local(Utc::now()).date_naive();
+        assert_eq!(response.status(), StatusCode::OK);
+        let observations = fixture.observations.lock().unwrap();
+        let query = observations.records.last().unwrap();
+        let local = timezone.local(query.range.start);
+        assert!(
+            [before, after].contains(&local.date_naive()),
+            "{zone}: {local}"
+        );
+        assert_eq!(local.format("%H:%M:%S%.f").to_string(), "14:56:57");
+        assert_eq!(
+            query.range.end - query.range.start,
+            chrono::Duration::seconds(1)
+        );
+        assert!(query.filter.search.is_none());
+    }
+}
+
+#[tokio::test]
+async fn usage_search_should_keep_ordinary_keywords_and_partial_or_invalid_times() {
+    use crate::admin::{AdminTestFixture, AdminTestState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode, header},
+    };
+    use gateway_api::admin::observability;
+    use tower::ServiceExt as _;
+
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let router = observability::router::<AdminTestState>().with_state(fixture.state());
+    for search in [
+        "req_123",
+        "gpt-6.1-sol",
+        "alice@example.com",
+        "14:56",
+        "14:56:",
+        "1:56:57",
+        "24:00:00",
+        "23:59:60",
+        "2026-02-30 14:55:30",
+        "2026-10-20 14:55:3",
+    ] {
+        let response = router.clone()
+            .oneshot(Request::builder()
+                .uri(format!("/api/admin/usage/records?scope=all&startTime=2026-10-01T00:00:00Z&endTime=2026-10-02T00:00:00Z&search={}", search.replace(' ', "%20")))
+                .header(header::COOKIE, "cpr_session=valid-session")
+                .header("x-request-id", "req_usage_keyword_search")
+                .body(Body::empty()).unwrap())
+            .await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{search}");
+        let observations = fixture.observations.lock().unwrap();
+        let query = observations.records.last().unwrap();
+        assert_eq!(query.filter.search.as_deref(), Some(search));
+        assert_eq!(
+            query.range.start,
+            "2026-10-01T00:00:00Z"
+                .parse::<chrono::DateTime<Utc>>()
+                .unwrap()
+        );
+        assert_eq!(
+            query.range.end,
+            "2026-10-02T00:00:00Z"
+                .parse::<chrono::DateTime<Utc>>()
+                .unwrap()
+        );
+    }
+}
+
+#[tokio::test]
 async fn usage_request_scope_is_validated_and_forwarded_without_changing_default() {
     use crate::admin::{AdminTestFixture, AdminTestState};
     use axum::{

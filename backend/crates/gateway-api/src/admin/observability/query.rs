@@ -1,6 +1,7 @@
 //! 查询 wire 类型、校验与领域命令映射
 
 use super::*;
+use chrono::{Duration, NaiveDateTime, NaiveTime, Timelike as _};
 
 /// 观测列表默认页大小
 pub const DEFAULT_PAGE_SIZE: u16 = 50;
@@ -333,7 +334,7 @@ pub(crate) fn usage_command(
     let (current_page, page_size) = query.validate_pagination()?;
     let page_size_value =
         DomainPageSize::new(page_size).map_err(|_| WireValidationError::new("pageSize"))?;
-    Ok(domain::UsageQuery {
+    let mut command = domain::UsageQuery {
         scope: match trimmed(query.scope.as_deref()) {
             None => domain::UsageRecordScope::Usage,
             Some("all") => domain::UsageRecordScope::All,
@@ -351,7 +352,50 @@ pub(crate) fn usage_command(
         filter: usage_filter(query)?,
         current_page,
         page_size: page_size_value,
-    })
+    };
+    if let Some(range) = usage_search_range(command.filter.search.as_deref(), timezone)? {
+        // 时间关键词取代日期选择范围，不再参与账号或模型的文本匹配
+        command.range = range;
+        command.filter.search = None;
+    }
+    Ok(command)
+}
+
+/// 完整时间关键词按部署时区转换为整秒范围，未完成或无效输入保留普通搜索
+fn usage_search_range(
+    search: Option<&str>,
+    timezone: gateway_core::time::DeploymentTimeZone,
+) -> Result<Option<domain::TimeRange>, WireValidationError> {
+    let Some(search) = search else {
+        return Ok(None);
+    };
+    let (local, format) = match search.len() {
+        8 => (
+            NaiveTime::parse_from_str(search, "%H:%M:%S")
+                .ok()
+                .map(|time| timezone.local(Utc::now()).date_naive().and_time(time)),
+            "%H:%M:%S",
+        ),
+        19 => (
+            NaiveDateTime::parse_from_str(search, "%Y-%m-%d %H:%M:%S").ok(),
+            "%Y-%m-%d %H:%M:%S",
+        ),
+        _ => return Ok(None),
+    };
+    let Some(local) =
+        local.filter(|local| local.nanosecond() == 0 && local.format(format).to_string() == search)
+    else {
+        return Ok(None);
+    };
+    let start = timezone
+        .resolve_local(local)
+        .ok_or_else(|| WireValidationError::new("search"))?;
+    let end = start
+        .checked_add_signed(Duration::seconds(1))
+        .ok_or_else(|| WireValidationError::new("search"))?;
+    domain::TimeRange::new(start, end)
+        .map(Some)
+        .map_err(|_| WireValidationError::new("search"))
 }
 
 pub(crate) fn ops_command(
