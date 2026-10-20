@@ -68,6 +68,7 @@ pub(super) fn account_view(
         account,
         capacity,
         capabilities,
+        runtime,
         plan_type_display,
         projection,
         usage,
@@ -112,6 +113,7 @@ pub(super) fn account_view(
             .error_reason
             .map(|reason| reason.as_str().to_owned()),
         error_message: projection.error_message,
+        websocket_degraded: runtime.websocket_degraded,
         enabled: account.enabled,
         concurrency_limit: account.concurrency_limit.map(|limit| limit.get()),
         capacity: AccountCapacityView {

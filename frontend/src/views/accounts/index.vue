@@ -24,6 +24,7 @@ import AccountOverviewCards from './components/AccountOverviewCards.vue'
 import AccountSchedulingSwitch from './components/AccountSchedulingSwitch.vue'
 import AccountTableActions from './components/AccountTableActions.vue'
 import AccountUsagePanel from './components/AccountUsagePanel.vue'
+import AccountWebSocketDegradedIndicator from './components/AccountWebSocketDegradedIndicator.vue'
 import { useAccountBatchEditor } from './composables/useAccountBatchEditor'
 import { useAccountConnectionTest } from './composables/useAccountConnectionTest'
 import { useAccountEditor } from './composables/useAccountEditor'
@@ -317,6 +318,7 @@ const {
                   :next-refresh-at="row.nextRefreshAt"
                   :next-refresh-at-display="row.nextRefreshAtDisplay"
                 />
+                <AccountWebSocketDegradedIndicator v-if="row.websocketDegraded" />
               </div>
             </template>
 

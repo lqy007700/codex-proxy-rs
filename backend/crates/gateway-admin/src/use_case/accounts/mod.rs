@@ -404,6 +404,7 @@ impl DefaultAccountsService {
             capacity: stored.capacity,
             capabilities: provider
                 .account_capabilities(account_id, &stored.account.authentication_kind),
+            runtime: provider.account_runtime_state(account_id),
             plan_type_display: self.providers.resolve_account_plan(
                 stored.account.provider_kind.as_str(),
                 &mut stored.account.plan_type,
@@ -536,10 +537,13 @@ impl AccountsService for DefaultAccountsService {
             .map(|(mut item, quota)| {
                 let id = ProviderAccountId::new(item.account.id.clone())
                     .map_err(|_| AdminError::invalid("Provider 账号 ID 不合法"))?;
-                let capabilities = providers
+                let (capabilities, runtime) = providers
                     .require(&item.account.provider_kind)
                     .map(|provider| {
-                        provider.account_capabilities(&id, &item.account.authentication_kind)
+                        (
+                            provider.account_capabilities(&id, &item.account.authentication_kind),
+                            provider.account_runtime_state(&id),
+                        )
                     })
                     .unwrap_or_default();
                 let usage = api_key_usage.remove(&item.account.id).or_else(|| {
@@ -555,6 +559,7 @@ impl AccountsService for DefaultAccountsService {
                         ..item.capacity
                     },
                     capabilities,
+                    runtime,
                     plan_type_display: providers.resolve_account_plan(
                         item.account.provider_kind.as_str(),
                         &mut item.account.plan_type,
@@ -697,6 +702,7 @@ impl AccountsService for DefaultAccountsService {
                 .map_err(|error| map_store_error(error, "enable provider account"))?
                 .config_revision
         };
+        provider.recover_account_runtime_state(&account_id);
         provider
             .account_facts_changed(std::slice::from_ref(&account_id))
             .await;

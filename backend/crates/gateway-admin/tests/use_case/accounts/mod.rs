@@ -74,6 +74,7 @@ pub(super) type EventLog = Arc<Mutex<Vec<&'static str>>>;
 pub(super) struct FakeProviderAdmin {
     kind: ProviderKind,
     capabilities: Mutex<gateway_admin::model::accounts::ProviderAccountCapabilities>,
+    websocket_degraded: Mutex<bool>,
     events: EventLog,
     failure: Mutex<Option<ProviderAdminError>>,
     import_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
@@ -104,6 +105,7 @@ impl FakeProviderAdmin {
         Arc::new(Self {
             kind: ProviderKind::new(kind).expect("provider kind"),
             capabilities: Mutex::default(),
+            websocket_degraded: Mutex::new(false),
             events,
             failure: Mutex::new(None),
             import_gate: Mutex::new(None),
@@ -217,6 +219,10 @@ impl FakeProviderAdmin {
         *self.quota.lock().expect("provider quota") = quota;
     }
 
+    fn set_websocket_degraded(&self, degraded: bool) {
+        *self.websocket_degraded.lock().expect("websocket degraded") = degraded;
+    }
+
     pub(super) fn pending(&self) -> Option<PendingAuthorizationMutation> {
         self.pending.lock().expect("pending authorization").clone()
     }
@@ -285,6 +291,20 @@ impl ProviderAdmin for FakeProviderAdmin {
         _authentication_kind: &str,
     ) -> gateway_admin::model::accounts::ProviderAccountCapabilities {
         *self.capabilities.lock().unwrap()
+    }
+
+    fn account_runtime_state(
+        &self,
+        _: &ProviderAccountId,
+    ) -> gateway_admin::model::accounts::ProviderAccountRuntimeState {
+        gateway_admin::model::accounts::ProviderAccountRuntimeState {
+            websocket_degraded: *self.websocket_degraded.lock().unwrap(),
+        }
+    }
+
+    fn recover_account_runtime_state(&self, _: &ProviderAccountId) {
+        self.record("provider.recover_account_runtime_state");
+        self.set_websocket_degraded(false);
     }
     fn provider_kind(&self) -> &ProviderKind {
         &self.kind
@@ -1662,6 +1682,7 @@ async fn accounts_quota_refresh_should_return_the_updated_account_status() {
 async fn accounts_recover_should_commit_facts_then_return_normal_account() {
     let events = events();
     let provider = FakeProviderAdmin::new("openai", events.clone());
+    provider.set_websocket_degraded(true);
     let mut account = account_record("openai");
     account.credential_state = CredentialState::Invalid;
     account.quota = QuotaState::exhausted(
@@ -1697,11 +1718,13 @@ async fn accounts_recover_should_commit_facts_then_return_normal_account() {
         result.account.projection.status,
         gateway_admin::model::accounts::AccountStatus::Normal
     );
+    assert!(!result.account.runtime.websocket_degraded);
     assert_eq!(
         recorded(&events),
         [
             "store.load_account",
             "store.recover_account",
+            "provider.recover_account_runtime_state",
             "provider.account_facts_changed",
             "store.load_account",
         ]
@@ -1714,6 +1737,7 @@ async fn accounts_recover_disabled_should_only_enable_scheduling_and_preserve_qu
     for has_error in [false, true] {
         let events = events();
         let provider = FakeProviderAdmin::new("openai", events.clone());
+        provider.set_websocket_degraded(true);
         let mut account = account_record("openai");
         account.enabled = false;
         if has_error {
@@ -1772,11 +1796,13 @@ async fn accounts_recover_disabled_should_only_enable_scheduling_and_preserve_qu
                 gateway_admin::model::accounts::AccountStatus::Normal
             }
         );
+        assert!(!result.account.runtime.websocket_degraded);
         assert_eq!(
             recorded(&events),
             [
                 "store.load_account",
                 "store.batch_update_accounts",
+                "provider.recover_account_runtime_state",
                 "provider.account_facts_changed",
                 "store.load_account",
             ]
@@ -1942,6 +1968,7 @@ async fn accounts_batch_update_should_commit_once_and_notify_each_provider() {
 #[tokio::test]
 async fn accounts_list_should_return_complete_directory_semantics() {
     let provider = FakeProviderAdmin::new("openai", events());
+    provider.set_websocket_degraded(true);
     let capabilities = gateway_admin::model::accounts::ProviderAccountCapabilities {
         quota: true,
         profile: true,
@@ -1970,6 +1997,7 @@ async fn accounts_list_should_return_complete_directory_semantics() {
     assert_eq!(page.summary.normal, 1);
     let account = page.items.first().expect("account item");
     assert_eq!(account.capabilities, capabilities);
+    assert!(account.runtime.websocket_degraded);
     assert_eq!(account.account.provider_kind.as_str(), "openai");
     assert_eq!(
         account.projection.status,

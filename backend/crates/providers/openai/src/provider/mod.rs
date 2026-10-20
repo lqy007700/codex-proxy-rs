@@ -65,7 +65,7 @@ use crate::credential::{
     derive_previous_response_id_hash, derive_turn_alias,
 };
 use crate::request_identity::{account_session_with_headers, turn_id_with_headers};
-use crate::session_transport::CodexSessionTransportRecovery;
+use crate::session_transport::{CodexSessionTransportRecovery, SessionTransportScope};
 use crate::transport::canonical::{
     CodexCanonicalDecoder, CodexCanonicalError, CodexCanonicalOutcome,
 };
@@ -345,6 +345,14 @@ impl CodexProvider {
 
     pub(crate) fn with_session_identity(mut self, identity: CodexSessionIdentity) -> Self {
         self.session_identity = Some(identity);
+        self
+    }
+
+    pub(crate) fn with_session_transport_recovery(
+        mut self,
+        recovery: CodexSessionTransportRecovery,
+    ) -> Self {
+        self.session_transport_recovery = recovery;
         self
     }
 
@@ -921,10 +929,14 @@ impl CodexProvider {
         } else {
             selected_transport(&upstream_request)
         };
+        let session_transport_scope = session_transport_key.as_ref().map(|key| {
+            self.session_transport_recovery
+                .scope(lease.account_id(), key)
+        });
         let session_http_fallback = requirement.allows_pre_send_http_fallback()
-            && session_transport_key
+            && session_transport_scope
                 .as_ref()
-                .is_some_and(|key| self.session_transport_recovery.uses_http(key));
+                .is_some_and(|scope| self.session_transport_recovery.uses_http(scope));
         let mut transport = if requirement.requires_websocket() {
             CodexProviderTransport::PreferWebSocket
         } else if context.transport() == AttemptTransport::Fallback || session_http_fallback {
@@ -1039,7 +1051,7 @@ impl CodexProvider {
             quota: Arc::clone(&self.quota),
             catalog: Arc::clone(&self.catalog),
             lease: Arc::clone(&lease),
-            session_transport_key,
+            session_transport_scope,
             session_transport_key_hash,
             session_transport_recovery: self.session_transport_recovery.clone(),
             websocket_retry_count,

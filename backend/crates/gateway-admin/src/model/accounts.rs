@@ -30,6 +30,12 @@ pub struct ProviderAccountCapabilities {
     pub consume_reset_credit: bool,
 }
 
+/// Provider 持有的账号级临时运行状态
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderAccountRuntimeState {
+    pub websocket_degraded: bool,
+}
+
 /// 导入时统一应用的账号备注、调度与分组设置；缺省时保留原有导入语义
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountImportSettings {

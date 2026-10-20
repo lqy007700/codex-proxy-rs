@@ -188,6 +188,17 @@ pub trait ProviderAdmin: Send + Sync {
         Default::default()
     }
 
+    /// 返回该账号当前的 Provider 临时运行状态
+    fn account_runtime_state(
+        &self,
+        _account_id: &ProviderAccountId,
+    ) -> crate::model::accounts::ProviderAccountRuntimeState {
+        Default::default()
+    }
+
+    /// 管理员恢复账号时清除该账号的 Provider 临时运行状态
+    fn recover_account_runtime_state(&self, _account_id: &ProviderAccountId) {}
+
     /// 提供该 Provider 的可选客户端身份；通用管理层不解释内部字段
     fn client_profile_options(
         &self,

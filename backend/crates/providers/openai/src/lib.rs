@@ -27,6 +27,7 @@ use crate::credential::{
     CodexCredentialRefreshService, CodexCredentialRepository, CodexCredentialSelector,
     CodexOAuthAdmin, CodexOAuthAdminService,
 };
+use crate::session_transport::CodexSessionTransportRecovery;
 use crate::transport::profile::{
     CodexArtifactProfileCache, CodexDesktopReleaseService, OfficialCodexDesktopReleaseTransport,
 };
@@ -174,6 +175,7 @@ pub async fn initialize(
         Arc::clone(&account_feedback),
         CodexCookiePolicy::official().map_err(|_| OpenAiInitializeError::CookiePolicy)?,
     ));
+    let session_transport_recovery = CodexSessionTransportRecovery::default();
     let core_provider: Arc<dyn Provider> = Arc::new(
         CodexProvider::new(
             selector,
@@ -187,6 +189,7 @@ pub async fn initialize(
             config.stream_max_retries(),
         )
         .map_err(OpenAiInitializeError::Provider)?
+        .with_session_transport_recovery(session_transport_recovery.clone())
         .with_session_identity(session_identity)
         .with_timezone(config.timezone)
         .with_live_support(repository.clone()),
@@ -241,6 +244,7 @@ pub async fn initialize(
             profile_statistics,
             quota: Arc::clone(&quota),
             catalog: Arc::clone(&catalog),
+            session_transport_recovery,
         },
         websocket_pool,
         desktop_release_status,

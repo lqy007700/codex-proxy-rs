@@ -61,6 +61,7 @@ use crate::credential::{
 use crate::credential::{
     CodexCredentialCodec, CodexOAuthSecret, oauth_owner_ref, parse_access_token_expiration,
 };
+use crate::session_transport::CodexSessionTransportRecovery;
 use crate::transport::CodexWebSocketPool;
 use crate::transport::profile::{
     CodexDesktopReleaseSnapshot, CodexDesktopReleaseStatus, CodexWireProfile, CodexWireProfileState,
@@ -82,6 +83,7 @@ pub(crate) struct OpenAiAdminProvider {
     profile_statistics: Arc<CodexCredentialProfileService>,
     quota: Arc<CodexCredentialQuotaService>,
     catalog: Arc<CodexCredentialCatalogService>,
+    session_transport_recovery: CodexSessionTransportRecovery,
     websocket_pool: Arc<CodexWebSocketPool>,
     desktop_release: CodexDesktopReleaseStatus,
 }
@@ -92,6 +94,7 @@ pub(crate) struct OpenAiAdminServices {
     pub(crate) profile_statistics: Arc<CodexCredentialProfileService>,
     pub(crate) quota: Arc<CodexCredentialQuotaService>,
     pub(crate) catalog: Arc<CodexCredentialCatalogService>,
+    pub(crate) session_transport_recovery: CodexSessionTransportRecovery,
 }
 
 impl OpenAiAdminProvider {
@@ -113,6 +116,7 @@ impl OpenAiAdminProvider {
             profile_statistics: services.profile_statistics,
             quota: services.quota,
             catalog: services.catalog,
+            session_transport_recovery: services.session_transport_recovery,
             websocket_pool,
             desktop_release,
         }
@@ -199,6 +203,21 @@ impl ProviderAdmin for OpenAiAdminProvider {
             reset_credits: oauth,
             consume_reset_credit: oauth,
         }
+    }
+
+    fn account_runtime_state(
+        &self,
+        account_id: &ProviderAccountId,
+    ) -> gateway_admin::model::accounts::ProviderAccountRuntimeState {
+        gateway_admin::model::accounts::ProviderAccountRuntimeState {
+            websocket_degraded: self
+                .session_transport_recovery
+                .account_is_degraded(account_id),
+        }
+    }
+
+    fn recover_account_runtime_state(&self, account_id: &ProviderAccountId) {
+        self.session_transport_recovery.recover_account(account_id);
     }
 
     fn pricing_catalog(&self) -> gateway_admin::model::pricing::ProviderPricingCatalog {

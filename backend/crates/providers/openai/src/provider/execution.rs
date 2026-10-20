@@ -393,7 +393,7 @@ pub(super) struct ColdResponse {
     pub(super) quota: Arc<CodexCredentialQuotaService>,
     pub(super) catalog: Arc<CodexCredentialCatalogService>,
     pub(super) lease: Arc<CodexCredentialLease>,
-    pub(super) session_transport_key: Option<ProviderSessionAffinityKey>,
+    pub(super) session_transport_scope: Option<SessionTransportScope>,
     pub(super) session_transport_key_hash: Option<String>,
     pub(super) session_transport_recovery: CodexSessionTransportRecovery,
     pub(super) websocket_retry_count: u32,
@@ -775,7 +775,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
         quota,
         catalog,
         lease,
-        session_transport_key,
+        session_transport_scope,
         session_transport_key_hash,
         session_transport_recovery,
         websocket_retry_count,
@@ -861,7 +861,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                             request_id: context.request_id().as_str(),
                             attempt_index: context.attempt_index().get(),
                             account_id: active_account.id().as_str(),
-                            session_transport_key: session_transport_key.as_ref(),
+                            session_transport_scope: session_transport_scope.as_ref(),
                             session_transport_key_hash: session_transport_key_hash.as_deref(),
                             session_transport_recovery: &session_transport_recovery,
                         },
@@ -1048,7 +1048,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                                 request_id: context.request_id().as_str(),
                                 attempt_index: context.attempt_index().get(),
                                 account_id: active_account.id().as_str(),
-                                session_transport_key: session_transport_key.as_ref(),
+                                session_transport_scope: session_transport_scope.as_ref(),
                                 session_transport_key_hash: session_transport_key_hash.as_deref(),
                                 session_transport_recovery: &session_transport_recovery,
                             },
@@ -1152,9 +1152,9 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 && observation_state.mark_completed(terminal_response_is_incomplete(&events));
             if response_transport == CodexBackendTransport::WebSocket
                 && completed && terminal_failure.is_none()
-                && let Some(key) = session_transport_key.as_ref()
+                && let Some(scope) = session_transport_scope.as_ref()
             {
-                session_transport_recovery.websocket_succeeded(key);
+                session_transport_recovery.websocket_succeeded(scope);
             }
             if allows_account_state_mutation && (completed || terminal_failure.is_some()) {
                 synchronize_passive_quota(
@@ -1298,9 +1298,9 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             && observation_state.mark_completed(terminal_response_is_incomplete(&events));
         if response_transport == CodexBackendTransport::WebSocket
             && completed && terminal_failure.is_none()
-            && let Some(key) = session_transport_key.as_ref()
+            && let Some(scope) = session_transport_scope.as_ref()
         {
-            session_transport_recovery.websocket_succeeded(key);
+            session_transport_recovery.websocket_succeeded(scope);
         }
         if allows_account_state_mutation && completed && terminal_failure.is_none() {
             // 尾部 finish() 也可能产出 completed，账号健康更新先于下游 yield

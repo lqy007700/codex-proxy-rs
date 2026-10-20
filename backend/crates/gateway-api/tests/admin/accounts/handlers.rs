@@ -76,6 +76,7 @@ async fn account_cooldown_returns_an_instant_and_server_formatted_recovery() {
             assert_eq!(response.status(), StatusCode::OK);
             let body = to_bytes(response.into_body(), 32768).await.unwrap();
             let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(value["data"]["items"][0]["websocketDegraded"], false);
             let quota = &value["data"]["items"][0]["quota"];
             match until {
                 Some(until) => {

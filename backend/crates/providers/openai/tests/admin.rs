@@ -126,6 +126,169 @@ async fn account_capabilities_distinguish_oauth_from_api_key_and_unknown_credent
 }
 
 #[tokio::test]
+async fn account_runtime_state_reports_and_recovers_websocket_degradation() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/codex/responses"))
+        .respond_with(ResponseTemplate::new(426).set_body_json(json!({
+            "error": {"code": "upgrade_required", "message": "use HTTP"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let store = Arc::new(MemoryAccountStore::default());
+    store
+        .seed_oauth_credential(ImportCodexOAuthCredential {
+            account_id: "acct_runtime_recovery".to_owned(),
+            name: "runtime recovery".to_owned(),
+            secret: secret("runtime-recovery-access"),
+            verified_account: profile("chatgpt-runtime-recovery"),
+            next_refresh_at: Some(Utc::now() + chrono::Duration::minutes(30)),
+            enabled: true,
+        })
+        .await;
+    let mut config = valid_config();
+    config.config.api.base_url = server.uri();
+    let bundle = provider_openai::initialize(
+        config.config.clone(),
+        provider_ports_with(store, Arc::new(TestOAuthPending::default())),
+    )
+    .await
+    .expect("OpenAI bundle");
+    let account_id = ProviderAccountId::new("acct_runtime_recovery").expect("account ID");
+
+    let mut stream = bundle
+        .core_provider()
+        .execute(
+            initialized_provider_request(
+                initialized_session_operation("runtime-recovery-session"),
+                account_id.as_str(),
+            ),
+            initialized_attempt_context("req_runtime_recovery", account_id.as_str()),
+        )
+        .await
+        .expect("prepare WebSocket stream");
+    let failure = loop {
+        match stream.next().await {
+            Some(Ok(_)) => {}
+            Some(Err(error)) => break error,
+            None => panic!("426 opening must fail"),
+        }
+    };
+    assert_eq!(failure.upstream_status(), Some(426));
+    assert!(
+        bundle
+            .admin_provider()
+            .account_runtime_state(&account_id)
+            .websocket_degraded
+    );
+
+    bundle
+        .admin_provider()
+        .recover_account_runtime_state(&account_id);
+
+    assert!(
+        !bundle
+            .admin_provider()
+            .account_runtime_state(&account_id)
+            .websocket_degraded
+    );
+    let recovered = bundle
+        .core_provider()
+        .execute(
+            initialized_provider_request(
+                initialized_session_operation("runtime-recovery-session"),
+                account_id.as_str(),
+            ),
+            initialized_attempt_context("req_runtime_recovery_next", account_id.as_str()),
+        )
+        .await
+        .expect("prepare recovered WebSocket stream");
+    assert_eq!(recovered.metadata().transport().as_str(), "websocket");
+}
+
+#[tokio::test]
+async fn websocket_degradation_is_isolated_by_account_when_session_is_shared() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/codex/responses"))
+        .respond_with(ResponseTemplate::new(426).set_body_json(json!({
+            "error": {"code": "upgrade_required", "message": "use HTTP"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let store = Arc::new(MemoryAccountStore::default());
+    for (account_id, owner) in [
+        ("acct_runtime_first", "chatgpt-runtime-first"),
+        ("acct_runtime_second", "chatgpt-runtime-second"),
+    ] {
+        store
+            .seed_oauth_credential(ImportCodexOAuthCredential {
+                account_id: account_id.to_owned(),
+                name: account_id.to_owned(),
+                secret: secret(&format!("{account_id}-access")),
+                verified_account: profile(owner),
+                next_refresh_at: Some(Utc::now() + chrono::Duration::minutes(30)),
+                enabled: true,
+            })
+            .await;
+    }
+    let mut config = valid_config();
+    config.config.api.base_url = server.uri();
+    let bundle = provider_openai::initialize(
+        config.config.clone(),
+        provider_ports_with(store, Arc::new(TestOAuthPending::default())),
+    )
+    .await
+    .expect("OpenAI bundle");
+    let first = ProviderAccountId::new("acct_runtime_first").expect("first account ID");
+    let second = ProviderAccountId::new("acct_runtime_second").expect("second account ID");
+
+    let mut degraded = bundle
+        .core_provider()
+        .execute(
+            initialized_provider_request(
+                initialized_session_operation("shared-runtime-session"),
+                first.as_str(),
+            ),
+            initialized_attempt_context("req_runtime_first", first.as_str()),
+        )
+        .await
+        .expect("prepare first WebSocket stream");
+    while let Some(result) = degraded.next().await {
+        if result.is_err() {
+            break;
+        }
+    }
+    assert!(
+        bundle
+            .admin_provider()
+            .account_runtime_state(&first)
+            .websocket_degraded
+    );
+    assert!(
+        !bundle
+            .admin_provider()
+            .account_runtime_state(&second)
+            .websocket_degraded
+    );
+
+    let unaffected = bundle
+        .core_provider()
+        .execute(
+            initialized_provider_request(
+                initialized_session_operation("shared-runtime-session"),
+                second.as_str(),
+            ),
+            initialized_attempt_context("req_runtime_second", second.as_str()),
+        )
+        .await
+        .expect("prepare second WebSocket stream");
+    assert_eq!(unaffected.metadata().transport().as_str(), "websocket");
+}
+
+#[tokio::test]
 async fn custom_identity_preview_and_dashboard_share_the_exact_request_profile() {
     let config = valid_config();
     let bundle = provider_openai::initialize(config.config.clone(), provider_ports())
@@ -1644,6 +1807,21 @@ fn reset_credit_command(account_id: ProviderAccountId) -> ConsumeProviderResetCr
         redeem_request_id: Uuid::parse_str("8fbf302d-11df-4bd5-82e4-08e4b3df7874")
             .expect("UUID v4"),
     }
+}
+
+fn initialized_session_operation(session_id: &str) -> Operation {
+    Operation::Generate(GenerateRequest::from_protocol_payload(
+        ProtocolPayload::json_object(
+            "openai",
+            Map::from_iter([
+                ("model".to_owned(), json!("gpt-5.4")),
+                ("input".to_owned(), json!("hello")),
+                ("session_id".to_owned(), json!(session_id)),
+                ("thread_id".to_owned(), json!(session_id)),
+            ]),
+        )
+        .expect("OpenAI payload"),
+    ))
 }
 
 fn initialized_provider_request(operation: Operation, account_id: &str) -> ProviderRequest {

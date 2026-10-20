@@ -145,6 +145,7 @@ export interface Account {
   status: AccountStatus
   errorReason: AccountErrorReason | null
   errorMessage: string | null
+  websocketDegraded: boolean
   enabled: boolean
   concurrencyLimit: number | null
   capacity: {

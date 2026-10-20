@@ -291,6 +291,7 @@ pub struct AccountView {
     pub error_reason: Option<String>,
     /// 最近一次失败的上游错误描述；仅错误状态存在
     pub error_message: Option<String>,
+    pub websocket_degraded: bool,
     pub enabled: bool,
     pub concurrency_limit: Option<u32>,
     pub capacity: AccountCapacityView,

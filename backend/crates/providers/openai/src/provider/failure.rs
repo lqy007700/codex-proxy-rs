@@ -425,7 +425,7 @@ pub(super) struct WebSocketRecoveryContext<'a> {
     pub(super) request_id: &'a str,
     pub(super) attempt_index: u32,
     pub(super) account_id: &'a str,
-    pub(super) session_transport_key: Option<&'a ProviderSessionAffinityKey>,
+    pub(super) session_transport_scope: Option<&'a SessionTransportScope>,
     pub(super) session_transport_key_hash: Option<&'a str>,
     pub(super) session_transport_recovery: &'a CodexSessionTransportRecovery,
 }
@@ -491,10 +491,10 @@ pub(super) fn apply_websocket_recovery_policy(
     }
     // close 1009 只拒绝当前请求，不代表会话的 WS 传输不可用
     let session_budget_exhausted = failure.error.kind() != ProviderErrorKind::MessageTooBig
-        && context.session_transport_key.is_some_and(|key| {
+        && context.session_transport_scope.is_some_and(|scope| {
             context
                 .session_transport_recovery
-                .record_websocket_failure(key, context.max_retries)
+                .record_websocket_failure(scope, context.max_retries)
         });
     // 已交付响应只影响后续请求的会话传输选择，不能重放当前请求
     if matches!(context.replay_boundary, ReplayBoundary::AfterSemanticOutput) {
@@ -553,8 +553,8 @@ pub(super) fn apply_websocket_recovery_policy(
         return;
     }
     failure.error.set_pre_delivery_transport_fallback();
-    if let Some(key) = context.session_transport_key {
-        context.session_transport_recovery.disable_websocket(key);
+    if let Some(scope) = context.session_transport_scope {
+        context.session_transport_recovery.disable_websocket(scope);
     }
     tracing::warn!(
         request_id = context.request_id,
@@ -574,7 +574,7 @@ pub(super) fn apply_websocket_recovery_policy(
             WebSocketFailurePolicy::Budgeted => "retry_budget_exhausted",
             WebSocketFailurePolicy::ImmediateFallback => "upgrade_required",
         },
-        session_affinity_present = context.session_transport_key.is_some(),
+        session_affinity_present = context.session_transport_scope.is_some(),
         session_transport_key_hash = context.session_transport_key_hash.unwrap_or(""),
         "OpenAI upstream WebSocket disabled for this session"
     );
