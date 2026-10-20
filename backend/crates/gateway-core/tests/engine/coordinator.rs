@@ -4109,6 +4109,346 @@ fn bounded_rejection(attempt: usize) -> ProviderError {
 }
 
 #[test]
+fn transient_retry_rotates_when_the_pinned_account_becomes_unavailable() {
+    for (kind, policy) in [
+        (
+            ProviderErrorKind::NoEligibleAccount,
+            bounded_rotation_policy(),
+        ),
+        (
+            ProviderErrorKind::AccountCapacityUnavailable,
+            bounded_rotation_policy(),
+        ),
+        (ProviderErrorKind::QuotaExhausted, bounded_rotation_policy()),
+        (
+            ProviderErrorKind::NoEligibleAccount,
+            TransientRetryPolicy::RetryThenRotateAccount,
+        ),
+    ] {
+        let operation = generate_operation();
+        let route_plan = plan(&operation);
+        let (coordinator, store, provider) = coordinator(vec![
+            Script::Stream {
+                account_id: "acct_first",
+                items: vec![Err(bounded_rejection(1).with_transient_retry(
+                    NonZeroU32::new(3).unwrap(),
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    policy,
+                ))],
+            },
+            Script::Error(ProviderError::new(kind, UpstreamSendState::NotSent)),
+            Script::Stream {
+                account_id: "acct_second",
+                items: complete_stream(None),
+            },
+        ]);
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        // HTTP 保活先提交响应头不等于业务输出，不能阻断这次安全换号
+        session.response_commit().record(Some(200));
+        block_on(session.collect_uncommitted()).expect("spare account should succeed");
+        block_on(session.commit_downstream(Some(200))).unwrap();
+
+        let contexts = provider.contexts.lock().unwrap();
+        assert_eq!(contexts.len(), 3);
+        let first = ProviderAccountId::new("acct_first").unwrap();
+        assert_eq!(contexts[1].required_account(), Some(&first));
+        assert_eq!(contexts[2].required_account(), None);
+        assert!(contexts[2].excluded_accounts().contains(&first));
+        let state = store.state.lock().unwrap();
+        assert_eq!(state.attempts.len(), 2);
+        assert_eq!(state.intermediate_failures, 1);
+        assert_eq!(state.finalizations.len(), 1);
+        assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Succeeded);
+        assert_eq!(state.finalizations[0].attempt_count, 2);
+    }
+}
+
+#[test]
+fn unavailable_transient_retry_respects_rotation_policy_and_selection_failure_boundaries() {
+    for (policy, rotations, kind, send_state, prohibited) in [
+        (
+            TransientRetryPolicy::RetryThenReturnError,
+            3,
+            ProviderErrorKind::NoEligibleAccount,
+            UpstreamSendState::NotSent,
+            false,
+        ),
+        (
+            bounded_rotation_policy(),
+            0,
+            ProviderErrorKind::NoEligibleAccount,
+            UpstreamSendState::NotSent,
+            false,
+        ),
+        (
+            bounded_rotation_policy(),
+            3,
+            ProviderErrorKind::NoEligibleAccount,
+            UpstreamSendState::NotSent,
+            true,
+        ),
+        (
+            bounded_rotation_policy(),
+            3,
+            ProviderErrorKind::NoEligibleAccount,
+            UpstreamSendState::Sent,
+            false,
+        ),
+        (
+            bounded_rotation_policy(),
+            3,
+            ProviderErrorKind::NoEligibleAccount,
+            UpstreamSendState::Ambiguous,
+            false,
+        ),
+        (
+            bounded_rotation_policy(),
+            3,
+            ProviderErrorKind::SessionPolicyRestricted,
+            UpstreamSendState::NotSent,
+            false,
+        ),
+        (
+            bounded_rotation_policy(),
+            3,
+            ProviderErrorKind::ProviderInfrastructureUnavailable,
+            UpstreamSendState::NotSent,
+            false,
+        ),
+    ] {
+        let operation = generate_operation();
+        let route_plan = plan_with_policy(
+            &operation,
+            AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::MIN)
+                .with_max_account_rotations(rotations),
+        );
+        let mut selection_failure = ProviderError::new(kind, send_state);
+        if prohibited {
+            selection_failure = selection_failure.with_retry_prohibited();
+        }
+        let (coordinator, _, provider) = coordinator(vec![
+            Script::Stream {
+                account_id: "acct_first",
+                items: vec![Err(bounded_rejection(1).with_transient_retry(
+                    NonZeroU32::new(3).unwrap(),
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    policy,
+                ))],
+            },
+            Script::Error(selection_failure),
+        ]);
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        assert!(block_on(session.collect_uncommitted()).is_err());
+        assert_eq!(provider.contexts.lock().unwrap().len(), 2);
+    }
+}
+
+#[test]
+fn unavailable_transient_retry_selects_another_account_before_advancing_provider() {
+    let operation = generate_operation();
+    let route_plan = dual_provider_plan(&operation);
+    let store = Arc::new(FakeStore::default());
+    let openai = Arc::new(ScriptedProvider::new(vec![
+        Script::Stream {
+            account_id: "acct_openai_first",
+            items: vec![Err(bounded_rejection(1))],
+        },
+        Script::Error(ProviderError::new(
+            ProviderErrorKind::NoEligibleAccount,
+            UpstreamSendState::NotSent,
+        )),
+        Script::Stream {
+            account_id: "acct_openai_second",
+            items: complete_stream(None),
+        },
+    ]));
+    let xai = Arc::new(ScriptedProvider::named("xai", Vec::new()));
+    let mut registry = ProviderRegistry::builder();
+    registry.register(openai.clone()).unwrap();
+    registry.register(xai.clone()).unwrap();
+    let coordinator = AttemptCoordinator::new(GatewayEngine::new(store, registry.build()));
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    block_on(session.collect_uncommitted()).unwrap();
+    block_on(session.commit_downstream(Some(200))).unwrap();
+    assert_eq!(openai.contexts.lock().unwrap().len(), 3);
+    assert!(xai.contexts.lock().unwrap().is_empty());
+}
+
+#[test]
+fn unavailable_transient_retry_reuses_its_reserved_budget_without_resetting_it() {
+    for (rotations, succeeds) in [(1, false), (8, false), (8, true)] {
+        let operation = generate_operation();
+        let route_plan = plan_with_policy(
+            &operation,
+            AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::MIN)
+                .with_max_account_rotations(rotations),
+        );
+        let rejection = |index| {
+            bounded_rejection(index).with_transient_retry(
+                NonZeroU32::new(3).unwrap(),
+                Duration::ZERO,
+                Duration::ZERO,
+                Duration::ZERO,
+                TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                    max_total_retries: NonZeroU32::new(2).unwrap(),
+                    track_client_retry_failure: true,
+                },
+            )
+        };
+        let (coordinator, store, provider) = coordinator(vec![
+            Script::Stream {
+                account_id: "acct_first",
+                items: vec![Err(rejection(1))],
+            },
+            Script::Error(ProviderError::new(
+                ProviderErrorKind::NoEligibleAccount,
+                UpstreamSendState::NotSent,
+            )),
+            Script::Stream {
+                account_id: "acct_second",
+                items: vec![Err(rejection(2))],
+            },
+            Script::Error(ProviderError::new(
+                ProviderErrorKind::NoEligibleAccount,
+                UpstreamSendState::NotSent,
+            )),
+            Script::Stream {
+                account_id: "acct_other",
+                items: if succeeds {
+                    complete_stream(None)
+                } else {
+                    vec![Err(rejection(3))]
+                },
+            },
+        ]);
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        let result = block_on(session.collect_uncommitted());
+        if succeeds {
+            result.unwrap();
+            block_on(session.commit_downstream(Some(200))).unwrap();
+        } else {
+            let Err(EngineError::Provider(error)) = result else {
+                panic!("the last upstream failure should exhaust the shared budget");
+            };
+            let expected = if rotations == 1 {
+                "reason_2"
+            } else {
+                "reason_3"
+            };
+            assert_eq!(
+                error.upstream_code().map(|code| code.as_str()),
+                Some(expected)
+            );
+        }
+        let contexts = provider.contexts.lock().unwrap();
+        let expected_attempts = if rotations == 1 { 2 } else { 3 };
+        assert_eq!(contexts.len(), if rotations == 1 { 4 } else { 5 });
+        let unpinned = &contexts[if rotations == 1 { 2 } else { 4 }];
+        assert_eq!(unpinned.required_account(), None);
+        assert!(
+            unpinned
+                .excluded_accounts()
+                .contains(&ProviderAccountId::new("acct_first").unwrap())
+        );
+        assert_eq!(
+            unpinned
+                .excluded_accounts()
+                .contains(&ProviderAccountId::new("acct_second").unwrap()),
+            rotations != 1,
+        );
+        let state = store.state.lock().unwrap();
+        assert_eq!(state.attempts.len(), expected_attempts);
+        assert_eq!(
+            state.finalizations[0].attempt_count as usize,
+            expected_attempts
+        );
+    }
+}
+
+#[test]
+fn unavailable_transient_retry_preserves_the_upstream_error_if_no_spare_account_exists() {
+    let operation = generate_operation();
+    let route_plan = plan(&operation);
+    let unavailable = || {
+        Script::Error(ProviderError::new(
+            ProviderErrorKind::NoEligibleAccount,
+            UpstreamSendState::NotSent,
+        ))
+    };
+    let (coordinator, store, provider) = coordinator(vec![
+        Script::Stream {
+            account_id: "acct_first",
+            items: vec![Err(bounded_rejection(1))],
+        },
+        unavailable(),
+        unavailable(),
+    ]);
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    let Err(EngineError::Provider(error)) = block_on(session.collect_uncommitted()) else {
+        panic!("retain the original upstream error after one unpinned selection");
+    };
+    assert_eq!(error.upstream_status(), Some(503));
+    assert_eq!(
+        error
+            .client_visible_upstream_response()
+            .unwrap()
+            .body()
+            .as_ref(),
+        b"upstream failure 1"
+    );
+    assert_eq!(provider.contexts.lock().unwrap().len(), 3);
+    let state = store.state.lock().unwrap();
+    assert_eq!(state.attempts.len(), 1);
+    assert_eq!(state.finalizations.len(), 1);
+    assert_eq!(state.finalizations[0].attempt_count, 1);
+    assert_eq!(state.finalizations[0].send_state, UpstreamSendState::Sent);
+}
+
+#[test]
 fn bounded_server_error_retries_until_success() {
     let operation = generate_operation();
     let route_plan = plan(&operation);

@@ -1003,6 +1003,9 @@ where
         let is_transport_recovery = pending_retry
             .as_ref()
             .is_some_and(|retry| retry.transport_recovery);
+        let is_transient_account_retry = pending_retry
+            .as_ref()
+            .is_some_and(|retry| !retry.transport_recovery && retry.account.is_some());
         if !is_transport_recovery && self.routing_attempts >= self.plan.max_attempts().get() {
             return Err(EngineError::EmptyRoutingPlan);
         }
@@ -1192,7 +1195,13 @@ where
                     attempt_trace.record_provider_failure(&error);
                     let continuation_retry = !error.retry_is_prohibited()
                         && self.prepare_unavailable_native_continuation_replay(&error);
+                    let unavailable_retry_account = pinned_account.as_ref().filter(|_| {
+                        is_transient_account_retry
+                            && !continuation_retry
+                            && self.can_rotate_unavailable_retry_account(&error)
+                    });
                     let candidate_retry = !error.retry_is_prohibited() && !continuation_retry
+                        && unavailable_retry_account.is_none()
                         && matches!(
                             error.kind(),
                             ProviderErrorKind::AccountCapacityUnavailable
@@ -1228,12 +1237,15 @@ where
                                 .get()
                                 .saturating_sub(self.routing_attempts),
                             remaining_deadline: Duration::ZERO,
-                            retry_allowed: continuation_retry || candidate_retry,
+                            retry_allowed: continuation_retry
+                                || candidate_retry
+                                || unavailable_retry_account.is_some(),
                         })
                         .await?;
                     attempt_trace.record("retry.decided", json!({
                         "phase": "prepare", "retryable": retryable,
                         "continuationRetry": continuation_retry, "candidateRetry": candidate_retry,
+                        "accountRotationRetry": unavailable_retry_account.is_some(),
                         "retryProhibited": error.retry_is_prohibited(),
                         "sendState": error.send_state().as_str(),
                         "requestSendState": self.current_send_state().as_str(),
@@ -1243,6 +1255,9 @@ where
                         "routingAttemptsRemaining": self.plan.max_attempts().get().saturating_sub(self.routing_attempts),
                     }));
                     if retryable {
+                        if let Some(account) = unavailable_retry_account {
+                            self.excluded_accounts.insert(account.clone());
+                        }
                         return Ok(Some(PullOutcome::AttemptDiscarded));
                     }
                     if matches!(
@@ -2070,6 +2085,55 @@ where
             ContinuationAttempt::None => return false,
         }
         true
+    }
+
+    /// 同账号瞬态重试尚未建立冷流时，可在原恢复策略允许的范围内重新选号
+    fn can_rotate_unavailable_retry_account(&self, error: &ProviderError) -> bool {
+        if error.retry_is_prohibited()
+            || error.send_state() != UpstreamSendState::NotSent
+            || !matches!(
+                error.kind(),
+                ProviderErrorKind::NoEligibleAccount
+                    | ProviderErrorKind::AccountCapacityUnavailable
+                    | ProviderErrorKind::QuotaExhausted
+            )
+            || self.account_selection.required_account().is_some()
+            || self.continuation_attempt != ContinuationAttempt::None
+            || self.replay_barrier_reached
+            || self.delivery_pending
+            || self.current_send_state() == UpstreamSendState::Ambiguous
+            || self.execution_effect_observed()
+            || self.cancellation.is_cancelled()
+            || self.deadline.is_elapsed()
+            || self.connection_budget.exhausted()
+            || self.routing_attempts >= self.plan.max_attempts().get()
+            || self.account_rotations
+                >= self.plan.account_selection_policy().max_account_rotations()
+        {
+            return false;
+        }
+        let Some(failure) = self.last_retryable_failure.as_ref() else {
+            return false;
+        };
+        if failure.retry_is_prohibited() || !provider_proved_replay_safe(failure) {
+            return false;
+        }
+        match failure.pre_delivery_retry() {
+            Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry { policy, .. }) => {
+                match policy {
+                    crate::error::TransientRetryPolicy::RetryThenRotateAccount => true,
+                    crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                        max_total_retries,
+                        ..
+                    } => {
+                        // 本次重试已在退避前预占额度，选号失败不再扣减，也不重置总预算
+                        self.bounded_transient_retries <= max_total_retries.get()
+                    }
+                    crate::error::TransientRetryPolicy::RetryThenReturnError => false,
+                }
+            }
+            _ => false,
+        }
     }
 
     /// 原生续写的原账号在本地调度阶段已不可用时，交给 Provider 执行跨账号恢复
