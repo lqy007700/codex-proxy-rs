@@ -210,8 +210,6 @@ const {
       description="维护账号池，查看可用性、配额与使用状态"
     />
 
-    <AccountOverviewCards :summary="accountSummary" />
-
     <ZCard
       class="mt-4 flex flex-col xl:h-[calc(100dvh-250px)] xl:min-h-125"
     >
@@ -382,6 +380,8 @@ const {
         </div>
       </template>
     </ZCard>
+
+    <AccountOverviewCards :summary="accountSummary" />
 
     <AccountConcurrencyModal v-model="showConcurrency" :account="concurrencyAccount" />
 
