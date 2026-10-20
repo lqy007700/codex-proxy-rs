@@ -58,6 +58,135 @@ impl ExecutionStore for NoopExecutionStore {
 }
 
 #[tokio::test]
+async fn server_busy_retries_same_account_then_rotates_with_shared_budget_after_keepalive() {
+    let store = Arc::new(MemoryAccountStore::default());
+    for id in [
+        "acct_provider_contract",
+        "acct_subagent_a",
+        "acct_subagent_b",
+    ] {
+        create_account(&store, id).await;
+    }
+    let server = MockServer::start().await;
+    let failure = json!({
+        "type": "response.failed",
+        "response": {"error": {
+            "type": "service_unavailable_error", "code": "server_busy",
+            "message": "Our servers are currently busy. Please try again in a moment.",
+            "param": null
+        }}
+    });
+    Mock::given(method("POST"))
+        .and(path("/codex/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            format!("event: response.failed\ndata: {failure}\n\n"),
+            "text/event-stream",
+        ))
+        .expect(6)
+        .mount(&server)
+        .await;
+    let provider = provider_with_base_url(&store, server.uri());
+    let providers =
+        ProviderRegistry::new([provider as Arc<dyn gateway_core::engine::provider::Provider>])
+            .unwrap();
+    let coordinator =
+        AttemptCoordinator::new(GatewayEngine::new(Arc::new(NoopExecutionStore), providers));
+    let operation = http_generate_operation();
+    let kind = ProviderKind::new("openai").unwrap();
+    let snapshot = RuntimeSnapshot::new(
+        ConfigRevision::new(1).unwrap(),
+        SettingsValues::new(3, "smart", Default::default(), None, None)
+            .with_request_location(global_request_location(), true),
+        vec![kind.clone()],
+        vec![ProviderModel::new(
+            kind,
+            UpstreamModelId::new("gpt-5.4").unwrap(),
+            ModelCapabilities::new(BTreeSet::from([operation.kind()]), Some(32_000))
+                .with_upstream_feature_validation(),
+        )],
+        Vec::new(),
+    )
+    .unwrap();
+    let plan = snapshot
+        .plan(
+            &PublicModelId::new("gpt-5.4").unwrap(),
+            &operation,
+            contract_account_scope(),
+            &RoutingContext::default(),
+        )
+        .unwrap();
+    let request = NewModelRequest {
+        admission_decision_ms: None,
+        id: ModelRequestId::new("req_server_busy_budget").unwrap(),
+        client_api_key_name_snapshot: None,
+        client_api_key_ref: ClientApiKeyId::new("key_openai_contract").unwrap(),
+        config_revision: ConfigRevision::new(1).unwrap(),
+        routing: AccountRoutingSnapshot::all(),
+        protocol: "openai".to_owned(),
+        operation: operation.kind(),
+        endpoint: "responses".to_owned(),
+        client_transport: "http_sse".to_owned(),
+        requested_model: Some(PublicModelId::new("gpt-5.4").unwrap()),
+        client_ip: None,
+        user_agent: None,
+        reasoning_effort: None,
+        reasoning_preset: None,
+        request_kind: None,
+        subagent_kind: None,
+        compact: false,
+        continuation: Default::default(),
+        image_generation_requested: false,
+        started_at: SystemTime::now(),
+        deadline_at: (SystemTime::now() + Duration::from_secs(30)).into(),
+    };
+    let mut session = coordinator
+        .start(
+            request,
+            operation,
+            plan,
+            None,
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    // 保活已提交响应头，但没有业务输出，不能阻止这类明确拒绝的有界恢复
+    session.response_commit().record(Some(200));
+    let EngineError::Provider(error) = session.collect_uncommitted().await.unwrap_err() else {
+        panic!("expected final upstream failure");
+    };
+    assert_eq!(error.upstream_code().unwrap().as_str(), "server_busy");
+    assert_eq!(
+        serde_json::from_str::<Value>(error.raw_upstream_error().unwrap().as_str()).unwrap(),
+        failure
+    );
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 6);
+    let accounts: Vec<_> = requests
+        .iter()
+        .map(|request| request.headers.get("chatgpt-account-id").unwrap())
+        .collect();
+    assert!(accounts[..4].iter().all(|account| *account == accounts[0]));
+    assert_ne!(accounts[4], accounts[0]);
+    assert_ne!(accounts[5], accounts[0]);
+    assert_ne!(accounts[5], accounts[4]);
+    let trace = session.trace().snapshot().unwrap();
+    let decisions: Vec<_> = trace["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["stage"] == "retry.decided")
+        .map(|event| &event["data"])
+        .collect();
+    assert_eq!(decisions.len(), 6);
+    for (index, decision) in decisions.iter().enumerate() {
+        assert_eq!(decision["boundedTransientRetriesRemaining"], 5 - index);
+        assert_eq!(decision["retryable"], index < 5);
+        assert_eq!(decision["downstreamCommitted"], true);
+    }
+}
+
+#[tokio::test]
 async fn cyber_policy_rotation_preserves_upstream_response_and_next_request_stays_local() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_subagent_a").await;

@@ -182,13 +182,14 @@ impl CodexUpstreamFailure {
         self.category
     }
 
-    /// 普通 500/503 与无状态码的 server_error 共用恢复策略，特殊错误分类保留各自策略
+    /// 普通 500/503 与无状态码的 server_error/server_busy 共用恢复策略，特殊错误分类保留各自策略
     pub(crate) fn is_retryable_service_unavailable(&self) -> bool {
         self.category == CodexFailureCategory::Unavailable
             && (matches!(
                 self.status,
                 Some(StatusCode::INTERNAL_SERVER_ERROR | StatusCode::SERVICE_UNAVAILABLE)
-            ) || (self.status.is_none() && self.code.as_deref() == Some("server_error")))
+            ) || (self.status.is_none()
+                && matches!(self.code.as_deref(), Some("server_error" | "server_busy"))))
     }
 
     /// 只对明确识别的账号、容量拒绝或可恢复服务故障提供重放资格

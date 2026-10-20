@@ -104,6 +104,21 @@ fn service_failure_replay_requires_explicit_500_or_503_and_unambiguous_send() {
             false,
         ),
         (503, "service unavailable", true),
+        (
+            503,
+            r#"{"error":{"code":"server_busy","type":"service_unavailable_error"}}"#,
+            true,
+        ),
+        (
+            400,
+            r#"{"error":{"code":"server_busy","type":"service_unavailable_error"}}"#,
+            false,
+        ),
+        (
+            504,
+            r#"{"error":{"code":"server_busy","type":"service_unavailable_error"}}"#,
+            false,
+        ),
     ] {
         for phase in [
             CodexUpstreamSendPhase::BeforePayload,

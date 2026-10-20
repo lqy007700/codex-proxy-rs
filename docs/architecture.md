@@ -389,7 +389,7 @@ Client Key 鉴权完成后，API adapter 从有界请求头识别客户端，Cor
 
 - 一个客户端请求对应一条 `model_requests`；attempt 是请求内事实，不建立第二张权威表
 - Provider 的一次 `execute` 只选择一个 credential 并返回一个冷流；换号、重试和 fallback 由 Core 决定
-- OpenAI 的自动恢复限于明确识别的账号、容量、普通显式 `500/503`、无状态码且 `error.code=server_error`、续接和传输场景；
+- OpenAI 的自动恢复限于明确识别的账号、容量、普通显式 `500/503`、无状态码且 `error.code` 为 `server_error` 或 `server_busy`、续接和传输场景；
   其他上游拒绝保留响应与重试提示，交由客户端决策。WS opening 尚未发送业务 payload 也不扩大该恢复范围，明确的 `426` 仍允许 HTTP 回退
 - `not_sent`、`sent`、`ambiguous` 是单调的上游发送边界；结果不明确时不能假定上游未收到请求
 - HTTP 明确未发送的瞬时建连失败（含 TLS 握手 EOF）共享最多 4 次 opening、30 秒的请求内预算；
@@ -402,7 +402,7 @@ Client Key 鉴权完成后，API adapter 从有界请求头识别客户端，Cor
 - API 在最终错误编码出口投影客户端恢复信号；该投影不修改 Provider 上游事实，也不改变 Core 的
   重试与提交边界。具体错误合同见 [数据面接口](api.md#3-openai-数据面与模型目录)
 - Provider 为有界退避显式选择耗尽动作及预算范围，Core 在既有安全重放边界内执行
-  OpenAI 明确容量拒绝与普通服务故障共用恢复预算，普通服务故障包含显式 `500/503`（不要求特定 error code）与无状态码且 `error.code=server_error` 的流内失败，保留上游原始状态码
+  OpenAI 明确容量拒绝与普通服务故障共用恢复预算，普通服务故障包含显式 `500/503`（不要求特定 error code）与无状态码且 `error.code` 为 `server_error` 或 `server_busy` 的流内失败，保留上游原始状态码
   在原账号额外重试 3 次后，每次换一个账号再重试最多 2 次；请求内共额外重试最多 5 次，换号或错误码变化不重置预算，耗尽后返回最后一次上游错误
   同账号重试在准备阶段发现账号不可用时，允许在同 Provider 内提前重新选号，复用本次已预占的重试额度，仍受原错误的安全重放条件与请求换号上限约束
   两阶段均从同一指数序列取值，基准为 500ms、1s、2s、2s、2s，每次另加 `[50ms, 250ms)` 随机等待

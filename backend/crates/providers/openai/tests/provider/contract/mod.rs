@@ -8955,6 +8955,12 @@ async fn capacity_feedback_in_stream_only_counts_explicit_overload() {
                     true,
                 ),
                 (
+                    "server_busy",
+                    "Our servers are currently busy. Please try again in a moment.",
+                    ProviderErrorKind::Unavailable,
+                    false,
+                ),
+                (
                     "unknown_error",
                     "Unrecognized upstream failure.",
                     ProviderErrorKind::Unavailable,
@@ -8984,6 +8990,9 @@ async fn capacity_feedback_in_stream_only_counts_explicit_overload() {
                 events.push(json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "hello"}));
             }
             let mut original = json!({"type": "response.failed", "response": {"id": "resp_capacity", "error": {"code": code, "message": message}}});
+            if code == "server_busy" {
+                original["response"]["error"]["type"] = json!("service_unavailable_error");
+            }
             if code == "turn_rate_limit_exceeded" {
                 original["response"]["error"]["headers"] = json!({"retry-after": "7"});
             }
@@ -9056,7 +9065,7 @@ async fn capacity_feedback_in_stream_only_counts_explicit_overload() {
                 expected_kind,
                 "unexpected error for {code}, websocket={use_websocket}, semantic_output={semantic_output}: {error:?}"
             );
-            let recoverable = capacity || code == "server_error";
+            let recoverable = capacity || matches!(code, "server_error" | "server_busy");
             assert_eq!(error.replay_is_safe(), recoverable && !semantic_output);
             assert_eq!(error.upstream_status(), None);
             if code == "turn_rate_limit_exceeded" {
