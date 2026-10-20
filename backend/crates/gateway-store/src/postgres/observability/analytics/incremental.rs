@@ -333,16 +333,18 @@ async fn rebuild_groups(
     progress: &BTreeMap<DateTime<Utc>, Progress>,
     keys: Vec<GroupKey>,
 ) -> StoreResult<BTreeMap<GroupKey, MetricState>> {
-    let mut by_collection = BTreeMap::<&str, Vec<&GroupKey>>::new();
+    // 同一统计桶的分组共享时间范围，按桶查询才能让事实表范围扫描命中 started_at 索引
+    let mut by_bucket = BTreeMap::<(&str, DateTime<Utc>), Vec<&GroupKey>>::new();
     for key in &keys {
-        by_collection.entry(&key.1).or_default().push(key);
+        by_bucket.entry((&key.1, key.0)).or_default().push(key);
     }
     let mut rebuilt = BTreeMap::new();
-    for (collection, keys) in by_collection {
+    for ((collection, bucket_start), keys) in by_bucket {
         let columns = worker::COLLECTION_COLUMNS
             .iter()
             .find_map(|(name, columns)| (*name == collection).then_some(*columns))
             .ok_or_else(|| invalid("unknown incremental analytics collection"))?;
+        let bucket_end = bucket_start + TimeDelta::seconds(if hourly { 3600 } else { 900 });
         // 同类分组共用维度匹配和聚合 SQL，各组仍独立遵守已发布的构建前缀
         for keys in keys.chunks(1_000) {
             let mut input = Vec::with_capacity(keys.len());
@@ -389,7 +391,11 @@ async fn rebuild_groups(
                 .push("),mr.started_at,timestamptz '2000-01-01 UTC')=k.bucket_start
                     and mr.started_at >= k.bucket_start and mr.started_at < k.end_at
                     and mr.recovered_at is null and mr.outcome=k.outcome
-                    and (k.cursor_time is null or (mr.started_at,mr.id collate \"C\") <= (k.cursor_time,k.cursor_id collate \"C\"))");
+                    and (k.cursor_time is null or (mr.started_at,mr.id collate \"C\") <= (k.cursor_time,k.cursor_id collate \"C\"))
+                    and mr.started_at >= ")
+                .push_bind(bucket_start)
+                .push(" and mr.started_at < ")
+                .push_bind(bucket_end);
             for (index, column) in columns.iter().enumerate() {
                 query.push(format!(
                     " and coalesce(mr.{column}::text,'')=k.dimensions[{}]",
