@@ -1330,12 +1330,19 @@ fn transient_retry_policy(
     failure: &CodexUpstreamFailure,
 ) -> Option<TransientRetryPolicy> {
     match category {
-        // 容量与可恢复服务故障共享请求预算，错误类别变化不能重新获得恢复次数
+        // 容量与可恢复服务故障共用已消耗次数，错误类别变化不能重置计数
         _ if category == CodexFailureCategory::CapacityUnavailable
             || failure.is_retryable_service_unavailable() =>
         {
             Some(TransientRetryPolicy::RetryThenRotateAccountWithBudget {
-                max_total_retries: NonZeroU32::new(5).unwrap_or(NonZeroU32::MIN),
+                max_total_retries: NonZeroU32::new(
+                    if category == CodexFailureCategory::CapacityUnavailable {
+                        7
+                    } else {
+                        5
+                    },
+                )
+                .unwrap_or(NonZeroU32::MIN),
                 // 容量拒绝保留不受历史轮次失败抑制的恢复行为
                 track_client_retry_failure: category != CodexFailureCategory::CapacityUnavailable,
             })
@@ -1432,7 +1439,7 @@ pub(super) fn map_upstream_failure(
                 crate::jitter::server_error_retry_jitter(crate::jitter::random_u64()),
             ),
             TransientRetryPolicy::RetryThenRotateAccountWithBudget { .. } => (
-                3,
+                if capacity_unavailable { 5 } else { 3 },
                 Duration::from_secs(2),
                 crate::jitter::server_error_retry_jitter(crate::jitter::random_u64()),
             ),

@@ -5,7 +5,7 @@ use super::*;
 use gateway_core::error::TransientRetryPolicy;
 
 #[tokio::test]
-async fn service_failure_recovery_requires_open_replay_boundary() {
+async fn transient_failure_recovery_requires_open_replay_boundary() {
     for websocket in [false, true] {
         for (status, code) in [
             (Some(500), Some("server_error")),
@@ -15,7 +15,11 @@ async fn service_failure_recovery_requires_open_replay_boundary() {
             (Some(503), Some("Vendor.Future.v2")),
             (Some(503), None),
             (None, Some("server_error")),
+            (Some(503), Some("server_is_overloaded")),
+            (None, Some("server_is_overloaded")),
+            (None, Some("slow_down")),
         ] {
+            let capacity = matches!(code, Some("server_is_overloaded" | "slow_down"));
             for (response_failed, boundary_event) in [false, true].into_iter().flat_map(|failed| {
                 [
                     None,
@@ -115,7 +119,14 @@ async fn service_failure_recovery_requires_open_replay_boundary() {
                 release.send(()).unwrap();
                 let (terminal_events, mut error) = stream_failure(&mut stream).await;
                 events.extend(terminal_events);
-                assert_eq!(error.kind(), ProviderErrorKind::Unavailable);
+                assert_eq!(
+                    error.kind(),
+                    if capacity {
+                        ProviderErrorKind::UpstreamCapacityUnavailable
+                    } else {
+                        ProviderErrorKind::Unavailable
+                    }
+                );
                 assert_eq!(error.upstream_status(), status);
                 assert_eq!(error.send_state(), UpstreamSendState::Sent);
                 assert_eq!(error.replay_is_safe(), !replay_closed);
@@ -134,13 +145,17 @@ async fn service_failure_recovery_requires_open_replay_boundary() {
                         policy:
                             TransientRetryPolicy::RetryThenRotateAccountWithBudget {
                                 max_total_retries,
-                                track_client_retry_failure: true,
+                                track_client_retry_failure,
                             },
                     }) = error.pre_delivery_retry()
                     else {
                         panic!("expected shared bounded service failure recovery")
                     };
-                    assert_eq!((max_retries.get(), max_total_retries.get()), (3, 5));
+                    assert_eq!(
+                        (max_retries.get(), max_total_retries.get()),
+                        if capacity { (5, 7) } else { (3, 5) }
+                    );
+                    assert_eq!(track_client_retry_failure, !capacity);
                     assert_eq!(initial_delay, Duration::from_millis(500));
                     assert_eq!(max_delay, Duration::from_secs(2));
                     assert!(

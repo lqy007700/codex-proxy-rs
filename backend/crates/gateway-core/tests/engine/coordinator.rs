@@ -4594,90 +4594,119 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
 
 #[test]
 fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
-    for (rotations, succeeds) in [(0, false), (1, false), (2, false), (8, false), (8, true)] {
-        let operation = generate_operation();
-        let route_plan = plan_with_policy(
-            &operation,
-            AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(10).unwrap())
-                .with_max_account_rotations(rotations),
-        );
-        let scripts = [
-            "acct_first",
-            "acct_first",
-            "acct_first",
-            "acct_first",
-            "acct_second",
-            "acct_other",
-            "acct_wrong",
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(index, account_id)| Script::Stream {
-            account_id,
-            items: if succeeds && index == 5 {
-                complete_stream(None)
-            } else {
-                vec![Err(bounded_rejection(index + 1))]
-            },
-        })
-        .collect();
-        let (coordinator, store, provider) = coordinator(scripts);
-        let mut session = block_on(coordinator.start(
-            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
-            operation,
-            route_plan,
-            None,
-            None,
-            CancellationToken::new(),
-        ))
-        .unwrap();
-        let expected = 4 + rotations.min(2) as usize;
-        let result = block_on(session.collect_uncommitted());
-        if succeeds {
-            result.unwrap();
-            block_on(session.commit_downstream(Some(200))).unwrap();
-        } else {
-            let Err(EngineError::Provider(error)) = result else {
-                panic!("last upstream failure required")
-            };
-            assert_eq!(
-                error
-                    .client_visible_upstream_response()
-                    .unwrap()
-                    .body()
-                    .as_ref(),
-                bounded_rejection(expected)
-                    .client_visible_upstream_response()
-                    .unwrap()
-                    .body()
-                    .as_ref()
+    for (same_account_retries, total_retries) in [(3_usize, 5_usize), (5, 7)] {
+        let same_account_attempts = same_account_retries + 1;
+        for (rotations, succeeds) in [(0, false), (1, false), (2, false), (8, false), (8, true)] {
+            let operation = generate_operation();
+            let route_plan = plan_with_policy(
+                &operation,
+                AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(10).unwrap())
+                    .with_max_account_rotations(rotations),
             );
+            let scripts = std::iter::repeat_n("acct_first", same_account_attempts)
+                .chain(["acct_second", "acct_other", "acct_wrong"])
+                .enumerate()
+                .map(|(index, account_id)| Script::Stream {
+                    account_id,
+                    items: if succeeds && index == total_retries {
+                        complete_stream(None)
+                    } else {
+                        // 较低上限的失败穿插在扩展预算中，已消耗次数仍必须连续累计
+                        let (max_retries, max_total_retries) = if index == 1 {
+                            (3, 5)
+                        } else {
+                            (same_account_retries, total_retries)
+                        };
+                        vec![Err(bounded_rejection(index + 1).with_transient_retry(
+                            NonZeroU32::new(u32::try_from(max_retries).unwrap()).unwrap(),
+                            Duration::from_millis(1),
+                            Duration::from_millis(4),
+                            Duration::from_millis(1),
+                            TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                                max_total_retries: NonZeroU32::new(
+                                    u32::try_from(max_total_retries).unwrap(),
+                                )
+                                .unwrap(),
+                                track_client_retry_failure: true,
+                            },
+                        ))]
+                    },
+                })
+                .collect();
+            let (coordinator, store, provider) = coordinator(scripts);
+            let mut session = block_on(coordinator.start(
+                model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+                operation,
+                route_plan,
+                None,
+                None,
+                CancellationToken::new(),
+            ))
+            .unwrap();
+            let expected = same_account_attempts + rotations.min(2) as usize;
+            let result = block_on(session.collect_uncommitted());
+            if succeeds {
+                result.unwrap();
+                block_on(session.commit_downstream(Some(200))).unwrap();
+            } else {
+                let Err(EngineError::Provider(error)) = result else {
+                    panic!("last upstream failure required")
+                };
+                assert_eq!(
+                    error
+                        .client_visible_upstream_response()
+                        .unwrap()
+                        .body()
+                        .as_ref(),
+                    bounded_rejection(expected)
+                        .client_visible_upstream_response()
+                        .unwrap()
+                        .body()
+                        .as_ref()
+                );
+            }
+            let first = ProviderAccountId::new("acct_first").unwrap();
+            let second = ProviderAccountId::new("acct_second").unwrap();
+            let contexts = provider.contexts.lock().unwrap();
+            assert_eq!(contexts.len(), expected);
+            for context in &contexts[1..same_account_attempts] {
+                assert_eq!(context.required_account(), Some(&first));
+                assert!(!context.excluded_accounts().contains(&first));
+            }
+            for (index, context) in contexts.iter().enumerate().skip(same_account_attempts) {
+                assert_eq!(context.required_account(), None);
+                assert!(context.excluded_accounts().contains(&first));
+                assert_eq!(
+                    context.excluded_accounts().contains(&second),
+                    index == same_account_attempts + 1
+                );
+            }
+            let trace = session.trace().snapshot().unwrap();
+            let consumed: Vec<_> = trace["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|event| event["stage"] == "retry.decided")
+                .map(|event| event["data"]["boundedTransientRetries"].as_u64().unwrap())
+                .collect();
+            assert_eq!(
+                consumed,
+                (0..u64::try_from(consumed.len()).unwrap()).collect::<Vec<_>>()
+            );
+            let delays: Vec<_> = trace["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|event| {
+                    event["stage"] == "retry.decided" && event["data"]["retryable"] == true
+                })
+                .map(|event| event["data"]["delayMs"].as_u64().unwrap())
+                .collect();
+            assert_eq!(delays, [2, 3, 5, 5, 5, 5, 5][..expected - 1]);
+            let state = store.state.lock().unwrap();
+            assert_eq!(state.intermediate_failures, expected - 1);
+            assert_eq!(state.finalizations[0].attempt_count as usize, expected);
         }
-        let first = ProviderAccountId::new("acct_first").unwrap();
-        let second = ProviderAccountId::new("acct_second").unwrap();
-        let contexts = provider.contexts.lock().unwrap();
-        assert_eq!(contexts.len(), expected);
-        for context in &contexts[1..4] {
-            assert_eq!(context.required_account(), Some(&first));
-            assert!(!context.excluded_accounts().contains(&first));
-        }
-        for (index, context) in contexts.iter().enumerate().skip(4) {
-            assert_eq!(context.required_account(), None);
-            assert!(context.excluded_accounts().contains(&first));
-            assert_eq!(context.excluded_accounts().contains(&second), index == 5);
-        }
-        let trace = session.trace().snapshot().unwrap();
-        let delays: Vec<_> = trace["events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|event| event["stage"] == "retry.decided" && event["data"]["retryable"] == true)
-            .map(|event| event["data"]["delayMs"].as_u64().unwrap())
-            .collect();
-        assert_eq!(delays, [2, 3, 5, 5, 5][..expected - 1]);
-        let state = store.state.lock().unwrap();
-        assert_eq!(state.intermediate_failures, expected - 1);
-        assert_eq!(state.finalizations[0].attempt_count as usize, expected);
     }
 }
 
