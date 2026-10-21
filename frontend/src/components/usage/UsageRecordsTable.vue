@@ -15,8 +15,10 @@ import UsageRouteCell from '@/components/usage/UsageRouteCell.vue'
 import UsageTimeCell from '@/components/usage/UsageTimeCell.vue'
 import UsageTokenCell from '@/components/usage/UsageTokenCell.vue'
 import UsageTransportBadge from '@/components/usage/UsageTransportBadge.vue'
-import UsageUserAgentCell from '@/components/usage/UsageUserAgentCell.vue'
-import { usageAccountText } from './shared/presenter'
+import {
+  usageAccountText,
+  usageUserAgent,
+} from './shared/presenter'
 
 // 使用记录表只负责该领域的单元格呈现；筛选与分页由页面组合。
 withDefaults(
@@ -95,7 +97,12 @@ withDefaults(
     </template>
 
     <template #userAgent="{ row }">
-      <UsageUserAgentCell :user-agent="row.userAgent" />
+      <span
+        class="line-clamp-2 max-w-full wrap-break-word whitespace-normal font-mono text-cp-sm leading-[1.4] font-emphasis text-cp-text-secondary"
+        :title="usageUserAgent(row)"
+      >
+        {{ usageUserAgent(row) }}
+      </span>
     </template>
 
     <template #model="{ row }">

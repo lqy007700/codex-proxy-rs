@@ -37,8 +37,6 @@ export const usageRecordColumns = defineTableColumns<UsageListRecord>([
     fixedWidth: true,
     formatter: (value: unknown) => formatProviderLabel(typeof value === 'string' ? value : null),
   },
-  ...usageDataColumns
-    .filter(column => column.key !== 'createdAtDisplay')
-    .map(column => column.key === 'userAgent' ? { ...column, label: '客户端' } : column),
+  ...usageDataColumns.filter(column => column.key !== 'createdAtDisplay'),
   { key: 'actions', label: '操作', kind: 'actions', size: 'sm', hideable: false },
 ])
