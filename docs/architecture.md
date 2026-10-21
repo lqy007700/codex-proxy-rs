@@ -464,7 +464,10 @@ OAuth 与 API Key 共用业务请求、响应和能力透传链路，差异限�
 OpenAI 模型目录用于发现，不因目录缺项拒绝请求；管理员配置的模型权限仍由 Core 与选号链路执行
 
 - OpenAI 是透明边界。Responses 请求保留未知字段和字段顺序；SSE、WebSocket、Images 与 standalone
-  Search 的业务正文按原始字节转发，原生续写额度恢复遵循下述 continuation 例外。
+  Search 的业务正文按原始字节转发，Search 请求的会话 `id` 遵循账号归一规则，
+  原生续写额度恢复遵循下述 continuation 例外。
+  `transport/correlation` 在出站副本上统一映射账号关联标识并剥离客户端 trace，
+  内部选号、亲和、连接池与本地诊断继续读取原始身份；具体字段边界见 [API 协议](api.md#请求头与身份)
   canonical facts 从同一数据旁路提取，用于路由、恢复判断、观测和计费。
   WebSocket transport 按完整文本消息交付，wire 同时保留原文与可选解析视图；同协议出口使用原文，
   SSE 转换只发生在需要该表达的出口。插件未改写的封套继续携带原始文本，观测失败不否定交付。

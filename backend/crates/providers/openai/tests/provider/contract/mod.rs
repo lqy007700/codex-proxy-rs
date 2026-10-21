@@ -3,6 +3,7 @@
 mod account_isolation;
 mod capacity;
 mod cookies;
+mod correlation;
 mod error_details;
 mod image_account_eligibility;
 mod image_model_access;
@@ -2788,7 +2789,13 @@ async fn image_endpoints_bypass_only_the_text_catalog_and_preserve_the_current_c
         Mock::given(method("POST"))
             .and(path(*endpoint))
             .and(header("originator", "codex_cli_rs"))
-            .and(header("x-codex-image-turn-id", "turn_image_contract"))
+            .and(|request: &wiremock::Request| {
+                request
+                    .headers
+                    .get("x-codex-image-turn-id")
+                    .and_then(|value| value.to_str().ok())
+                    .is_some_and(|value| uuid::Uuid::parse_str(value).is_ok())
+            })
             .and(header("version", "0.144.0"))
             .and(header("accept", "*/*"))
             .and(body_bytes(body.to_vec()))
@@ -3550,14 +3557,13 @@ async fn standalone_search_preserves_wire_and_scopes_turn_metadata_to_the_select
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_provider_contract").await;
     let server = MockServer::start().await;
-    let request_body = br#"{ "id":"search-session", "model":"gpt-future", "commands":{"search_query":[{"q":"private query","future":9007199254740993}]}, "future":1, "future":2 }"#;
+    let request_body = br#"{ "id":"search-session", "future_session":"search-session", "model":"gpt-future", "commands":{"search_query":[{"q":"private query","future":9007199254740993}]}, "future":1, "future":2 }"#;
     let response_body = br#"{ "encrypted_output":"ciphertext", "output":"search result", "results":[{"type":"text_result","ref_id":"turn0search0","future":9007199254740993}] }"#;
     Mock::given(method("POST"))
         .and(path("/codex/alpha/search"))
         .and(header("originator", "codex_cli_rs"))
         .and(header("version", "0.144.0"))
         .and(header("accept", "*/*"))
-        .and(body_bytes(request_body.to_vec()))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("content-type", "application/json")
@@ -3624,13 +3630,13 @@ async fn standalone_search_preserves_wire_and_scopes_turn_metadata_to_the_select
     assert_eq!(raw_response.as_deref(), Some(response_body.as_slice()));
     let requests = server.received_requests().await.expect("received requests");
     let request = requests.first().expect("single search request");
-    assert_eq!(request.body.as_slice(), request_body);
+    assert_scoped_search_body(&request.body, request_body);
     let metadata_values = captured_header_values(request, "x-codex-turn-metadata");
     assert_eq!(metadata_values.len(), 1);
     let metadata: Value = serde_json::from_slice(&metadata_values[0]).expect("turn metadata JSON");
-    assert_eq!(metadata.get("session_id"), Some(&json!("session")));
-    assert_eq!(metadata.get("thread_id"), Some(&json!("thread")));
-    assert_eq!(metadata.get("turn_id"), Some(&json!("turn")));
+    assert_scoped_id(metadata["session_id"].as_str().unwrap(), "session");
+    assert_scoped_id(metadata["thread_id"].as_str().unwrap(), "thread");
+    assert_scoped_id(metadata["turn_id"].as_str().unwrap(), "turn");
     assert_eq!(metadata.get("future"), Some(&json!(true)));
     assert!(metadata.get("account_id").is_none());
     assert_ne!(
@@ -3650,7 +3656,6 @@ async fn standalone_search_returns_the_exact_upstream_error_response() {
     let response_body = br#"{ "error":{"message":"future search validation","type":"search_error","code":"future_code"}, "future":9007199254740993 }"#;
     Mock::given(method("POST"))
         .and(path("/codex/alpha/search"))
-        .and(body_bytes(request_body.to_vec()))
         .respond_with(
             ResponseTemplate::new(422)
                 .insert_header("content-type", "application/problem+json")
@@ -5271,6 +5276,8 @@ async fn oversized_http_threshold_counts_utf8_and_json_escaping() {
     let requests = server.received_requests().await.unwrap();
     let mut frame = captured_request_body(&requests[0]);
     frame["type"] = json!("response.create");
+    // 发送前阈值按本地请求副本计量，账号域映射在实际出站时执行
+    frame["session_id"] = body["session_id"].clone();
     let baseline_len = serde_json::to_vec(&frame).unwrap().len();
 
     for (payload_len, expected) in [(THRESHOLD - 1, "websocket"), (THRESHOLD, "http_sse")] {
@@ -6364,9 +6371,9 @@ async fn cross_account_scope_removes_only_account_bound_body_fields() {
 
     assert!(body.get("authorization").is_none());
     assert!(body.get("conversation").is_none());
-    assert_eq!(
-        body.get("conversation_id"),
-        Some(&json!("client-correlation"))
+    assert_scoped_id(
+        body["conversation_id"].as_str().unwrap(),
+        "client-correlation",
     );
     assert_eq!(
         body.get("client_metadata"),
@@ -11215,7 +11222,11 @@ async fn api_key_default_http_uses_own_prefix_plain_json_and_only_own_authentica
         }
         assert_eq!(request.headers["x-business-extension"], "keep");
         for name in API_KEY_BUSINESS_HEADERS {
-            assert_eq!(request.headers[*name], "downstream-value", "lost {name}");
+            if matches!(*name, "session-id" | "thread-id") {
+                assert_scoped_id(request.headers[*name].to_str().unwrap(), "downstream-value");
+            } else {
+                assert_eq!(request.headers[*name], "downstream-value", "lost {name}");
+            }
         }
         for header in ["cookie", "chatgpt-account-id"] {
             assert!(!request.headers.contains_key(header), "unexpected {header}");
@@ -11444,7 +11455,14 @@ async fn api_key_websocket_uses_api_path_and_bearer_without_oauth_identity() {
                 }
                 assert_eq!(request.headers()["x-business-extension"], "keep");
                 for name in API_KEY_BUSINESS_HEADERS {
-                    assert_eq!(request.headers()[*name], "downstream-value", "lost {name}");
+                    if matches!(*name, "session-id" | "thread-id") {
+                        assert_scoped_id(
+                            request.headers()[*name].to_str().unwrap(),
+                            "downstream-value",
+                        );
+                    } else {
+                        assert_eq!(request.headers()[*name], "downstream-value", "lost {name}");
+                    }
                 }
             })
             .await;
@@ -12857,4 +12875,28 @@ async fn public_catalog_filters_each_api_account_before_union_without_gating_inf
             ["gpt-5.4", "gpt-public"]
         );
     }
+}
+
+fn assert_scoped_id(actual: &str, original: &str) {
+    assert_ne!(actual, original);
+    assert!(
+        uuid::Uuid::parse_str(actual).is_ok(),
+        "scoped ID must retain UUID format"
+    );
+}
+
+fn assert_scoped_search_body(actual: &[u8], original: &[u8]) {
+    let actual_json: Value = serde_json::from_slice(actual).unwrap();
+    let original_json: Value = serde_json::from_slice(original).unwrap();
+    let id = actual_json["id"].as_str().unwrap();
+    let original_id = original_json["id"].as_str().unwrap();
+    assert_scoped_id(id, original_id);
+    assert_eq!(
+        std::str::from_utf8(actual).unwrap(),
+        std::str::from_utf8(original).unwrap().replacen(
+            &serde_json::to_string(original_id).unwrap(),
+            &serde_json::to_string(id).unwrap(),
+            1
+        )
+    );
 }
