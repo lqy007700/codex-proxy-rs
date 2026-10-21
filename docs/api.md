@@ -532,11 +532,14 @@ WebSocket 在交付有效输出前断线或超时，可按 `stream_max_retries` 
 外部副作用和下游提交仍限制恢复；取消与请求截止时间随时终止等待
 
 OpenAI 明确返回 `server_is_overloaded`、`slow_down` 或模型容量不足错误时，代理在允许安全重放且
-尚未交付输出的前提下，先做最多 5 次同账号重试，再通过现有调度逐次换号最多 2 次，共额外重试最多 7 次。
-普通可恢复服务故障最多额外重试 5 次，两类错误共用已消耗次数，切换错误类别不会重置计数。
-没有有效服务器建议时，按 500ms 起步的指数退避等待，基准上限为 2 秒，每次另加 `[50ms, 250ms)` 随机等待；
-有效 `Retry-After` 优先，接受秒数、HTTP 日期和零延迟，
-不受本地退避上限截断。流内失败事件使用相同解析规则，WS 转 HTTP 回退也遵守服务器建议；
+尚未交付输出的前提下，先在初始普通账号上最多尝试 3 次（含首次），再排除该账号，在其他合格普通账号中轮询最多 3 次，最后使用保底账号尝试 1 次。
+例如 A、B、C 为普通账号，D 为保底账号时为 `A-A-A-B-C-B-D`；只有 B 可轮询时为 `A-A-A-B-B-B-D`。
+没有其他普通账号时直接进入保底，没有保底或保底失败时返回最后一次上游错误；任意一次成功立即结束。
+普通可恢复服务故障采用同一恢复链，两类错误共用预算；明确不可用的账号可提前切换，安全重放和原生续接限制不放宽。
+恢复轮询遍历除初始账号之外的合格普通池，不按日常调度策略或权重层截断候选；权限、模型、额度、冷却和并发限制仍然有效。
+恢复轮询与保底保留根会话主绑定，下一条普通请求仍按原有亲和与调度规则选号。
+严格亲和的跟随子线程和原生增量续接仍遵守账号归属，不能为保底强行跨账号。
+上游 `Retry-After` 优先于本地指数退避，不截断、不叠加随机等待；未提供时采用 500ms 起、最高 2s 的退避并附加随机等待。
 等待受请求截止时间和取消约束，重试受请求总尝试次数约束。
 已发送的容量失败计入[智能调度健康分](architecture.md#智能调度)，可用账号的会话亲和优先。
 容量不足不触发 Provider 全局熔断，也不作为账号额度耗尽；启用账号自动冻结且达到阈值时写入临时冷却。
@@ -741,8 +744,8 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 | `POST` | `/api/admin/accounts/import-tasks/stop` | `{ taskId }` | 跳过未开始的条目，已开始的条目继续完成 |
 | `POST` | `/api/admin/accounts/refresh` | `{ accountId }` | 手工刷新 OAuth credential（`idToken` / `accessToken` / `refreshToken`），不刷新额度 |
 | `POST` | `/api/admin/accounts/recover` | `{ accountId }` | 恢复账号调度或本地错误/额度/cooldown 事实，并清除 Provider 的账号级临时运行状态；不访问上游 |
-| `POST` | `/api/admin/accounts/update` | `{ accountId, enabled, concurrencyLimit, weight, groupIds, notes?, modelAccess?, outboundProxyId?, outboundProxyUrl?, connection? }` | 一次更新账号设置；`connection` 支持 OpenAI OAuth 传输方式及 API Key 连接配置，见下文 |
-| `POST` | `/api/admin/accounts/batch-update` | `{ accountIds, enabled?, concurrencyLimit?, weight?, groupIds?, modelAccess?, allowCredits?, outboundProxyId?, outboundProxyUrl? }` | 一次事务更新所选账号；仅修改提供的字段，至少提供一项修改 |
+| `POST` | `/api/admin/accounts/update` | `{ accountId, enabled, concurrencyLimit, weight, groupIds, notes?, schedulingRole?, modelAccess?, outboundProxyId?, outboundProxyUrl?, connection? }` | 一次更新账号设置；`connection` 支持 OpenAI OAuth 传输方式及 API Key 连接配置，见下文 |
+| `POST` | `/api/admin/accounts/batch-update` | `{ accountIds, enabled?, concurrencyLimit?, weight?, groupIds?, schedulingRole?, modelAccess?, allowCredits?, outboundProxyId?, outboundProxyUrl? }` | 一次事务更新所选账号；仅修改提供的字段，至少提供一项修改 |
 | `POST` | `/api/admin/accounts/delete` | `{ provider, accountIds }` | 批量删除 1–200 个账号 |
 | `GET` | `/api/admin/accounts/quota` | `accountId` | 读取当前额度，不强制访问上游；Provider 未提供额度能力时返回空额度投影 |
 | `GET` | `/api/admin/accounts/quota-forecast` | `accountId` | 按需读取周/月容量预测、源窗口剩余估算与采样依据，不刷新上游额度 |
@@ -769,6 +772,11 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 - `status`: `normal`、`quota_exhausted`、`rate_limited`、`disabled`、`error`
 - `sortBy`: `email`、`status`、`planType`、`usage`、`lastUsedAt`、`expiresAt`
 - `sortDirection`: `asc`、`desc`
+
+账号视图的 `schedulingRole` 为 `regular`（常规）或 `fallback`（仅保底），与 OAuth / API Key 认证类型独立。
+新建和已有账号默认 `regular`；单账号与批量更新可修改该字段，省略时保留原值，重新导入不覆盖用途。
+`fallback` 不参与日常调度，仅在普通恢复耗尽或没有可用普通账号时尝试一次；保底仍须满足账号范围、模型与可用性限制。
+管理端连接测试可直接探测保底账号，不会改变其用途
 
 账号视图的 `capacity` 返回查询时的普通并发容量：`usedSlots` 不含独立审批池和排队请求，
 读取运行态失败时为 `null`；`totalSlots` 是应用账号独立配置或全局默认值后的上限，`null` 表示不限。
@@ -1677,7 +1685,8 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 
 `maxAccountRotations` 是单请求最大换号次数，默认 3，取值 0～31；0 表示不换号。
 首次选号、同账号重试和选号时过滤不可用候选不计入换号次数，总路由尝试仍最多 32 次。
-提高该值允许请求尝试更多账号，但不放宽安全重放或交付后的重试限制。
+非零值约束常规换号、传输和续接恢复，不提前截断[固定业务恢复链](#容量拒绝与重试)；0 仍禁止失败后的换号。
+提高该值不放宽安全重放或交付后的重试限制。
 设置更新请求须包含账号亲和、亲和时长与最大换号次数，保存后对新请求生效，执行中请求及其重试沿用冻结值
 
 ### 请求解压上限

@@ -25,7 +25,7 @@ const affinityOptions = [{ label: '宽松', value: 'relaxed' }, { label: '优先
               <p>宽松：会话内请求直接按调度策略选号，不优先主账号</p>
               <p>优先：会话内请求优先沿用主账号，繁忙或不可用时临时分流，不改变会话绑定</p>
               <p>严格：同一会话共用账号，子线程等待当前账号，并跟随主线程换号</p>
-              <p>重新选号仍遵循当前调度策略</p>
+              <p>日常选号遵循调度策略，业务故障恢复按固定轮询执行</p>
             </div>
           </ZPopover>
         </template>
@@ -38,7 +38,7 @@ const affinityOptions = [{ label: '宽松', value: 'relaxed' }, { label: '优先
           </template>
         </ZInput>
       </ZFormItem>
-      <ZFormItem label="最大换号次数" description="单请求最多换号次数，0 表示不换号">
+      <ZFormItem label="最大换号次数" description="其他恢复路径的换号上限；0 禁止换号，业务故障使用固定恢复链">
         <ZInput v-model="maxAccountRotations" aria-label="最大换号次数" type="number" min="0" max="31" step="1" :disabled="props.disabled" />
       </ZFormItem>
     </ZForm>

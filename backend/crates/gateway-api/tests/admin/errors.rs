@@ -511,6 +511,7 @@ mod provider {
                 total_slots: None,
             },
             account: AccountRecord {
+                scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
                 allow_credits: false,
                 outbound_proxy_id: None,
                 outbound_proxy_enabled: true,

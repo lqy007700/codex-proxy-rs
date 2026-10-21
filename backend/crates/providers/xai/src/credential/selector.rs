@@ -256,6 +256,9 @@ impl GrokAccountSessionSelector {
             let mut retry_after = None;
             loop {
                 context.excluded_accounts = request.excluded_accounts().clone();
+                request
+                    .recovery_stage
+                    .prepare_selection(&candidates, &mut context, None);
                 let selection = match request.request_policy() {
                     Some(policy) => {
                         policy

@@ -1852,6 +1852,7 @@ async fn accounts_update_should_commit_then_release_disabled_account_and_publish
         .update(
             &context("update-request"),
             UpdateAccount {
+                scheduling_role: None,
                 notes: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
@@ -1891,6 +1892,7 @@ async fn accounts_update_should_not_notify_provider_when_store_commit_fails() {
         .update(
             &context("update-failure"),
             UpdateAccount {
+                scheduling_role: None,
                 notes: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
@@ -1935,6 +1937,7 @@ async fn accounts_batch_update_should_commit_once_and_notify_each_provider() {
         .batch_update(
             &context("batch-update-request"),
             BatchUpdateAccounts {
+                scheduling_role: None,
                 allow_credits: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
@@ -3223,6 +3226,7 @@ fn quota_local_usage(account_id: &str, total_tokens: u64) -> AccountUsage {
 pub(super) fn account_record(kind: &str) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
+        scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
         allow_credits: false,
         outbound_proxy_id: None,
         outbound_proxy_enabled: true,

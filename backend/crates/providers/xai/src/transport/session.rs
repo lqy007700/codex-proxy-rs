@@ -261,9 +261,18 @@ pub struct GrokSessionSelection {
     concurrency_wait_budget: gateway_core::concurrency::ConcurrencyWaitBudget,
     request_policy: Option<RequestPolicyContext>,
     attempt_index: std::num::NonZeroU32,
+    pub(crate) recovery_stage: gateway_core::engine::recovery::AccountRecoveryStage,
 }
 
 impl GrokSessionSelection {
+    pub(crate) fn with_recovery_stage(
+        mut self,
+        stage: gateway_core::engine::recovery::AccountRecoveryStage,
+    ) -> Self {
+        self.recovery_stage = stage;
+        self
+    }
+
     pub(crate) fn with_lease_metadata(
         mut self,
         metadata: Option<Arc<gateway_core::provider_ports::ProviderLeaseMetadata>>,
@@ -310,6 +319,7 @@ impl GrokSessionSelection {
             concurrency_wait_budget: gateway_core::concurrency::ConcurrencyWaitBudget::default(),
             request_policy: None,
             attempt_index: std::num::NonZeroU32::MIN,
+            recovery_stage: Default::default(),
         }
     }
 

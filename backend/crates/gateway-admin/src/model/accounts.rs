@@ -140,6 +140,7 @@ pub struct AccountRecord {
     pub last_error_message: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub scheduling_role: gateway_core::account::AccountSchedulingRole,
 }
 
 impl AccountRecord {
@@ -236,6 +237,7 @@ pub struct UpdateAccount {
     pub model_access: Option<gateway_core::account::AccountModelAccess>,
     pub group_ids: Vec<gateway_core::routing::AccountGroupId>,
     pub outbound_proxy: Option<super::proxies::AccountProxySelection>,
+    pub scheduling_role: Option<gateway_core::account::AccountSchedulingRole>,
 }
 
 /// 账号更新结果
@@ -256,6 +258,7 @@ pub struct BatchUpdateAccounts {
     pub model_access: Option<gateway_core::account::AccountModelAccess>,
     pub group_ids: Option<Vec<gateway_core::routing::AccountGroupId>>,
     pub outbound_proxy: Option<super::proxies::AccountProxySelection>,
+    pub scheduling_role: Option<gateway_core::account::AccountSchedulingRole>,
 }
 
 /// 批量账号更新结果

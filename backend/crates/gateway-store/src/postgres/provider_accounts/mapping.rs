@@ -36,6 +36,7 @@ pub(crate) fn admin_account_record(
         enabled: summary.enabled,
         concurrency_limit: summary.concurrency_limit,
         weight: summary.weight,
+        scheduling_role: summary.scheduling_role,
         model_access: summary.model_access,
         allow_credits: summary.allow_credits,
         credential_state: summary.credential_state,

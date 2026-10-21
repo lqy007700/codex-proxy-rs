@@ -121,6 +121,7 @@ pub(super) fn account_view(
             total_slots: capacity.total_slots,
         },
         weight: account.weight.get(),
+        scheduling_role: account.scheduling_role,
         model_access: account.model_access,
         allow_credits: account.allow_credits,
         outbound_proxy_id: account.outbound_proxy_id,

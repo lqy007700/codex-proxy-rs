@@ -16,6 +16,7 @@ pub mod observation;
 pub mod policy;
 pub mod probe;
 pub mod provider;
+pub mod recovery;
 pub mod response_control;
 pub mod upstream_adapter;
 
@@ -129,6 +130,7 @@ pub struct AccountAttemptContext {
     credential_recovery_attempted: bool,
     diagnostic_required_account: bool,
     account_scope: Option<Arc<crate::account::scope::FrozenAccountScope>>,
+    recovery_stage: recovery::AccountRecoveryStage,
 }
 
 impl AccountAttemptContext {
@@ -144,6 +146,7 @@ impl AccountAttemptContext {
             state_owner,
             credential_recovery_attempted: false,
             diagnostic_required_account: false,
+            recovery_stage: recovery::AccountRecoveryStage::Initial,
             account_scope: None,
         }
     }
@@ -163,8 +166,15 @@ impl AccountAttemptContext {
             state_owner,
             credential_recovery_attempted: false,
             diagnostic_required_account: true,
+            recovery_stage: recovery::AccountRecoveryStage::Initial,
             account_scope: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_recovery_stage(mut self, stage: recovery::AccountRecoveryStage) -> Self {
+        self.recovery_stage = stage;
+        self
     }
 
     /// 附着普通请求认证时冻结的账号范围
@@ -853,6 +863,11 @@ impl AttemptContext {
         &self.cancellation
     }
 
+    #[must_use]
+    pub const fn recovery_stage(&self) -> &recovery::AccountRecoveryStage {
+        &self.account.recovery_stage
+    }
+
     /// 使用冻结策略选择账号；没有匹配策略时委托现有 `AccountSelector`
     pub async fn select_account<'a>(
         &self,
@@ -861,6 +876,22 @@ impl AttemptContext {
         candidates: &'a [AccountCandidate],
         context: &mut AccountSelectionContext,
     ) -> Result<Option<AccountSelection<'a>>, policy::AccountPolicyError> {
+        if !self.is_diagnostic_required_account() {
+            let native_owner = match self.continuation_attempt() {
+                ContinuationAttempt::Native => self
+                    .continuation()
+                    .and_then(ContinuationBinding::pinned)
+                    .filter(|pin| pin.provider() == provider)
+                    .map(|pin| pin.account()),
+                ContinuationAttempt::ReplayOwner => self
+                    .account_state_owner()
+                    .filter(|owner| owner.provider() == provider)
+                    .map(|owner| owner.account()),
+                ContinuationAttempt::None | ContinuationAttempt::ReplayAny => None,
+            };
+            self.recovery_stage()
+                .prepare_selection(candidates, context, native_owner);
+        }
         match self.request.request_policy() {
             Some(policy) => {
                 policy

@@ -1219,6 +1219,10 @@ fn plan_with_profiles(
 /// 双 Provider 路由计划：候选顺序为 openai、xai，不锁定 required_provider，
 /// 用于验证跨 Provider 候选推进受换号预算约束。
 fn dual_provider_plan(operation: &Operation) -> RoutingPlan {
+    dual_provider_plan_with_fallback(operation, false)
+}
+
+fn dual_provider_plan_with_fallback(operation: &Operation, fallback: bool) -> RoutingPlan {
     let openai = ProviderKind::new("openai").expect("provider");
     let xai = ProviderKind::new("xai").expect("provider");
     let public_model = PublicModelId::new("gpt-5").expect("public model");
@@ -1235,7 +1239,13 @@ fn dual_provider_plan(operation: &Operation) -> RoutingPlan {
     .map(|(provider, id)| {
         (
             ProviderAccountId::new(id).expect("account"),
-            RuntimeAccount::new(provider, BTreeSet::new()),
+            RuntimeAccount::new(provider, BTreeSet::new()).with_scheduling_role(
+                if fallback && id == "acct_openai_second" {
+                    gateway_core::account::AccountSchedulingRole::Fallback
+                } else {
+                    gateway_core::account::AccountSchedulingRole::Regular
+                },
+            ),
         )
     })
     .collect();
@@ -4311,7 +4321,7 @@ fn unavailable_transient_retry_selects_another_account_before_advancing_provider
 
 #[test]
 fn unavailable_transient_retry_reuses_its_reserved_budget_without_resetting_it() {
-    for (rotations, succeeds) in [(1, false), (8, false), (8, true)] {
+    for (rotations, succeeds) in [(1, false), (2, false), (8, true)] {
         let operation = generate_operation();
         let route_plan = plan_with_policy(
             &operation,
@@ -4343,10 +4353,6 @@ fn unavailable_transient_retry_reuses_its_reserved_budget_without_resetting_it()
                 account_id: "acct_second",
                 items: vec![Err(rejection(2))],
             },
-            Script::Error(ProviderError::new(
-                ProviderErrorKind::NoEligibleAccount,
-                UpstreamSendState::NotSent,
-            )),
             Script::Stream {
                 account_id: "acct_other",
                 items: if succeeds {
@@ -4373,31 +4379,26 @@ fn unavailable_transient_retry_reuses_its_reserved_budget_without_resetting_it()
             let Err(EngineError::Provider(error)) = result else {
                 panic!("the last upstream failure should exhaust the shared budget");
             };
-            let expected = if rotations == 1 {
-                "reason_2"
-            } else {
-                "reason_3"
-            };
+            let expected = "reason_3";
             assert_eq!(
                 error.upstream_code().map(|code| code.as_str()),
                 Some(expected)
             );
         }
         let contexts = provider.contexts.lock().unwrap();
-        let expected_attempts = if rotations == 1 { 2 } else { 3 };
-        assert_eq!(contexts.len(), if rotations == 1 { 4 } else { 5 });
-        let unpinned = &contexts[if rotations == 1 { 2 } else { 4 }];
+        let expected_attempts = 3;
+        assert_eq!(contexts.len(), 4);
+        let unpinned = &contexts[3];
         assert_eq!(unpinned.required_account(), None);
         assert!(
             unpinned
                 .excluded_accounts()
                 .contains(&ProviderAccountId::new("acct_first").unwrap())
         );
-        assert_eq!(
-            unpinned
+        assert!(
+            !unpinned
                 .excluded_accounts()
-                .contains(&ProviderAccountId::new("acct_second").unwrap()),
-            rotations != 1,
+                .contains(&ProviderAccountId::new("acct_second").unwrap())
         );
         let state = store.state.lock().unwrap();
         assert_eq!(state.attempts.len(), expected_attempts);
@@ -4500,9 +4501,9 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
             "acct_first",
             "acct_first",
             "acct_first",
-            "acct_first",
             "acct_second",
             "acct_other",
+            "acct_second",
         ]
         .into_iter()
         .enumerate()
@@ -4564,10 +4565,11 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
     // 传输恢复仍独立消耗一次 attempt，六次业务尝试不能因类别或传输变化扩大
     assert_eq!(contexts.len(), 7);
     assert_eq!(provider.released_leases.load(Ordering::SeqCst), 6);
-    for context in &contexts[2..5] {
+    for context in &contexts[2..4] {
         assert_eq!(context.required_account().unwrap().as_str(), "acct_first");
         assert_eq!(context.transport(), AttemptTransport::Fallback);
     }
+    assert!(contexts[4].required_account().is_none());
     assert!(contexts[5].required_account().is_none());
     assert!(contexts[6].required_account().is_none());
     let trace = session.trace().snapshot().unwrap();
@@ -4595,7 +4597,7 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
 #[test]
 fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
     for (same_account_retries, total_retries) in [(3_usize, 5_usize), (5, 7)] {
-        let same_account_attempts = same_account_retries + 1;
+        let same_account_attempts = 3;
         for (rotations, succeeds) in [(0, false), (1, false), (2, false), (8, false), (8, true)] {
             let operation = generate_operation();
             let route_plan = plan_with_policy(
@@ -4604,11 +4606,11 @@ fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
                     .with_max_account_rotations(rotations),
             );
             let scripts = std::iter::repeat_n("acct_first", same_account_attempts)
-                .chain(["acct_second", "acct_other", "acct_wrong"])
+                .chain(["acct_second", "acct_other", "acct_second"])
                 .enumerate()
                 .map(|(index, account_id)| Script::Stream {
                     account_id,
-                    items: if succeeds && index == total_retries {
+                    items: if succeeds && index == 5 {
                         complete_stream(None)
                     } else {
                         // 较低上限的失败穿插在扩展预算中，已消耗次数仍必须连续累计
@@ -4643,7 +4645,7 @@ fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
                 CancellationToken::new(),
             ))
             .unwrap();
-            let expected = same_account_attempts + rotations.min(2) as usize;
+            let expected = if rotations == 0 { 3 } else { 6 };
             let result = block_on(session.collect_uncommitted());
             if succeeds {
                 result.unwrap();
@@ -4673,13 +4675,10 @@ fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
                 assert_eq!(context.required_account(), Some(&first));
                 assert!(!context.excluded_accounts().contains(&first));
             }
-            for (index, context) in contexts.iter().enumerate().skip(same_account_attempts) {
+            for context in contexts.iter().skip(same_account_attempts) {
                 assert_eq!(context.required_account(), None);
                 assert!(context.excluded_accounts().contains(&first));
-                assert_eq!(
-                    context.excluded_accounts().contains(&second),
-                    index == same_account_attempts + 1
-                );
+                assert!(!context.excluded_accounts().contains(&second));
             }
             let trace = session.trace().snapshot().unwrap();
             let consumed: Vec<_> = trace["events"]
@@ -7819,4 +7818,48 @@ fn lease_cancellation_is_preserved_in_the_single_request_terminal() {
             Some(reason.message())
         );
     });
+}
+
+#[test]
+fn empty_regular_provider_does_not_skip_later_regular_candidates_for_fallback() {
+    let operation = generate_operation();
+    let route_plan = dual_provider_plan_with_fallback(&operation, true);
+    let openai = Arc::new(ScriptedProvider::new(vec![Script::Error(
+        ProviderError::new(
+            ProviderErrorKind::NoEligibleAccount,
+            UpstreamSendState::NotSent,
+        ),
+    )]));
+    let xai = Arc::new(ScriptedProvider::named(
+        "xai",
+        vec![Script::Stream {
+            account_id: "acct_xai_first",
+            items: complete_stream(None),
+        }],
+    ));
+    let mut registry = ProviderRegistry::builder();
+    registry.register(openai.clone()).unwrap();
+    registry.register(xai.clone()).unwrap();
+    let coordinator = AttemptCoordinator::new(GatewayEngine::new(
+        Arc::new(FakeStore::default()),
+        registry.build(),
+    ));
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    block_on(session.collect_uncommitted()).unwrap();
+    block_on(session.commit_downstream(Some(200))).unwrap();
+    assert_eq!(openai.contexts.lock().unwrap().len(), 1);
+    let contexts = xai.contexts.lock().unwrap();
+    assert_eq!(contexts.len(), 1);
+    assert_eq!(
+        contexts[0].recovery_stage(),
+        &gateway_core::engine::recovery::AccountRecoveryStage::Initial
+    );
 }

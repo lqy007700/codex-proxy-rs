@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AccountGroupRef, AccountModelAccess } from '@/api'
+import type { AccountGroupRef, AccountModelAccess, AccountSchedulingRole } from '@/api'
 
 import { ZButton, ZDialog } from '@codex-proxy/ui'
 import AccountSettingsFields from './AccountSettingsFields.vue'
@@ -21,6 +21,7 @@ const enabled = defineModel<boolean>('enabled', { required: true })
 const concurrencyLimit = defineModel<string>('concurrencyLimit', { required: true })
 const modelAccess = defineModel<AccountModelAccess | undefined>('modelAccess', { required: true })
 const weight = defineModel<string>('weight', { required: true })
+const schedulingRole = defineModel<AccountSchedulingRole | 'preserve'>('schedulingRole', { required: true })
 const proxyMode = defineModel<string>('proxyMode', { required: true })
 const proxyId = defineModel<string>('proxyId', { required: true })
 const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: true })
@@ -39,10 +40,13 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         v-model:enabled="enabled"
         v-model:concurrency-limit="concurrencyLimit"
         v-model:weight="weight"
+        v-model:scheduling-role="schedulingRole"
         v-model:model-access="modelAccess"
         v-model:selected-group-ids="selectedGroupIds"
         v-model:proxy-mode="proxyMode"
         v-model:proxy-id="proxyId"
+        show-scheduling-role
+        preserve-scheduling-role
         preserve-model-access
         :account-id="catalogAccountId"
         :groups="groups"

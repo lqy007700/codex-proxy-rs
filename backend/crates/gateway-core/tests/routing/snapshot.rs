@@ -1528,3 +1528,60 @@ fn key_profiles_replace_whole_global_choice_and_previous_snapshot_stays_frozen()
     assert_eq!(values(&previous), ["global-a", "override"]);
     assert_eq!(values(&build("global-b", false)), ["global-b", "global-b"]);
 }
+
+#[test]
+fn grouped_account_roles_are_frozen_across_snapshot_publication() {
+    use gateway_core::{
+        account::{AccountSchedulingRole, ProviderAccountId},
+        routing::AccountGroupId,
+    };
+    let id = ProviderAccountId::new("acct_role_snapshot").unwrap();
+    let group = AccountGroupId::new("grp_00000000000000000000000000000001").unwrap();
+    let snapshot = |role, version| {
+        block_on(
+            RuntimeSnapshotCompiler::new(
+                Arc::new(TestSnapshotStore::new(Ok(SnapshotFacts::new(
+                    revision(version),
+                    revision(version),
+                    SettingsValues::new(3, "smart", Default::default(), None, None),
+                    vec![SnapshotClientPolicyFacts::new(
+                        ClientApiKeyId::new("key_role").unwrap(),
+                        PlaintextClientApiKey::new("sk_role_test").unwrap(),
+                        vec![group.clone()],
+                        RateLimits::unlimited(),
+                    )],
+                    vec![SnapshotAccountGroupFacts::new(
+                        group.clone(),
+                        "Role group".into(),
+                        true,
+                    )],
+                    vec![
+                        SnapshotProviderAccountFacts::new(id.clone(), "alpha")
+                            .with_scheduling_role(role),
+                    ],
+                    vec![SnapshotAccountGroupMemberFacts::new(
+                        group.clone(),
+                        id.clone(),
+                    )],
+                )))),
+                Arc::new(TestCatalog::Unavailable),
+            )
+            .compile(),
+        )
+        .unwrap()
+    };
+    let old = snapshot(AccountSchedulingRole::Fallback, 1);
+    let current = snapshot(AccountSchedulingRole::Regular, 2);
+    for (snapshot, expected) in [
+        (&old, AccountSchedulingRole::Fallback),
+        (&current, AccountSchedulingRole::Regular),
+    ] {
+        let scope = snapshot.client_policies().next().unwrap().account_scope();
+        assert!(scope.allows(&id));
+        assert_eq!(scope.scheduling_role(&id), Some(expected));
+        assert_eq!(
+            snapshot.all_account_scope().scheduling_role(&id),
+            Some(expected)
+        );
+    }
+}

@@ -43,6 +43,7 @@ pub struct SnapshotProviderAccountData {
     pub id: String,
     pub provider_kind: String,
     pub model_access: gateway_core::account::AccountModelAccess,
+    pub scheduling_role: gateway_core::account::AccountSchedulingRole,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,6 +166,7 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                     ProviderAccountId::new(account.id)
                         .map(|id| {
                             SnapshotProviderAccountFacts::new(id, account.provider_kind)
+                                .with_scheduling_role(account.scheduling_role)
                                 .with_model_access(account.model_access)
                         })
                         .map_err(|_| SnapshotStoreError::unavailable())
@@ -358,28 +360,24 @@ async fn load_account_groups(
 async fn load_provider_accounts(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<Vec<SnapshotProviderAccountData>> {
-    sqlx::query_as::<
-        _,
-        (
-            String,
-            String,
-            sqlx::types::Json<gateway_core::account::AccountModelAccess>,
-        ),
-    >("select id, provider_kind, model_access_json from provider_accounts order by id")
+    let rows = sqlx::query_as::<_, (String, String, sqlx::types::Json<gateway_core::account::AccountModelAccess>, String)>(
+        "select id, provider_kind, model_access_json, scheduling_role from provider_accounts order by id",
+    )
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|source| postgres_unavailable("load snapshot provider accounts", source))
-    .map(|rows| {
-        rows.into_iter()
-            .map(
-                |(id, provider_kind, model_access)| SnapshotProviderAccountData {
-                    id,
-                    provider_kind,
-                    model_access: model_access.0,
-                },
-            )
-            .collect()
-    })
+    .map_err(|source| postgres_unavailable("load snapshot provider accounts", source))?;
+    rows.into_iter()
+        .map(|(id, provider_kind, model_access, role)| {
+            let scheduling_role = gateway_core::account::AccountSchedulingRole::parse(&role)
+                .ok_or_else(|| invalid("invalid scheduling_role"))?;
+            Ok(SnapshotProviderAccountData {
+                id,
+                provider_kind,
+                model_access: model_access.0,
+                scheduling_role,
+            })
+        })
+        .collect()
 }
 
 async fn load_group_memberships(

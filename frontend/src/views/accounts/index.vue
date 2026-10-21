@@ -160,6 +160,7 @@ const {
 const {
   showBatchEditModal,
   schedulingEnabled: batchSchedulingEnabled,
+  schedulingRole: batchSchedulingRole,
   concurrencyLimit: batchConcurrencyLimit,
   weight: batchWeight,
   modelAccess: batchModelAccess,
@@ -187,6 +188,7 @@ const {
   editingAccount,
   notes: editingNotes,
   schedulingEnabled,
+  schedulingRole: editingSchedulingRole,
   concurrencyLimit: editingConcurrencyLimit,
   weight: editingWeight,
   modelAccess: editingModelAccess,
@@ -445,6 +447,7 @@ const {
       v-model:enabled="schedulingEnabled"
       v-model:concurrency-limit="editingConcurrencyLimit"
       v-model:weight="editingWeight"
+      v-model:scheduling-role="editingSchedulingRole"
       v-model:model-access="editingModelAccess"
       v-model:proxy-mode="editingProxyMode"
       v-model:proxy-id="editingProxyId"
@@ -464,6 +467,7 @@ const {
       v-model:enabled="batchSchedulingEnabled"
       v-model:concurrency-limit="batchConcurrencyLimit"
       v-model:weight="batchWeight"
+      v-model:scheduling-role="batchSchedulingRole"
       v-model:model-access="batchModelAccess"
       v-model:proxy-mode="batchProxyMode"
       v-model:proxy-id="batchProxyId"

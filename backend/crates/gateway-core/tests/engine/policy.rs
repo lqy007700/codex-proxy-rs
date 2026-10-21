@@ -403,3 +403,143 @@ fn empty_filter_preserves_native_affinity_and_busy_candidates_cannot_be_picked()
         assert!(matches!(result, Err(AccountPolicyError::Fault)));
     });
 }
+
+#[test]
+fn recovery_selection_isolates_roles_and_round_robins_without_moving_daily_preferences() {
+    use gateway_core::{
+        account::{AccountSchedulingRole, AccountSelector},
+        engine::recovery::AccountRecoveryStage,
+    };
+    let mut candidates = [
+        candidate("acct_a"),
+        candidate("acct_b"),
+        candidate("acct_c"),
+        candidate("acct_d"),
+    ];
+    candidates[2].account = candidates[2]
+        .account
+        .clone()
+        .with_scheduling(None, AccountWeight::new(1).unwrap());
+    candidates[3].account = candidates[3]
+        .account
+        .clone()
+        .with_scheduling_role(AccountSchedulingRole::Fallback);
+    let initial = AccountRecoveryStage::Initial;
+    let mut normal = context();
+    normal.preferred_account = Some(account_id("acct_d"));
+    initial.prepare_selection(&candidates, &mut normal, None);
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &normal)
+            .unwrap()
+            .candidate()
+            .account
+            .id(),
+        &account_id("acct_a")
+    );
+    // 显式插件选号同样不能让保底账号进入日常池
+    assert!(matches!(
+        block_on(policy(Some("acct_d")).select_account(
+            NonZeroU32::MIN,
+            &ProviderKind::new("openai").unwrap(),
+            None,
+            &candidates,
+            &mut normal
+        )),
+        Err(AccountPolicyError::Fault)
+    ));
+    let mut after = None;
+    for expected in ["acct_b", "acct_c", "acct_b"] {
+        let mut selection = context();
+        AccountRecoveryStage::OtherAccounts {
+            initial: account_id("acct_a"),
+            after: after.clone(),
+        }
+        .prepare_selection(&candidates, &mut selection, None);
+        let selected = AccountSelector.select(&candidates, &selection).unwrap();
+        assert_eq!(selected.candidate().account.id(), &account_id(expected));
+        after = Some(selected.candidate().account.id().clone());
+    }
+    let mut fallback = context();
+    AccountRecoveryStage::Fallback.prepare_selection(&candidates, &mut fallback, None);
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &fallback)
+            .unwrap()
+            .candidate()
+            .account
+            .id(),
+        &account_id("acct_d")
+    );
+    let mut native = context();
+    native.preferred_account = Some(account_id("acct_d"));
+    initial.prepare_selection(&candidates, &mut native, Some(&account_id("acct_d")));
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &native)
+            .unwrap()
+            .candidate()
+            .account
+            .id(),
+        &account_id("acct_d")
+    );
+    let mut diagnostic = context();
+    diagnostic.eligibility = AccountEligibilityPolicy::BypassForDiagnostic;
+    diagnostic.preferred_account = Some(account_id("acct_d"));
+    initial.prepare_selection(&candidates, &mut diagnostic, None);
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &diagnostic)
+            .unwrap()
+            .candidate()
+            .account
+            .id(),
+        &account_id("acct_d")
+    );
+}
+
+#[test]
+fn recovery_roles_follow_the_frozen_scope_and_preserve_hard_eligibility() {
+    use gateway_core::{
+        account::{
+            AccountSchedulingRole, AccountSelector,
+            scope::{
+                ClientRoutingScope, FrozenAccountScope, RuntimeAccount, RuntimeAccountDirectory,
+            },
+        },
+        engine::recovery::AccountRecoveryStage,
+    };
+    use std::collections::BTreeMap;
+    let provider = ProviderKind::new("openai").unwrap();
+    let candidates = [candidate("acct_a"), candidate("acct_d")];
+    let scope = Arc::new(FrozenAccountScope::new(
+        Arc::new(RuntimeAccountDirectory::new(BTreeMap::from([
+            (
+                account_id("acct_a"),
+                RuntimeAccount::new(provider.clone(), Default::default()),
+            ),
+            (
+                account_id("acct_d"),
+                RuntimeAccount::new(provider, Default::default())
+                    .with_scheduling_role(AccountSchedulingRole::Fallback),
+            ),
+        ]))),
+        ClientRoutingScope::all_accounts(),
+    ));
+    let mut selection = context();
+    selection.account_scope = Some(scope);
+    AccountRecoveryStage::Initial.prepare_selection(&candidates, &mut selection, None);
+    assert!(selection.excluded_accounts.contains(&account_id("acct_d")));
+    for blocked in [false, true] {
+        let mut fallback = context();
+        fallback.account_scope = selection.account_scope.clone();
+        if blocked {
+            fallback.busy_accounts.insert(account_id("acct_d"));
+        }
+        AccountRecoveryStage::Fallback.prepare_selection(&candidates, &mut fallback, None);
+        assert_eq!(
+            AccountSelector.select(&candidates, &fallback).is_none(),
+            blocked
+        );
+    }
+}

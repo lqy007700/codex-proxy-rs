@@ -350,6 +350,7 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
             let error = admin
                 .batch_update_accounts(
                     BatchUpdateAccounts {
+                        scheduling_role: None,
                         allow_credits: None,
                         account_ids: vec![
                             "acct_enabled_openai".to_owned(),
@@ -392,6 +393,7 @@ fn success() -> ProxyTestResult {
 
 fn update(account_id: &str, selection: AccountProxySelection) -> UpdateAccount {
     UpdateAccount {
+        scheduling_role: None,
         notes: None,
         model_access: Default::default(),
         account_id: account_id.to_owned(),
@@ -1164,6 +1166,7 @@ async fn legacy_urls_join_one_catalog_entry_and_invalid_batch_rolls_back() {
         admin
             .batch_update_accounts(
                 BatchUpdateAccounts {
+                    scheduling_role: None,
                     allow_credits: None,
                     model_access: Default::default(),
                     account_ids: vec!["acct_one".to_owned(), "acct_missing".to_owned()],

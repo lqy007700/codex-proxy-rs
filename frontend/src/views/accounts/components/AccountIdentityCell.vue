@@ -9,7 +9,7 @@ import { accountIdentityLabel } from '../utils/accountIdentity'
 import AccountNotesPopover from './AccountNotesPopover.vue'
 
 type AccountIdentity = Pick<Account, 'id' | 'email' | 'planType' | 'planTypeDisplay'>
-  & Partial<Pick<Account, 'accountId' | 'notes' | 'name' | 'authenticationKind'>>
+  & Partial<Pick<Account, 'accountId' | 'notes' | 'name' | 'authenticationKind' | 'schedulingRole'>>
 
 const props = withDefaults(
   defineProps<{
@@ -75,6 +75,9 @@ const avatarToneClass = computed(() => {
       <div class="flex min-w-0 items-center gap-2">
         <span class="min-w-0 flex-1 truncate text-cp font-heavy text-cp-text" :title="displayTitle">
           {{ displayTitle }}
+        </span>
+        <span v-if="account.schedulingRole === 'fallback'" class="shrink-0 text-cp-xs font-medium text-cp-warning">
+          保底
         </span>
         <span
           v-if="metaPosition === 'title' && (showPlan || $slots.meta)"

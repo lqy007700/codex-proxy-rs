@@ -174,6 +174,12 @@ impl AccountSelectionPolicy {
     }
 
     #[must_use]
+    pub const fn with_strategy(mut self, strategy: RotationStrategy) -> Self {
+        self.strategy = strategy;
+        self
+    }
+
+    #[must_use]
     pub const fn strategy(self) -> RotationStrategy {
         self.strategy
     }

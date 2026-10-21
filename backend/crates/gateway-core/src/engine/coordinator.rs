@@ -371,6 +371,7 @@ where
             pending_retry: None,
             transient_retry_counts: BTreeMap::new(),
             bounded_transient_retries: 0,
+            account_recovery: super::recovery::AccountRecovery::default(),
             request_profiles: BTreeMap::new(),
             current: None,
             send_state_watermark: UpstreamSendState::NotSent,
@@ -536,6 +537,7 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     transient_retry_counts: BTreeMap<crate::account::ProviderAccountId, u32>,
     /// 分阶段业务恢复共享请求总预算，切换账号或错误码不重新获得同账号重试阶段
     bounded_transient_retries: u32,
+    account_recovery: super::recovery::AccountRecovery,
     /// 只在首次进入对应 Provider 时解析，避免后台发布更新改变同一请求的重试身份
     request_profiles: BTreeMap<crate::identity::ProviderKind, crate::account::OpaqueProviderData>,
     current: Option<CurrentAttempt>,
@@ -1094,6 +1096,7 @@ where
             )
             .with_account_scope(Arc::clone(self.plan.account_scope())),
         }
+        .with_recovery_stage(self.account_recovery.stage().clone())
         .with_credential_recovery_attempted(pinned_account.as_ref().is_some_and(|account| {
             self.credential_recovery_attempted_accounts
                 .contains(account)
@@ -1228,7 +1231,42 @@ where
                             && !connection_fallback
                             && self.can_rotate_unavailable_retry_account(&error)
                     });
+                    let selection_recovery = !error.retry_is_prohibited()
+                        && self.last_retryable_failure.as_ref().is_none_or(|failure| matches!(
+                            failure.pre_delivery_retry(),
+                            Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
+                                policy: crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget { .. }, ..
+                            } | crate::error::PreDeliveryRetry::AccountRotation)
+                        ))
+                        && !continuation_retry && !connection_fallback
+                        && (self.last_retryable_failure.is_none()
+                            || self.plan.account_selection_policy().max_account_rotations() > 0)
+                        && self.account_selection.required_account().is_none()
+                        && self.continuation_attempt == ContinuationAttempt::None
+                        && !self.execution_effect_observed()
+                        && !self.replay_barrier_reached && !self.delivery_pending
+                        && error.send_state() == UpstreamSendState::NotSent
+                        && self.last_retryable_failure.as_ref().is_none_or(|failure|
+                            failure.send_state() == UpstreamSendState::NotSent || provider_proved_replay_safe(failure))
+                        && matches!(error.kind(), ProviderErrorKind::NoEligibleAccount
+                            | ProviderErrorKind::AccountCapacityUnavailable | ProviderErrorKind::QuotaExhausted)
+                        && if self.account_recovery.is_fallback() {
+                            self.advance_provider_candidate()
+                        } else if pinned_account.is_some() && !self.account_recovery.is_reselecting()
+                            && self.plan.account_selection_policy().max_account_rotations() > 0 {
+                            self.account_recovery.leave_initial();
+                            true
+                        } else if self.plan.account_selection_policy().max_account_rotations() > 0
+                            && self.advance_provider_candidate() {
+                            // 普通候选仍按路由顺序用尽，不能因较早的 Provider 空池跳过后续普通账号
+                            true
+                        } else if self.has_fallback_account() {
+                            self.account_recovery.enter_fallback();
+                            self.candidate_index = 0;
+                            true
+                        } else { false };
                     let candidate_retry = !error.retry_is_prohibited() && !continuation_retry
+                        && !selection_recovery && !self.account_recovery.is_fallback()
                         && !connection_fallback
                         && unavailable_retry_account.is_none()
                         && matches!(
@@ -1269,7 +1307,8 @@ where
                             retry_allowed: connection_fallback
                                 || continuation_retry
                                 || candidate_retry
-                                || unavailable_retry_account.is_some(),
+                                || unavailable_retry_account.is_some()
+                                || selection_recovery,
                         })
                         .await?;
                     attempt_trace.record("retry.decided", json!({
@@ -1277,6 +1316,8 @@ where
                         "continuationRetry": continuation_retry, "candidateRetry": candidate_retry,
                         "accountRotationRetry": unavailable_retry_account.is_some(),
                         "connectionFallback": connection_fallback,
+                        "selectionRecovery": selection_recovery,
+                        "recoveryStage": self.account_recovery.stage().as_str(),
                         "retryProhibited": error.retry_is_prohibited(),
                         "sendState": error.send_state().as_str(),
                         "requestSendState": self.current_send_state().as_str(),
@@ -1293,6 +1334,15 @@ where
                                 }
                                 self.pending_retry = Some(recovery);
                             }
+                        } else if selection_recovery {
+                            if let super::recovery::AccountRecoveryStage::OtherAccounts {
+                                initial,
+                                ..
+                            } = self.account_recovery.stage()
+                            {
+                                self.excluded_accounts.insert(initial.clone());
+                            }
+                            self.connection_rotation = None;
                         } else if let Some(account) = unavailable_retry_account {
                             self.excluded_accounts.insert(account.clone());
                         } else if candidate_retry {
@@ -1465,6 +1515,15 @@ where
                 metadata.provider_account_id().clone(),
             ));
         }
+        self.account_recovery
+            .observe_selected(metadata.provider_account_id());
+        attempt_trace.record(
+            "account.recovery",
+            json!({
+                "stage": self.account_recovery.stage().as_str(),
+                "accountId": metadata.provider_account_id().as_str(),
+            }),
+        );
         let attempt_record = AttemptRecord {
             account_snapshot: metadata.account_snapshot().cloned(),
             request_id: self.request_id.clone(),
@@ -1523,6 +1582,16 @@ where
             }
         }
         Ok(None)
+    }
+
+    fn has_fallback_account(&self) -> bool {
+        self.plan.candidates().iter().any(|candidate| {
+            self.plan.account_scope().has_scheduling_role(
+                candidate.provider(),
+                candidate.upstream_model().map(|model| model.as_str()),
+                crate::account::AccountSchedulingRole::Fallback,
+            )
+        })
     }
 
     fn advance_provider_candidate(&mut self) -> bool {
@@ -1766,35 +1835,24 @@ where
                 ..
             })
         );
-        let (transient_retry, rotation_delay) = match error.pre_delivery_retry() {
+        let (mut transient_retry, mut rotation_delay) = match error.pre_delivery_retry() {
             Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
                 max_retries,
                 initial_delay,
                 max_delay,
                 jitter,
-                policy,
-            }) if ordinary_retry && !suppress_transient_retry => {
-                let (retries, retry_allowed) = match policy {
-                    crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget {
-                        max_total_retries,
-                        ..
-                    } => (
-                        self.bounded_transient_retries,
-                        self.bounded_transient_retries < max_total_retries.get(),
-                    ),
-                    _ => {
-                        let retries = self
-                            .transient_retry_counts
-                            .entry(current.metadata.provider_account_id().clone())
-                            .or_default();
-                        let count = *retries;
-                        let allowed = count < max_retries.get();
-                        if allowed {
-                            *retries = retries.saturating_add(1);
-                        }
-                        (count, allowed)
-                    }
-                };
+                ..
+            }) if ordinary_retry && !suppress_transient_retry && !bounded_transient_retry => {
+                let retries = self
+                    .transient_retry_counts
+                    .entry(current.metadata.provider_account_id().clone())
+                    .or_default();
+                let count = *retries;
+                let retry_allowed = count < max_retries.get();
+                if retry_allowed {
+                    *retries = retries.saturating_add(1);
+                }
+                let retries = count;
                 if retry_allowed {
                     let multiplier = 1_u32.checked_shl(retries).unwrap_or(u32::MAX);
                     // 服务器建议优先于本地退避，不截断、不放大，也不叠加随机等待
@@ -1815,6 +1873,54 @@ where
             }
             _ => (None, None),
         };
+        let staged_recovery = !self.account_recovery.is_fallback()
+            && !error.retry_is_prohibited()
+            && ((bounded_transient_retry && ordinary_retry && !suppress_transient_retry)
+                || account_rotation_retry);
+        if staged_recovery {
+            let mut retry_same = self.account_recovery.record_failure(account_rotation_retry);
+            let budget_exhausted = match error.pre_delivery_retry() {
+                Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
+                    policy:
+                        crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                            max_total_retries,
+                            ..
+                        },
+                    ..
+                }) => self.bounded_transient_retries >= max_total_retries.get().min(5),
+                _ => false,
+            };
+            if budget_exhausted {
+                self.account_recovery.enter_fallback();
+                retry_same = false;
+            }
+            let delay = match error.pre_delivery_retry() {
+                Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
+                    initial_delay,
+                    max_delay,
+                    jitter,
+                    ..
+                }) => error.retry_after().unwrap_or_else(|| {
+                    initial_delay
+                        .saturating_mul(
+                            1_u32
+                                .checked_shl(self.bounded_transient_retries)
+                                .unwrap_or(u32::MAX),
+                        )
+                        .min(max_delay)
+                        .saturating_add(jitter)
+                }),
+                _ => error.retry_after().unwrap_or_default(),
+            };
+            if retry_same {
+                transient_retry = Some(delay);
+            } else if !self.account_recovery.is_fallback() || self.has_fallback_account() {
+                rotation_delay = Some(delay);
+                if self.account_recovery.is_fallback() {
+                    self.candidate_index = 0;
+                }
+            }
+        }
         let same_account_retry = !execution_effect_observed
             && error.retries_same_account()
             && provider_proved_replay_safe
@@ -1837,9 +1943,15 @@ where
             && (!bounded_transient_retry || rotation_delay.is_some())
             && transport_recovery.is_none()
             && (ordinary_retry || account_rotation_retry)
-            && self.account_rotations
-                < self.plan.account_selection_policy().max_account_rotations();
+            && self.plan.account_selection_policy().max_account_rotations() > 0
+            && (if staged_recovery {
+                rotation_delay.is_some()
+            } else {
+                self.account_rotations
+                    < self.plan.account_selection_policy().max_account_rotations()
+            });
         let retryable = !error.retry_is_prohibited()
+            && !(self.account_recovery.is_fallback() && rotation_delay.is_none())
             && (continuation_retry
                 || same_account_retry
                 || transient_retry.is_some()
@@ -1882,6 +1994,7 @@ where
             "retryable": retryable, "continuationRetry": continuation_retry,
             "sameAccountRetry": same_account_retry, "accountRotationRetry": account_rotation_retry,
             "ordinaryRetry": ordinary_retry, "transportRecovery": transport_recovery.is_some(),
+            "recoveryStage": self.account_recovery.stage().as_str(),
             "ordinaryRetryBlockers": ordinary_retry_blockers,
             "providerReplaySafe": error.replay_is_safe(),
             "retryProhibited": error.retry_is_prohibited(),
@@ -1963,8 +2076,14 @@ where
                     reserve_connection_rotation: false,
                 });
             } else if !continuation_retry {
-                self.excluded_accounts
-                    .insert(current.metadata.provider_account_id().clone());
+                if let super::recovery::AccountRecoveryStage::OtherAccounts { initial, .. } =
+                    self.account_recovery.stage()
+                {
+                    self.excluded_accounts.insert(initial.clone());
+                } else if !staged_recovery {
+                    self.excluded_accounts
+                        .insert(current.metadata.provider_account_id().clone());
+                }
                 if let Some(delay) = rotation_delay {
                     self.pending_retry = Some(PendingAttemptRetry {
                         account: None,

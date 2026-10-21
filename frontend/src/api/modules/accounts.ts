@@ -2,6 +2,8 @@ import type { RequestOptions } from '../request'
 import type { AccountGroupRef } from './groups'
 import request from '../request'
 
+export type AccountSchedulingRole = 'regular' | 'fallback'
+
 export type AccountStatus
   = 'normal' | 'quota_exhausted' | 'rate_limited' | 'disabled' | 'error'
 
@@ -154,6 +156,7 @@ export interface Account {
     totalSlots: number | null
   }
   weight: number
+  schedulingRole: AccountSchedulingRole
   modelAccess: AccountModelAccess
   allowCredits: boolean
   accessTokenExpiresAt: string | null
@@ -415,6 +418,7 @@ interface AccountResetCreditConsumeParam extends AccountIdParam {
 }
 
 interface AccountUpdateParam {
+  schedulingRole?: AccountSchedulingRole
   connection?: { baseUrl?: string, transport: ApiKeyConfiguration['transport'], apiKey?: string }
   outboundProxyUrl?: string
   outboundProxyId?: string
@@ -428,6 +432,7 @@ interface AccountUpdateParam {
 }
 
 interface AccountBatchUpdateParam {
+  schedulingRole?: AccountSchedulingRole
   outboundProxyUrl?: string
   outboundProxyId?: string
   accountIds: string[]

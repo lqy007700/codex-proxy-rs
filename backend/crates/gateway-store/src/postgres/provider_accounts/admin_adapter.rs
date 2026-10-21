@@ -604,6 +604,9 @@ impl AccountStore for PgAdminAccountStore {
             "weight".to_owned(),
             "groups".to_owned(),
         ];
+        if command.scheduling_role.is_some() {
+            changed_fields.push("scheduling_role".to_owned());
+        }
         if command.model_access.is_some() {
             changed_fields.push("model_access".to_owned());
         }
@@ -622,6 +625,7 @@ impl AccountStore for PgAdminAccountStore {
                 enabled: Some(command.enabled),
                 concurrency_limit: Some(command.concurrency_limit),
                 weight: Some(command.weight),
+                scheduling_role: command.scheduling_role,
                 model_access: command.model_access,
                 group_ids: Some(command.group_ids),
                 outbound_proxy: command.outbound_proxy,
@@ -771,6 +775,9 @@ impl AccountStore for PgAdminAccountStore {
                 changed_fields.push(field.to_owned());
             }
         }
+        if command.scheduling_role.is_some() {
+            changed_fields.push("scheduling_role".to_owned());
+        }
         if command.model_access.is_some() {
             changed_fields.push("model_access".to_owned());
         }
@@ -786,6 +793,7 @@ impl AccountStore for PgAdminAccountStore {
                 enabled: command.enabled,
                 concurrency_limit: command.concurrency_limit,
                 weight: command.weight,
+                scheduling_role: command.scheduling_role,
                 model_access: command.model_access,
                 group_ids: command.group_ids,
                 outbound_proxy: command.outbound_proxy,

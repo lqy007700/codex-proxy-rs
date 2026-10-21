@@ -506,7 +506,13 @@ impl CodexCredentialSelector {
         follow_only: bool,
     ) -> Result<CodexCredentialLease, CredentialSelectionError> {
         let diagnostic = request.attempt.is_diagnostic_required_account();
-        let binding_key = request.session_affinity_key.filter(|_| !diagnostic);
+        let binding_key = request.session_affinity_key.filter(|_| {
+            !diagnostic
+                && (matches!(
+                    request.attempt.recovery_stage(),
+                    gateway_core::engine::recovery::AccountRecoveryStage::Initial
+                ) || follow_only)
+        });
         let affinity_mode = request
             .attempt
             .account_selection_policy()
@@ -992,7 +998,13 @@ impl CodexCredentialSelector {
                         busy_accounts.insert(account.id().clone());
                     }
                     ProviderLeaseAcquisition::Acquired(guard) => {
-                        if let Some(key) = binding_key
+                        let regular_account = request
+                            .attempt
+                            .account_scope()
+                            .and_then(|scope| scope.scheduling_role(account.id()))
+                            .unwrap_or_else(|| account.scheduling_role())
+                            == gateway_core::account::AccountSchedulingRole::Regular;
+                        if let Some(key) = binding_key.filter(|_| regular_account)
                             && !self
                                 .admit_session(
                                     key,
@@ -1068,7 +1080,12 @@ impl CodexCredentialSelector {
                             cyber_policy_scope,
                             allows_account_state_mutation,
                             affinity_telemetry,
-                            admitted_session: binding_key.cloned(),
+                            // 恢复选号已校验原会话，但不认领或迁移根绑定；正文改写成其他
+                            // 会话时仍由 validate_translated_selection 重新执行亲和复验
+                            admitted_session: request
+                                .session_affinity_key
+                                .filter(|_| !diagnostic)
+                                .cloned(),
                             capacity: capacity.map(AccountCapacitySnapshot::with_acquired_request),
                             _guard: guard,
                         });
@@ -1661,7 +1678,7 @@ pub struct CodexCredentialLease {
     cyber_policy_scope: Option<CodexCyberPolicyScope>,
     allows_account_state_mutation: bool,
     affinity_telemetry: AffinityTelemetry,
-    // 已准入请求允许完成；只有中间件改变会话身份时才需要再次认领
+    // 已复验会话允许完成；恢复租约不迁移根绑定，只有中间件改写会话身份时重新复验
     admitted_session: Option<ProviderSessionAffinityKey>,
     capacity: Option<AccountCapacitySnapshot>,
     _guard: Box<dyn ProviderLeaseGuard>,

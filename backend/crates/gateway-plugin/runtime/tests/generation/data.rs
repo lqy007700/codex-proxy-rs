@@ -27,6 +27,7 @@ struct Facts(AtomicUsize, AtomicUsize, Option<String>);
 fn account() -> AccountRecord {
     let at = "2026-01-01T00:00:00Z".parse().unwrap();
     AccountRecord {
+        scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
         allow_credits: false,
         outbound_proxy_id: None,
         outbound_proxy_enabled: true,

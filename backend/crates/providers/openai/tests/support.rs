@@ -155,6 +155,18 @@ impl MemoryAccountStore {
             .map(|stored| stored.account.clone())
     }
 
+    pub(crate) fn set_scheduling_role(
+        &self,
+        id: &str,
+        role: gateway_core::account::AccountSchedulingRole,
+    ) {
+        let mut accounts = self.accounts.lock().unwrap();
+        let stored = accounts
+            .get_mut(&ProviderAccountId::new(id).unwrap())
+            .unwrap();
+        stored.account = stored.account.clone().with_scheduling_role(role);
+    }
+
     pub(crate) fn set_scheduling(
         &self,
         id: &str,
@@ -684,6 +696,7 @@ fn rebuild_account(current: &ProviderAccount, rebuild: AccountRebuild) -> Provid
     )
     .with_allow_credits(current.allow_credits())
     .with_scheduling(current.concurrency_limit(), current.weight())
+    .with_scheduling_role(current.scheduling_role())
     .with_refresh_schedule(rebuild.has_refresh_token, rebuild.next_refresh_at)
     .with_outbound_proxy(current.outbound_proxy().cloned())
     .with_request_location(current.request_location().cloned())

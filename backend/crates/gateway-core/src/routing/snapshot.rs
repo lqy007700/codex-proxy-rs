@@ -112,14 +112,30 @@ pub struct SnapshotProviderAccountFacts {
     account_id: ProviderAccountId,
     provider_kind: String,
     model_access: crate::account::AccountModelAccess,
+    scheduling_role: crate::account::AccountSchedulingRole,
 }
 
 impl SnapshotProviderAccountFacts {
+    #[must_use]
+    pub const fn with_scheduling_role(
+        mut self,
+        role: crate::account::AccountSchedulingRole,
+    ) -> Self {
+        self.scheduling_role = role;
+        self
+    }
+
+    #[must_use]
+    pub const fn scheduling_role(&self) -> crate::account::AccountSchedulingRole {
+        self.scheduling_role
+    }
+
     #[must_use]
     pub fn new(account_id: ProviderAccountId, provider_kind: impl Into<String>) -> Self {
         Self {
             account_id,
             provider_kind: provider_kind.into(),
+            scheduling_role: crate::account::AccountSchedulingRole::Regular,
             model_access: crate::account::AccountModelAccess::all(),
         }
     }
@@ -477,6 +493,7 @@ async fn compile_runtime_snapshot(
             .insert(
                 account.account_id.clone(),
                 RuntimeAccount::new(provider_kind, BTreeSet::new())
+                    .with_scheduling_role(account.scheduling_role)
                     .with_model_access(account.model_access),
             )
             .is_some()
@@ -503,6 +520,7 @@ async fn compile_runtime_snapshot(
             .get_mut(&account_id)
             .ok_or(RuntimeSnapshotCompileError::InvalidData)?;
         *account = RuntimeAccount::new(account.provider_kind().clone(), group_ids)
+            .with_scheduling_role(account.scheduling_role())
             .with_model_access(account.model_access().clone());
     }
     let account_directory = Arc::new(RuntimeAccountDirectory::new(accounts));

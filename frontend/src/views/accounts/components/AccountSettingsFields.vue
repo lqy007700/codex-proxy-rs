@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import type { AccountGroupRef, AccountModelAccess } from '@/api'
-import { ZFormItem, ZInput, ZSwitch } from '@codex-proxy/ui'
+import type { AccountGroupRef, AccountModelAccess, AccountSchedulingRole } from '@/api'
+import { ZFormItem, ZInput, ZSegmented, ZSwitch } from '@codex-proxy/ui'
+import { computed } from 'vue'
 import AccountGroupCheckboxGrid from '@/components/AccountGroupCheckboxGrid.vue'
 import AccountModelAccessField from './AccountModelAccessField.vue'
 import AccountProxyField from './AccountProxyField.vue'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   groups: AccountGroupRef[]
   groupsLoading: boolean
   disabled: boolean
@@ -15,6 +16,8 @@ withDefaults(defineProps<{
   preserveProxy?: boolean
   preserveModelAccess?: boolean
   showScheduling?: boolean
+  showSchedulingRole?: boolean
+  preserveSchedulingRole?: boolean
   proxyError?: string
 }>(), { preserveProxy: true, showScheduling: true })
 
@@ -22,6 +25,12 @@ const modelAccess = defineModel<AccountModelAccess | undefined>('modelAccess', {
 const enabled = defineModel<boolean>('enabled', { required: true })
 const concurrencyLimit = defineModel<string>('concurrencyLimit', { required: true })
 const weight = defineModel<string>('weight', { required: true })
+const schedulingRole = defineModel<AccountSchedulingRole | 'preserve'>('schedulingRole', { default: 'regular' })
+const schedulingRoleOptions = computed(() => [
+  ...(props.preserveSchedulingRole ? [{ label: '保持原值', value: 'preserve' }] : []),
+  { label: '常规', value: 'regular' },
+  { label: '仅保底', value: 'fallback' },
+])
 const proxyMode = defineModel<string>('proxyMode', { required: true })
 const proxyId = defineModel<string>('proxyId', { required: true })
 const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: true })
@@ -38,6 +47,13 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         :disabled="disabled"
       />
     </div>
+
+    <ZFormItem v-if="showSchedulingRole" label="调度用途">
+      <ZSegmented v-model="schedulingRole" aria-label="调度用途" :options="schedulingRoleOptions" :disabled="disabled" />
+      <p v-if="schedulingRole === 'fallback'" class="m-0 mt-2 text-cp-xs text-cp-text-secondary">
+        仅在普通账号恢复失败或无可用普通账号时使用
+      </p>
+    </ZFormItem>
 
     <div class="grid gap-4 sm:grid-cols-2">
       <ZFormItem label="并发限制">

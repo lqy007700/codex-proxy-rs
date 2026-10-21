@@ -19,6 +19,7 @@ export function useAccountEditor(options: {
   const notes = shallowRef('')
   const schedulingEnabled = shallowRef(true)
   const concurrencyLimit = shallowRef('')
+  const schedulingRole = shallowRef<Account['schedulingRole']>('regular')
   const weight = shallowRef('1')
   const modelAccess = ref<AccountModelAccess | undefined>()
   const proxyMode = shallowRef('preserve')
@@ -70,6 +71,7 @@ export function useAccountEditor(options: {
     notes.value = account.notes ?? ''
     proxyMode.value = 'preserve'
     proxyId.value = ''
+    schedulingRole.value = account.schedulingRole
     schedulingEnabled.value = account.enabled
     concurrencyLimit.value = concurrencyLimitInput(account.concurrencyLimit)
     weight.value = String(account.weight)
@@ -121,6 +123,7 @@ export function useAccountEditor(options: {
         notes: notes.value,
         outboundProxyId: proxyMode.value === 'preserve' ? undefined : proxyMode.value === 'direct' ? '' : proxyId.value.trim(),
         enabled: schedulingEnabled.value,
+        schedulingRole: schedulingRole.value,
         concurrencyLimit: scheduling.values.concurrencyLimit,
         weight: scheduling.values.weight,
         modelAccess: modelAccess.value,
@@ -165,6 +168,7 @@ export function useAccountEditor(options: {
     editingAccount,
     notes,
     schedulingEnabled,
+    schedulingRole,
     concurrencyLimit,
     weight,
     modelAccess,

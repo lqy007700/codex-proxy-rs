@@ -98,6 +98,34 @@ impl From<NonZeroU32> for AccountConcurrency {
     }
 }
 
+/// 账号参与常规调度或仅在请求恢复耗尽后保底
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountSchedulingRole {
+    #[default]
+    Regular,
+    Fallback,
+}
+
+impl AccountSchedulingRole {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Regular => "regular",
+            Self::Fallback => "fallback",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "regular" => Some(Self::Regular),
+            "fallback" => Some(Self::Fallback),
+            _ => None,
+        }
+    }
+}
+
 /// 账号的相对调度优先级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AccountWeight(NonZeroU16);
@@ -812,6 +840,7 @@ pub struct ProviderAccount {
     enabled: bool,
     concurrency_limit: Option<AccountConcurrencyLimit>,
     weight: AccountWeight,
+    scheduling_role: AccountSchedulingRole,
     model_access: super::AccountModelAccess,
     allow_credits: bool,
     credential_state: CredentialState,
@@ -851,6 +880,7 @@ impl ProviderAccount {
             enabled: true,
             concurrency_limit: None,
             weight: AccountWeight::DEFAULT,
+            scheduling_role: AccountSchedulingRole::Regular,
             model_access: super::AccountModelAccess::all(),
             allow_credits: false,
             credential_state: CredentialState::Unknown,
@@ -951,6 +981,17 @@ impl ProviderAccount {
         self.concurrency_limit = concurrency_limit;
         self.weight = weight;
         self
+    }
+
+    #[must_use]
+    pub const fn with_scheduling_role(mut self, role: AccountSchedulingRole) -> Self {
+        self.scheduling_role = role;
+        self
+    }
+
+    #[must_use]
+    pub const fn scheduling_role(&self) -> AccountSchedulingRole {
+        self.scheduling_role
     }
 
     /// 设置 RT 存在性与失败后的最早重试时刻

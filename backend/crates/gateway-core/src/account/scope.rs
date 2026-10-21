@@ -48,14 +48,30 @@ pub struct RuntimeAccount {
     provider_kind: ProviderKind,
     group_ids: Arc<BTreeSet<AccountGroupId>>,
     model_access: super::AccountModelAccess,
+    scheduling_role: crate::account::AccountSchedulingRole,
 }
 
 impl RuntimeAccount {
+    #[must_use]
+    pub const fn with_scheduling_role(
+        mut self,
+        role: crate::account::AccountSchedulingRole,
+    ) -> Self {
+        self.scheduling_role = role;
+        self
+    }
+
+    #[must_use]
+    pub const fn scheduling_role(&self) -> crate::account::AccountSchedulingRole {
+        self.scheduling_role
+    }
+
     #[must_use]
     pub fn new(provider_kind: ProviderKind, group_ids: BTreeSet<AccountGroupId>) -> Self {
         Self {
             provider_kind,
             group_ids: Arc::new(group_ids),
+            scheduling_role: crate::account::AccountSchedulingRole::Regular,
             model_access: super::AccountModelAccess::all(),
         }
     }
@@ -258,6 +274,32 @@ pub struct FrozenAccountScope {
 }
 
 impl FrozenAccountScope {
+    #[must_use]
+    pub fn scheduling_role(
+        &self,
+        account: &ProviderAccountId,
+    ) -> Option<crate::account::AccountSchedulingRole> {
+        self.directory
+            .accounts
+            .get(account)
+            .map(RuntimeAccount::scheduling_role)
+    }
+
+    #[must_use]
+    pub fn has_scheduling_role(
+        &self,
+        provider: &ProviderKind,
+        model: Option<&str>,
+        role: crate::account::AccountSchedulingRole,
+    ) -> bool {
+        self.directory.accounts.iter().any(|(id, account)| {
+            account.provider_kind() == provider
+                && account.scheduling_role() == role
+                && self.allows(id)
+                && model.is_none_or(|model| self.allows_model(id, model))
+        })
+    }
+
     /// Key 绑定分组合并后的生图权限，与账号成员资格一同冻结
     #[must_use]
     pub const fn with_image_generation(mut self, allowed: bool) -> Self {
