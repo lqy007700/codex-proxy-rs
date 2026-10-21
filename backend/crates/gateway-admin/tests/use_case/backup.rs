@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use gateway_admin::model::backup::BackupStatus;
-use gateway_admin::ports::backup::BackupStorePorts;
+use gateway_admin::model::backup::{BackupRecordSeed, BackupStatus, BackupTriggerKind};
+use gateway_admin::ports::backup::{BackupRepository as _, BackupStorePorts};
 
 use crate::backup::support::{
     FakeAuthStore, FakeBackupRepository, FakeDumpPort, FakeObjectStore, configured_settings,
@@ -69,6 +69,46 @@ async fn backup_service_creates_downloads_and_deletes_with_audit() {
             .iter()
             .any(|action| action == "backup.delete_requested")
     );
+}
+
+#[tokio::test]
+async fn backup_download_preserves_each_stored_archive_format() {
+    let repository = Arc::new(FakeBackupRepository::new(configured_settings()));
+    let services = AdminHarness::new()
+        .auth(Arc::new(FakeAuthStore::new()))
+        .backup(BackupStorePorts::new(
+            repository.clone(),
+            Arc::new(FakeDumpPort::new()),
+            Arc::new(FakeObjectStore::new()),
+        ))
+        .build()
+        .await;
+
+    for (index, extension) in ["dump", "sql.gz"].into_iter().enumerate() {
+        let id = format!("backup_0123456789abcdef0123456789abcde{index}");
+        let object_key = format!("codex/archive_{id}.{extension}");
+        repository
+            .insert_backup_record(BackupRecordSeed {
+                id: id.clone(),
+                trigger_kind: BackupTriggerKind::Manual,
+                scheduled_at: None,
+                object_key: object_key.clone(),
+                expires_at: None,
+            })
+            .await
+            .unwrap();
+        repository.force_status(&id, BackupStatus::Completed);
+        let download = services
+            .backups()
+            .download_url(&system_context(), &id)
+            .await
+            .unwrap();
+        assert_eq!(
+            download.file_name,
+            format!("codex-proxy-rs_01234567.{extension}")
+        );
+        assert!(download.url.ends_with(&object_key));
+    }
 }
 
 #[tokio::test]
