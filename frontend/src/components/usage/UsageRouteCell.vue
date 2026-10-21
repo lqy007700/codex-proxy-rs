@@ -6,7 +6,7 @@ defineProps<{ record: { route: string | null, compact?: boolean } }>()
 
 <template>
   <div class="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap">
-    <code class="min-w-0 truncate font-mono text-cp-sm font-emphasis" :title="record.route || undefined">{{ record.route || '—' }}</code>
+    <code class="font-mono text-cp-sm font-emphasis">{{ record.route || '—' }}</code>
     <span
       v-if="record.compact"
       class="inline-flex shrink-0 text-cp-orange-text"
