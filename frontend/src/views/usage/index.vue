@@ -20,9 +20,29 @@ import { useUsageTimeRange } from './composables/useUsageTimeRange'
 import { isErrorUsageRecord } from './utils/detail'
 
 const statsExpanded = shallowRef(true)
+const requestColumnWidths: Record<string, number> = {
+  clientApiKeyName: 112,
+  createdAtDisplay: 176,
+  accountEmail: 184,
+  accountPlanType: 72,
+  provider: 88,
+  reasoningEffort: 104,
+  route: 160,
+  upstreamTransport: 80,
+  clientTransport: 80,
+  billing: 128,
+  latency: 152,
+  performance: 112,
+  clientIp: 144,
+  userAgent: 144,
+  actions: 64,
+}
 const requestColumns = defineTableColumns<UsageListRecord>([
-  { key: 'logicalOutcome', label: '请求结果', kind: 'custom', size: 'lg', hideable: false },
-  ...usageRecordColumns,
+  { key: 'logicalOutcome', label: '请求结果', kind: 'custom', minWidth: 128, hideable: false },
+  ...usageRecordColumns.map(column => ({
+    ...column,
+    minWidth: requestColumnWidths[column.key] ?? column.minWidth,
+  })),
 ])
 const recordViewOptions = [
   { label: '所有请求', value: 'all', icon: List },
@@ -136,6 +156,7 @@ watch(timeRange, () => {
           <div class="flex min-h-0 min-w-0 flex-col">
             <UsageRecordsTable
               class="min-h-0 flex-1"
+              size="small"
               :columns="visibleColumns"
               :rows="records"
               :loading="loading"
