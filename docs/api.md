@@ -332,6 +332,8 @@ Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和
 会话、线程、轮次、窗口及父子引用在出站时按账号安装身份稳定映射为 UUID；
 同账号保留引用关系，换账号使用不同标识。HTTP 请求头、正文 metadata、WS 副本及
 已识别的 Desktop 自动 Git 上下文使用一致映射。
+输入项的 `internal_chat_message_metadata_passthrough.turn_id` 同步映射，
+保留历史轮次与当前轮次的引用关系，其余输入项元数据保持不变。
 Images 的 `x-codex-image-turn-id`、turn metadata 和 Search 的会话 `id` 使用同一账号域；
 Search 只替换该 `id` 的原始字节，其余正文保持不变。
 `prompt_cache_key` 同样按账号映射，保留同账号内的缓存共享关系；未提供时不补造。
@@ -1647,9 +1649,13 @@ JSON 路径支持 `$`、`.成员`、`["带特殊字符的键"]`、`[索引]`、`
 `$.workspaces.*.associated_remote_urls.*` 配合 `remove_field` 和 `pattern: "private-org"` 只删除命中的远端；
 `$.workspaces` 配合 `rename_key` 可改写工作区路径键名。环境文本替换必须保留 XML 包裹结构
 
-管理端提供「统一工作区信息」预设，生成一条含多个通用步骤的规则。
-预设统一路径中的用户名为 `user`，工作区路径键和环境工作目录保留实际目录名并改为 `/workspace/<项目名>`，
-保留实际仓库、提交、分支、工作区标识和会话关联信息。安装身份由账号隔离逻辑处理，
+管理端提供「统一工作区信息」预设，生成一条含多个步骤的规则，仅处理 turn metadata 的 `workspaces`：
+
+- `/home/<用户名>`、`/Users/<用户名>` 及 Windows 用户目录中的用户名改为 `user`，保留其余目录结构和项目名
+- Git 远端 URL 的账号或组织路径段改为 `alex`，保留协议、主机和仓库名，支持 HTTP(S)、SSH、Git 协议和 `git@host:owner/repo` 形式；多级命名空间及本地远端路径保持原值
+
+提交、分支、工作区标识和会话关联信息保持原值。正文中的工作目录及其他执行路径也保持原值，
+供客户端工具使用，仍可能包含真实用户名和项目名。安装身份由账号隔离逻辑处理，
 UA、平台参数及自动 Git 上下文版本由 [OpenAI 上游客户端身份](#openai-上游客户端身份)管理。
 预设和自定义规则使用同一编辑器，步骤均可增删、修改和排序；调整预设不覆盖已保存的规则
 

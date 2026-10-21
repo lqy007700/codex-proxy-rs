@@ -16,11 +16,25 @@ fn payload(websocket: bool) -> ProtocolPayload {
         .as_array()
         .unwrap()
         .clone();
+    for (index, item) in input.iter_mut().enumerate() {
+        let metadata = item
+            .as_object_mut()
+            .unwrap()
+            .entry("internal_chat_message_metadata_passthrough")
+            .or_insert_with(|| json!({}));
+        metadata["turn_id"] = json!(if index == 3 {
+            "source-turn"
+        } else {
+            "source-previous-turn"
+        });
+    }
     input.insert(0, json!({"role":"user", "content":[{"type":"input_text", "text":concat!(
         "<external_codex_git_state><environment_context><git>",
         r#"{"sessionId":"source-session","threadId":"source-thread","clientUserMessageId":"source-turn","path":"/workspace/project"}"#,
         "</git></environment_context></external_codex_git_state>"
-    )}], "internal_chat_message_metadata_passthrough":{"content_item_kinds":["additional_content.codex_git_state"]}}));
+    )}], "internal_chat_message_metadata_passthrough":{
+        "turn_id":"source-turn", "content_item_kinds":["additional_content.codex_git_state"]
+    }}));
     ProtocolPayload::json_object("openai", json!({
         "model":"gpt-5.4", "input":input,
         "prompt_cache_key":"custom-cache-key", "client_metadata":{
@@ -143,7 +157,32 @@ async fn account_correlation_is_stable_across_transports_and_changes_only_with_a
             assert_eq!(full["tool_namespaces_info"]["inventory"], "body-only");
             assert_eq!(full["future"], metadata()["future"]);
             let input = body["input"].as_array().unwrap();
-            assert_eq!(json!(&input[1..]), account_isolation::isolation_history());
+            assert_eq!(
+                input[0]["internal_chat_message_metadata_passthrough"],
+                json!({"turn_id":flat["turn_id"], "content_item_kinds":["additional_content.codex_git_state"]}),
+            );
+            let previous_turn = &input[1]["internal_chat_message_metadata_passthrough"]["turn_id"];
+            assert_scoped_id(previous_turn.as_str().unwrap(), "source-previous-turn");
+            assert_ne!(previous_turn, &flat["turn_id"]);
+            let mut expected_history = account_isolation::isolation_history();
+            for (index, item) in expected_history
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .enumerate()
+            {
+                let metadata = item
+                    .as_object_mut()
+                    .unwrap()
+                    .entry("internal_chat_message_metadata_passthrough")
+                    .or_insert_with(|| json!({}));
+                metadata["turn_id"] = if index == 3 {
+                    flat["turn_id"].clone()
+                } else {
+                    previous_turn.clone()
+                };
+            }
+            assert_eq!(json!(&input[1..]), expected_history);
             let document =
                 roxmltree::Document::parse(input[0]["content"][0]["text"].as_str().unwrap())
                     .unwrap();
@@ -168,7 +207,15 @@ async fn account_correlation_is_stable_across_transports_and_changes_only_with_a
                 body["prompt_cache_key"].as_str().unwrap(),
                 "custom-cache-key",
             );
-            captures.push((flat["session_id"].clone(), body["prompt_cache_key"].clone()));
+            captures.push((
+                [
+                    flat["session_id"].clone(),
+                    flat["thread_id"].clone(),
+                    flat["turn_id"].clone(),
+                ],
+                body["prompt_cache_key"].clone(),
+                previous_turn.clone(),
+            ));
         }
     }
     for index in [1, 2, 3, 6, 7] {
@@ -177,6 +224,7 @@ async fn account_correlation_is_stable_across_transports_and_changes_only_with_a
     assert_eq!(captures[4], captures[5]);
     assert_ne!(captures[0].0, captures[4].0);
     assert_ne!(captures[0].1, captures[4].1);
+    assert_ne!(captures[0].2, captures[4].2);
 }
 
 #[tokio::test]

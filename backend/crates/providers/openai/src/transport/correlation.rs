@@ -205,6 +205,16 @@ pub(super) fn scope_request(
     let Some(installation_id) = installation_id else {
         return;
     };
+    // 输入项的轮次引用与请求 metadata 共用账号域，保留 item/call ID 和业务元数据
+    if let Some(Value::Array(input)) = body.get_mut("input") {
+        for item in input {
+            if let Some(Value::Object(metadata)) =
+                item.get_mut("internal_chat_message_metadata_passthrough")
+            {
+                map_fields(metadata, installation_id, &["turn_id"]);
+            }
+        }
+    }
     // 只处理官方自动 Git 上下文的关联字段，不扫描普通用户输入和工具输出
     let Ok(targets) = locate_contexts(body, true, || Ok(())) else {
         return;
