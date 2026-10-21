@@ -512,6 +512,7 @@ mod provider {
             },
             account: AccountRecord {
                 allow_credits: false,
+                outbound_proxy_id: None,
                 outbound_proxy_enabled: true,
                 notes: None,
                 model_access: Default::default(),
