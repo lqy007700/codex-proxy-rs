@@ -144,6 +144,15 @@ impl CodexBackendClient {
             .cloned()
             .unwrap_or_default()
             .exchange("http_sse");
+        if let Some(body) = upstream_body.as_object() {
+            super::diagnostics::evidence::record_request(
+                &trace,
+                "provider.request.outbound",
+                body,
+                "http_sse",
+                Some(&headers),
+            );
+        }
         trace.headers(
             "upstream.request.headers",
             serde_json::json!({
@@ -300,6 +309,15 @@ impl CodexBackendClient {
         super::correlation::scope_request(&mut body, &mut headers, context.installation_id);
         let original_headers = self.privacy.as_ref().map(|_| headers.clone());
         self.apply_privacy(&mut body, &mut headers)?;
+        if let Some(body) = body.as_object() {
+            super::diagnostics::evidence::record_request(
+                &context.trace.cloned().unwrap_or_default(),
+                "provider.request.outbound",
+                body,
+                "websocket",
+                Some(&headers),
+            );
+        }
         *websocket_request.body_mut() = body.as_object().cloned().ok_or_else(|| {
             CodexClientError::Privacy(gateway_core::settings::privacy::PrivacyError {
                 rule_index: 0,

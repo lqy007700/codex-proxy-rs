@@ -958,6 +958,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
         // 同协议保留原始帧；canonical 解析只提取计费、续接和状态事实
         let websocket_transport = response.transport == CodexBackendTransport::WebSocket;
         let mut decoder = CodexCanonicalDecoder::new(upstream_model.as_str())
+            .with_trace(trace.clone())
             .with_pricing(context.pricing().get("openai").and_then(|models| models.get(upstream_model.as_str())).cloned())
             .with_reported_model(response.response_metadata.effective_model.as_deref())
             .with_requested_service_tier(request.service_tier())

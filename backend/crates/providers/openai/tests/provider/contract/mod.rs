@@ -6736,6 +6736,8 @@ async fn missing_affinity_continuation_should_require_client_replay_without_an_u
 
 #[tokio::test]
 async fn missing_affinity_full_request_should_clear_unowned_turn_state() {
+    let trace = gateway_core::diagnostics::TraceContext::new("req_unknown_turn_state");
+    let input = json!((0..520).map(|index| json!({"role":"user", "content":format!("{index}:{}", "private-transcript".repeat(60))})).collect::<Vec<_>>());
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_unknown_turn_state").await;
     let server = MockServer::start().await;
@@ -6754,7 +6756,9 @@ async fn missing_affinity_full_request_should_clear_unowned_turn_state() {
             "openai",
             Map::from_iter([
                 ("model".to_owned(), json!("gpt-5.4")),
-                ("input".to_owned(), json!("full transcript")),
+                ("input".to_owned(), input.clone()),
+                ("instructions".to_owned(), json!("private-instructions")),
+                ("tools".to_owned(), json!([{"type":"function", "name":"private_tool", "parameters":{"type":"object"}}])),
             ]),
         )
         .expect("OpenAI payload")
@@ -6768,7 +6772,21 @@ async fn missing_affinity_full_request_should_clear_unowned_turn_state() {
     let mut stream = provider_with_base_url(&store, server.uri())
         .execute(
             planned_request("openai", Operation::Generate(generation)),
-            context("req_unknown_turn_state", CancellationToken::new()),
+            AttemptContext::new(
+                RequestAttemptContext::new(
+                    ModelRequestId::new("req_unknown_turn_state").unwrap(),
+                    ClientApiKeyId::new("key_openai_contract").unwrap(),
+                )
+                .with_trace(trace.clone())
+                .with_request_location(Some(global_request_location())),
+                NonZeroU32::new(1).unwrap(),
+                SystemTime::now() + Duration::from_secs(30),
+                account_policy(),
+                AccountAttemptContext::new(BTreeSet::<ProviderAccountId>::new(), None, None)
+                    .with_account_scope(contract_account_scope()),
+                None,
+                CancellationToken::new(),
+            ),
         )
         .await
         .expect("prepare full replay stream");
@@ -6781,6 +6799,30 @@ async fn missing_affinity_full_request_should_clear_unowned_turn_state() {
         .expect("captured full replay request");
 
     assert!(captured_header_values(&requests[0], "x-codex-turn-state").is_empty());
+    assert_eq!(captured_request_body(&requests[0])["input"], input);
+    let snapshot = trace.snapshot().unwrap();
+    let events = snapshot["events"].as_array().unwrap();
+    let evidence =
+        |stage: &str| &events.iter().find(|event| event["stage"] == stage).unwrap()["data"];
+    let before = evidence("provider.request.input");
+    let outbound = evidence("provider.request.outbound");
+    assert_eq!(before["input"], outbound["input"]);
+    assert_eq!(before["input"]["omittedItems"], 8);
+    for field in ["instructions", "tools"] {
+        assert_eq!(before["fields"][field], outbound["fields"][field]);
+    }
+    let scope = evidence("provider.request.account_scope");
+    assert_eq!(scope["scope"], "unknown");
+    assert!(scope["before"]["turnState"].is_object());
+    assert!(scope["after"]["turnState"].is_null());
+    for private in [
+        "private-transcript",
+        "private-instructions",
+        "private_tool",
+        "unowned-turn-state",
+    ] {
+        assert!(!snapshot.to_string().contains(private));
+    }
 }
 
 #[tokio::test]

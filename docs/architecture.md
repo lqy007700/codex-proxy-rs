@@ -1104,6 +1104,10 @@ Compose 的 `stop_grace_period` 必须覆盖后台关闭预算并留出进程清
   嵌套的同名 header 不获得头部白名单权限。诊断下载保留已存 trace 事件 data 与错误原因，
   在服务端按实际凭据与认证合同重新脱敏，不因历史 `sanitized` 标记而信任旧正文。
   管理端详情保留有界时间线，采集或导出丢失的信息必须明确标记，接口范围见 [诊断与恢复关联](api.md#诊断与恢复关联)
+- Core 集中管理诊断事件预算、关键事实保留与阶段计数；Provider 在既有解析和状态决策边界提取安全事实，
+  协议字段提取集中在所属 Provider 的诊断模块，调用点不重复解释字段或重试规则。
+  管理用例集中归纳缺口，API 对同一份脱敏文档生成 ZIP、结构化 JSON 与文本摘要，前端只负责下载。
+  关键事实复用请求现有 trace JSON 持久化，ZIP 不另行存储；预算和字段合同见诊断接口章节
 - 真实 secret 不进入普通日志、Debug、fixture 或 audit details；明文只能通过账号导出、Key reveal、
   备份设置等明确的敏感 Admin 合同返回
 - OAuth pending flow 使用有期限、带 owner 的一次性 claim；事务成功后才消费，失败释放 claim

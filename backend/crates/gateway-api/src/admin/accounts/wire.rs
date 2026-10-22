@@ -1043,8 +1043,7 @@ impl AccountExportData {
         time: crate::time::TimePresenter,
     ) -> Self {
         let filename = format!(
-            "cpr-accounts-selected-{}-{}.json",
-            bundle.documents.len(),
+            "cpr-accounts-{}.json",
             time.label(bundle.exported_at, "%Y-%m-%d")
         );
         let documents = bundle
