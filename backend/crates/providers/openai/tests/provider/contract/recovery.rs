@@ -52,6 +52,7 @@ async fn transient_failure_recovery_requires_open_replay_boundary() {
                 if let Some(event) = boundary_event {
                     upstream_events.push(event);
                 }
+                upstream_events.push(json!({"type":"keepalive","sequence_number":2}));
                 // 元数据可替换，但不能重新打开已被输出或未知事件关闭的恢复窗口
                 upstream_events.push(json!({
                     "type": "response.metadata",

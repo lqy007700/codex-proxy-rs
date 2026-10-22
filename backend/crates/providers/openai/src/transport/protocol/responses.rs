@@ -210,11 +210,19 @@ pub fn transport_requirement(request: &CodexResponsesRequest) -> TransportRequir
     }
 }
 
-/// 仅空响应前导和元数据可在已交付后被下一次尝试替换
+/// 仅空响应前导、元数据和纯心跳可在已交付后被下一次尝试替换
 pub(crate) fn is_replaceable_response_prelude(event_type: &str, value: &Value) -> bool {
     match event_type {
         // 两类官方元数据都不代表输出，轮次与安全状态仍随原始事件交付
         "codex.response.metadata" | "response.metadata" | "codex.rate_limits" => true,
+        // 心跳不代表业务交付；带有额外载荷或未知形状时仍保留原有重放屏障
+        "keepalive" => value.as_object().is_some_and(|object| {
+            object.get("type").and_then(Value::as_str) == Some("keepalive")
+                && object.get("sequence_number").is_none_or(Value::is_u64)
+                && object
+                    .keys()
+                    .all(|key| matches!(key.as_str(), "type" | "sequence_number"))
+        }),
         "response.created" | "response.in_progress" => value
             .pointer("/response/output")
             .is_none_or(|output| output.as_array().is_some_and(Vec::is_empty)),

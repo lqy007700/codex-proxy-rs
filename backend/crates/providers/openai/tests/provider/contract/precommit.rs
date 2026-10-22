@@ -505,12 +505,87 @@ async fn sse_comments_are_forwarded_without_closing_the_retry_window() {
 }
 
 #[tokio::test]
+async fn keepalive_events_are_forwarded_without_closing_the_retry_window() {
+    for websocket in [false, true] {
+        let store = Arc::new(MemoryAccountStore::default());
+        create_account(&store, "acct_provider_contract").await;
+        let prelude = vec![
+            structural_event("response.created", 1024),
+            json!({"type":"keepalive"}),
+            json!({"type":"keepalive","sequence_number":2}),
+            structural_event("response.in_progress", 1024),
+        ];
+        let (base_url, release, server) = if websocket {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let (release, released) = oneshot::channel();
+            let outgoing = prelude.clone();
+            let server = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut socket = accept_codex_test_websocket(socket).await;
+                socket.next().await.unwrap().unwrap();
+                for event in outgoing {
+                    socket
+                        .send(Message::Text(event.to_string().into()))
+                        .await
+                        .unwrap();
+                }
+                released.await.unwrap();
+                socket
+                    .send(Message::Text(overload().to_string().into()))
+                    .await
+                    .unwrap();
+            });
+            (base_url, release, server)
+        } else {
+            let (base_url, release, _, server) = paused_chunked_sse_server(
+                prelude.iter().map(sse).collect::<String>(),
+                sse(&overload()),
+            )
+            .await;
+            (base_url, release, server)
+        };
+        let operation = if websocket {
+            generate_operation()
+        } else {
+            http_generate_operation()
+        };
+        let mut stream = provider_with_base_url(&store, base_url)
+            .execute(
+                planned_request("openai", operation),
+                context("req_keepalive_retry", CancellationToken::new()),
+            )
+            .await
+            .unwrap();
+        for expected in prelude {
+            let event = timeout(Duration::from_secs(1), next_client_event(&mut stream))
+                .await
+                .expect("prelude cannot wait for a later event");
+            assert_eq!(event.wire_event().unwrap().data(), &expected);
+            assert!(event.is_replayable_prelude());
+        }
+        release.send(()).unwrap();
+        let (_, error) = stream_failure(&mut stream).await;
+        assert!(error.replay_is_safe());
+        assert!(matches!(
+            error.pre_delivery_retry(),
+            Some(PreDeliveryRetry::SameAccountTransientRetry { .. })
+        ));
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn ordinary_streams_forward_compaction_output_and_unknown_events_without_reopening_retry() {
     for websocket in [false, true] {
         for first in [
             json!({"type":"response.compaction.compacting","item_id":"compact_test","output_index":0}),
             json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"partial"}),
+            json!({"type":"response.code_interpreter_call.in_progress","item_id":"tool_test","output_index":0}),
             json!({"type":"response.future","value":"opaque"}),
+            json!({"type":"keepalive","sequence_number":2,"delta":"partial"}),
+            json!({"type":"keepalive","sequence_number":2,"extension":true}),
+            json!({"type":"keepalive","sequence_number":"2"}),
         ] {
             let store = Arc::new(MemoryAccountStore::default());
             create_account(&store, "acct_provider_contract").await;
@@ -524,7 +599,11 @@ async fn ordinary_streams_forward_compaction_output_and_unknown_events_without_r
                     let (socket, _) = listener.accept().await.unwrap();
                     let mut socket = accept_codex_test_websocket(socket).await;
                     socket.next().await.unwrap().unwrap();
-                    for event in [first, prelude] {
+                    for event in [
+                        first,
+                        json!({"type":"keepalive","sequence_number":2}),
+                        prelude,
+                    ] {
                         socket
                             .send(Message::Text(event.to_string().into()))
                             .await
@@ -538,8 +617,13 @@ async fn ordinary_streams_forward_compaction_output_and_unknown_events_without_r
                 });
                 (base_url, release, server)
             } else {
-                let (base_url, release, _, server) =
-                    paused_chunked_sse_server(sse(&first) + &sse(&prelude), sse(&overload())).await;
+                let (base_url, release, _, server) = paused_chunked_sse_server(
+                    sse(&first)
+                        + &sse(&json!({"type":"keepalive","sequence_number":2}))
+                        + &sse(&prelude),
+                    sse(&overload()),
+                )
+                .await;
                 (base_url, release, server)
             };
             let operation = if websocket {
@@ -559,6 +643,14 @@ async fn ordinary_streams_forward_compaction_output_and_unknown_events_without_r
                 .unwrap();
             assert_eq!(delivered.wire_event().unwrap().data(), &first);
             assert!(!delivered.is_replayable_prelude());
+            let heartbeat = timeout(Duration::from_secs(1), next_client_event(&mut stream))
+                .await
+                .unwrap();
+            assert_eq!(
+                heartbeat.wire_event().unwrap().event_type(),
+                Some("keepalive")
+            );
+            assert!(!heartbeat.is_replayable_prelude());
             let created = timeout(Duration::from_secs(1), next_client_event(&mut stream))
                 .await
                 .unwrap();
