@@ -57,6 +57,7 @@ pub struct RuntimeSettingsValues {
     pub openai_guardian_reserved_concurrency: u32,
     pub openai_account_affinity: gateway_core::account::AccountAffinity,
     pub max_account_rotations: u32,
+    pub recovery_attempts: u32,
     pub openai_session_affinity_ttl_hours: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
@@ -208,6 +209,7 @@ impl RuntimeSettingsValues {
             self.max_waiting_per_account,
             self.concurrency_wait_timeout_seconds,
             self.max_account_rotations,
+            self.recovery_attempts,
             self.openai_session_affinity_ttl_hours,
         )?;
         gateway_core::settings::response_body_limit(self.responses_max_decompressed_body_bytes)?;

@@ -55,6 +55,7 @@ fn update_body() -> Value {
         "openaiGuardianReservedConcurrency": 0,
         "openaiAccountAffinity": "relaxed",
         "maxAccountRotations": 3,
+        "recoveryAttempts": 4,
         "openaiSessionAffinityTtlHours": 24,
         "concurrencyWaitTimeoutSeconds": 30,
         "responsesMaxDecompressedBodyBytes": 67108864,
@@ -392,6 +393,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
             max_account_rotations: 3,
+            recovery_attempts: gateway_core::account::default_recovery_attempts(),
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
@@ -420,9 +422,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
         gateway_api::TimePresenter::new(Default::default()),
     )))
     .expect("serialize view");
-    assert_eq!(
-        value,
-        json!({
+    let mut expected = json!({
             "configRevision": 7,
             "providerRequestProfiles": {},
             "openaiClientProfile": null,
@@ -467,8 +467,9 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
                 "resetCreditMaxWeeklyRemainingPercent": null,
                 "updatedAt": "2026-08-02T10:30:00Z",
                 "updatedAtDisplay": "2026-08-02 18:30:00"
-        })
-    );
+    });
+    expected["recoveryAttempts"] = json!(4);
+    assert_eq!(value, expected);
 }
 
 #[test]
@@ -1559,4 +1560,60 @@ fn reset_credit_weekly_threshold_accepts_unset_and_zero_to_one_hundred() {
         body["resetCreditMaxWeeklyRemainingPercent"] = value;
         assert!(serde_json::from_value::<UpdateRuntimeSettingsRequest>(body).is_err());
     }
+}
+
+#[tokio::test]
+async fn recovery_attempts_round_trip_and_reject_invalid_values() {
+    for attempts in [1, 2, 3, 4, 5, 7, 31] {
+        let fixture = AdminTestFixture::new().await;
+        fixture.auth.insert_session("valid-session");
+        let mut body = update_body();
+        body["recoveryAttempts"] = json!(attempts);
+        let response = app(fixture.state())
+            .oneshot(request(
+                Method::POST,
+                "/api/admin/settings/update",
+                Some(body),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(response).await["data"]["recoveryAttempts"],
+            attempts
+        );
+        let response = app(fixture.state())
+            .oneshot(request(Method::GET, "/api/admin/settings", None))
+            .await
+            .unwrap();
+        assert_eq!(
+            response_json(response).await["data"]["recoveryAttempts"],
+            attempts
+        );
+    }
+    for (value, status) in [
+        (json!(0), StatusCode::BAD_REQUEST),
+        (json!(32), StatusCode::BAD_REQUEST),
+        (json!(-1), StatusCode::UNPROCESSABLE_ENTITY),
+        (json!(1.5), StatusCode::UNPROCESSABLE_ENTITY),
+        (Value::Null, StatusCode::UNPROCESSABLE_ENTITY),
+    ] {
+        let fixture = AdminTestFixture::new().await;
+        fixture.auth.insert_session("valid-session");
+        let mut body = update_body();
+        body["recoveryAttempts"] = value;
+        let response = app(fixture.state())
+            .oneshot(request(
+                Method::POST,
+                "/api/admin/settings/update",
+                Some(body),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+    }
+    let mut omitted = update_body();
+    omitted.as_object_mut().unwrap().remove("recoveryAttempts");
+    let omitted: UpdateRuntimeSettingsRequest = serde_json::from_value(omitted).unwrap();
+    assert_eq!(omitted.values.recovery_attempts, 4);
 }

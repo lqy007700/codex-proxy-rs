@@ -30,6 +30,7 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
             max_account_rotations: 3,
+            recovery_attempts: gateway_core::account::default_recovery_attempts(),
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
@@ -1187,5 +1188,68 @@ async fn reset_credit_weekly_threshold_defaults_unset_and_round_trips() {
         assert!(sqlx::query("update runtime_settings set reset_credit_max_weekly_remaining_percent = $1 where id = 1")
             .bind(threshold).execute(&database.pool).await.is_err());
     }
+    database.close().await;
+}
+
+#[tokio::test]
+async fn recovery_attempts_default_and_updates_reach_persisted_runtime_snapshots() {
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create("recovery_attempts").await else {
+        return;
+    };
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    assert_eq!(
+        repository
+            .load_runtime_settings()
+            .await
+            .unwrap()
+            .values
+            .recovery_attempts,
+        4
+    );
+    for attempts in [1, 2, 3, 4, 5, 7, 31] {
+        let mut update = settings_with_margin(3600);
+        update.values.recovery_attempts = attempts;
+        let before = repository
+            .load_runtime_settings()
+            .await
+            .unwrap()
+            .config_revision;
+        repository.update_runtime_settings(update).await.unwrap();
+        let loaded = repository.load_runtime_settings().await.unwrap();
+        assert_eq!(loaded.values.recovery_attempts, attempts);
+        assert!(loaded.config_revision > before);
+        let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+            .load_runtime_snapshot()
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(snapshot.settings).unwrap()["recovery_attempts"],
+            attempts
+        );
+    }
+    for attempts in [0, 32] {
+        let mut update = settings_with_margin(3600);
+        update.values.recovery_attempts = attempts;
+        assert!(repository.update_runtime_settings(update).await.is_err());
+    }
+    for attempts in [-1, 0, 32] {
+        assert!(
+            sqlx::query("update runtime_settings set recovery_attempts = $1 where id = 1")
+                .bind(attempts as i64)
+                .execute(&database.pool)
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(
+        repository
+            .load_runtime_settings()
+            .await
+            .unwrap()
+            .values
+            .recovery_attempts,
+        31
+    );
     database.close().await;
 }

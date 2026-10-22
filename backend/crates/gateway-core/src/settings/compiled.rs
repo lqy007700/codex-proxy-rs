@@ -55,6 +55,7 @@ impl CompiledSettings {
             settings.max_waiting_per_account,
             settings.concurrency_wait_timeout_seconds,
             settings.max_account_rotations,
+            settings.recovery_attempts,
             settings.openai_session_affinity_ttl_hours,
         )
         .map_err(|_| InvalidSettings)?;
@@ -77,6 +78,7 @@ impl CompiledSettings {
         .with_openai_guardian_reserved_concurrency(settings.openai_guardian_reserved_concurrency)
         .with_openai_account_affinity(settings.openai_account_affinity)
         .with_max_account_rotations(settings.max_account_rotations)
+        .with_recovery_attempts(settings.recovery_attempts)
         .with_openai_session_affinity_ttl(Duration::from_secs(
             u64::from(settings.openai_session_affinity_ttl_hours) * 3600,
         ))

@@ -80,17 +80,33 @@ impl AccountRecoveryStage {
 }
 
 /// 只累计可恢复的业务失败，传输恢复不创建另一份业务预算
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct AccountRecovery {
     stage: AccountRecoveryStage,
     initial: Option<ProviderAccountId>,
     initial_failures: u32,
     other_failures: u32,
+    attempt_limit: u32,
 }
 
 impl AccountRecovery {
+    pub fn new(attempt_limit: u32) -> Self {
+        Self {
+            stage: AccountRecoveryStage::Initial,
+            initial: None,
+            initial_failures: 0,
+            other_failures: 0,
+            attempt_limit,
+        }
+    }
+
     pub fn stage(&self) -> &AccountRecoveryStage {
         &self.stage
+    }
+
+    /// 普通尝试加一次保底所需的额外重试数等于普通尝试总数，仍尊重 Provider 的较小预算
+    pub fn retry_limit(&self, provider_limit: u32) -> u32 {
+        self.attempt_limit.min(provider_limit)
     }
 
     pub fn observe_selected(&mut self, account: &ProviderAccountId) {
@@ -118,14 +134,14 @@ impl AccountRecovery {
         match &self.stage {
             AccountRecoveryStage::Initial => {
                 self.initial_failures += 1;
-                if self.initial_failures < 3 && !skip_initial {
+                if self.initial_failures < self.attempt_limit.div_ceil(2) && !skip_initial {
                     return true;
                 }
                 self.leave_initial();
             }
             AccountRecoveryStage::OtherAccounts { .. } => {
                 self.other_failures += 1;
-                if self.other_failures >= 2 {
+                if self.other_failures >= self.attempt_limit / 2 {
                     self.stage = AccountRecoveryStage::Fallback;
                 }
             }
@@ -135,6 +151,10 @@ impl AccountRecovery {
     }
 
     pub fn leave_initial(&mut self) {
+        if self.attempt_limit / 2 == 0 {
+            self.enter_fallback();
+            return;
+        }
         self.stage = self
             .initial
             .as_ref()

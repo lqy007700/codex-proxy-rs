@@ -153,7 +153,7 @@ async fn transient_failure_recovery_requires_open_replay_boundary() {
                     };
                     assert_eq!(
                         (max_retries.get(), max_total_retries.get()),
-                        (2, 5)
+                        (2, gateway_core::account::MAX_RECOVERY_ATTEMPTS)
                     );
                     assert_eq!(track_client_retry_failure, !capacity);
                     assert_eq!(initial_delay, Duration::from_millis(500));
@@ -234,7 +234,7 @@ async fn service_failure_opening_rejections_request_bounded_retry_and_keep_respo
                     policy: TransientRetryPolicy::RetryThenRotateAccountWithBudget { max_total_retries, track_client_retry_failure: true },
                     max_retries,
                     ..
-                }) if max_retries.get() == 2 && max_total_retries.get() == 5
+                }) if max_retries.get() == 2 && max_total_retries.get() == gateway_core::account::MAX_RECOVERY_ATTEMPTS
             ));
             assert_eq!(error.retry_after(), Some(Duration::from_secs(17)));
             let response = error.client_visible_upstream_response().unwrap();

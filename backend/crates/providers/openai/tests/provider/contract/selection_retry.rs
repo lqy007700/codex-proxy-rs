@@ -82,7 +82,7 @@ async fn server_busy_retries_same_account_then_rotates_with_shared_budget_after_
             format!("event: response.failed\ndata: {failure}\n\n"),
             "text/event-stream",
         ))
-        .expect(5)
+        .expect(4)
         .mount(&server)
         .await;
     let provider = provider_with_base_url(&store, server.uri());
@@ -161,15 +161,15 @@ async fn server_busy_retries_same_account_then_rotates_with_shared_budget_after_
         failure
     );
     let requests = server.received_requests().await.unwrap();
-    assert_eq!(requests.len(), 5);
+    assert_eq!(requests.len(), 4);
     let accounts: Vec<_> = requests
         .iter()
         .map(|request| request.headers.get("chatgpt-account-id").unwrap())
         .collect();
-    assert!(accounts[..3].iter().all(|account| *account == accounts[0]));
+    assert!(accounts[..2].iter().all(|account| *account == accounts[0]));
+    assert_ne!(accounts[2], accounts[0]);
     assert_ne!(accounts[3], accounts[0]);
-    assert_ne!(accounts[4], accounts[0]);
-    assert_ne!(accounts[4], accounts[3]);
+    assert_ne!(accounts[3], accounts[2]);
     let trace = session.trace().snapshot().unwrap();
     let decisions: Vec<_> = trace["events"]
         .as_array()
@@ -178,10 +178,10 @@ async fn server_busy_retries_same_account_then_rotates_with_shared_budget_after_
         .filter(|event| event["stage"] == "retry.decided")
         .map(|event| &event["data"])
         .collect();
-    assert_eq!(decisions.len(), 5);
+    assert_eq!(decisions.len(), 4);
     for (index, decision) in decisions.iter().enumerate() {
-        assert_eq!(decision["boundedTransientRetriesRemaining"], 5 - index);
-        assert_eq!(decision["retryable"], index < 4);
+        assert_eq!(decision["boundedTransientRetriesRemaining"], 4 - index);
+        assert_eq!(decision["retryable"], index < 3);
         assert_eq!(decision["downstreamCommitted"], true);
     }
 }
@@ -432,32 +432,17 @@ fn execution_request(id: &str, operation: &Operation, timeout: Duration) -> NewM
 async fn recovery_round_robin_uses_api_key_fallback_once_and_preserves_session_binding() {
     use gateway_core::account::AccountSchedulingRole;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    for (regular, fallback, failures, scenario, expected) in [
-        (
-            vec!["a", "b", "c"],
-            true,
-            99,
-            vec!["a", "a", "a", "b", "c", "d"],
-        ),
-        (vec!["a", "b"], true, 99, vec!["a", "a", "a", "b", "b", "d"]),
-        (vec!["a"], true, 99, vec!["a", "a", "a", "d"]),
+    for (regular, fallback, failures, scenario, attempts, expected) in [
+        (vec!["a", "b", "c"], true, 99, vec!["a", "a", "b", "c", "d"]),
+        (vec!["a", "b"], true, 99, vec!["a", "a", "b", "b", "d"]),
+        (vec!["a"], true, 99, vec!["a", "a", "d"]),
         (vec![], true, 99, vec!["d"]),
-        (
-            vec!["a", "b", "c"],
-            false,
-            99,
-            vec!["a", "a", "a", "b", "c"],
-        ),
-        (vec!["a"], false, 99, vec!["a", "a", "a"]),
+        (vec!["a", "b", "c"], false, 99, vec!["a", "a", "b", "c"]),
+        (vec!["a"], false, 99, vec!["a", "a"]),
         (vec![], false, 99, vec![]),
         (vec!["a", "b", "c"], true, 0, vec!["a"]),
-        (vec!["a", "b", "c"], true, 4, vec!["a", "a", "a", "b", "c"]),
-        (
-            vec!["a", "b", "c"],
-            true,
-            5,
-            vec!["a", "a", "a", "b", "c", "d"],
-        ),
+        (vec!["a", "b", "c"], true, 3, vec!["a", "a", "b", "c"]),
+        (vec!["a", "b", "c"], true, 4, vec!["a", "a", "b", "c", "d"]),
     ]
     .into_iter()
     .map(|(regular, fallback, failures, expected)| {
@@ -469,23 +454,85 @@ async fn recovery_round_robin_uses_api_key_fallback_once_and_preserves_session_b
             true,
             99,
             "disabled",
-            vec!["a", "a", "a", "b", "c"],
+            vec!["a", "a", "b", "c"],
         ),
         (
             vec!["a", "b", "c"],
             true,
             99,
             "model_denied",
-            vec!["a", "a", "a", "b", "c"],
+            vec!["a", "a", "b", "c"],
         ),
         (
             vec!["a", "b", "c"],
             true,
             99,
             "outside_scope",
-            vec!["a", "a", "a", "b", "c"],
+            vec!["a", "a", "b", "c"],
         ),
         (vec!["a", "b", "c"], true, 99, "bad_request", vec!["a"]),
+    ])
+    .map(|(regular, fallback, failures, scenario, expected)| {
+        (regular, fallback, failures, scenario, 4, expected)
+    })
+    .chain([
+        (vec!["a", "b"], true, 99, "available", 1, vec!["a", "d"]),
+        (
+            vec!["a", "b"],
+            true,
+            99,
+            "available",
+            2,
+            vec!["a", "b", "d"],
+        ),
+        (
+            vec!["a", "b"],
+            true,
+            99,
+            "available",
+            3,
+            vec!["a", "a", "b", "d"],
+        ),
+        (
+            vec!["a", "b"],
+            true,
+            99,
+            "available",
+            5,
+            vec!["a", "a", "a", "b", "b", "d"],
+        ),
+        (
+            vec!["a", "b"],
+            true,
+            99,
+            "available",
+            7,
+            vec!["a", "a", "a", "a", "b", "b", "b", "d"],
+        ),
+        (
+            vec!["a", "b", "c"],
+            true,
+            99,
+            "available",
+            7,
+            vec!["a", "a", "a", "a", "b", "c", "b", "d"],
+        ),
+        (
+            vec!["a"],
+            true,
+            99,
+            "available",
+            5,
+            vec!["a", "a", "a", "d"],
+        ),
+        (
+            vec!["a", "b"],
+            false,
+            99,
+            "available",
+            3,
+            vec!["a", "a", "b"],
+        ),
     ]) {
         let store = Arc::new(MemoryAccountStore::default());
         let server = MockServer::start().await;
@@ -565,7 +612,8 @@ async fn recovery_round_robin_uses_api_key_fallback_once_and_preserves_session_b
         let snapshot = RuntimeSnapshot::new(
             ConfigRevision::new(1).unwrap(),
             SettingsValues::new(2, "sticky", Default::default(), None, None)
-                .with_request_location(global_request_location(), true),
+                .with_request_location(global_request_location(), true)
+                .with_recovery_attempts(attempts),
             vec![kind.clone()],
             vec![ProviderModel::new(
                 kind,

@@ -7,6 +7,7 @@ const props = defineProps<{ disabled: boolean }>()
 const accountAffinity = defineModel<AccountAffinity | ''>({ required: true })
 const affinityTtlHours = defineModel<string>('ttlHours', { required: true })
 const maxAccountRotations = defineModel<string>('maxAccountRotations', { required: true })
+const recoveryAttempts = defineModel<string>('recoveryAttempts', { required: true })
 const affinityOptions = [{ label: '宽松', value: 'relaxed' }, { label: '优先', value: 'preferred' }, { label: '严格', value: 'strict' }]
 </script>
 
@@ -38,8 +39,26 @@ const affinityOptions = [{ label: '宽松', value: 'relaxed' }, { label: '优先
           </template>
         </ZInput>
       </ZFormItem>
-      <ZFormItem label="最大换号次数" description="其他恢复路径的换号上限；0 禁止换号，业务故障使用固定恢复链">
+      <ZFormItem label="最大换号次数" description="其他恢复路径的换号上限，0 禁止换号，业务故障按尝试次数恢复">
         <ZInput v-model="maxAccountRotations" aria-label="最大换号次数" type="number" min="0" max="31" step="1" :disabled="props.disabled" />
+      </ZFormItem>
+      <ZFormItem label="普通账号尝试次数" description="包含首次尝试，保底账号另算 1 次">
+        <template #label-extra>
+          <ZPopover class="-my-1" trigger="hover-click" placement="top-start">
+            <template #reference="{ open }">
+              <ZIconButton aria-label="普通账号尝试次数说明" :title="undefined" :aria-expanded="open" class="size-6! hover:bg-transparent! active:bg-transparent!">
+                <CircleAlert class="size-3.5" aria-hidden="true" />
+              </ZIconButton>
+            </template>
+            <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+              <p>初始账号分配向上取整的一半次数，其余次数用于其他普通账号轮询</p>
+              <p>默认 4 次：初始账号 2 次，其他普通账号合计 2 次</p>
+              <p>设为 3 次：A → A → B → 保底</p>
+              <p>没有其他普通账号时直接保底，成功或不可重试时提前结束</p>
+            </div>
+          </ZPopover>
+        </template>
+        <ZInput v-model="recoveryAttempts" aria-label="普通账号尝试次数" type="number" min="1" max="31" step="1" :disabled="props.disabled" />
       </ZFormItem>
     </ZForm>
   </ZCard>

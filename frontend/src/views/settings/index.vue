@@ -68,6 +68,7 @@ const {
   maxConcurrentPerAccountValue,
   openaiGuardianReservedConcurrencyValue,
   maxAccountRotationsValue,
+  recoveryAttemptsValue,
   openaiSessionAffinityTtlHoursValue,
   maxWaitingPerKeyValue,
   maxWaitingPerAccountValue,
@@ -171,6 +172,7 @@ watch(section, (value) => {
             v-model="form.openaiAccountAffinity"
             v-model:ttl-hours="openaiSessionAffinityTtlHoursValue"
             v-model:max-account-rotations="maxAccountRotationsValue"
+            v-model:recovery-attempts="recoveryAttemptsValue"
             :disabled="disabled"
           />
           <ConcurrencyPolicyCard

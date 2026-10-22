@@ -56,6 +56,7 @@ export interface RuntimeSettings {
   openaiGuardianReservedConcurrency: number
   openaiAccountAffinity: AccountAffinity
   maxAccountRotations: number
+  recoveryAttempts: number
   openaiSessionAffinityTtlHours: number
   maxWaitingPerKey: number
   maxWaitingPerAccount: number

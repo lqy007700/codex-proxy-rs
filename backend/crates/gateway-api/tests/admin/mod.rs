@@ -626,6 +626,7 @@ impl SettingsStore for MemorySettingsStore {
                     .openai_guardian_reserved_concurrency,
                 openai_account_affinity: command.values.openai_account_affinity,
                 max_account_rotations: command.values.max_account_rotations,
+                recovery_attempts: command.values.recovery_attempts,
                 openai_session_affinity_ttl_hours: command.values.openai_session_affinity_ttl_hours,
                 responses_max_decompressed_body_bytes: command
                     .values
@@ -1808,6 +1809,7 @@ fn test_runtime_settings() -> RuntimeSettings {
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
             max_account_rotations: 3,
+            recovery_attempts: gateway_core::account::default_recovery_attempts(),
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),

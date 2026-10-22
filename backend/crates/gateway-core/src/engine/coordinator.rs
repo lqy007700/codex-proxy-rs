@@ -298,6 +298,7 @@ where
                     "strategy": plan.account_selection_policy().strategy().as_str(),
                     "affinity": plan.account_selection_policy().openai_account_affinity().as_str(),
                     "maxAccountRotations": plan.account_selection_policy().max_account_rotations(),
+                    "recoveryAttempts": plan.account_selection_policy().recovery_attempts(),
                     "maxRoutingAttempts": plan.max_attempts().get(),
                     "maxConcurrentPerAccount": plan.account_selection_policy().max_concurrent_per_account().get(),
                     "queueMaxWaiting": plan.account_selection_policy().queue_policy().max_waiting,
@@ -311,6 +312,9 @@ where
             }),
         );
         let image_generation_requested = operation.image_generation_requested();
+        let account_recovery = super::recovery::AccountRecovery::new(
+            plan.account_selection_policy().recovery_attempts(),
+        );
         let mut session = ResponseExecutionSession {
             engine: Arc::clone(&self.engine),
             request_id,
@@ -371,7 +375,7 @@ where
             pending_retry: None,
             transient_retry_counts: BTreeMap::new(),
             bounded_transient_retries: 0,
-            account_recovery: super::recovery::AccountRecovery::default(),
+            account_recovery,
             request_profiles: BTreeMap::new(),
             current: None,
             send_state_watermark: UpstreamSendState::NotSent,
@@ -1887,7 +1891,10 @@ where
                             ..
                         },
                     ..
-                }) => self.bounded_transient_retries >= max_total_retries.get().min(5),
+                }) => {
+                    self.bounded_transient_retries
+                        >= self.account_recovery.retry_limit(max_total_retries.get())
+                }
                 _ => false,
             };
             if budget_exhausted {
@@ -2013,7 +2020,7 @@ where
             "boundedTransientRetriesRemaining": match error.pre_delivery_retry() {
                 Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
                     policy: crate::error::TransientRetryPolicy::RetryThenRotateAccountWithBudget { max_total_retries, .. }, ..
-                }) => Some(max_total_retries.get().saturating_sub(self.bounded_transient_retries)),
+                }) => Some(self.account_recovery.retry_limit(max_total_retries.get()).saturating_sub(self.bounded_transient_retries)),
                 _ => None,
             },
             "routingAttemptsRemaining": self.plan.max_attempts().get().saturating_sub(self.routing_attempts),
@@ -2323,7 +2330,8 @@ where
                         ..
                     } => {
                         // 本次重试已在退避前预占额度，选号失败不再扣减，也不重置总预算
-                        self.bounded_transient_retries <= max_total_retries.get()
+                        self.bounded_transient_retries
+                            <= self.account_recovery.retry_limit(max_total_retries.get())
                     }
                     crate::error::TransientRetryPolicy::RetryThenReturnError => false,
                 }

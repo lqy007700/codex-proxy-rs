@@ -532,8 +532,19 @@ WebSocket 在交付有效输出前断线或超时，可按 `stream_max_retries` 
 外部副作用和下游提交仍限制恢复；取消与请求截止时间随时终止等待
 
 OpenAI 明确返回 `server_is_overloaded`、`slow_down` 或模型容量不足错误时，代理在允许安全重放且
-尚未交付输出的前提下，先在初始普通账号上最多尝试 3 次（含首次），再排除该账号，在其他合格普通账号中轮询最多 2 次，最后使用保底账号尝试 1 次。
-例如 A、B、C 为普通账号，D 为保底账号时为 `A-A-A-B-C-D`；只有 B 可轮询时为 `A-A-A-B-B-D`。
+尚未交付输出的前提下，按 `recoveryAttempts=N` 分配普通账号的总尝试次数（含首次），默认 4，取值 1～31。
+初始账号 A 分配 `ceil(N / 2)` 次，其余 `floor(N / 2)` 次在排除 A 的其他合格普通账号中轮询，最后使用保底账号尝试 1 次，保底不计入 N。
+例如 A、B 为普通账号，D 为保底账号时：
+
+| `recoveryAttempts` | 全部失败时的尝试顺序 |
+| --- | --- |
+| 1 | `A-D` |
+| 2 | `A-B-D` |
+| 3 | `A-A-B-D` |
+| 4（默认） | `A-A-B-B-D` |
+| 5 | `A-A-A-B-B-D` |
+
+存在多个其他普通账号时按轮询选择，默认顺序可为 `A-A-B-C-D`。
 没有其他普通账号时直接进入保底，没有保底或保底失败时返回最后一次上游错误；任意一次成功立即结束。
 普通可恢复服务故障采用同一恢复链，两类错误共用预算；明确不可用的账号可提前切换，安全重放和原生续接限制不放宽。
 恢复轮询遍历除初始账号之外的合格普通池，不按日常调度策略或权重层截断候选；权限、模型、额度、冷却和并发限制仍然有效。
@@ -1551,7 +1562,7 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 | 模型映射 | `modelMappings` |
 | 凭据刷新 | `refreshMarginSeconds`、`refreshConcurrency` |
 | [并发与排队](#并发与排队) | `maxConcurrentPerAccount`、`maxWaitingPerKey`、`maxWaitingPerAccount`、`openaiGuardianReservedConcurrency`、`concurrencyWaitTimeoutSeconds` |
-| [亲和与换号](#账号亲和与换号) | `openaiAccountAffinity`、`openaiSessionAffinityTtlHours`、`maxAccountRotations` |
+| [亲和与换号](#账号亲和与换号) | `openaiAccountAffinity`、`openaiSessionAffinityTtlHours`、`maxAccountRotations`、`recoveryAttempts` |
 | [调度策略](#智能调度) | `rotationStrategy`、`smartScheduling` |
 | [请求解压](#请求解压上限) | `responsesMaxDecompressedBodyBytes` |
 | [客户端门禁](#1-鉴权与公共约定) | `minCodexDesktopVersion`、`minCodexCliVersion` |
@@ -1685,9 +1696,11 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 
 `maxAccountRotations` 是单请求最大换号次数，默认 3，取值 0～31；0 表示不换号。
 首次选号、同账号重试和选号时过滤不可用候选不计入换号次数，总路由尝试仍最多 32 次。
-非零值约束常规换号、传输和续接恢复，不提前截断[固定业务恢复链](#容量拒绝与重试)；0 仍禁止失败后的换号。
+非零值约束常规换号、传输和续接恢复，不提前截断[业务恢复链](#容量拒绝与重试)；0 仍禁止失败后的换号。
 提高该值不放宽安全重放或交付后的重试限制。
-设置更新请求须包含账号亲和、亲和时长与最大换号次数，保存后对新请求生效，执行中请求及其重试沿用冻结值
+`recoveryAttempts` 控制[业务恢复链](#容量拒绝与重试)中的普通账号总尝试次数，默认 4，取值 1～31，包含首次尝试，保底另算 1 次。
+设置更新请求须包含账号亲和、亲和时长与最大换号次数；未提供 `recoveryAttempts` 时使用默认值 4。
+保存后对新请求生效，执行中请求及其重试沿用冻结值
 
 ### 请求解压上限
 

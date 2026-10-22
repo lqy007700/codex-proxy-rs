@@ -337,6 +337,7 @@ async fn settings_should_reject_zero_refresh_margin_before_store_call() {
                     openai_guardian_reserved_concurrency: 0,
                     openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
                     max_account_rotations: 3,
+                    recovery_attempts: gateway_core::account::default_recovery_attempts(),
                     openai_session_affinity_ttl_hours: 24,
                     responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
                     smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),

@@ -261,3 +261,38 @@ fn session_affinity_ttl_rejects_unbounded_or_empty_retention() {
         );
     }
 }
+
+#[test]
+fn recovery_attempts_are_validated_and_frozen_into_each_request_plan() {
+    let original = snapshot(1, "host");
+    let facts = serde_json::to_value(original.settings()).unwrap();
+    assert_eq!(facts["recovery_attempts"], 4);
+    for attempts in [1, 2, 3, 4, 5, 7, 31] {
+        let changed = original
+            .with_settings(&original.settings().clone().with_recovery_attempts(attempts))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(changed.settings()).unwrap()["recovery_attempts"],
+            attempts
+        );
+    }
+    for attempts in [0, 32, u32::MAX] {
+        assert!(
+            original
+                .with_settings(&original.settings().clone().with_recovery_attempts(attempts))
+                .is_err()
+        );
+    }
+    let mut historical = facts.clone();
+    historical
+        .as_object_mut()
+        .unwrap()
+        .remove("recovery_attempts");
+    let restored: gateway_core::settings::SettingsValues =
+        serde_json::from_value(historical).unwrap();
+    assert_eq!(
+        serde_json::to_value(restored).unwrap()["recovery_attempts"],
+        4
+    );
+    assert_eq!(serde_json::to_value(original.settings()).unwrap(), facts);
+}

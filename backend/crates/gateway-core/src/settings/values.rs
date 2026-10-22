@@ -20,6 +20,8 @@ pub struct SettingsValues {
     pub(crate) openai_guardian_reserved_concurrency: u32,
     pub(crate) openai_account_affinity: crate::account::AccountAffinity,
     pub(crate) max_account_rotations: u32,
+    #[serde(default = "crate::account::default_recovery_attempts")]
+    pub(crate) recovery_attempts: u32,
     pub(crate) openai_session_affinity_ttl_hours: u32,
     pub(crate) responses_max_decompressed_body_bytes: u64,
     pub(crate) smart_scheduling: crate::account::SmartSchedulingConfig,
@@ -54,6 +56,12 @@ impl SettingsValues {
     #[must_use]
     pub const fn with_max_account_rotations(mut self, rotations: u32) -> Self {
         self.max_account_rotations = rotations;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_recovery_attempts(mut self, attempts: u32) -> Self {
+        self.recovery_attempts = attempts;
         self
     }
 
@@ -146,6 +154,7 @@ impl SettingsValues {
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: crate::account::AccountAffinity::default(),
             max_account_rotations: 3,
+            recovery_attempts: crate::account::default_recovery_attempts(),
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: crate::account::SmartSchedulingConfig::default(),
@@ -179,6 +188,7 @@ pub fn validate_request_limits(
     max_waiting_per_account: u32,
     timeout_seconds: u32,
     max_account_rotations: u32,
+    recovery_attempts: u32,
     affinity_ttl_hours: u32,
 ) -> Result<(), &'static str> {
     for (valid, field) in [
@@ -191,6 +201,10 @@ pub fn validate_request_limits(
         (
             max_account_rotations <= crate::account::MAX_ACCOUNT_ROTATIONS,
             "max_account_rotations",
+        ),
+        (
+            (1..=crate::account::MAX_RECOVERY_ATTEMPTS).contains(&recovery_attempts),
+            "recovery_attempts",
         ),
         (
             (1..=crate::account::MAX_SESSION_AFFINITY_TTL_HOURS).contains(&affinity_ttl_hours),

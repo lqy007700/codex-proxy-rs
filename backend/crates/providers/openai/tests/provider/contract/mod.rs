@@ -8576,7 +8576,7 @@ async fn capacity_http_and_websocket_opening_rejections_use_bounded_business_ret
                         max_total_retries, track_client_retry_failure: false,
                     },
                 }) if max_retries.get() == 2
-                    && max_total_retries.get() == 5
+                    && max_total_retries.get() == gateway_core::account::MAX_RECOVERY_ATTEMPTS
                     && initial_delay == Duration::from_millis(500)
                     && max_delay == Duration::from_secs(2)
                     && (Duration::from_millis(50)..Duration::from_millis(250)).contains(&jitter))

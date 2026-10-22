@@ -67,9 +67,9 @@ impl Provider for RetryBudgetProvider {
         context: AttemptContext,
     ) -> Result<ProviderStream, ProviderError> {
         let number = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        // 有界换号无保底时共五次尝试，原账号返回错误策略仍保留六次
+        // 有界换号无保底时共四次尝试，原账号返回错误策略仍保留六次
         let reject = if self.bounded_rotation {
-            number <= 6 || matches!(number, 8 | 9)
+            number <= 5 || matches!(number, 7 | 8)
         } else {
             number <= 7 || matches!(number, 9 | 10)
         };
@@ -100,8 +100,8 @@ impl Provider for RetryBudgetProvider {
                     request.candidate().provider().clone(),
                     request.candidate().upstream_model().unwrap().clone(),
                     ProviderAccountId::new(match (self.bounded_rotation, number) {
-                        (true, 4) => "acct_retry_b",
-                        (true, 5) => "acct_retry_c",
+                        (true, 3) => "acct_retry_b",
+                        (true, 4) => "acct_retry_c",
                         _ => "acct_api_test",
                     })
                     .unwrap(),
@@ -169,7 +169,7 @@ async fn client_retry_budget_should_flow_through_http_and_live_websocket() {
             body["type"] = json!("response.create");
         }
         let expected_requests = if bounded {
-            [(5, false), (6, false), (7, true), (10, true)]
+            [(4, false), (5, false), (6, true), (9, true)]
         } else {
             [(6, false), (7, false), (8, true), (11, true)]
         };

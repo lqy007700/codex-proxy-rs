@@ -1178,6 +1178,7 @@ fn plan_with_profiles(
         )
         .with_smart_scheduling(account_selection_policy.smart_scheduling())
         .with_max_account_rotations(account_selection_policy.max_account_rotations())
+        .with_recovery_attempts(account_selection_policy.recovery_attempts())
         .with_openai_account_affinity(account_selection_policy.openai_account_affinity())
         .with_openai_session_affinity_ttl_hours(
             u32::try_from(
@@ -4497,42 +4498,36 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
     let route_plan = plan(&operation);
     let mut scripts = Vec::new();
     scripts.extend(
-        [
-            "acct_first",
-            "acct_first",
-            "acct_first",
-            "acct_second",
-            "acct_other",
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(index, account_id)| {
-            let capacity = index % 3 == 0;
-            let error = ProviderError::new(
-                if capacity {
-                    ProviderErrorKind::UpstreamCapacityUnavailable
-                } else {
-                    ProviderErrorKind::Unavailable
-                },
-                UpstreamSendState::Sent,
-            )
-            .with_status(if index % 3 == 1 { 500 } else { 503 })
-            .with_replay_safe()
-            .with_transient_retry(
-                NonZeroU32::new(3).unwrap(),
-                Duration::ZERO,
-                Duration::ZERO,
-                Duration::ZERO,
-                TransientRetryPolicy::RetryThenRotateAccountWithBudget {
-                    max_total_retries: NonZeroU32::new(5).unwrap(),
-                    track_client_retry_failure: !capacity,
-                },
-            );
-            Script::Stream {
-                account_id,
-                items: vec![Err(error)],
-            }
-        }),
+        ["acct_first", "acct_first", "acct_second", "acct_other"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, account_id)| {
+                let capacity = index % 3 == 0;
+                let error = ProviderError::new(
+                    if capacity {
+                        ProviderErrorKind::UpstreamCapacityUnavailable
+                    } else {
+                        ProviderErrorKind::Unavailable
+                    },
+                    UpstreamSendState::Sent,
+                )
+                .with_status(if index % 3 == 1 { 500 } else { 503 })
+                .with_replay_safe()
+                .with_transient_retry(
+                    NonZeroU32::new(3).unwrap(),
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                        max_total_retries: NonZeroU32::new(5).unwrap(),
+                        track_client_retry_failure: !capacity,
+                    },
+                );
+                Script::Stream {
+                    account_id,
+                    items: vec![Err(error)],
+                }
+            }),
     );
     // 在容量重试已消耗一次预算后切换传输，验证回退不能重置业务恢复次数
     scripts.insert(
@@ -4561,15 +4556,16 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
         Err(EngineError::Provider(_))
     ));
     let contexts = provider.contexts.lock().unwrap();
-    // 无保底时最多五次业务尝试，传输恢复独立占一次 attempt 且不能重置阶段
-    assert_eq!(contexts.len(), 6);
-    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 5);
-    for context in &contexts[2..4] {
-        assert_eq!(context.required_account().unwrap().as_str(), "acct_first");
-        assert_eq!(context.transport(), AttemptTransport::Fallback);
-    }
+    // 无保底时最多四次业务尝试，传输恢复独立占一次 attempt 且不能重置阶段
+    assert_eq!(contexts.len(), 5);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 4);
+    assert_eq!(
+        contexts[2].required_account().unwrap().as_str(),
+        "acct_first"
+    );
+    assert_eq!(contexts[2].transport(), AttemptTransport::Fallback);
+    assert!(contexts[3].required_account().is_none());
     assert!(contexts[4].required_account().is_none());
-    assert!(contexts[5].required_account().is_none());
     let trace = session.trace().snapshot().unwrap();
     let decisions: Vec<_> = trace["events"]
         .as_array()
@@ -4581,21 +4577,21 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
         })
         .map(|event| &event["data"])
         .collect();
-    assert_eq!(decisions.len(), 5);
+    assert_eq!(decisions.len(), 4);
     for (index, decision) in decisions.iter().enumerate() {
         assert_eq!(decision["boundedTransientRetries"], index);
-        assert_eq!(decision["boundedTransientRetriesRemaining"], 5 - index);
-        assert_eq!(decision["retryable"], index < 4);
+        assert_eq!(decision["boundedTransientRetriesRemaining"], 4 - index);
+        assert_eq!(decision["retryable"], index < 3);
         assert_eq!(decision["ordinaryRetryBlockers"], serde_json::json!([]));
     }
     drop(session);
-    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 6);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 5);
 }
 
 #[test]
 fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
     for (same_account_retries, total_retries) in [(3_usize, 5_usize), (5, 7)] {
-        let same_account_attempts = 3;
+        let same_account_attempts = 2;
         for (rotations, succeeds) in [(0, false), (1, false), (2, false), (8, false), (8, true)] {
             let operation = generate_operation();
             let route_plan = plan_with_policy(
@@ -4608,7 +4604,7 @@ fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
                 .enumerate()
                 .map(|(index, account_id)| Script::Stream {
                     account_id,
-                    items: if succeeds && index == 4 {
+                    items: if succeeds && index == 3 {
                         complete_stream(None)
                     } else {
                         // 较低上限的失败穿插在扩展预算中，已消耗次数仍必须连续累计
@@ -4643,7 +4639,7 @@ fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
                 CancellationToken::new(),
             ))
             .unwrap();
-            let expected = if rotations == 0 { 3 } else { 5 };
+            let expected = if rotations == 0 { 2 } else { 4 };
             let result = block_on(session.collect_uncommitted());
             if succeeds {
                 result.unwrap();
@@ -4713,7 +4709,6 @@ fn bounded_transient_retry_is_suppressed_for_repeated_client_turns() {
     let mut scripts = [
         "acct_first",
         "acct_first",
-        "acct_first",
         "acct_second",
         "acct_other",
         "acct_first",
@@ -4741,7 +4736,7 @@ fn bounded_transient_retry_is_suppressed_for_repeated_client_turns() {
     ]);
     let (coordinator, provider) = retry_coordinator(scripts, markers.clone());
     let operation = retry_turn_operation("thread", "turn");
-    for (id, attempts) in [("req_first", 5), ("req_repeated", 6)] {
+    for (id, attempts) in [("req_first", 4), ("req_repeated", 5)] {
         let mut session = retry_session(&coordinator, id, operation.clone(), "key_client_1");
         assert!(block_on(session.collect_uncommitted()).is_err());
         assert_eq!(provider.contexts.lock().unwrap().len(), attempts);
@@ -4759,7 +4754,7 @@ fn bounded_transient_retry_is_suppressed_for_repeated_client_turns() {
     let mut followup = retry_session(&coordinator, "req_followup", operation, "key_client_1");
     block_on(followup.collect_uncommitted()).unwrap();
     block_on(followup.commit_downstream(Some(200))).unwrap();
-    assert_eq!(provider.contexts.lock().unwrap().len(), 9);
+    assert_eq!(provider.contexts.lock().unwrap().len(), 8);
 }
 
 #[test]
@@ -4767,11 +4762,15 @@ fn bounded_rotation_backoff_obeys_retry_after_cancellation_and_deadline() {
     for cancel in [false, true] {
         let operation = generate_operation();
         let route_plan = plan(&operation);
-        let scripts = (0..4)
+        let scripts = (0..3)
             .map(|index| Script::Stream {
-                account_id: "acct_first",
+                account_id: if index < 2 {
+                    "acct_first"
+                } else {
+                    "acct_second"
+                },
                 items: vec![Err(bounded_rejection(index + 1).with_retry_after(
-                    if index == 3 {
+                    if index == 2 {
                         Duration::from_secs(60)
                     } else {
                         Duration::ZERO
@@ -4792,8 +4791,8 @@ fn bounded_rotation_backoff_obeys_retry_after_cancellation_and_deadline() {
         .unwrap();
         let mut collection = Box::pin(session.collect_uncommitted());
         assert!(block_on(async { futures::poll!(&mut collection) }).is_pending());
-        assert_eq!(provider.contexts.lock().unwrap().len(), 4);
-        assert_eq!(provider.released_leases.load(Ordering::SeqCst), 4);
+        assert_eq!(provider.contexts.lock().unwrap().len(), 3);
+        assert_eq!(provider.released_leases.load(Ordering::SeqCst), 3);
         if cancel {
             cancellation.cancel();
         }
@@ -4802,7 +4801,7 @@ fn bounded_rotation_backoff_obeys_retry_after_cancellation_and_deadline() {
             (cancel, result),
             (true, Err(EngineError::Cancelled)) | (false, Err(EngineError::Deadline))
         ));
-        assert_eq!(provider.contexts.lock().unwrap().len(), 4);
+        assert_eq!(provider.contexts.lock().unwrap().len(), 3);
         let trace = session.trace().snapshot().unwrap();
         let retry = trace["events"]
             .as_array()

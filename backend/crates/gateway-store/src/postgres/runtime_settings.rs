@@ -154,7 +154,7 @@ pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResul
                     refresh_concurrency, max_concurrent_per_account,
                     rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                     audit_retention_days, min_codex_desktop_version,
-                    min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, openai_session_affinity_ttl_hours,
+                    min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, openai_session_affinity_ttl_hours,
                     account_auto_freeze_enabled, account_auto_freeze_threshold,
                     account_auto_freeze_window_seconds, account_auto_freeze_duration_seconds,
                     account_auto_freeze_probe_enabled, account_auto_freeze_probe_model,
@@ -332,7 +332,7 @@ pub(crate) async fn load_runtime_settings_in_transaction(
                 refresh_concurrency, max_concurrent_per_account,
                 rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                 audit_retention_days, min_codex_desktop_version,
-                min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, openai_session_affinity_ttl_hours,
+                min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, openai_session_affinity_ttl_hours,
                 account_auto_freeze_enabled, account_auto_freeze_threshold,
                 account_auto_freeze_window_seconds, account_auto_freeze_duration_seconds,
                 account_auto_freeze_probe_enabled, account_auto_freeze_probe_model,
@@ -420,6 +420,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
                      codex_privacy_policy_json = $34,
                      reset_credit_lead_minutes = $35,
                      reset_credit_max_weekly_remaining_percent = $36,
+                     recovery_attempts = $37,
 	                 updated_at = now()
 	             where id = 1
 	             returning config_revision",
@@ -471,6 +472,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     .bind(sqlx::types::Json(&update.values.codex_privacy_policy))
     .bind(i64::from(update.values.reset_credit_lead_minutes))
     .bind(update.values.reset_credit_max_weekly_remaining_percent.map(i64::from))
+    .bind(i64::from(update.values.recovery_attempts))
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("update runtime settings in transaction", source))?
@@ -561,6 +563,7 @@ struct RuntimeSettingsRow {
     openai_guardian_reserved_concurrency: i64,
     openai_account_affinity: String,
     max_account_rotations: i64,
+    recovery_attempts: i64,
     openai_session_affinity_ttl_hours: i64,
     responses_max_decompressed_body_bytes: i64,
     account_auto_freeze_enabled: bool,
@@ -628,6 +631,7 @@ fn runtime_settings_from_row(row: RuntimeSettingsRow) -> StoreResult<RuntimeSett
                 source: None,
             })?,
             max_account_rotations: to_u32(row.max_account_rotations)?,
+            recovery_attempts: to_u32(row.recovery_attempts)?,
             openai_session_affinity_ttl_hours: to_u32(row.openai_session_affinity_ttl_hours)?,
             responses_max_decompressed_body_bytes: to_u64(
                 row.responses_max_decompressed_body_bytes,

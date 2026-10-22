@@ -1335,7 +1335,8 @@ fn transient_retry_policy(
             || failure.is_retryable_service_unavailable() =>
         {
             Some(TransientRetryPolicy::RetryThenRotateAccountWithBudget {
-                max_total_retries: NonZeroU32::new(5).unwrap_or(NonZeroU32::MIN),
+                max_total_retries: NonZeroU32::new(gateway_core::account::MAX_RECOVERY_ATTEMPTS)
+                    .unwrap_or(NonZeroU32::MIN),
                 // 容量拒绝保留不受历史轮次失败抑制的恢复行为
                 track_client_retry_failure: category != CodexFailureCategory::CapacityUnavailable,
             })
