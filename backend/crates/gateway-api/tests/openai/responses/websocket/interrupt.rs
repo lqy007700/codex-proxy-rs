@@ -67,7 +67,13 @@ impl Provider for RetryBudgetProvider {
         context: AttemptContext,
     ) -> Result<ProviderStream, ProviderError> {
         let number = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        if number <= 7 || matches!(number, 9 | 10) {
+        // 有界换号无保底时共五次尝试，原账号返回错误策略仍保留六次
+        let reject = if self.bounded_rotation {
+            number <= 6 || matches!(number, 8 | 9)
+        } else {
+            number <= 7 || matches!(number, 9 | 10)
+        };
+        if reject {
             let error = ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::Sent)
                 .with_status(503)
                 .with_replay_safe()
@@ -94,8 +100,8 @@ impl Provider for RetryBudgetProvider {
                     request.candidate().provider().clone(),
                     request.candidate().upstream_model().unwrap().clone(),
                     ProviderAccountId::new(match (self.bounded_rotation, number) {
-                        (true, 5) => "acct_retry_b",
-                        (true, 6) => "acct_retry_c",
+                        (true, 4) => "acct_retry_b",
+                        (true, 5) => "acct_retry_c",
                         _ => "acct_api_test",
                     })
                     .unwrap(),
@@ -162,7 +168,12 @@ async fn client_retry_budget_should_flow_through_http_and_live_websocket() {
             socket = Some(connect_async(request).await.unwrap().0);
             body["type"] = json!("response.create");
         }
-        for (expected_attempts, success) in [(6, false), (7, false), (8, true), (11, true)] {
+        let expected_requests = if bounded {
+            [(5, false), (6, false), (7, true), (10, true)]
+        } else {
+            [(6, false), (7, false), (8, true), (11, true)]
+        };
+        for (expected_attempts, success) in expected_requests {
             if let Some(socket) = &mut socket {
                 send(socket, body.clone()).await;
                 loop {
@@ -203,7 +214,11 @@ async fn client_retry_budget_should_flow_through_http_and_live_websocket() {
                     assert!(String::from_utf8_lossy(&payload).contains("response.completed"));
                 }
             }
-            assert_eq!(provider.calls.load(Ordering::SeqCst), expected_attempts);
+            assert_eq!(
+                provider.calls.load(Ordering::SeqCst),
+                expected_attempts,
+                "websocket={websocket}, bounded={bounded}"
+            );
             assert_eq!(marker.0.lock().unwrap().is_none(), success);
         }
         if let Some(mut socket) = socket {
