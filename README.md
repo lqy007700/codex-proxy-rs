@@ -123,6 +123,7 @@ curl http://127.0.0.1:8080/v1/models \
 | 使用插件 | [安装、配置与使用](docs/plugins.md) |
 | 开发插件 | [SDK 与合同](backend/crates/gateway-plugin/sdk/README.md) · [打包工具](backend/apps/plugin-cli/README.md) |
 | 开发宿主 | [开发与源码联调](docs/development.md) · [系统架构](docs/architecture.md) · [管理端主题](docs/theme.md) · [数据库迁移](backend/migrations/README.md) |
+| 了解本仓库二开逻辑 | [当前行为、代码入口与回归重点](docs/fork-behavior.md) |
 | 升级与同步上游 | [当前合并基线、保留差异与待选更新](docs/upstream-sync.md) |
 | 参与协作 | [贡献、审查与验证](CONTRIBUTING.md) |
 
