@@ -4503,7 +4503,6 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
             "acct_first",
             "acct_second",
             "acct_other",
-            "acct_second",
         ]
         .into_iter()
         .enumerate()
@@ -4562,16 +4561,15 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
         Err(EngineError::Provider(_))
     ));
     let contexts = provider.contexts.lock().unwrap();
-    // 传输恢复仍独立消耗一次 attempt，六次业务尝试不能因类别或传输变化扩大
-    assert_eq!(contexts.len(), 7);
-    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 6);
+    // 无保底时最多五次业务尝试，传输恢复独立占一次 attempt 且不能重置阶段
+    assert_eq!(contexts.len(), 6);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 5);
     for context in &contexts[2..4] {
         assert_eq!(context.required_account().unwrap().as_str(), "acct_first");
         assert_eq!(context.transport(), AttemptTransport::Fallback);
     }
     assert!(contexts[4].required_account().is_none());
     assert!(contexts[5].required_account().is_none());
-    assert!(contexts[6].required_account().is_none());
     let trace = session.trace().snapshot().unwrap();
     let decisions: Vec<_> = trace["events"]
         .as_array()
@@ -4583,15 +4581,15 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
         })
         .map(|event| &event["data"])
         .collect();
-    assert_eq!(decisions.len(), 6);
+    assert_eq!(decisions.len(), 5);
     for (index, decision) in decisions.iter().enumerate() {
         assert_eq!(decision["boundedTransientRetries"], index);
         assert_eq!(decision["boundedTransientRetriesRemaining"], 5 - index);
-        assert_eq!(decision["retryable"], index < 5);
+        assert_eq!(decision["retryable"], index < 4);
         assert_eq!(decision["ordinaryRetryBlockers"], serde_json::json!([]));
     }
     drop(session);
-    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 7);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 6);
 }
 
 #[test]
@@ -4606,11 +4604,11 @@ fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
                     .with_max_account_rotations(rotations),
             );
             let scripts = std::iter::repeat_n("acct_first", same_account_attempts)
-                .chain(["acct_second", "acct_other", "acct_second"])
+                .chain(["acct_second", "acct_other"])
                 .enumerate()
                 .map(|(index, account_id)| Script::Stream {
                     account_id,
-                    items: if succeeds && index == 5 {
+                    items: if succeeds && index == 4 {
                         complete_stream(None)
                     } else {
                         // 较低上限的失败穿插在扩展预算中，已消耗次数仍必须连续累计
@@ -4645,7 +4643,7 @@ fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
                 CancellationToken::new(),
             ))
             .unwrap();
-            let expected = if rotations == 0 { 3 } else { 6 };
+            let expected = if rotations == 0 { 3 } else { 5 };
             let result = block_on(session.collect_uncommitted());
             if succeeds {
                 result.unwrap();
@@ -4716,7 +4714,6 @@ fn bounded_transient_retry_is_suppressed_for_repeated_client_turns() {
         "acct_first",
         "acct_first",
         "acct_first",
-        "acct_first",
         "acct_second",
         "acct_other",
         "acct_first",
@@ -4744,7 +4741,7 @@ fn bounded_transient_retry_is_suppressed_for_repeated_client_turns() {
     ]);
     let (coordinator, provider) = retry_coordinator(scripts, markers.clone());
     let operation = retry_turn_operation("thread", "turn");
-    for (id, attempts) in [("req_first", 6), ("req_repeated", 7)] {
+    for (id, attempts) in [("req_first", 5), ("req_repeated", 6)] {
         let mut session = retry_session(&coordinator, id, operation.clone(), "key_client_1");
         assert!(block_on(session.collect_uncommitted()).is_err());
         assert_eq!(provider.contexts.lock().unwrap().len(), attempts);
@@ -4762,7 +4759,7 @@ fn bounded_transient_retry_is_suppressed_for_repeated_client_turns() {
     let mut followup = retry_session(&coordinator, "req_followup", operation, "key_client_1");
     block_on(followup.collect_uncommitted()).unwrap();
     block_on(followup.commit_downstream(Some(200))).unwrap();
-    assert_eq!(provider.contexts.lock().unwrap().len(), 10);
+    assert_eq!(provider.contexts.lock().unwrap().len(), 9);
 }
 
 #[test]

@@ -125,7 +125,7 @@ impl AccountRecovery {
             }
             AccountRecoveryStage::OtherAccounts { .. } => {
                 self.other_failures += 1;
-                if self.other_failures >= 3 {
+                if self.other_failures >= 2 {
                     self.stage = AccountRecoveryStage::Fallback;
                 }
             }
