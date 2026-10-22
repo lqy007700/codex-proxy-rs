@@ -620,8 +620,17 @@ pub(crate) fn parse_api_model_catalog(
     }
     let value: serde_json::Value =
         serde_json::from_slice(body).map_err(|_| CodexModelCatalogError::InvalidWire)?;
-    // 部分 Responses 上游按客户端版本返回完整 Codex 目录；不能降格为只有 ID 的画像
-    if value.get("models").is_some() {
+    // 第三方可能同时返回标准 data 和同名 models 扩展，按原生身份字段区分目录
+    // 已声明原生条目的目录仍须完整校验，不能因条目无效而降格为只有 ID 的画像
+    let has_native_models = value
+        .get("models")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|models| {
+            models
+                .iter()
+                .any(|model| model.get("slug").is_some() || model.get("display_name").is_some())
+        });
+    if has_native_models || value.get("data").is_none() {
         return parse_native_model_catalog(body, etag, OpenAiUpstreamProtocol::ResponsesApi);
     }
     let wire: ApiModels =

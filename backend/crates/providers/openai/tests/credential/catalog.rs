@@ -1197,6 +1197,148 @@ async fn api_key_catalog_accepts_namespaced_model_ids_without_inventing_capabili
 }
 
 #[tokio::test]
+async fn api_key_catalog_accepts_standard_data_with_unrelated_models_metadata() {
+    use gateway_core::routing::ProviderModelContent;
+    use provider_openai::credential::ResponsesTransport;
+    use serde_json::json;
+
+    for metadata in [
+        json!([{"name":"vendor-latest", "description":"Configured model", "release_date":""}]),
+        json!([]),
+        serde_json::Value::Null,
+    ] {
+        let upstream = MockServer::start().await;
+        let store = Arc::new(MemoryAccountStore::default());
+        store
+            .seed_api_key("acct_api", upstream.uri(), ResponsesTransport::Http)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .and(header("authorization", "Bearer sk-api-test-only"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "object":"list",
+                "data":[{"id":"api-model"}, {"id":"vendor/model"}],
+                "models":metadata
+            })))
+            .expect(2)
+            .mount(&upstream)
+            .await;
+        let service = service_with_catalog_cache(&store, upstream.uri(), catalog_cache());
+        service.synchronize().await.expect("standard API catalog");
+        let account = store.account("acct_api").expect("API account");
+        assert_eq!(
+            service.cached_account_models(&account).unwrap().unwrap(),
+            ["api-model", "vendor/model"]
+        );
+        let models = service
+            .client_model_catalog(&client_scope(&[account]), "0.155.0")
+            .await
+            .expect("standard client catalog");
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.model.as_str())
+                .collect::<Vec<_>>(),
+            ["api-model", "vendor/model"]
+        );
+        assert!(
+            models
+                .iter()
+                .all(|model| matches!(model.content, ProviderModelContent::Adapted(_)))
+        );
+        upstream.verify().await;
+    }
+}
+
+#[tokio::test]
+async fn api_key_catalog_preserves_native_models_alongside_standard_data() {
+    use gateway_core::routing::ProviderModelContent;
+    use provider_openai::credential::ResponsesTransport;
+    use serde_json::json;
+
+    let upstream = MockServer::start().await;
+    let store = Arc::new(MemoryAccountStore::default());
+    store
+        .seed_api_key("acct_api", upstream.uri(), ResponsesTransport::Http)
+        .await;
+    let original = json!({
+        "slug":"native-model", "display_name":"Native model", "context_window":128000,
+        "supported_reasoning_levels":[{"effort":"high"}],
+        "future_field":{"enabled":true}
+    });
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data":[{"id":"plain-model"}], "models":[original]
+        })))
+        .expect(2)
+        .mount(&upstream)
+        .await;
+    let service = service_with_catalog_cache(&store, upstream.uri(), catalog_cache());
+    let snapshot = service.synchronize().await.expect("native API catalog");
+    assert_eq!(
+        snapshot.models()[0]
+            .limits()
+            .context_window_tokens()
+            .unwrap()
+            .get(),
+        128000
+    );
+    let account = store.account("acct_api").expect("API account");
+    assert_eq!(
+        service.cached_account_models(&account).unwrap().unwrap(),
+        ["native-model"]
+    );
+    let models = service
+        .client_model_catalog(&client_scope(&[account]), "0.155.0")
+        .await
+        .expect("native client catalog");
+    assert_eq!(models.len(), 1);
+    let ProviderModelContent::Native(payload) = &models[0].content else {
+        panic!("native model metadata must be preserved")
+    };
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(payload.body()).unwrap(),
+        original
+    );
+    upstream.verify().await;
+}
+
+#[tokio::test]
+async fn api_key_catalog_rejects_invalid_native_models_instead_of_falling_back_to_data() {
+    use provider_openai::credential::ResponsesTransport;
+    use serde_json::json;
+
+    let upstream = MockServer::start().await;
+    let store = Arc::new(MemoryAccountStore::default());
+    store
+        .seed_api_key("acct_api", upstream.uri(), ResponsesTransport::Http)
+        .await;
+    let service = service_with_catalog_cache(&store, upstream.uri(), catalog_cache());
+    for models in [
+        json!([{"slug":"native-model"}]),
+        json!([{"display_name":"Missing slug"}]),
+        json!([{"slug":null, "display_name":"Native model"}]),
+        json!([{"slug":"native-model", "display_name":"Native model", "context_window":-1}]),
+        json!([
+            {"slug":"native-model", "display_name":"First"},
+            {"slug":"native-model", "display_name":"Duplicate"}
+        ]),
+    ] {
+        upstream.reset().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data":[{"id":"plain-model"}], "models":models
+            })))
+            .mount(&upstream)
+            .await;
+        assert!(service.synchronize().await.is_err());
+        assert!(service.cached().expect("cache").is_none());
+    }
+}
+
+#[tokio::test]
 async fn api_key_catalog_rejects_invalid_ids_and_duplicates() {
     use provider_openai::credential::ResponsesTransport;
 
