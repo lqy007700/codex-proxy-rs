@@ -23,6 +23,23 @@ fn classify(status: u16, body: &str) -> CodexFailureCategory {
 }
 
 #[test]
+fn only_empty_http_not_found_responses_are_cloudflare_path_blocks() {
+    for body in ["", " \r\n\t"] {
+        assert_eq!(
+            classify(404, body),
+            CodexFailureCategory::CloudflarePathBlocked
+        );
+    }
+    assert_eq!(
+        classify(
+            404,
+            r#"{"error":{"type":"invalid_request_error","message":"Item not found"}}"#,
+        ),
+        CodexFailureCategory::InvalidRequest,
+    );
+}
+
+#[test]
 fn flex_capacity_rejection_should_be_terminal_even_before_payload_send() {
     for phase in [
         CodexUpstreamSendPhase::BeforePayload,

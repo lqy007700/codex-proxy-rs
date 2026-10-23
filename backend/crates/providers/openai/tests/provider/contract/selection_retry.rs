@@ -429,6 +429,125 @@ fn execution_request(id: &str, operation: &Operation, timeout: Duration) -> NewM
 }
 
 #[tokio::test]
+async fn repeated_stream_not_found_errors_do_not_invalidate_accounts_or_retry() {
+    for websocket in [false, true] {
+        for response_failed in [false, true] {
+            let store = Arc::new(MemoryAccountStore::default());
+            create_account(&store, "acct_provider_contract").await;
+            let error = json!({
+                "type": "invalid_request_error",
+                "code": null,
+                "message": "Item with id 'rs_test_missing' not found. Items are not persisted when `store` is set to false.",
+                "param": "input"
+            });
+            let failure = if response_failed {
+                json!({"type":"response.failed","status":404,"response":{"id":"resp_missing","status":"failed","error":error}})
+            } else {
+                json!({"type":"error","status":404,"error":error})
+            };
+            let events = vec![
+                json!({"type":"response.created","response":{"id":"resp_missing","status":"in_progress","output":[]}}),
+                json!({"type":"keepalive"}),
+                failure.clone(),
+            ];
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                for _ in 0..3 {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    if websocket {
+                        let mut socket = accept_codex_test_websocket(socket).await;
+                        socket.next().await.unwrap().unwrap();
+                        for event in &events {
+                            socket
+                                .send(Message::Text(event.to_string().into()))
+                                .await
+                                .unwrap();
+                        }
+                    } else {
+                        read_http_request(&mut socket).await;
+                        let body = events
+                            .iter()
+                            .map(|event| {
+                                gateway_protocol::openai::sse::encode_sse_event(
+                                    event["type"].as_str().unwrap(),
+                                    &event.to_string(),
+                                )
+                            })
+                            .collect::<String>();
+                        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                    }
+                }
+            });
+            let provider = provider_with_base_url(&store, base_url);
+            let providers = ProviderRegistry::new([
+                provider as Arc<dyn gateway_core::engine::provider::Provider>
+            ])
+            .unwrap();
+            let coordinator = AttemptCoordinator::new(GatewayEngine::new(
+                Arc::new(NoopExecutionStore),
+                providers,
+            ));
+            let operation = if websocket {
+                capacity_websocket_operation()
+            } else {
+                http_generate_operation()
+            };
+            for index in 0..3 {
+                let mut session = coordinator
+                    .start(
+                        execution_request(
+                            &format!("req_stream_not_found_{index}"),
+                            &operation,
+                            Duration::from_secs(5),
+                        ),
+                        operation.clone(),
+                        execution_plan(&operation),
+                        None,
+                        None,
+                        CancellationToken::new(),
+                    )
+                    .await
+                    .unwrap();
+                session.response_commit().record(Some(200));
+                let EngineError::Provider(error) = session.collect_uncommitted().await.unwrap_err()
+                else {
+                    panic!("expected original request error");
+                };
+                assert_eq!(error.kind(), ProviderErrorKind::InvalidRequest);
+                assert_eq!(error.upstream_status(), Some(404));
+                assert!(error.retry_is_prohibited());
+                assert!(!error.replay_is_safe());
+                assert_eq!(
+                    serde_json::from_str::<Value>(error.raw_upstream_error().unwrap().as_str())
+                        .unwrap(),
+                    failure
+                );
+                let trace = session.trace().snapshot().unwrap();
+                let attempts = trace["events"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|event| event["stage"] == "attempt.started")
+                    .count();
+                assert_eq!(attempts, 1, "request errors must not rotate accounts");
+                assert_eq!(
+                    store
+                        .account("acct_provider_contract")
+                        .unwrap()
+                        .credential_state(),
+                    CredentialState::Ready
+                );
+            }
+            timeout(Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
+}
+
+#[tokio::test]
 async fn recovery_round_robin_uses_api_key_fallback_once_and_preserves_session_binding() {
     use gateway_core::account::AccountSchedulingRole;
     use std::sync::atomic::{AtomicUsize, Ordering};

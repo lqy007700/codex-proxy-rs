@@ -471,7 +471,11 @@ fn classify_upstream_failure(
     if status == Some(StatusCode::FORBIDDEN) && is_cloudflare_challenge(&body) {
         return CodexFailureCategory::CloudflareChallenge;
     }
-    if status == Some(StatusCode::NOT_FOUND) && body.trim().is_empty() {
+    // 流内失败没有 HTTP 错误正文，不能把分类占位空串当成路径封锁证据
+    if matches!(source, UpstreamFailureSource::HttpResponse)
+        && status == Some(StatusCode::NOT_FOUND)
+        && body.trim().is_empty()
+    {
         return CodexFailureCategory::CloudflarePathBlocked;
     }
     let structured_failure_signals = [code.as_str(), error_type.as_str()];
