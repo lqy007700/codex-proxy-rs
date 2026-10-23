@@ -32,6 +32,7 @@ const TRACE_FIELDS: &[&str] = &[
     "ws_request_header_traceparent",
     "ws_request_header_tracestate",
 ];
+// Live 的 x-session-id 与 voice-session-id 是业务会话引用，必须原样传递
 const ID_HEADERS: &[&str] = &[
     "session-id",
     "thread-id",

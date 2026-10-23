@@ -486,6 +486,9 @@ OpenAI 模型目录用于发现，不因目录缺项拒绝请求；管理员配�
   会话别名只规范化请求头，不清除正文身份字段；未知业务扩展与响应诊断头不受影响，字段见
   [Responses 合同](api.md#3-openai-数据面与模型目录)。Grok 专属请求标记和已知指令开场白的兼容只在
   `downstream/grok.rs` 内判断，且仅用于 Codex/OAuth 上游；普通请求的提示词、工具及业务正文不做品牌清洗
+- Live 共用 OpenAI 的头部身份、下游环境和传输边界，业务扩展不使用固定白名单。
+  引导、sideband 与 hangup 由 Provider 在选定或加载钉住账号后统一处理出站关联标识；
+  API 保留原始入站事实，Core 只传递头值字节和通话归属，具体合同见 [Codex Live 语音通话](api.md#codex-live-语音通话)
 - xAI 是翻译边界。Provider 把 Grok wire 转换为 Responses wire；上游结构化错误的 message/code/type
   可以透出，但账号指纹会先脱敏
 - response ID 是不透明 UTF-8 bytes，不假设 UUID、固定长度或跨 Provider 可复用
