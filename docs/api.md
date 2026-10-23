@@ -329,13 +329,13 @@ Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和
 出站移除下游的 `traceparent`、`tracestate` 及 WS metadata 中对应的
 `ws_request_header_traceparent`、`ws_request_header_tracestate`
 
-会话、线程、轮次、窗口及父子引用在出站时按账号安装身份稳定映射为 UUID；
+会话、线程、窗口及父子线程引用在出站时按账号安装身份稳定映射为 UUID；
 同账号保留引用关系，换账号使用不同标识。HTTP 请求头、正文 metadata、WS 副本及
 已识别的 Desktop 自动 Git 上下文使用一致映射。
-输入项的 `internal_chat_message_metadata_passthrough.turn_id` 同步映射，
-保留历史轮次与当前轮次的引用关系，其余输入项元数据保持不变。
-Images 的 `x-codex-image-turn-id`、turn metadata 和 Search 的会话 `id` 使用同一账号域；
-Search 只替换该 `id` 的原始字节，其余正文保持不变。
+轮次及父子轮次引用保留客户端原值，包括输入项的 `internal_chat_message_metadata_passthrough.turn_id`、
+请求 metadata 中的 `turn_id`、`parent_turn_id`、`root_turn_id`，以及 `x-client-turn-id`、
+Images 的 `x-codex-image-turn-id` 和 Desktop 自动 Git 上下文的 `clientUserMessageId`。
+输入项元数据保持不变。Search 的会话 `id` 按同一账号域映射，只替换该值的原始字节，其余正文保持不变。
 `prompt_cache_key` 同样按账号映射，保留同账号内的缓存共享关系；未提供时不补造。
 续接 response ID、历史 item/call ID、业务正文和未知扩展不参与映射，
 该处理减少显式追踪标识的跨账号复用，不保证会话内容或业务 metadata 无法关联
