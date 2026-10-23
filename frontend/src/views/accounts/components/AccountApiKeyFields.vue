@@ -2,7 +2,7 @@
 import type { ApiKeyAccountForm } from '../utils/upstreamApiKey'
 import { ZFormItem, ZInput, ZSegmented } from '@codex-proxy/ui'
 
-defineProps<{ disabled?: boolean, editing?: boolean }>()
+defineProps<{ disabled?: boolean, editing?: boolean, provider?: string }>()
 const form = defineModel<ApiKeyAccountForm>({ required: true })
 const transportOptions = [
   { label: 'HTTP / SSE', value: 'http' },
@@ -24,7 +24,7 @@ const transportOptions = [
     <ZFormItem label="API Key" :required="!editing">
       <ZInput v-model="form.apiKey" type="password" :placeholder="editing ? '留空保留当前密钥' : '输入上游密钥'" :disabled="disabled" autocomplete="new-password" />
     </ZFormItem>
-    <ZFormItem label="传输方式">
+    <ZFormItem v-if="provider !== 'glm'" label="传输方式">
       <ZSegmented v-model="form.transport" aria-label="传输方式" :options="transportOptions" :disabled="disabled" title="WS 优先需要上游支持 Responses WebSocket" />
     </ZFormItem>
   </div>

@@ -38,7 +38,7 @@ Codex 原生生图配置还会携带 `X-OpenAI-Actor-Authorization: proxy-manage
 上游账号身份只由服务端选中的账号提供；不要把真实账号 token 放进该标记
 
 Client Key 通过账号分组限定路由范围：未绑定分组时可使用全部账号，绑定一个或多个分组时只能使用
-已启用分组成员的并集。分组可以混合 `openai` 与 `xai` 账号；同一请求只会在模型能力明确匹配且满足
+已启用分组成员的并集。分组可以混合 `openai`、`xai` 与 `glm` 账号；同一请求只会在模型能力明确匹配且满足
 重放安全边界时跨 Provider fallback
 
 运行设置可以分别配置 `minCodexDesktopVersion` 与 `minCodexCliVersion`。两者只接受 SemVer，`null`
@@ -502,6 +502,15 @@ xAI 的 `reasoning.effort` 接受 `none / minimal / low / medium / high / xhigh 
 `allowed_domains` 与 `excluded_domains`，两者不能同时为非空；客户端函数与托管搜索工具
 同名时使用内部别名，并在返回工具调用时还原客户端名称。搜索工具顶层的 `allowed_domains` 不受支持，返回请求错误
 
+#### 智谱 GLM
+
+`glm` 接入智谱标准 API 的 Responses HTTP/SSE，复用现有 Responses 与 Chat Completions 客户端入口。
+默认模型为 `glm-5.3`，模型目录由账号凭据中的 `models` 声明；不将目录声明视为上游权限验证。
+工具与推理字段沿用原生 Responses 合同，不提供 Chat 上游桥接、Coding Plan、上游 WebSocket、压缩或独立 Images/Search 接口。
+原生续接须使用已保存响应的原账号和原凭据版本；状态缺失或凭据轮换时要求客户端重放完整历史，不跨账号发送增量输入。
+上游业务码区分认证、限流、欠费与容量拒绝；HTTP 429 不统一视为瞬时限流。
+未提供上游余额时返回空额度投影；费用只按管理员配置的 USD 单价计算，缺少单价或计价必需用量时保持未知。
+
 #### 容量拒绝与重试
 
 客户端推理请求提供有效逻辑线程、轮次及 `request_kind=turn` 时，网关按 Client Key 隔离短期失败状态。
@@ -743,7 +752,7 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 ## 5. 账号
 
 账号 API 使用统一路由，不存在 Provider Instance 或 Provider 专属账号路由。`provider` 使用 Provider ID，
-固定为内置 `openai`、`xai`；操作可用性由平台实现与账号认证类型决定
+固定为内置 `openai`、`xai`、`glm`；操作可用性由平台实现与账号认证类型决定
 
 | 方法 | 路由 | 主要 query/body | 说明 |
 | --- | --- | --- | --- |
@@ -777,11 +786,34 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 | `POST` | `/api/admin/accounts/oauth/start` | `{ provider, name, accountId?, outboundProxyId?, outboundProxyUrl? }` | 为支持登录的 Provider 创建 flow；`accountId` 表示重新授权 |
 | `POST` | `/api/admin/accounts/oauth/complete` | `{ provider, flowId, callbackUrl, settings? }` | 消费 OAuth callback；首次授权可附带账号设置，重新授权保留原设置 |
 
+### 智谱账号凭据
+
+`POST /api/admin/accounts/import` 的 `provider` 为 `glm`，`data` 支持单个账号对象或 `{ accounts: [...] }`：
+
+```json
+{
+  "provider": "glm",
+  "data": {
+    "name": "智谱标准 API",
+    "api_key": "<智谱标准 API Key>",
+    "base_url": "https://open.bigmodel.cn/api/v1",
+    "transport": "http",
+    "models": ["glm-5.3"]
+  }
+}
+```
+
+`base_url`、`transport` 与 `models` 可省略，默认值如示例；只接受标准 Responses API 前缀和 HTTP/SSE。
+`models` 为 1–128 个 `glm-` 开头的模型 ID，未声明的模型不会使用该账号；新增模型须确认该端点的实际支持。
+普通详情只返回非敏感连接设置，API Key 仅在显式凭据导出中返回。
+`connection` 可更新地址和密钥，省略密钥时保留现值；只更新地址时保留凭据健康状态。
+凭据文件导入创建新账号，已有账号通过编辑连接设置轮换密钥；不提供 OAuth 或自动密钥续期。
+
 ### 查询与账号字段
 
 账号列表支持以下稳定值：
 
-- `provider`: `openai` 或 `xai`，省略或空值表示不过滤
+- `provider`: `openai`、`xai` 或 `glm`，省略或空值表示不过滤
 - `groupId`: 分组 ID、`ungrouped`，或省略以不过滤
 - `status`: `normal`、`quota_exhausted`、`rate_limited`、`disabled`、`error`
 - `sortBy`: `email`、`status`、`planType`、`usage`、`lastUsedAt`、`expiresAt`

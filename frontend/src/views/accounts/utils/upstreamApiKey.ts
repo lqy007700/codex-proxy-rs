@@ -1,7 +1,7 @@
 import type { Account, ApiKeyConfiguration } from '@/api'
 
-export function isOpenAiApiKeyAccount(account: Pick<Account, 'provider' | 'authenticationKind'> | null | undefined): boolean {
-  return account?.provider === 'openai' && account.authenticationKind === 'api_key'
+export function isApiKeyAccount(account: Pick<Account, 'provider' | 'authenticationKind'> | null | undefined): boolean {
+  return (account?.provider === 'openai' || account?.provider === 'glm') && account.authenticationKind === 'api_key'
 }
 
 export function isOpenAiOAuthAccount(account: Pick<Account, 'provider' | 'authenticationKind'> | null | undefined): boolean {
@@ -13,8 +13,8 @@ export interface ApiKeyAccountForm extends ApiKeyConfiguration {
   apiKey: string
 }
 
-export function emptyApiKeyAccountForm(): ApiKeyAccountForm {
-  return { name: '', base_url: '', apiKey: '', transport: 'http' }
+export function emptyApiKeyAccountForm(provider?: string): ApiKeyAccountForm {
+  return { name: '', base_url: provider === 'glm' ? 'https://open.bigmodel.cn/api/v1' : '', apiKey: '', transport: 'http' }
 }
 
 export function parseApiKeyConfiguration(value: Record<string, unknown> | undefined): ApiKeyConfiguration | undefined {

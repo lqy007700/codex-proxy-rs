@@ -256,15 +256,12 @@ where
     let (command, connection) = request.into_command().map_err(map_wire_error)?;
     let context = auth.context().mutation_context();
     let result = if let Some(provider_material) = connection {
-        let provider = ProviderKind::new("openai").map_err(|_| AdminError::internal())?;
         let account_id = ProviderAccountId::new(command.account_id.clone())
             .map_err(|_| AdminError::internal())?;
         let result = state
             .admin_services()
             .credentials()
-            .for_provider(&provider)
-            .map_err(map_service_error)?
-            .rotate(RotateCredential {
+            .rotate_for_account(RotateCredential {
                 mutation: CredentialMutation {
                     context,
                     account_id,

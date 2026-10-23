@@ -65,16 +65,17 @@ export function useAccountOnboarding(options: {
         return
       const provider = accountCreateProvider(form)
       if (mode === 'api_key') {
-        if (requireImportProvider(provider) !== 'openai')
+        const apiKeyProvider = requireImportProvider(provider)
+        if (!['openai', 'glm'].includes(apiKeyProvider))
           throw new Error('当前平台不支持 API Key 账号')
         const error = apiKeyAccountError(form.apiKey)
         if (error)
           throw new Error(error)
         await importAccounts({
-          provider: 'openai',
+          provider: apiKeyProvider,
           settings,
           outboundProxyId,
-          data: { provider: 'openai', authentication_kind: 'api_key', name: form.apiKey.name.trim(), base_url: form.apiKey.base_url.trim(), api_key: form.apiKey.apiKey, transport: form.apiKey.transport },
+          data: { provider: apiKeyProvider, authentication_kind: 'api_key', name: form.apiKey.name.trim(), base_url: form.apiKey.base_url.trim(), api_key: form.apiKey.apiKey, transport: form.apiKey.transport },
         })
         await finishCreate('API Key 账号已添加')
         return
@@ -158,7 +159,7 @@ export function useAccountOnboarding(options: {
     createForm.value = {
       ...createForm.value,
       mode: reauthorizingAccount.value ? 'oauth' : createForm.value.source?.kind === 'bundle' ? 'json' : accountImportModes(accountCreateProvider(createForm.value))[0]?.value ?? 'json',
-      apiKey: emptyApiKeyAccountForm(),
+      apiKey: emptyApiKeyAccountForm(accountCreateProvider(createForm.value)),
       importTexts: { access_token: '', refresh_token: '', json: '' },
     }
   }, { flush: 'sync' })

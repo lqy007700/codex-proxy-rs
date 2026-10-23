@@ -7,7 +7,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
 import { accountModelAccessError } from '../utils/modelAccess'
 import { concurrencyLimitInput, parseAccountSchedulingForm } from '../utils/schedulingForm'
-import { apiKeyAccountError, emptyApiKeyAccountForm, isOpenAiApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
+import { apiKeyAccountError, emptyApiKeyAccountForm, isApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
 
 export function useAccountEditor(options: {
   reloadAccounts: () => Promise<unknown>
@@ -83,7 +83,7 @@ export function useAccountEditor(options: {
     savedConfiguration.value = undefined
     configurationReady.value = false
     showEditModal.value = true
-    if (isOpenAiApiKeyAccount(account) || isOpenAiOAuthAccount(account))
+    if (isApiKeyAccount(account) || isOpenAiOAuthAccount(account))
       void loadConfiguration(account.id)
   }
 
@@ -91,7 +91,7 @@ export function useAccountEditor(options: {
     const accountId = editingAccount.value?.id
     if (!accountId || saving.value)
       return
-    const isApiKey = isOpenAiApiKeyAccount(editingAccount.value)
+    const isApiKey = isApiKeyAccount(editingAccount.value)
     const isOAuth = isOpenAiOAuthAccount(editingAccount.value)
     if (isApiKey && !configurationReady.value)
       return

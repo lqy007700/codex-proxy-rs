@@ -83,6 +83,8 @@ export function accountImportModes(provider: string | undefined) {
       { label: '账号文件', value: 'json' as const },
     ]
   }
+  if (provider === 'glm')
+    return [{ label: 'API Key', value: 'api_key' as const }, { label: '账号文件', value: 'json' as const }]
   if (provider === 'xai')
     return [{ label: 'OAuth', value: 'oauth' as const }, { label: '账号文件', value: 'json' as const }]
   return []

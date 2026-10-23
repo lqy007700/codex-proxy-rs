@@ -37,6 +37,22 @@ impl CredentialsService {
         }
     }
 
+    /// 按数据库中的账号归属分派连接更新，不接受调用方另行声明 Provider
+    pub async fn rotate_for_account(
+        &self,
+        command: crate::model::provider_credentials::RotateCredential,
+    ) -> Result<crate::model::provider_credentials::CredentialMutationResult, AdminError> {
+        let details = self
+            .accounts
+            .credential_details_by_id(&command.mutation.account_id)
+            .await
+            .map_err(|error| super::map_store_error(error, "provider credential owner"))?
+            .ok_or_else(|| AdminError::not_found("Provider 凭据不存在"))?;
+        self.for_provider(&details.credential.provider_kind)?
+            .rotate(command)
+            .await
+    }
+
     pub fn for_provider(&self, kind: &ProviderKind) -> Result<ProviderCredentials, AdminError> {
         let provider = self
             .providers

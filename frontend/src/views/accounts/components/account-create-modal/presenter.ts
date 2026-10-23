@@ -25,7 +25,7 @@ export function resolveAccountCreatePresentation(input: {
   else if (form.mode === 'oauth')
     description = `通过浏览器授权导入 ${label} 账号`
   else if (form.mode === 'api_key')
-    description = '接入 OpenAI Responses 兼容上游'
+    description = id === 'glm' ? '接入智谱标准 API' : '接入 OpenAI Responses 兼容上游'
   else if (form.mode === 'access_token')
     description = '逐行粘贴 Access Token，未包含 Refresh Token 时无法自动续期'
   else if (form.mode === 'refresh_token')

@@ -513,3 +513,29 @@ async fn reauthorization_with_import_settings_releases_claim_without_committing(
     assert!(!recorded(&events).contains(&"store.commit_authorization"));
     assert!(store.import_settings().is_empty());
 }
+
+#[tokio::test]
+async fn connection_rotation_uses_the_accounts_provider_including_glm() {
+    use gateway_admin::model::provider_credentials::{CredentialMutation, RotateCredential};
+    for kind in ["openai", "glm", "xai"] {
+        let log = events();
+        let provider = FakeProviderAdmin::new(kind, log.clone());
+        let store = FakeAccountStore::new(kind, log.clone());
+        let services = service(provider, store.clone()).await;
+        let result = services
+            .credentials()
+            .rotate_for_account(RotateCredential {
+                mutation: CredentialMutation {
+                    context: context("rotate-owner"),
+                    account_id: ProviderAccountId::new("acct_test").unwrap(),
+                },
+                provider_material: document(),
+                settings: None,
+            })
+            .await
+            .expect("rotate via persisted provider");
+        assert_eq!(result.config_revision, revision(2));
+        assert!(recorded(&log).contains(&"provider.prepare_rotation"));
+        assert_eq!(store.audit_requests(), ["rotate-owner"]);
+    }
+}

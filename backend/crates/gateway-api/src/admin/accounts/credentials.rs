@@ -261,7 +261,7 @@ impl UpdateAccountRequest {
     }
 }
 
-/// 编辑 OpenAI 账号的连接设置；OAuth 仅接受传输方式
+/// 编辑账号的连接设置，具体字段由所属 Provider 校验；OpenAI OAuth 仅接受传输方式
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountConnectionUpdateRequest {

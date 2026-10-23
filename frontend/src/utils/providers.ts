@@ -5,6 +5,7 @@ import { Fingerprint, Plug } from '@lucide/vue'
 const PROVIDER_DISPLAY_NAMES = {
   openai: 'OpenAI',
   xai: 'xAI',
+  glm: '智谱 GLM',
 } as const
 
 export const PROVIDER_IDS = Object.keys(PROVIDER_DISPLAY_NAMES) as Array<keyof typeof PROVIDER_DISPLAY_NAMES>

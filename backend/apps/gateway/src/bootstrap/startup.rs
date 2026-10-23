@@ -81,9 +81,19 @@ impl Providers {
         environment.host.report_startup_ready("OpenAI Provider");
         let xai = provider_xai::initialize(ports).await?;
         environment.host.report_startup_ready("xAI Provider");
-        let core = ProviderRegistry::new([openai.core_provider(), xai.core_provider()])?;
-        let admin = ProviderAdminRegistry::new([openai.admin_provider(), xai.admin_provider()])
-            .map_err(|_| gateway_admin::model::AdminError::invalid("Provider 管理身份冲突"))?;
+        let glm = provider_glm::initialize(environment.store.provider_ports())?;
+        environment.host.report_startup_ready("GLM Provider");
+        let core = ProviderRegistry::new([
+            openai.core_provider(),
+            xai.core_provider(),
+            glm.core_provider(),
+        ])?;
+        let admin = ProviderAdminRegistry::new([
+            openai.admin_provider(),
+            xai.admin_provider(),
+            glm.admin_provider(),
+        ])
+        .map_err(|_| gateway_admin::model::AdminError::invalid("Provider 管理身份冲突"))?;
         Ok(Self {
             openai,
             xai,
