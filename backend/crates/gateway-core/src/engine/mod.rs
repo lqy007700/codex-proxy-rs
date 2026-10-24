@@ -585,11 +585,48 @@ impl AttemptContext {
         &self,
         provider: &ProviderKind,
         model: &UpstreamModelId,
+    ) -> Result<upstream_adapter::UpstreamAdapterSelection, ProviderError> {
+        let account = self
+            .required_account()
+            .or_else(|| match self.continuation_attempt() {
+                ContinuationAttempt::Native => self
+                    .continuation()
+                    .and_then(continuation::ContinuationBinding::pinned)
+                    .map(|pin| pin.account()),
+                ContinuationAttempt::ReplayOwner => self
+                    .account_state_owner()
+                    .filter(|owner| owner.provider() == provider)
+                    .map(|owner| owner.account()),
+                ContinuationAttempt::None | ContinuationAttempt::ReplayAny => None,
+            });
+        self.request.upstream_adapters.as_ref().map_or(
+            Ok(upstream_adapter::UpstreamAdapterSelection::Native),
+            |plan| plan.select(self, provider, model, account),
+        )
+    }
+
+    /// 账号候选资格检查和最终执行解析使用同一冻结计划，不调用插件进程
+    pub fn upstream_adapter_for_account(
+        &self,
+        provider: &ProviderKind,
+        model: &UpstreamModelId,
+        account: &ProviderAccountId,
     ) -> Result<Option<Arc<dyn upstream_adapter::UpstreamAdapter>>, ProviderError> {
         self.request
             .upstream_adapters
             .as_ref()
-            .map_or(Ok(None), |plan| plan.select(self, provider, model))
+            .map_or(Ok(None), |plan| {
+                match plan.select(self, provider, model, Some(account))? {
+                    upstream_adapter::UpstreamAdapterSelection::Native => Ok(None),
+                    upstream_adapter::UpstreamAdapterSelection::Adapter(adapter) => {
+                        Ok(Some(adapter))
+                    }
+                    // 已知账号的解析必须给出最终执行端，不能绕过资格检查进入原生路径
+                    upstream_adapter::UpstreamAdapterSelection::PendingAccount => Err(
+                        ProviderError::new(ProviderErrorKind::Protocol, UpstreamSendState::NotSent),
+                    ),
+                }
+            })
     }
 
     #[must_use]

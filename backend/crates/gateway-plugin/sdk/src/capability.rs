@@ -33,7 +33,7 @@ impl Capability {
             | Self::Observer
             | Self::Management => &[2],
             Self::Scheduler => &[3],
-            Self::UpstreamAdapter => &[4],
+            Self::UpstreamAdapter => &[5],
             Self::ModelCatalog | Self::CommandLine | Self::Maintenance => &[1],
         }
     }

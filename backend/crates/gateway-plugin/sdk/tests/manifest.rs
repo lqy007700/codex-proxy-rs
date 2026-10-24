@@ -135,7 +135,7 @@ fn capability_contract_versions_are_checked_independently_of_rpc_version() {
     for (capability, stage, supported, needs_formats) in [
         (Capability::Middleware, Stage::Request, 5, true),
         (Capability::Management, Stage::Management, 2, false),
-        (Capability::UpstreamAdapter, Stage::Upstream, 4, true),
+        (Capability::UpstreamAdapter, Stage::Upstream, 5, true),
         (Capability::Scheduler, Stage::Scheduling, 3, false),
     ] {
         for mut manifest in [source_manifest(), packaged_manifest()] {

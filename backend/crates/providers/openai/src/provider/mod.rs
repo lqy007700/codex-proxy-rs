@@ -16,6 +16,7 @@ use gateway_core::engine::provider::{
     ContinuationRequestObservation, EventStream, Provider, ProviderCallMetadata, ProviderRequest,
     ProviderRequestObservation, ProviderSelectionObservation, ProviderStream,
 };
+use gateway_core::engine::upstream_adapter::UpstreamAdapterSelection;
 use gateway_core::engine::{AttemptContext, AttemptTransport, ContinuationAttempt};
 use gateway_core::error::{
     ClientVisibleUpstreamError, ClientVisibleUpstreamResponse, ContinuationFailure,
@@ -648,7 +649,8 @@ impl Provider for CodexProvider {
             unreachable!("generate settings keep the operation kind")
         };
         let adapter = context.upstream_adapter(candidate.provider(), upstream_model)?;
-        if adapter.is_none()
+        let adapted = matches!(adapter, UpstreamAdapterSelection::Adapter(_));
+        if !adapted
             && generate
                 .provider_session_state(PROVIDER_NAME)
                 .is_some_and(|state| state.extension_owner().is_some())
@@ -666,18 +668,15 @@ impl Provider for CodexProvider {
         let guardian = upstream
             .as_ref()
             .is_some_and(CodexResponsesRequest::is_guardian);
-        let adapter_affinity = upstream
-            .as_ref()
-            .filter(|_| adapter.is_some())
-            .map(|request| {
-                (
-                    derive_codex_session_affinity(request, context.client_api_key_ref()),
-                    derive_codex_cyber_policy_session_key(request, context.client_api_key_ref()),
-                    false,
-                )
-            });
+        let adapter_affinity = upstream.as_ref().filter(|_| adapted).map(|request| {
+            (
+                derive_codex_session_affinity(request, context.client_api_key_ref()),
+                derive_codex_cyber_policy_session_key(request, context.client_api_key_ref()),
+                false,
+            )
+        });
         let preselection = upstream
-            .filter(|_| adapter.is_none())
+            .filter(|_| !adapted)
             .map(|upstream| self.prepare_generate_request(generate, upstream, &context));
         if let Some(prepared) = preselection.as_ref() {
             prepared.checked_native_continuation_scope(&context)?;
@@ -730,6 +729,11 @@ impl Provider for CodexProvider {
         };
         let account_selection_wait_ms =
             u64::try_from(selection_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let adapter = context.upstream_adapter_for_account(
+            candidate.provider(),
+            upstream_model,
+            lease.account_id(),
+        )?;
         if adapter.is_some() {
             // 适配器自行解释业务改写，宿主轮次关联只使用本次选号已确认的会话
             self.remember_generate_turn(

@@ -49,7 +49,17 @@ RPC v5 的帧布局、编码与会话生命周期见[通信边界](../README.md#
 
 ## 扩展项简写
 
-作者声明可以省略 `id` 和固定阶段。版本字段省略时为 `1`，适用于 `model_catalog`、`command_line` 和 `maintenance`；其余能力显式声明当前版本：`middleware` 为 `5`，`scheduler` 为 `3`，`upstream_adapter` 为 `4`，认证、路由、重试、观察和管理能力为 `2`：
+作者声明可以省略 `id` 和固定阶段。版本字段省略时为 `1`，其余版本必须显式声明：
+
+| 能力 | 当前版本 |
+| --- | --- |
+| `middleware` | `5` |
+| `scheduler` | `3` |
+| `upstream_adapter` | `5` |
+| `frontend_authentication`、`model_router`、`retry_policy`、`observer`、`management` | `2` |
+| `model_catalog`、`command_line`、`maintenance` | `1` |
+
+例如，仅声明管理页面、命令行和模型请求中间件：
 
 ```json
 {
