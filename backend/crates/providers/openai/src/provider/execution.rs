@@ -1152,26 +1152,42 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 session_transport_recovery.websocket_succeeded(scope);
             }
             if allows_account_state_mutation && (completed || terminal_failure.is_some()) {
+                let started = Instant::now();
                 synchronize_passive_quota(
                     &quota,
                     &active_account,
                     passive_quota_observation.rate_limits(),
                 )
                 .await;
+                trace.record("provider.quota_sync", json!({
+                    "durationMs": started.elapsed().as_millis(),
+                }));
             }
             if let Some((failure, _)) = terminal_failure.as_ref() {
+                let started = Instant::now();
                 apply_failure(&failure_context, &active_account, failure)
                 .await;
+                trace.record("provider.account_failure", json!({
+                    "durationMs": started.elapsed().as_millis(),
+                }));
             }
             attach_openai_session_update(&mut events, &mut session_capture);
             if allows_account_state_mutation && completed && terminal_failure.is_none() {
                 // 完成事实交给下游前更新账号健康，绑定已经在发送前完成
+                let started = Instant::now();
                 selector
                     .record_success(&active_account)
                     .await;
+                trace.record("provider.account_success", json!({
+                    "durationMs": started.elapsed().as_millis(),
+                }));
+                let started = Instant::now();
                 selector
                     .observe_cyber_policy_success(cyber_policy_scope.as_ref())
                     .await;
+                trace.record("provider.cyber_policy_success", json!({
+                    "durationMs": started.elapsed().as_millis(),
+                }));
             }
             if (rate_limits_changed
                 || response_model_changed

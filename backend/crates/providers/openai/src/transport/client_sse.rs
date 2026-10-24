@@ -318,12 +318,16 @@ impl CodexBackendClient {
                 Some(&headers),
             );
         }
-        *websocket_request.body_mut() = body.as_object().cloned().ok_or_else(|| {
-            CodexClientError::Privacy(gateway_core::settings::privacy::PrivacyError {
-                rule_index: 0,
-                reason: "WS 请求正文必须是对象",
-            })
-        })?;
+        // 正文已归当前请求所有，移回对象避免再次复制完整对话
+        let serde_json::Value::Object(body) = body else {
+            return Err(CodexClientError::Privacy(
+                gateway_core::settings::privacy::PrivacyError {
+                    rule_index: 0,
+                    reason: "WS 请求正文必须是对象",
+                },
+            ));
+        };
+        *websocket_request.body_mut() = body;
         let mut websocket_create = CodexWebSocketConnection::responses_create_request_for_path(
             &self.base_url,
             self.protocol.responses_path(),
