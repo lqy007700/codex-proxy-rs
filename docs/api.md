@@ -2229,7 +2229,9 @@ WebSocket 握手不主动添加专项计时请求头，客户端显式提供的�
 允许重试不代表已经执行，实际重试与换号需结合后续 `attempt.started`、`attemptCount` 和账号核对
 
 Trace v3 为路由、账号选择、失败、重试、响应边界及终态事实预留独立的 64 KiB 预算，
-普通事件另有 64 KiB 预算，总事件数最多 128。`stageCounts` 记录至多 64 类已采集阶段的次数，
+普通事件另有 64 KiB 预算，总事件数最多 128。包含元数据的完整 JSON 快照最多 128 KiB，
+生成与持久化共用同一上限；完整编码超限时先淘汰普通事件，再淘汰关键证据。
+`stageCounts` 记录至多 64 类已采集阶段的次数，
 事件淘汰不抹除阶段计数；`droppedEvidenceEvents` 与 `stageCountOverflow` 分别报告关键证据淘汰和阶段统计超限
 
 OpenAI Responses 的 `provider.request.input` 与 `provider.request.outbound` 分别记录 Provider 收到的
