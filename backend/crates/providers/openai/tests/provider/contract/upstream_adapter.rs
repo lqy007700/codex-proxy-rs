@@ -7,6 +7,174 @@ use gateway_core::engine::upstream_adapter::{
     UpstreamAccountConnection, UpstreamAdapter, UpstreamAdapterInvocation, UpstreamAdapterPlan,
 };
 
+#[derive(Debug, Default)]
+struct UnmatchedAdapterPlan {
+    selections: std::sync::atomic::AtomicUsize,
+}
+
+impl UpstreamAdapterPlan for UnmatchedAdapterPlan {
+    fn select(
+        &self,
+        _: &AttemptContext,
+        provider: &ProviderKind,
+        model: &UpstreamModelId,
+    ) -> Result<Option<Arc<dyn UpstreamAdapter>>, gateway_core::error::ProviderError> {
+        assert_eq!(provider.as_str(), "openai");
+        assert_eq!(model.as_str(), "gpt-5.4");
+        self.selections
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(None)
+    }
+}
+
+#[tokio::test]
+async fn unmatched_adapter_preserves_native_oauth_and_api_key_http_wire() {
+    for api_key in [false, true] {
+        let store = Arc::new(MemoryAccountStore::default());
+        let server = MockServer::start().await;
+        if api_key {
+            store
+                .seed_api_key(
+                    "acct_provider_contract",
+                    server.uri(),
+                    provider_openai::credential::ResponsesTransport::Http,
+                )
+                .await;
+        } else {
+            create_account(&store, "acct_provider_contract").await;
+        }
+        let endpoint = if api_key {
+            "/responses"
+        } else {
+            "/codex/responses"
+        };
+        let response = concat!(
+            "event: response.output_text.delta\n",
+            "data: { \"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"native\",\"future\":{\"keep\":true} }\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_wire\",\"model\":\"gpt-5.4\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2},\"future\":true}}\n\n"
+        );
+        Mock::given(method("POST"))
+            .and(path(endpoint))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(response),
+            )
+            .expect(2)
+            .mount(&server)
+            .await;
+        let provider = provider_with_base_url(&store, server.uri());
+        let plan = Arc::new(UnmatchedAdapterPlan::default());
+        // 不透明内容仅为离线夹具，不向真实上游发送或尝试解码
+        let body = json!({
+            "model": "gpt-5.4",
+            "stream": true,
+            "store": false,
+            "instructions": "Keep the original history.",
+            "input": [
+                {"type":"reasoning","id":"rs_fixture","summary":[],"encrypted_content":"opaque-offline-fixture"},
+                {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Third-party visible reply"}]},
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"Continue"}]}
+            ],
+            "tools": [{"type":"function","name":"lookup_fixture","parameters":{"type":"object","properties":{}}}],
+            "future_extension": {"nested":[1,true,"preserve"]}
+        });
+        for with_plan in [false, true] {
+            let frozen_plan = with_plan.then(|| {
+                gateway_core::engine::upstream_adapter::FrozenUpstreamAdapterPlan::new(
+                    plan.clone(),
+                    ExtensionSetReference::new(
+                        ExtensionSetId::new("unmatched-wire-test".to_owned()).unwrap(),
+                        Arc::new(TestExtensionLease),
+                    ),
+                )
+            });
+            let context = AttemptContext::new(
+                RequestAttemptContext::new(
+                    ModelRequestId::new("req_unmatched_wire").unwrap(),
+                    ClientApiKeyId::new("key_openai_contract").unwrap(),
+                )
+                .with_upstream_adapters(frozen_plan)
+                .with_middleware(
+                    None,
+                    Arc::from([]),
+                    "/v1/responses".into(),
+                    ClientTransport::HttpSse,
+                ),
+                NonZeroU32::MIN,
+                SystemTime::now() + Duration::from_secs(30),
+                account_policy(),
+                AccountAttemptContext::new(BTreeSet::new(), None, None)
+                    .with_account_scope(contract_account_scope()),
+                None,
+                CancellationToken::new(),
+            );
+            let payload = ProtocolPayload::json_object("openai", body.as_object().unwrap().clone())
+                .unwrap()
+                .with_context(Map::from_iter([
+                    ("use_websocket".into(), json!(false)),
+                    (
+                        "opaque_request_headers".into(),
+                        json!([
+                            ["x-future-business", STANDARD.encode(b"first")],
+                            ["x-future-business", STANDARD.encode(b"second")]
+                        ]),
+                    ),
+                ]));
+            let mut stream = Arc::clone(&provider)
+                .execute(
+                    planned_request(
+                        "openai",
+                        Operation::Generate(GenerateRequest::from_protocol_payload(payload)),
+                    ),
+                    context,
+                )
+                .await
+                .unwrap();
+            let mut wire = Vec::new();
+            while let Some(event) = stream.next().await {
+                if let Some(frame) = event
+                    .unwrap()
+                    .wire_event()
+                    .and_then(|wire| wire.raw_sse_frame())
+                {
+                    wire.extend_from_slice(frame);
+                }
+            }
+            assert_eq!(
+                wire,
+                response.as_bytes(),
+                "response changed: api_key={api_key}, with_plan={with_plan}"
+            );
+        }
+        assert!(plan.selections.load(std::sync::atomic::Ordering::SeqCst) > 0);
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].method, requests[1].method);
+        assert_eq!(requests[0].url, requests[1].url);
+        assert_eq!(
+            requests[0].headers, requests[1].headers,
+            "headers changed: api_key={api_key}"
+        );
+        assert_eq!(
+            requests[0].body, requests[1].body,
+            "body changed: api_key={api_key}"
+        );
+        let sent = captured_request_body(&requests[1]);
+        for field in ["input", "tools", "future_extension", "instructions"] {
+            assert_eq!(
+                sent[field], body[field],
+                "native field changed: {field}, api_key={api_key}"
+            );
+        }
+        assert_eq!(
+            captured_header_values(&requests[1], "x-future-business"),
+            vec![b"first".to_vec(), b"second".to_vec()]
+        );
+    }
+}
+
 #[derive(Debug)]
 struct AdapterProbe {
     polls: Arc<std::sync::atomic::AtomicUsize>,
@@ -169,6 +337,388 @@ async fn upstream_adapter_reuses_selected_native_account_inside_attempt_onion_an
 }
 
 type SelectedConnection = Arc<dyn UpstreamAccountConnection>;
+
+type AdapterInvocations = Arc<Mutex<Vec<UpstreamAdapterInvocation>>>;
+
+struct AffinityAdapterProbe {
+    invocations: Option<AdapterInvocations>,
+}
+
+impl std::fmt::Debug for AffinityAdapterProbe {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AffinityAdapterProbe")
+            .finish_non_exhaustive()
+    }
+}
+
+impl UpstreamAdapterPlan for AffinityAdapterProbe {
+    fn select(
+        &self,
+        _: &AttemptContext,
+        _: &ProviderKind,
+        _: &UpstreamModelId,
+    ) -> Result<Option<Arc<dyn UpstreamAdapter>>, gateway_core::error::ProviderError> {
+        Ok(Some(Arc::new(Self {
+            invocations: self.invocations.clone(),
+        })))
+    }
+}
+
+impl UpstreamAdapter for AffinityAdapterProbe {
+    fn transport(&self) -> &str {
+        "http_sse"
+    }
+
+    fn execute(
+        self: Arc<Self>,
+        invocation: UpstreamAdapterInvocation,
+    ) -> gateway_core::engine::provider::EventStream {
+        Box::pin(futures::stream::once(async move {
+            if let Some(invocations) = &self.invocations {
+                invocations.lock().unwrap().push(invocation);
+            }
+            Err(gateway_core::error::ProviderError::new(
+                ProviderErrorKind::Cancelled,
+                UpstreamSendState::NotSent,
+            ))
+        }))
+    }
+}
+
+fn affinity_adapter_context(
+    request_id: &str,
+    client_key: &str,
+    middleware: Option<Arc<dyn MiddlewarePlan>>,
+    invocations: Option<AdapterInvocations>,
+) -> AttemptContext {
+    let extension = ExtensionSetReference::new(
+        ExtensionSetId::new("adapter-affinity-test".to_owned()).unwrap(),
+        Arc::new(TestExtensionLease),
+    );
+    let plan = gateway_core::engine::upstream_adapter::FrozenUpstreamAdapterPlan::new(
+        Arc::new(AffinityAdapterProbe { invocations }),
+        extension.clone(),
+    );
+    AttemptContext::new(
+        RequestAttemptContext::new(
+            ModelRequestId::new(request_id).unwrap(),
+            ClientApiKeyId::new(client_key).unwrap(),
+        )
+        .with_upstream_adapters(Some(plan))
+        .with_middleware(
+            middleware.map(|plan| FrozenMiddlewarePlan::new(plan, extension)),
+            Arc::from([]),
+            "/v1/responses".to_owned(),
+            ClientTransport::HttpSse,
+        ),
+        NonZeroU32::MIN,
+        SystemTime::now() + Duration::from_secs(5),
+        account_policy(),
+        AccountAttemptContext::new(BTreeSet::new(), None, None)
+            .with_account_scope(contract_account_scope()),
+        None,
+        CancellationToken::new(),
+    )
+}
+
+#[tokio::test]
+async fn upstream_adapter_reuses_session_account_and_isolates_client_keys() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_subagent_a").await;
+    let affinity = Arc::new(MemorySessionAffinity::default());
+    let server = MockServer::start().await;
+    let provider = provider_with_affinity_and_base_url(&store, affinity.clone(), server.uri());
+    let request = || planned_request("openai", session_binding::turn_request("session", "turn"));
+    drop(
+        provider
+            .clone()
+            .execute(
+                request(),
+                affinity_adapter_context("req_seed", "key_a", None, None),
+            )
+            .await
+            .unwrap(),
+    );
+    assert_eq!(affinity.binding_count(), 1);
+    assert!(!affinity.alias_ttls().is_empty());
+    create_account(&store, "acct_subagent_b").await;
+    store.set_scheduling("acct_subagent_b", None, AccountWeight::new(100).unwrap());
+    for (key, expected) in [("key_a", "acct_subagent_a"), ("key_b", "acct_subagent_b")] {
+        let stream = provider
+            .clone()
+            .execute(
+                request(),
+                affinity_adapter_context("req_follow", key, None, None),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stream.metadata().provider_account_id().as_str(), expected);
+    }
+    assert_eq!(affinity.binding_count(), 2);
+    store
+        .set_enabled(&ProviderAccountId::new("acct_subagent_a").unwrap(), false)
+        .await
+        .unwrap();
+    let stream = provider
+        .execute(
+            request(),
+            affinity_adapter_context("req_migrate", "key_a", None, None),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        stream.metadata().provider_account_id().as_str(),
+        "acct_subagent_b"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn upstream_adapter_preserves_plugin_rewrites_without_changing_admitted_affinity() {
+    use gateway_core::provider_ports::{ProviderSessionAffinityKey, ProviderSessionAffinityPort};
+    use sha2::Digest;
+
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_subagent_a").await;
+    let affinity = Arc::new(MemorySessionAffinity::default());
+    let server = MockServer::start().await;
+    let provider = provider_with_affinity_and_base_url(&store, affinity.clone(), server.uri());
+    let client = ClientApiKeyId::new("key_a").unwrap();
+    let provider_kind = ProviderKind::new("openai").unwrap();
+    let operation = session_binding::turn_request("session-a", "client-turn");
+    let session_key = ProviderSessionAffinityKey::try_new(
+        provider
+            .request_observation(&operation, &client)
+            .continuation
+            .affinity_hash
+            .unwrap(),
+    )
+    .unwrap();
+    let turn_key = |turn: &str| {
+        ProviderSessionAffinityKey::try_new(hex::encode(sha2::Sha256::digest(format!(
+            "codex-session-affinity-v1\0client-turn\0key_a\0{turn}"
+        ))))
+        .unwrap()
+    };
+    drop(
+        provider
+            .clone()
+            .execute(
+                planned_request(
+                    "openai",
+                    session_binding::turn_request("session-a", "seed-a"),
+                ),
+                affinity_adapter_context("req_seed_a", "key_a", None, None),
+            )
+            .await
+            .unwrap(),
+    );
+    create_account(&store, "acct_subagent_b").await;
+    store.set_scheduling("acct_subagent_b", None, AccountWeight::new(100).unwrap());
+    drop(
+        provider
+            .clone()
+            .execute(
+                planned_request(
+                    "openai",
+                    session_binding::turn_request("session-b", "seed-b"),
+                ),
+                affinity_adapter_context("req_seed_b", "key_a", None, None),
+            )
+            .await
+            .unwrap(),
+    );
+    let other_turn = affinity
+        .load_alias(&provider_kind, &turn_key("seed-b"))
+        .await
+        .unwrap()
+        .unwrap();
+    // 插件可使用已有会话或自己的会话标识，宿主不据此重绑或新增亲和状态
+    for plugin_session in ["session-b", "plugin-session"] {
+        let metadata = json!({
+            "session_id": plugin_session, "thread_id": plugin_session, "turn_id": "plugin-turn"
+        })
+        .to_string();
+        let replacement = json!({"x-codex-turn-metadata": metadata});
+        let headers = vec![MiddlewareHeader::new(
+            "x-codex-turn-metadata",
+            Bytes::from(metadata),
+        )];
+        let middleware = RecordingMiddleware {
+            observed: Default::default(),
+            replacement: ("client_metadata".to_owned(), replacement.clone()),
+            request_headers: headers.clone(),
+        };
+        let invocations = Arc::new(Mutex::new(Vec::new()));
+        let mut stream = provider
+            .clone()
+            .execute(
+                planned_request("openai", operation.clone()),
+                affinity_adapter_context(
+                    "req_changed",
+                    "key_a",
+                    Some(Arc::new(middleware)),
+                    Some(invocations.clone()),
+                ),
+            )
+            .await
+            .expect("plugin rewrites must reach the adapter with the selected account");
+        assert!(
+            invocations.lock().unwrap().is_empty(),
+            "adapter must stay cold"
+        );
+        assert_eq!(
+            stream.metadata().provider_account_id().as_str(),
+            "acct_subagent_a"
+        );
+        assert_eq!(
+            stream.next().await.unwrap().unwrap_err().kind(),
+            ProviderErrorKind::Cancelled
+        );
+        let invocation = invocations
+            .lock()
+            .unwrap()
+            .pop()
+            .expect("adapter was polled");
+        assert_eq!(invocation.account.account_id().as_str(), "acct_subagent_a");
+        assert_eq!(
+            invocation.metadata.provider_account_id(),
+            invocation.account.account_id()
+        );
+        assert_eq!(invocation.headers, headers);
+        let Operation::Generate(original) = &operation else {
+            unreachable!()
+        };
+        let mut expected = original.protocol_payload().body().clone();
+        expected.insert("client_metadata".to_owned(), replacement);
+        let Operation::Generate(delivered) = &invocation.operation else {
+            unreachable!()
+        };
+        assert_eq!(delivered.protocol_payload().protocol(), "openai");
+        assert_eq!(delivered.protocol_payload().body(), &expected);
+        assert_eq!(
+            delivered.protocol_payload().context(),
+            original.protocol_payload().context()
+        );
+        assert_eq!(affinity.binding_count(), 2);
+        assert_eq!(
+            affinity
+                .load(&provider_kind, &session_key)
+                .await
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "acct_subagent_a"
+        );
+        assert_eq!(
+            affinity
+                .load(&provider_kind, &other_turn.session_key)
+                .await
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "acct_subagent_b"
+        );
+        assert_eq!(
+            affinity
+                .load_alias(&provider_kind, &turn_key("seed-b"))
+                .await
+                .unwrap(),
+            Some(other_turn.clone())
+        );
+        let alias = affinity
+            .load_alias(&provider_kind, &turn_key("client-turn"))
+            .await
+            .unwrap()
+            .expect("client turn remains associated");
+        assert_eq!(alias.session_key, session_key);
+        assert!(!alias.follow_only);
+        assert!(
+            affinity
+                .load_alias(&provider_kind, &turn_key("plugin-turn"))
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn upstream_adapter_child_cannot_migrate_a_strict_session() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_subagent_a").await;
+    let server = MockServer::start().await;
+    let provider = provider_with_affinity_and_base_url(
+        &store,
+        Arc::new(MemorySessionAffinity::default()),
+        server.uri(),
+    );
+    let request = |thread| {
+        planned_request(
+            "openai",
+            Operation::Generate(generate_with_session_context("root", Some(thread), None)),
+        )
+    };
+    drop(
+        provider
+            .clone()
+            .execute(
+                request("root"),
+                affinity_adapter_context("req_root", "key_a", None, None),
+            )
+            .await
+            .unwrap(),
+    );
+    create_account(&store, "acct_subagent_b").await;
+    store
+        .set_enabled(&ProviderAccountId::new("acct_subagent_a").unwrap(), false)
+        .await
+        .unwrap();
+    let error = provider
+        .execute(
+            request("child"),
+            affinity_adapter_context("req_child", "key_a", None, None),
+        )
+        .await
+        .err()
+        .expect("strict child cannot replace the session owner");
+    assert!(error.retry_is_prohibited());
+    assert_eq!(error.send_state(), UpstreamSendState::NotSent);
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn upstream_adapter_does_not_infer_sessions_from_unknown_protocols_or_missing_identity() {
+    for (protocol, body) in [
+        (
+            "example-source",
+            json!({"model":"gpt-5.4", "input":"hello", "session_id":"opaque-session"}),
+        ),
+        ("openai", json!({"model":"gpt-5.4", "input":"hello"})),
+    ] {
+        let store = Arc::new(MemoryAccountStore::default());
+        create_account(&store, "acct_provider_contract").await;
+        let affinity = Arc::new(MemorySessionAffinity::default());
+        let server = MockServer::start().await;
+        let provider = provider_with_affinity_and_base_url(&store, affinity.clone(), server.uri());
+        let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+            ProtocolPayload::json_object(protocol, body.as_object().unwrap().clone()).unwrap(),
+        ));
+        drop(
+            provider
+                .execute(
+                    planned_request("openai", operation),
+                    affinity_adapter_context("req_unassociated", "key_a", None, None),
+                )
+                .await
+                .unwrap(),
+        );
+        assert_eq!(affinity.binding_count(), 0);
+        assert!(affinity.alias_ttls().is_empty());
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+}
 
 struct ConnectionProbe {
     selected: Arc<Mutex<Option<oneshot::Sender<SelectedConnection>>>>,
