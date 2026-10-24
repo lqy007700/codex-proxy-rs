@@ -7,8 +7,8 @@
 
 | 项目 | 核对范围 |
 | --- | --- |
-| 核对日期 | 2026-10-22 |
-| 本仓库源码 | `5ec00a432eaf0b329f51fe7f158a79de57862d59`，源码版本 `3.30.21+lqy007700` |
+| 核对日期 | 2026-10-23 |
+| 本仓库源码 | `4f70e364b449abc833997c456759a30fe63dcb7b`，源码版本以 [`release/version.yaml`](../release/version.yaml) 为准 |
 | 已合并上游基线 | `v3.29.7`，`78bc57c5cf24b01a38e985cdd739bb4ae89ce11f` |
 | 差异依据 | 上述上游基线到本仓库核对提交的最终文件差异，结合调用链和现有测试 |
 | 上游后续提交 | 单独记录于[上游同步清单](upstream-sync.md#暂未合并的上游更新)，不作为本仓库已有能力 |
@@ -207,6 +207,9 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 实际文件和冻结摘要见[迁移目录](../backend/migrations/README.md#冻结规则)。
 业务备份沿用当前精简归档合同；下载已有 PostgreSQL custom 归档时保留 `.dump` 扩展，不将其误标为 `.sql.gz`。
 恢复必须按真实格式选择 `pg_restore` 或 gzip 解压后 `psql`，步骤见[人工恢复数据库](../deploy/README.md#人工恢复数据库)
+
+人工创建备份、请求删除和连接测试的审计分类沿用统一的变更审计模型；创建或状态迁移与审计事件在同一数据库事务内提交，失败时一起回滚。
+保留策略触发的自动删除不伪造管理员审计上下文。更新、回滚和自重启操作共用主机级互斥状态，受理自重启后继续持有跨进程锁，避免更新产物处于替换中时启动新进程
 
 归档命名入口为 [build_download_file_name](../backend/crates/gateway-admin/src/model/backup/mod.rs)，回归见[备份用例测试](../backend/crates/gateway-admin/tests/use_case/backup.rs)
 
