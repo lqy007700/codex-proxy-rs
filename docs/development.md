@@ -67,7 +67,7 @@ gh workflow run release.yml --ref main --raw-field tag='<原版本tag>' --raw-fi
 
 ## 环境与依赖
 
-需要 Node.js 26.12.0、pnpm、[Rust 工具链](architecture.md#验证命令)、PostgreSQL 和 Redis
+需要 Node.js 26.12.1、pnpm、[Rust 工具链](architecture.md#验证命令)、PostgreSQL 和 Redis
 
 各前端的 `packageManager` 固定 pnpm 版本，宿主 CI 和 Docker 从 `frontend/package.json` 读取
 
