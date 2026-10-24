@@ -394,7 +394,7 @@ fn start_pooled_websocket_connect(
                         );
                     }
                     Err(connection) => {
-                        connection.websocket.close().await;
+                        connection.websocket.abort_and_wait().await;
                         let _ = sender.send(Err(continuation_unavailable(
                             PreviousResponseUnavailableReason::PoolUnavailable,
                         )));
@@ -683,7 +683,7 @@ async fn discard_after_send(
     if let Some(lease) = lease {
         lease.discard_with_observation(observation).await;
     }
-    websocket.close().await;
+    websocket.abort_and_wait().await;
 }
 
 pub(crate) fn post_send_ambiguous(
