@@ -35,6 +35,7 @@ export const PLUGIN_REQUEST_STAGES: Record<string, PluginRequestStage> = {
   service: { label: '服务调用', scope: 'none', globalLabel: '所有服务调用' },
   request: { label: '请求开始', scope: 'model' },
   attempt: { label: '每次尝试', scope: 'provider' },
+  outbound: { label: '出站准备', scope: 'provider' },
   upstream: { label: '上游调用', scope: 'provider' },
   routing: { label: '模型路由', scope: 'model' },
   scheduling: { label: '账号调度', scope: 'provider' },
