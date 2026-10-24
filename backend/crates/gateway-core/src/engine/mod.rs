@@ -765,7 +765,6 @@ impl AttemptContext {
         provider: ProviderKind,
         model: Option<String>,
         account_id: ProviderAccountId,
-        parameters: Option<serde_json::Map<String, serde_json::Value>>,
         terminal: provider::ProviderMiddlewareTerminal,
     ) -> Result<provider::ProviderStream, ProviderError> {
         // 入口已校验原请求，此处复查中间件最终提交的 operation，每次重试均生效
@@ -773,7 +772,7 @@ impl AttemptContext {
             .account_scope()
             .is_some_and(|scope| !scope.allows_image_generation())
         {
-            Box::new(move |operation, headers, parameters| {
+            Box::new(move |operation, headers| {
                 Box::pin(async move {
                     image_generation::check_image_generation(false, &operation).map_err(|_| {
                         ProviderError::new(
@@ -782,7 +781,7 @@ impl AttemptContext {
                         )
                         .with_retry_prohibited()
                     })?;
-                    terminal(operation, headers, parameters).await
+                    terminal(operation, headers).await
                 })
             })
         } else {
@@ -800,7 +799,6 @@ impl AttemptContext {
             context,
             operation,
             self.request.client_transport,
-            parameters,
             terminal,
         )
         .await

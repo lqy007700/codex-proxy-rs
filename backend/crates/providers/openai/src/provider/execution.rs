@@ -179,8 +179,7 @@ impl CodexProvider {
                 provider_kind,
                 requested_model.map(|model| model.as_str().to_owned()),
                 account_id,
-                Some(RequestParameters::baseline(lease.installation_id())),
-                Box::new(move |operation, middleware_headers, parameters| {
+                Box::new(move |operation, middleware_headers| {
                     Box::pin(async move {
                         provider
                             .execute_selected_raw_json_endpoint(
@@ -188,11 +187,8 @@ impl CodexProvider {
                                 operation,
                                 middleware_headers,
                                 request,
-                                SelectedRequest {
-                                    parameters: RequestParameters::decode(parameters)?,
-                                    lease,
-                                    account_selection_wait_ms,
-                                },
+                                lease,
+                                account_selection_wait_ms,
                             )
                             .await
                     })
@@ -207,13 +203,9 @@ impl CodexProvider {
         operation: Operation,
         middleware_headers: Vec<MiddlewareHeader>,
         mut request: RawJsonEndpointRequest,
-        selected: SelectedRequest,
+        mut lease: CodexCredentialLease,
+        account_selection_wait_ms: u64,
     ) -> Result<ProviderStream, ProviderError> {
-        let SelectedRequest {
-            parameters,
-            mut lease,
-            account_selection_wait_ms,
-        } = selected;
         let affinity = match &operation {
             Operation::GenerateImage(image) => {
                 let model = endpoint_requested_model(image.payload());
@@ -337,7 +329,7 @@ impl CodexProvider {
             lease.capacity_snapshot(),
         ));
         // Standalone Provider 端点没有可证明的账号 owner；Images/Search metadata 必须按
-        // 跨账号输入收敛到本次构造参数，不能沿用下游声明的账号身份
+        // 跨账号输入收敛到当前 lease，不能沿用下游声明的账号或 installation identity
         let turn_metadata = payload
             .context()
             .get("turn_metadata")
@@ -345,12 +337,11 @@ impl CodexProvider {
             .and_then(|metadata| {
                 crate::transport::request::scope_turn_metadata(
                     metadata,
-                    &parameters.installation_id,
+                    lease.installation_id(),
                     true,
                 )
             });
         let events = cold_json_response_stream(ColdJsonResponse {
-            parameters,
             client: self
                 .client_for_request(&context)?
                 .for_account(lease.account())
@@ -392,7 +383,6 @@ struct RawJsonEndpointRequest {
 }
 
 pub(super) struct ColdResponse {
-    pub(super) parameters: RequestParameters,
     pub(super) client: CodexBackendClient,
     pub(super) response_origin: Url,
     pub(super) request: CodexResponsesRequest,
@@ -412,7 +402,6 @@ pub(super) struct ColdResponse {
 }
 
 pub(super) struct ColdJsonResponse {
-    pub(super) parameters: RequestParameters,
     pub(super) client: CodexBackendClient,
     pub(super) response_origin: Url,
     pub(super) endpoint_path: &'static str,
@@ -657,7 +646,7 @@ pub(super) fn cold_json_response_stream(request: ColdJsonResponse) -> EventStrea
         let response = create_json_attempt(
             &request,
             &active_account,
-            &request.parameters.installation_id,
+            request.lease.installation_id(),
             &authorization,
             cookie_header.as_ref(),
             account_selection,
@@ -776,7 +765,6 @@ fn image_response_metering(
 
 pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
     let ColdResponse {
-        parameters,
         client,
         response_origin,
         request,
@@ -833,7 +821,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 &request,
                 &request_id,
                 &active_account,
-                &parameters.installation_id,
+                lease.installation_id(),
                 &authorization,
                 cookie_header.as_ref(),
                 account_selection,
