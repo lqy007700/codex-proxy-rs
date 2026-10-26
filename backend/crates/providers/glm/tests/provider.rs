@@ -1,14 +1,21 @@
 //! 验证智谱冷发送、原生事件、错误分类、续接和账号范围
 
 use super::support::Store;
-use futures::StreamExt;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use bytes::Bytes;
+use futures::{StreamExt, future::BoxFuture};
 use gateway_core::{
     account::{
-        AccountFeedbackStats, AccountSelectionPolicy,
+        AccountFeedbackStats, AccountSelectionPolicy, CredentialState,
         scope::{ClientRoutingScope, FrozenAccountScope, RuntimeAccount, RuntimeAccountDirectory},
     },
     engine::{
         AccountAttemptContext, AttemptContext, ModelRequestId, RequestAttemptContext,
+        execution::ClientTransport,
+        middleware::{
+            FrozenMiddlewarePlan, MiddlewareContext, MiddlewareError, MiddlewareHeader,
+            MiddlewareNext, MiddlewarePlan, MiddlewareRequest, MiddlewareResponse,
+        },
         provider::{Provider, ProviderRequest},
     },
     error::ProviderErrorKind,
@@ -19,6 +26,7 @@ use gateway_core::{
     routing::{
         ConfigRevision, ModelCapabilities, ProviderKind, ProviderModel, PublicModelId,
         RoutingContext, RuntimeSnapshot, SupportLevel, UpstreamModelId,
+        extensions::{ExtensionSetId, ExtensionSetLease, ExtensionSetReference},
     },
 };
 use provider_glm::GlmProvider;
@@ -34,7 +42,7 @@ use wiremock::{
     matchers::{header, method, path},
 };
 
-fn scope(store: &Store) -> Arc<FrozenAccountScope> {
+pub(super) fn scope(store: &Store) -> Arc<FrozenAccountScope> {
     Arc::new(FrozenAccountScope::new(
         Arc::new(RuntimeAccountDirectory::new(
             store
@@ -53,7 +61,7 @@ fn scope(store: &Store) -> Arc<FrozenAccountScope> {
         ClientRoutingScope::AllAccounts,
     ))
 }
-fn context(scope: Arc<FrozenAccountScope>) -> AttemptContext {
+pub(super) fn context(scope: Arc<FrozenAccountScope>) -> AttemptContext {
     context_with_continuation(scope, None)
 }
 fn context_with_continuation(
@@ -76,7 +84,7 @@ fn context_with_continuation(
         CancellationToken::new(),
     )
 }
-fn request(scope: Arc<FrozenAccountScope>, body: Value) -> ProviderRequest {
+pub(super) fn request(scope: Arc<FrozenAccountScope>, body: Value) -> ProviderRequest {
     let kind = ProviderKind::new("glm").unwrap();
     let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
         ProtocolPayload::json_object("openai", body.as_object().unwrap().clone()).unwrap(),
@@ -111,7 +119,7 @@ fn request(scope: Arc<FrozenAccountScope>, body: Value) -> ProviderRequest {
         .unwrap();
     ProviderRequest::new(operation, plan.candidates()[0].clone())
 }
-fn provider(store: Arc<Store>) -> Arc<GlmProvider> {
+pub(super) fn provider(store: Arc<Store>) -> Arc<GlmProvider> {
     Arc::new(GlmProvider::new(
         ProviderKind::new("glm").unwrap(),
         store.clone(),
@@ -120,7 +128,7 @@ fn provider(store: Arc<Store>) -> Arc<GlmProvider> {
         Arc::new(AccountFeedbackStats::default()),
     ))
 }
-fn stream(events: Vec<Value>) -> String {
+pub(super) fn stream(events: Vec<Value>) -> String {
     events
         .into_iter()
         .map(|v| format!("data: {v}\n\n"))
@@ -133,7 +141,7 @@ fn normal() -> Vec<Value> {
         json!({"type":"response.completed","response":{"id":"resp_glm","status":"completed","output":[{"type":"message","id":"msg_glm","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":10,"input_tokens_details":{"cached_tokens":3},"output_tokens":4,"output_tokens_details":{"reasoning_tokens":1}}}}),
     ]
 }
-async fn setup() -> (MockServer, Arc<Store>) {
+pub(super) async fn setup() -> (MockServer, Arc<Store>) {
     let server = MockServer::start().await;
     let store = Arc::new(Store::default());
     store.add(
@@ -208,6 +216,7 @@ async fn preserves_tool_call_pairing_without_protocol_translation() {
     events.remove(1);
     events.insert(1,json!({"type":"response.output_item.added","output_index":0,"item":{"type":"custom_tool_call","call_id":"call_patch","name":"apply_patch"}}));
     events.insert(2,json!({"type":"response.custom_tool_call_input.delta","output_index":0,"delta":"patch body"}));
+    events.last_mut().unwrap()["response"]["output"] = json!([{ "type":"custom_tool_call", "call_id":"call_patch", "name":"apply_patch", "input":"patch body" }]);
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(stream(events), "text/event-stream"))
         .mount(&server)
@@ -686,4 +695,258 @@ async fn adapter_selection_preserves_native_execution_and_rejects_unresolved_acc
         }
         assert_eq!(store.in_flight.load(Ordering::SeqCst), 0);
     }
+}
+
+#[derive(Debug)]
+struct HeaderOverrides;
+impl ExtensionSetLease for HeaderOverrides {
+    fn is_ready(&self) -> bool {
+        true
+    }
+}
+impl MiddlewarePlan for HeaderOverrides {
+    fn handle(
+        &self,
+        _: MiddlewareContext,
+        request: MiddlewareRequest,
+        next: MiddlewareNext,
+    ) -> BoxFuture<'static, Result<MiddlewareResponse, MiddlewareError>> {
+        let (protocol, mut headers, body) = request.clone().into_parts();
+        headers.extend([
+            MiddlewareHeader::new("x-business", Bytes::from_static(b"override-first")),
+            MiddlewareHeader::new("x-business", Bytes::from_static(b"override-second")),
+            MiddlewareHeader::new("authorization", Bytes::from_static(b"Bearer untrusted")),
+            MiddlewareHeader::new("connection", Bytes::from_static(b"x-hop")),
+        ]);
+        next.run(
+            request
+                .replace_parts(protocol, headers, body, None)
+                .unwrap(),
+        )
+    }
+}
+
+#[tokio::test]
+async fn forwards_multivalue_business_headers_and_protects_selected_credentials() {
+    let (server, store) = setup().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            stream(vec![json!({
+                "type":"response.completed","response":{"id":"resp_headers","status":"completed",
+                    "output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}
+            })]),
+            "text/event-stream",
+        ))
+        .mount(&server)
+        .await;
+    for overrides in [false, true] {
+        let scope = scope(&store);
+        let initial = request(scope.clone(), json!({"model":"glm-5.3","input":"test"}));
+        let entries: Vec<_> = [
+            ("x-business", "original-first"),
+            ("x-business", "original-second"),
+            ("x-hop", "hop-secret"),
+            ("authorization", "Bearer client-secret"),
+            ("cookie", "client-session"),
+            ("chatgpt-account-id", "client-account"),
+            ("x-codex-installation-id", "client-installation"),
+            ("proxy-authorization", "proxy-secret"),
+        ]
+        .into_iter()
+        .map(|(name, value)| json!([name, STANDARD.encode(value)]))
+        .collect();
+        let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+            ProtocolPayload::json_object(
+                "openai",
+                json!({"model":"glm-5.3","input":"test"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .unwrap()
+            .with_context(
+                json!({"opaque_request_headers":entries})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        ));
+        let mut attempt = context(scope.clone());
+        if overrides {
+            attempt = AttemptContext::new(
+                RequestAttemptContext::new(
+                    ModelRequestId::new("req_glm_headers").unwrap(),
+                    ClientApiKeyId::new("key_glm_fixture").unwrap(),
+                )
+                .with_middleware(
+                    Some(FrozenMiddlewarePlan::new(
+                        Arc::new(HeaderOverrides),
+                        ExtensionSetReference::new(
+                            ExtensionSetId::new("glm-headers".to_owned()).unwrap(),
+                            Arc::new(HeaderOverrides),
+                        ),
+                    )),
+                    Arc::from([]),
+                    "/v1/responses".to_owned(),
+                    ClientTransport::HttpSse,
+                ),
+                NonZeroU32::MIN,
+                SystemTime::now() + Duration::from_secs(5),
+                AccountSelectionPolicy::new(
+                    gateway_core::account::RotationStrategy::RoundRobin,
+                    gateway_core::account::AccountConcurrency::new(2),
+                ),
+                AccountAttemptContext::new(BTreeSet::new(), None, None).with_account_scope(scope),
+                None,
+                CancellationToken::new(),
+            );
+        }
+        let mut response = provider(store.clone())
+            .execute(
+                ProviderRequest::new(operation, initial.candidate().clone()),
+                attempt,
+            )
+            .await
+            .unwrap();
+        while let Some(event) = response.next().await {
+            event.unwrap();
+        }
+        drop(response);
+        let requests = server.received_requests().await.unwrap();
+        let headers = &requests.last().unwrap().headers;
+        assert_eq!(headers["authorization"], "Bearer fixture-key");
+        let expected = if overrides {
+            ["override-first", "override-second"]
+        } else {
+            ["original-first", "original-second"]
+        };
+        assert_eq!(
+            headers
+                .get_all("x-business")
+                .iter()
+                .map(|value| value.to_str().unwrap())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        for name in [
+            "cookie",
+            "chatgpt-account-id",
+            "x-codex-installation-id",
+            "proxy-authorization",
+        ] {
+            assert!(!headers.contains_key(name), "leaked {name}");
+        }
+        assert_eq!(headers.contains_key("x-hop"), !overrides);
+        assert_eq!(store.in_flight.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn http_and_stream_errors_apply_the_same_credential_and_cooldown_facts() {
+    for streaming in [false, true] {
+        for (code, status, kind, invalid, cooldown) in [
+            ("1000", 401, ProviderErrorKind::Unauthorized, true, true),
+            ("1113", 429, ProviderErrorKind::QuotaExhausted, false, true),
+            ("1302", 429, ProviderErrorKind::RateLimited, false, true),
+            (
+                "1305",
+                429,
+                ProviderErrorKind::UpstreamCapacityUnavailable,
+                false,
+                false,
+            ),
+            ("1200", 500, ProviderErrorKind::Unavailable, false, false),
+        ] {
+            let (server, store) = setup().await;
+            let response = if streaming {
+                ResponseTemplate::new(200).set_body_raw(
+                    stream(vec![json!({"type":"error","code":code})]),
+                    "text/event-stream",
+                )
+            } else {
+                ResponseTemplate::new(status).set_body_json(json!({"error":{"code":code}}))
+            }
+            .insert_header("retry-after", "7");
+            Mock::given(method("POST"))
+                .respond_with(response)
+                .mount(&server)
+                .await;
+            let scope = scope(&store);
+            let mut response = provider(store.clone())
+                .execute(
+                    request(scope.clone(), json!({"model":"glm-5.3","input":"test"})),
+                    context(scope),
+                )
+                .await
+                .unwrap();
+            let mut failure = None;
+            while let Some(event) = response.next().await {
+                if let Err(error) = event {
+                    failure = Some(error);
+                    break;
+                }
+            }
+            let failure = failure.unwrap();
+            assert_eq!(failure.kind(), kind, "{code} streaming={streaming}");
+            assert_eq!(failure.retry_after(), Some(Duration::from_secs(7)));
+            drop(response);
+            let rows = store.rows.lock().unwrap();
+            let account = &rows.values().next().unwrap().account;
+            assert_eq!(
+                account.credential_state(),
+                if invalid {
+                    CredentialState::Invalid
+                } else {
+                    CredentialState::Ready
+                }
+            );
+            assert_eq!(!store.cooldowns.lock().unwrap().is_empty(), cooldown);
+            assert_eq!(store.in_flight.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_request_deadline_releases_the_selected_account_lease() {
+    let (server, store) = setup().await;
+    let received = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = received.clone();
+    Mock::given(method("POST"))
+        .respond_with(move |_: &wiremock::Request| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            ResponseTemplate::new(200).set_delay(Duration::from_secs(30))
+        })
+        .mount(&server)
+        .await;
+    let scope = scope(&store);
+    let attempt = AttemptContext::new(
+        RequestAttemptContext::new(
+            ModelRequestId::new("req_glm_timeout").unwrap(),
+            ClientApiKeyId::new("key_glm_fixture").unwrap(),
+        ),
+        NonZeroU32::MIN,
+        SystemTime::now() + Duration::from_secs(5),
+        AccountSelectionPolicy::new(
+            gateway_core::account::RotationStrategy::RoundRobin,
+            gateway_core::account::AccountConcurrency::new(2),
+        ),
+        AccountAttemptContext::new(BTreeSet::new(), None, None).with_account_scope(scope.clone()),
+        None,
+        CancellationToken::new(),
+    );
+    let mut response = provider(store.clone())
+        .execute(
+            request(scope, json!({"model":"glm-5.3","input":"test"})),
+            attempt,
+        )
+        .await
+        .unwrap();
+    assert_eq!(store.in_flight.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        response.next().await.unwrap().unwrap_err().kind(),
+        ProviderErrorKind::Timeout
+    );
+    drop(response);
+    assert_eq!(store.in_flight.load(Ordering::SeqCst), 0);
+    assert_eq!(received.load(Ordering::SeqCst), 1);
 }

@@ -329,6 +329,49 @@ async fn connection_update_requires_admin_and_validates_before_calling_the_servi
 }
 
 #[tokio::test]
+async fn connection_model_catalog_is_bounded_and_forwarded_to_the_service() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    for (models, expected) in [
+        (
+            serde_json::json!(["glm-5.3", "glm-fixture"]),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (serde_json::json!([]), StatusCode::BAD_REQUEST),
+        (serde_json::json!([""]), StatusCode::BAD_REQUEST),
+        (
+            serde_json::json!(vec!["glm-fixture"; 129]),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            serde_json::json!("glm-5.3"),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let input = serde_json::json!({
+            "accountId":"acct_api", "enabled":true, "concurrencyLimit":null,
+            "weight":1, "groupIds":[],
+            "connection":{"transport":"http", "models":models}
+        });
+        let response = admin::router::<AdminTestState>()
+            .with_state(fixture.state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/admin/accounts/update")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("x-request-id", "req_connection_models")
+                    .header(header::COOKIE, "cpr_session=valid-session")
+                    .body(Body::from(input.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected, "{input}");
+    }
+}
+
+#[tokio::test]
 async fn personal_info_requires_admin_and_a_valid_account_query() {
     let fixture = AdminTestFixture::new().await;
     fixture.auth.insert_session("valid-session");

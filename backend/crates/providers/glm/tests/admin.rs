@@ -113,3 +113,127 @@ async fn ordinary_configuration_never_returns_the_upstream_key() {
     assert!(!object.contains_key("api_key"));
     assert_eq!(object["base_url"], "https://open.bigmodel.cn/api/v1");
 }
+
+#[tokio::test]
+async fn model_catalog_updates_preserve_key_and_health_and_reject_invalid_lists() {
+    use chrono::Utc;
+    use gateway_admin::model::{
+        Revision,
+        accounts::{AccountRecord, AccountWeight, CredentialState, QuotaState},
+        provider_credentials::PrepareCredentialRotation,
+    };
+    let store = Arc::new(Store::default());
+    store.add(
+        "acct_glm",
+        "glm",
+        "https://open.bigmodel.cn/api/v1",
+        "glm-5.3",
+    );
+    let admin = GlmAdmin::new(ProviderKind::new("glm").unwrap(), store);
+    let now = Utc::now();
+    let account = AccountRecord {
+        id: "acct_glm".to_owned(),
+        provider_kind: ProviderKind::new("glm").unwrap(),
+        groups: vec![],
+        name: "fixture".to_owned(),
+        notes: None,
+        email: None,
+        upstream_user_id: None,
+        upstream_account_id: None,
+        plan_type: Some("payg".to_owned()),
+        authentication_kind: "api_key".to_owned(),
+        credential_revision: Revision::new(1).unwrap(),
+        has_refresh_token: false,
+        access_token_expires_at: None,
+        next_refresh_at: None,
+        enabled: true,
+        concurrency_limit: None,
+        weight: AccountWeight::new(1).unwrap(),
+        model_access: Default::default(),
+        allow_credits: false,
+        outbound_proxy_id: None,
+        outbound_proxy: None,
+        outbound_proxy_enabled: true,
+        credential_state: CredentialState::Invalid,
+        credential_observed_at: now,
+        quota: QuotaState::unknown(),
+        last_error_reason: None,
+        last_error_message: None,
+        created_at: now,
+        updated_at: now,
+        scheduling_role: Default::default(),
+    };
+    let maximum_models = (0..128)
+        .map(|index| format!("glm-fixture-{index}"))
+        .collect::<Vec<_>>();
+    for (changes, expected_models, preserves_health) in [
+        (
+            json!({"models":["glm-5.3", "glm-fixture"]}),
+            json!(["glm-5.3", "glm-fixture"]),
+            true,
+        ),
+        (
+            json!({"models":maximum_models}),
+            json!(maximum_models),
+            true,
+        ),
+        (
+            json!({"base_url":"https://example.invalid/api/v1"}),
+            json!(["glm-5.3"]),
+            true,
+        ),
+        (
+            json!({"api_key":"replacement-fixture-key"}),
+            json!(["glm-5.3"]),
+            false,
+        ),
+    ] {
+        let rotated = admin
+            .prepare_rotation(PrepareCredentialRotation {
+                account: account.clone(),
+                provider_material: ProviderDocument::new(OpaqueProviderData::new(
+                    changes.as_object().unwrap().clone(),
+                )),
+            })
+            .await
+            .unwrap();
+        let facts = rotated.facts();
+        assert_eq!(facts.preserve_credential_state, preserves_health);
+        assert_eq!(facts.expected_credential_revision.get(), 1);
+        let material = facts
+            .provider_material
+            .expose_to_provider()
+            .expose_to_provider();
+        assert_eq!(material["models"], expected_models);
+        assert_eq!(
+            material["api_key"],
+            if preserves_health {
+                "fixture-key"
+            } else {
+                "replacement-fixture-key"
+            }
+        );
+    }
+    for models in [
+        json!([]),
+        json!(["gpt-example"]),
+        json!(["glm-5.3", "glm-5.3"]),
+        json!(
+            (0..129)
+                .map(|index| format!("glm-fixture-{index}"))
+                .collect::<Vec<_>>()
+        ),
+    ] {
+        assert!(
+            admin
+                .prepare_rotation(PrepareCredentialRotation {
+                    account: account.clone(),
+                    provider_material: ProviderDocument::new(OpaqueProviderData::new(
+                        json!({"models":models}).as_object().unwrap().clone()
+                    )),
+                })
+                .await
+                .is_err()
+        );
+    }
+}

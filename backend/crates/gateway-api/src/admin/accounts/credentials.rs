@@ -268,6 +268,7 @@ pub struct AccountConnectionUpdateRequest {
     pub base_url: Option<String>,
     pub transport: String,
     pub api_key: Option<String>,
+    pub models: Option<Vec<String>>,
 }
 
 impl AccountConnectionUpdateRequest {
@@ -277,6 +278,15 @@ impl AccountConnectionUpdateRequest {
         }
         if !matches!(self.transport.as_str(), "http" | "prefer_websocket") {
             return Err(WireValidationError::new("connection.transport"));
+        }
+        if self.models.as_ref().is_some_and(|models| {
+            models.is_empty()
+                || models.len() > 128
+                || models.iter().any(|model| {
+                    gateway_core::routing::UpstreamModelId::new(model.clone()).is_err()
+                })
+        }) {
+            return Err(WireValidationError::new("connection.models"));
         }
         if self.api_key.as_ref().is_some_and(|key| {
             key.is_empty()
@@ -296,6 +306,12 @@ impl AccountConnectionUpdateRequest {
         }
         if let Some(key) = self.api_key {
             material.insert("api_key".to_owned(), Value::String(key));
+        }
+        if let Some(models) = self.models {
+            material.insert(
+                "models".to_owned(),
+                Value::Array(models.into_iter().map(Value::String).collect()),
+            );
         }
         ProviderDocument::new(OpaqueProviderData::new(material))
     }

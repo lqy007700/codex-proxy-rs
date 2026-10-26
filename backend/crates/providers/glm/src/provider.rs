@@ -5,6 +5,7 @@ use crate::{
     response::{Decoder, error, upstream_error},
 };
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::StreamExt;
 use gateway_core::{
     account::{
@@ -285,6 +286,60 @@ impl GlmProvider {
         }
     }
 
+    async fn record_failure(
+        &self,
+        mut failure: ProviderError,
+        account: &gateway_core::account::ProviderAccount,
+        context: &AttemptContext,
+        retry_after: Option<Duration>,
+    ) -> ProviderError {
+        if failure.retry_after().is_none()
+            && let Some(delay) = retry_after
+        {
+            failure = failure.with_retry_after(delay);
+        }
+        if failure.kind() == ProviderErrorKind::Unauthorized
+            && (!context.is_diagnostic_required_account() || account.enabled())
+        {
+            let _ = self
+                .accounts
+                .apply_state_change(gateway_core::account::AccountStateChange {
+                    account_id: account.id().clone(),
+                    expected_revision: account.revision(),
+                    credential_state: gateway_core::account::CredentialState::Invalid,
+                    observed_at: SystemTime::now(),
+                    error_reason: Some(
+                        gateway_core::account::AccountErrorReason::CredentialInvalid,
+                    ),
+                    message: Some("智谱 API Key 认证失败".to_owned()),
+                })
+                .await;
+        }
+        let default_delay = match failure.kind() {
+            ProviderErrorKind::QuotaExhausted => Some(Duration::from_secs(30 * 60)),
+            ProviderErrorKind::Unauthorized => Some(Duration::from_secs(10 * 60)),
+            ProviderErrorKind::RateLimited => Some(Duration::from_secs(60)),
+            _ => None,
+        };
+        if !context.is_diagnostic_required_account()
+            && let Some(delay) = default_delay
+        {
+            let duration = failure
+                .retry_after()
+                .unwrap_or(delay)
+                .min(Duration::from_secs(24 * 3600));
+            let _ = self
+                .cooldowns
+                .put_if_later(ProviderCooldown::new(
+                    account.id().clone(),
+                    account.revision(),
+                    SystemTime::now() + duration,
+                ))
+                .await;
+        }
+        failure
+    }
+
     fn execute_selected(
         self: Arc<Self>,
         operation: Operation,
@@ -300,6 +355,7 @@ impl GlmProvider {
             ));
         };
         let body = prepare_body(&generate, &model, &context)?;
+        let headers = request_headers(&generate, headers)?;
         let credential = Credential::parse(selected.loaded.credential.expose_to_provider())
             .map_err(|_| infrastructure())?;
         if !credential.models.iter().any(|id| id == model.as_str()) {
@@ -343,45 +399,14 @@ impl GlmProvider {
             selected.capacity,
         ));
         let revision = selected.loaded.account.revision();
-        let account_id = selected.loaded.account.id().clone();
         let persisted = body.get("store").and_then(Value::as_bool) == Some(true);
         let feedback = self.feedback.clone();
         let events = async_stream::try_stream! {
             preflight(&context)?;
-            let mut request = client.post(credential.responses_url()).json(&body);
-            for header in headers {
-                let name = header.name().to_ascii_lowercase();
-                if !gateway_protocol::openai::is_transport_managed_request_header(&name)
-                    && !matches!(
-                        name.as_str(),
-                        "authorization"
-                            | "x-api-key"
-                            | "cookie"
-                            | "accept"
-                            | "content-type"
-                            | "chatgpt-account-id"
-                            | "openai-organization"
-                            | "openai-project"
-                    )
-                {
-                    let name =
-                        reqwest::header::HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
-                            error(
-                                ProviderErrorKind::InvalidRequest,
-                                UpstreamSendState::NotSent,
-                            )
-                        })?;
-                    let value =
-                        reqwest::header::HeaderValue::from_bytes(header.value()).map_err(|_| {
-                            error(
-                                ProviderErrorKind::InvalidRequest,
-                                UpstreamSendState::NotSent,
-                            )
-                        })?;
-                    request = request.header(name, value);
-                }
-            }
-            request = request
+            let request = client
+                .post(credential.responses_url())
+                .json(&body)
+                .headers(headers)
                 .bearer_auth(&credential.api_key)
                 .header("Accept", "text/event-stream")
                 .header("Content-Type", "application/json");
@@ -389,7 +414,7 @@ impl GlmProvider {
                     biased;
                 _=context.cancellation().cancelled()=>Err(error(ProviderErrorKind::Cancelled,UpstreamSendState::Ambiguous)),
                 _=context.deadline().wait()=>Err(error(ProviderErrorKind::Timeout,UpstreamSendState::Ambiguous)),
-                result=request.send()=>result.map_err(|failure|error(ProviderErrorKind::Transport,if failure.is_connect(){UpstreamSendState::NotSent}else{UpstreamSendState::Ambiguous})),
+                result=request.send()=>result.map_err(|failure|error(if failure.is_timeout(){ProviderErrorKind::Timeout}else{ProviderErrorKind::Transport},if failure.is_connect(){UpstreamSendState::NotSent}else{UpstreamSendState::Ambiguous})),
             }?;
             let status = response.status().as_u16();
             let retry_after = response
@@ -402,39 +427,12 @@ impl GlmProvider {
             yield ProviderEvent::observation(observation.clone());
             if !response.status().is_success() {
                 let value = read_error_body(&mut response, &context).await?;
-                let mut failure = upstream_error(status, &value);
-                if let Some(delay) = retry_after {
-                    failure = failure.with_retry_after(delay);
-                }
-                if failure.kind() == ProviderErrorKind::Unauthorized && (!context.is_diagnostic_required_account() || selected.loaded.account.enabled()) {
-                    let _ = self.accounts.apply_state_change(gateway_core::account::AccountStateChange {
-                        account_id: account_id.clone(), expected_revision: revision,
-                        credential_state: gateway_core::account::CredentialState::Invalid,
-                        observed_at: SystemTime::now(), error_reason: Some(gateway_core::account::AccountErrorReason::CredentialInvalid),
-                        message: Some("智谱 API Key 认证失败".to_owned()),
-                    }).await;
-                }
-                let duration = match failure.kind() {
-                    ProviderErrorKind::QuotaExhausted => Some(Duration::from_secs(30 * 60)),
-                    ProviderErrorKind::Unauthorized => Some(Duration::from_secs(10 * 60)),
-                    ProviderErrorKind::RateLimited => {
-                        Some(retry_after.unwrap_or(Duration::from_secs(60)))
-                    }
-                    _ => None,
-                };
-                if !context.is_diagnostic_required_account()
-                    && let Some(duration) = duration
-                {
-                    let _ = self
-                        .cooldowns
-                        .clone()
-                        .put_if_later(ProviderCooldown::new(
-                            account_id.clone(),
-                            revision,
-                            SystemTime::now() + duration.min(Duration::from_secs(24 * 3600)),
-                        ))
-                        .await;
-                }
+                let failure = self.record_failure(
+                    upstream_error(status, &value),
+                    &selected.loaded.account,
+                    &context,
+                    retry_after,
+                ).await;
                 Err(failure)?;
             }
             if !response
@@ -457,13 +455,21 @@ impl GlmProvider {
                 }?;
                 let ending = chunk.is_none();
                 let decoded = match chunk {
-                    Some(chunk) => decoder.push(&chunk.map_err(|_| {
-                        error(ProviderErrorKind::Transport, UpstreamSendState::Sent)
+                    Some(chunk) => decoder.push(&chunk.map_err(|failure| {
+                        error(if failure.is_timeout() { ProviderErrorKind::Timeout } else { ProviderErrorKind::Transport }, UpstreamSendState::Sent)
                     })?),
                     None => decoder.finish(),
                 };
                 for event in decoded {
-                    let mut event = event?;
+                    let mut event = match event {
+                        Ok(event) => event,
+                        Err(failure) => Err(self.record_failure(
+                            failure,
+                            &selected.loaded.account,
+                            &context,
+                            retry_after,
+                        ).await)?,
+                    };
                     let elapsed = context
                         .timing_started_at()
                         .elapsed()
@@ -555,7 +561,7 @@ impl Provider for GlmProvider {
             .into_iter()
             .map(|(model, accounts)| {
                 let capabilities =
-                    ModelCapabilities::new(BTreeSet::from([OperationKind::Generate]), Some(131072))
+                    ModelCapabilities::new(BTreeSet::from([OperationKind::Generate]), None)
                         .with_feature(Feature::Reasoning, SupportLevel::Native)
                         .with_feature(Feature::Tools, SupportLevel::Native)
                         .with_feature(Feature::NativeContinuation, SupportLevel::Native);
@@ -626,6 +632,101 @@ impl Provider for GlmProvider {
             )
             .await
     }
+}
+
+fn request_headers(
+    generate: &GenerateRequest,
+    middleware: Vec<gateway_core::engine::middleware::MiddlewareHeader>,
+) -> Result<reqwest::header::HeaderMap, ProviderError> {
+    use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+
+    let mut overrides = HeaderMap::new();
+    for header in middleware {
+        let name = HeaderName::from_bytes(header.name().as_bytes()).map_err(|_| {
+            error(
+                ProviderErrorKind::InvalidRequest,
+                UpstreamSendState::NotSent,
+            )
+        })?;
+        let value = HeaderValue::from_bytes(header.value()).map_err(|_| {
+            error(
+                ProviderErrorKind::InvalidRequest,
+                UpstreamSendState::NotSent,
+            )
+        })?;
+        overrides.append(name, value);
+    }
+    let mut headers = HeaderMap::new();
+    for entry in generate
+        .protocol_payload()
+        .context()
+        .get("opaque_request_headers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(entry) = entry.as_array().filter(|entry| entry.len() == 2) else {
+            continue;
+        };
+        let (Some(name), Some(value)) = (entry[0].as_str(), entry[1].as_str()) else {
+            continue;
+        };
+        let (Ok(name), Ok(bytes)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            STANDARD.decode(value),
+        ) else {
+            continue;
+        };
+        if !overrides.contains_key(&name)
+            && let Ok(value) = HeaderValue::from_bytes(&bytes)
+        {
+            headers.append(name, value);
+        }
+    }
+    for (name, value) in &overrides {
+        headers.append(name.clone(), value.clone());
+    }
+    let connection_options = headers
+        .get_all("connection")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(|value| value.trim().to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    let excluded = headers
+        .keys()
+        .filter(|name| {
+            connection_options.contains(name.as_str())
+                || gateway_protocol::openai::is_transport_managed_request_header(name.as_str())
+                || matches!(
+                    name.as_str(),
+                    "authorization"
+                        | "x-api-key"
+                        | "cookie"
+                        | "cookie2"
+                        | "accept"
+                        | "content-type"
+                        | "x-openai-actor-authorization"
+                        | "chatgpt-account-id"
+                        | "chatgpt-project-id"
+                        | "chatgpt-organization-id"
+                        | "chatgpt-org-id"
+                        | "x-codex-installation-id"
+                        | "openai-organization"
+                        | "openai-project"
+                        | "x-openai-account-routing-override"
+                        | "x-openai-fedramp"
+                        | "x-oai-attestation"
+                        | "x-oai-is"
+                        | "x-oai-is-update"
+                )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for name in excluded {
+        headers.remove(name);
+    }
+    Ok(headers)
 }
 
 pub(crate) fn prepare_body(
@@ -720,8 +821,16 @@ async fn read_error_body(
             _=context.deadline().wait()=>return Err(error(ProviderErrorKind::Timeout,UpstreamSendState::Sent)),
             next=response.chunk()=>next,
         };
-        let Some(next) =
-            next.map_err(|_| error(ProviderErrorKind::Transport, UpstreamSendState::Sent))?
+        let Some(next) = next.map_err(|failure| {
+            error(
+                if failure.is_timeout() {
+                    ProviderErrorKind::Timeout
+                } else {
+                    ProviderErrorKind::Transport
+                },
+                UpstreamSendState::Sent,
+            )
+        })?
         else {
             break;
         };

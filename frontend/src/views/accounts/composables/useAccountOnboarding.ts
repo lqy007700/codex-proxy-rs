@@ -7,7 +7,7 @@ import { errorMessage, generateRequestId } from '@/utils/operation'
 import { formatProviderLabel, isSupportedProvider } from '@/utils/providers'
 import { accountCreateProvider, accountCreateSourceKey, accountImportModes, accountImportSettings, accountProxyError, emptyAccountCreateForm } from '../utils/accountCreate'
 import { accountImportBatches, accountImportDocuments, mixedImportDocuments } from '../utils/accountImport'
-import { apiKeyAccountError, emptyApiKeyAccountForm } from '../utils/upstreamApiKey'
+import { apiKeyAccountError, apiKeyAccountModels, emptyApiKeyAccountForm } from '../utils/upstreamApiKey'
 import { useAccountAuthorization } from './useAccountAuthorization'
 
 export function useAccountOnboarding(options: {
@@ -68,14 +68,14 @@ export function useAccountOnboarding(options: {
         const apiKeyProvider = requireImportProvider(provider)
         if (!['openai', 'glm'].includes(apiKeyProvider))
           throw new Error('当前平台不支持 API Key 账号')
-        const error = apiKeyAccountError(form.apiKey)
+        const error = apiKeyAccountError(form.apiKey, false, apiKeyProvider)
         if (error)
           throw new Error(error)
         await importAccounts({
           provider: apiKeyProvider,
           settings,
           outboundProxyId,
-          data: { provider: apiKeyProvider, authentication_kind: 'api_key', name: form.apiKey.name.trim(), base_url: form.apiKey.base_url.trim(), api_key: form.apiKey.apiKey, transport: form.apiKey.transport },
+          data: { provider: apiKeyProvider, authentication_kind: 'api_key', name: form.apiKey.name.trim(), base_url: form.apiKey.base_url.trim(), api_key: form.apiKey.apiKey, transport: form.apiKey.transport, ...(apiKeyProvider === 'glm' ? { models: apiKeyAccountModels(form.apiKey) } : {}) },
         })
         await finishCreate('API Key 账号已添加')
         return

@@ -152,8 +152,20 @@ impl ProviderAccountStore for Store {
     ) -> Result<QuotaWriteOutcome, StoreError> {
         Err(StoreError::new(StoreErrorKind::Unavailable))
     }
-    async fn apply_state_change(&self, _change: AccountStateChange) -> Result<(), StoreError> {
-        Err(StoreError::new(StoreErrorKind::Unavailable))
+    async fn apply_state_change(&self, change: AccountStateChange) -> Result<(), StoreError> {
+        let mut rows = self.rows.lock().unwrap();
+        let row = rows
+            .get_mut(&change.account_id)
+            .filter(|row| row.account.revision() == change.expected_revision)
+            .ok_or_else(|| StoreError::new(StoreErrorKind::Conflict))?;
+        row.account = row.account.clone().with_account_facts(
+            row.account.enabled(),
+            change.credential_state,
+            row.account.quota(),
+            change.error_reason,
+            change.message,
+        );
+        Ok(())
     }
     async fn update_account(&self, _update: ProviderAccountUpdate) -> Result<(), StoreError> {
         Err(StoreError::new(StoreErrorKind::Unavailable))

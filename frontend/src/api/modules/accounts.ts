@@ -419,7 +419,7 @@ interface AccountResetCreditConsumeParam extends AccountIdParam {
 
 interface AccountUpdateParam {
   schedulingRole?: AccountSchedulingRole
-  connection?: { baseUrl?: string, transport: ApiKeyConfiguration['transport'], apiKey?: string }
+  connection?: { baseUrl?: string, transport: ApiKeyConfiguration['transport'], apiKey?: string, models?: string[] }
   outboundProxyUrl?: string
   outboundProxyId?: string
   accountId: string
@@ -731,6 +731,7 @@ export function completeAccountOAuth(data: AccountOAuthCompleteParam, options: R
 export interface ApiKeyConfiguration {
   base_url: string
   transport: 'http' | 'prefer_websocket'
+  models?: string[]
 }
 
 export function getAccountDetail(data: AccountIdParam, options: RequestOptions = {}) {

@@ -35,7 +35,7 @@ export function resolveAccountCreatePresentation(input: {
   if (form.mode === 'oauth')
     canSubmit &&= Boolean(authorization.flow && input.callback.trim())
   else if (form.mode === 'api_key')
-    canSubmit &&= !apiKeyAccountError(form.apiKey)
+    canSubmit &&= !apiKeyAccountError(form.apiKey, false, id)
   else
     canSubmit &&= Boolean(form.importTexts[form.mode].trim())
 

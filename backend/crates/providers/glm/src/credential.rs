@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::BTreeSet;
 use zeroize::Zeroize;
 
 pub(crate) const DEFAULT_BASE_URL: &str = "https://open.bigmodel.cn/api/v1";
@@ -65,6 +66,7 @@ impl Credential {
             || url.fragment().is_some()
             || self.models.is_empty()
             || self.models.len() > 128
+            || self.models.iter().collect::<BTreeSet<_>>().len() != self.models.len()
             || self.models.iter().any(|model| {
                 !model.starts_with("glm-")
                     || gateway_core::routing::UpstreamModelId::new(model.clone()).is_err()

@@ -7,7 +7,7 @@ import { useRequestState } from '@/composables/useRequestState'
 import { notification as ZNotification } from '@/utils/notification'
 import { accountModelAccessError } from '../utils/modelAccess'
 import { concurrencyLimitInput, parseAccountSchedulingForm } from '../utils/schedulingForm'
-import { apiKeyAccountError, emptyApiKeyAccountForm, isApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
+import { apiKeyAccountError, apiKeyAccountModels, emptyApiKeyAccountForm, isApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
 
 export function useAccountEditor(options: {
   reloadAccounts: () => Promise<unknown>
@@ -50,10 +50,10 @@ export function useAccountEditor(options: {
         configurationReady.value = true
         return
       }
-      const configuration = parseApiKeyConfiguration(detail.credentialConfiguration)
+      const configuration = parseApiKeyConfiguration(detail.credentialConfiguration, detail.account.provider)
       if (!configuration)
         throw new Error('该账号没有 API Key 上游设置')
-      apiKey.value = { ...emptyApiKeyAccountForm(), ...configuration }
+      apiKey.value = { ...emptyApiKeyAccountForm(detail.account.provider), base_url: configuration.base_url, transport: configuration.transport, modelsText: configuration.models?.join('\n') ?? '' }
       savedConfiguration.value = configuration
       configurationReady.value = true
     }
@@ -96,7 +96,7 @@ export function useAccountEditor(options: {
     if (isApiKey && !configurationReady.value)
       return
     if (isApiKey) {
-      const error = apiKeyAccountError(apiKey.value, true)
+      const error = apiKeyAccountError(apiKey.value, true, editingAccount.value?.provider)
       if (error) {
         ZNotification.warning({ message: error })
         return
@@ -129,15 +129,17 @@ export function useAccountEditor(options: {
         modelAccess: modelAccess.value,
         groupIds: [...new Set(selectedGroupIds.value)],
       }
+      const models = editingAccount.value?.provider === 'glm' ? apiKeyAccountModels(apiKey.value) : undefined
       const connectionChanged = isApiKey && (
         apiKey.value.apiKey !== ''
         || apiKey.value.base_url.trim() !== savedConfiguration.value?.base_url
         || apiKey.value.transport !== savedConfiguration.value?.transport
+        || JSON.stringify(models) !== JSON.stringify(savedConfiguration.value?.models)
       )
       await updateAccount({
         ...settings,
         connection: connectionChanged
-          ? { baseUrl: apiKey.value.base_url.trim(), transport: apiKey.value.transport, apiKey: apiKey.value.apiKey || undefined }
+          ? { baseUrl: apiKey.value.base_url.trim(), transport: apiKey.value.transport, apiKey: apiKey.value.apiKey || undefined, models }
           : isOAuth && configurationReady.value && oauthTransport.value !== savedOAuthTransport.value
             ? { transport: oauthTransport.value }
             : undefined,
