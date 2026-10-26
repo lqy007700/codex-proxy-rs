@@ -7,11 +7,11 @@
 
 | 项目 | 核对范围 |
 | --- | --- |
-| 核对日期 | 2026-10-23 |
-| 本仓库源码 | `4f70e364b449abc833997c456759a30fe63dcb7b`，源码版本以 [`release/version.yaml`](../release/version.yaml) 为准 |
-| 已合并上游基线 | `v3.29.7`，`78bc57c5cf24b01a38e985cdd739bb4ae89ce11f` |
+| 核对日期 | 2026-10-26 |
+| 本仓库源码 | `b4f9c942c03466d8c5519b6f91573ff1d1351afb`，源码版本以 [`release/version.yaml`](../release/version.yaml) 为准 |
+| 最近完整合并的上游基线 | `v3.29.7`，`78bc57c5cf24b01a38e985cdd739bb4ae89ce11f` |
 | 差异依据 | 上述上游基线到本仓库核对提交的最终文件差异，结合调用链和现有测试 |
-| 上游后续提交 | 单独记录于[上游同步清单](upstream-sync.md#暂未合并的上游更新)，不作为本仓库已有能力 |
+| 上游主题移植 | 已采用能力与暂缓项分别记录于[上游同步清单](upstream-sync.md)，核对目标为 `v3.32.0` |
 
 源码版本、发布完成和运行实例升级是不同事实，本文不代表某个实例已部署该版本。
 这里的“二开”包含主动定制和为保留本发行线而存在的兼容适配，不表示相关基础能力都由本仓库原创
@@ -57,7 +57,7 @@ Core 统一负责退避、阶段推进和安全重放，Provider 负责错误分
 
 | 职责 | 代码与回归入口 |
 | --- | --- |
-| 错误分类和重放资格 | [diagnostics.rs](../backend/crates/providers/openai/src/transport/diagnostics.rs)、[failure.rs](../backend/crates/providers/openai/src/provider/failure.rs)、[Provider 恢复测试](../backend/crates/providers/openai/tests/provider/contract/recovery.rs) |
+| 错误分类和重放资格 | [diagnostics.rs](../backend/crates/providers/openai/src/transport/diagnostics/mod.rs)、[failure.rs](../backend/crates/providers/openai/src/provider/failure.rs)、[Provider 恢复测试](../backend/crates/providers/openai/tests/provider/contract/selection_retry.rs) |
 | 共享预算、退避、换号和终态 | [coordinator.rs](../backend/crates/gateway-core/src/engine/coordinator.rs)、[recovery.rs](../backend/crates/gateway-core/src/engine/recovery.rs)、[协调器测试](../backend/crates/gateway-core/tests/engine/coordinator.rs) |
 | Provider 与插件的共同阶段约束 | [AttemptContext](../backend/crates/gateway-core/src/engine/mod.rs)、[插件错误投影](../backend/crates/gateway-plugin/runtime/src/callback/error.rs)、[插件设置快照](../backend/crates/gateway-plugin/sdk/src/call/services/settings.rs) |
 
