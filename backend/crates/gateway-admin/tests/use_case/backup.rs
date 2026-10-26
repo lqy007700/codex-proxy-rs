@@ -94,13 +94,16 @@ async fn backup_download_preserves_each_stored_archive_format() {
         let id = format!("backup_0123456789abcdef0123456789abcde{index}");
         let object_key = format!("codex/archive_{id}.{extension}");
         repository
-            .insert_backup_record(BackupRecordSeed {
-                id: id.clone(),
-                trigger_kind: BackupTriggerKind::Manual,
-                scheduled_at: None,
-                object_key: object_key.clone(),
-                expires_at: None,
-            }, &system_context())
+            .insert_backup_record(
+                BackupRecordSeed {
+                    id: id.clone(),
+                    trigger_kind: BackupTriggerKind::Manual,
+                    scheduled_at: None,
+                    object_key: object_key.clone(),
+                    expires_at: None,
+                },
+                &system_context(),
+            )
             .await
             .unwrap();
         repository.force_status(&id, BackupStatus::Completed);
