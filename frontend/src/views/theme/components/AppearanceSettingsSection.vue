@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import { ZButton, ZInput, ZNotification, ZPageHeader, ZScrollbar, ZSegmented } from '@codex-proxy/ui'
-
+import { ZButton, ZInput, ZPageHeader, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
 import { Check, RotateCcw, Save, Search, Undo2 } from '@lucide/vue'
+
+import { defineAsyncComponent } from 'vue'
+
+import { notification as ZNotification } from '@/utils/notification'
 
 import { useThemeEditor } from '../composables/useThemeEditor'
 import ThemeComponentTokenPanel from './ThemeComponentTokenPanel.vue'
-import ThemeEditorPreview from './ThemeEditorPreview.vue'
 import ThemeGlobalTokenPanel from './ThemeGlobalTokenPanel.vue'
+
+const ThemeEditorPreview = defineAsyncComponent({
+  loader: () => import('./ThemeEditorPreview.vue'),
+  loadingComponent: ZSkeleton,
+  delay: 200,
+  timeout: 30000,
+})
 
 const {
   draft,

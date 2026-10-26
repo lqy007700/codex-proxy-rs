@@ -1,7 +1,6 @@
 import type { Ref } from 'vue'
 import type { Account, AccountImportTask } from '@/api'
 import type { RequestOptions } from '@/api/request'
-import { ZNotification } from '@codex-proxy/ui'
 import { computed, ref, shallowReactive, watch } from 'vue'
 import {
   batchUpdateAccounts,
@@ -15,6 +14,7 @@ import {
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useDownload } from '@/composables/useDownload'
 import { useIdSet } from '@/composables/useIdSet'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage, withMinimumDuration } from '@/utils/operation'
 import { isSupportedProvider } from '@/utils/providers'
 

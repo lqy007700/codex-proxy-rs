@@ -1,8 +1,8 @@
 import type { PluginRefreshContext } from '../utils/actions'
 import type { PluginArtifact } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { deletePluginArtifact } from '@/api'
+import { notification as ZNotification } from '@/utils/notification'
 import { notifyPluginError } from '../utils/actions'
 
 export function usePluginArtifactActions({ refresh }: PluginRefreshContext) {

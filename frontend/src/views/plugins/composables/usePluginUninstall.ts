@@ -1,7 +1,7 @@
 import type { InstalledPlugin } from '../utils/catalog'
-import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { deletePluginArtifact, deletePluginInstance, disablePluginInstance, getPluginArtifacts, getPluginInstances } from '@/api'
+import { notification as ZNotification } from '@/utils/notification'
 import { notifyPluginError } from '../utils/actions'
 
 export function usePluginUninstall(refresh: () => Promise<void>) {

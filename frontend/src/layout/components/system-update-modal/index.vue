@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { SystemRestartPlan, SystemUpdateChannel, SystemUpdateDetail } from '@/api'
-import { ZButton, ZConfirmDialog, ZDialog, ZMarkdown, ZNotification, ZPopover, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
-
+import { ZButton, ZConfirmDialog, ZDialog, ZMarkdown, ZPopover, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
 import {
   ArrowUpCircle,
   Circle,
@@ -14,10 +13,12 @@ import {
   Terminal,
   TriangleAlert,
 } from '@lucide/vue'
+
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
 import { checkSystemRestart } from '@/api'
 import { normalizeSystemVersion, useSystemUpdateStore } from '@/stores/modules/system-update'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import {
   resolveSystemUpdateLogClasses,

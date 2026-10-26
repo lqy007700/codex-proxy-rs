@@ -7,11 +7,12 @@ import type {
   PluginFrontendIdentityBinding,
 } from '@/api'
 
-import { ZButton, ZFormItem, ZIconButton, ZInput, ZNotification, ZSegmented, ZSelect, ZSwitch } from '@codex-proxy/ui'
-
+import { ZButton, ZFormItem, ZIconButton, ZInput, ZSegmented, ZSelect, ZSwitch } from '@codex-proxy/ui'
 import { Plus, RefreshCw, Trash2 } from '@lucide/vue'
+
 import { computed, shallowRef, watch } from 'vue'
 import { getApiKeys } from '@/api'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import PluginHelpPopover from './PluginHelpPopover.vue'
 

@@ -1,10 +1,10 @@
 import type { ApiKey } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { revealApiKey } from '@/api'
 import { useCopyText } from '@/composables/useCopyText'
 import { useIdSet } from '@/composables/useIdSet'
 import { buildCodexCcSwitchImportDeeplink, resolveServiceRootUrl } from '@/utils/client'
+import { notification as ZNotification } from '@/utils/notification'
 
 // 明文读取、复制、展示与导入共用生命周期，列表数据不保存明文。
 export function useApiKeyUse() {

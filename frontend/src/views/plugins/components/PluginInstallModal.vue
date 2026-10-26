@@ -13,12 +13,13 @@ import type {
 } from '@/api'
 
 import { Github } from '@boxicons/vue'
-import { ZButton, ZCheckbox, ZDialog, ZForm, ZFormItem, ZInput, ZNotification, ZSegmented, ZTag } from '@codex-proxy/ui'
-
+import { ZButton, ZCheckbox, ZDialog, ZForm, ZFormItem, ZInput, ZSegmented, ZTag } from '@codex-proxy/ui'
 import { CheckCircle2, Download, FileArchive, Link, PackageOpen } from '@lucide/vue'
+
 import { useEventListener, useSessionStorage } from '@vueuse/core'
 import { isEqual } from 'es-toolkit'
 import { computed, nextTick, reactive, shallowRef, watch } from 'vue'
+import { notification as ZNotification } from '@/utils/notification'
 import { formatPluginFileSize, normalizePluginRepository, pluginInstallSelectionKey } from '../utils/model'
 import { selectPluginReleaseAsset } from '../utils/updates'
 import PluginAssetPicker from './PluginAssetPicker.vue'

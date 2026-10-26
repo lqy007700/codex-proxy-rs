@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ZButton, ZEmpty, ZNotification, ZSelect } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZSelect } from '@codex-proxy/ui'
 import { CircleAlert, LoaderCircle } from '@lucide/vue'
 import { computed, onScopeDispose, shallowRef, watch } from 'vue'
 import { getAccountGroups, getApiKeys } from '@/api'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
 const props = withDefaults(defineProps<{ kind: 'keys' | 'groups', disabled?: boolean, active?: boolean, maxCollapseTags?: number }>(), { active: true, maxCollapseTags: 1 })

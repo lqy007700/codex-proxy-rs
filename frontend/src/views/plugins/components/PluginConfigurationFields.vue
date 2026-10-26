@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { JsonSchema } from '../utils/model'
-import { ZEmpty, ZFormItem, ZInput, ZTag } from '@codex-proxy/ui'
 
+import { ZEmpty, ZFormItem, ZInput, ZSegmented, ZTag } from '@codex-proxy/ui'
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
 
 import SchemaForm from '@/components/schema-form/index.vue'
@@ -13,11 +13,9 @@ const props = withDefaults(defineProps<{
   schema: Record<string, unknown>
   secretFields: string[]
   existingSecretFields?: string[]
-  secretMode?: 'preserve' | 'replace' | 'clear'
   disabled?: boolean
 }>(), {
   existingSecretFields: () => [],
-  secretMode: 'replace',
   disabled: false,
 })
 
@@ -27,6 +25,7 @@ const emit = defineEmits<{
 
 const configuration = defineModel<Record<string, unknown>>('configuration', { required: true })
 const secrets = defineModel<Record<string, string>>('secrets', { required: true })
+const secretMode = defineModel<'preserve' | 'replace' | 'clear'>('secretMode', { required: true })
 const configurationText = shallowRef('{}')
 const schemaForm = useTemplateRef<{ focusField: (key?: string) => Promise<boolean> }>('schemaForm')
 const secretFieldsRoot = useTemplateRef<HTMLElement>('secretFieldsRoot')
@@ -52,6 +51,15 @@ const secretSchemas = computed(() => {
     required: required.includes(name),
   }))
 })
+const secretModes = [
+  { label: '保留现有值', value: 'preserve' },
+  { label: '替换全部', value: 'replace' },
+  { label: '清除全部', value: 'clear' },
+]
+const existingSecretLabels = computed(() => props.existingSecretFields.map(name => ({
+  name,
+  label: (props.schema as JsonSchema).properties?.[name]?.title || name,
+})))
 const requiredConfigurationFields = computed(() => (configurationSchema.value as JsonSchema).required ?? [])
 const missingConfigurationFields = computed(() => requiredConfigurationFields.value.filter(name =>
   !Object.hasOwn(configuration.value, name),
@@ -61,19 +69,19 @@ const configurationFieldErrors = computed(() => Object.fromEntries(
 ))
 const requiredSecretFields = computed(() => secretSchemas.value.filter(field => field.required))
 const missingSecretFields = computed(() => requiredSecretFields.value.filter((field) => {
-  if (props.secretMode === 'clear')
+  if (secretMode.value === 'clear')
     return true
-  if (props.secretMode === 'preserve')
+  if (secretMode.value === 'preserve')
     return !props.existingSecretFields.includes(field.name)
   return !valuePresent(secrets.value[field.name])
 }))
 const secretModeError = computed(() => {
-  if (props.secretMode === 'preserve' && props.existingSecretFields.some(name => !props.secretFields.includes(name)))
+  if (secretMode.value === 'preserve' && props.existingSecretFields.some(name => !props.secretFields.includes(name)))
     return '目标版本不支持部分已保存的敏感配置，请选择替换或清除'
-  if (!missingSecretFields.value.length || props.secretMode === 'replace')
+  if (!missingSecretFields.value.length || secretMode.value === 'replace')
     return ''
   const labels = missingSecretFields.value.map(field => field.schema.title || field.name).join('、')
-  return props.secretMode === 'clear'
+  return secretMode.value === 'clear'
     ? `必填敏感配置不能清除：${labels}`
     : `没有可保留的必填敏感配置：${labels}`
 })
@@ -83,7 +91,8 @@ const hasConfiguration = computed(() => {
     || (configurationSchema.value as JsonSchema).additionalProperties !== false
     || Object.keys(configuration.value).length > 0
 })
-const hasFields = computed(() => hasConfiguration.value || props.secretFields.length > 0)
+const hasSecrets = computed(() => props.secretFields.length > 0 || props.existingSecretFields.length > 0)
+const hasFields = computed(() => hasConfiguration.value || hasSecrets.value)
 
 function setSecret(name: string, value: unknown) {
   const next = { ...secrets.value }
@@ -138,7 +147,7 @@ async function focusInvalid() {
   }
   if (!missingSecretFields.value.length)
     return null
-  if (props.secretMode !== 'replace')
+  if (secretMode.value !== 'replace')
     return 'secretMode' as const
 
   await nextTick()
@@ -171,22 +180,37 @@ defineExpose({ focusInvalid, validationMessage })
       :field-errors="configurationFieldErrors"
     />
 
-    <template v-if="secretFields.length > 0">
+    <section v-if="hasSecrets" class="grid gap-3 rounded-cp bg-cp-fill-alter p-4" aria-label="敏感配置">
       <div class="flex min-w-0 flex-wrap items-center gap-2">
         <strong class="text-cp leading-none text-cp-text">敏感配置</strong>
-        <PluginHelpPopover label="敏感配置说明">
-          敏感配置单独保存，不回显已有值，选择保留时不会更改，选择替换时以本次填写的全部值覆盖
-        </PluginHelpPopover>
         <ZTag v-if="existingSecretFields.length > 0" type="success" size="small">
           已保存 {{ existingSecretFields.length }} 项
         </ZTag>
       </div>
-      <p v-if="secretMode === 'clear'" class="m-0 text-cp-xs text-cp-warning-text">
-        保存时清除全部敏感配置
+      <p class="m-0 text-cp-xs leading-relaxed text-cp-text-secondary">
+        用于令牌、密钥等机密参数，已保存的值不会回显
       </p>
-      <div ref="secretFieldsRoot" class="contents">
+      <ZSegmented
+        v-if="existingSecretFields.length"
+        v-model="secretMode"
+        :options="secretModes"
+        aria-label="敏感配置保存方式"
+        :disabled="disabled"
+        class="w-fit max-w-full"
+      />
+      <p v-if="secretModeError" role="alert" class="m-0 text-cp-xs leading-relaxed text-cp-warning-text">
+        {{ secretModeError }}
+      </p>
+      <ul v-if="secretMode === 'preserve'" class="m-0 flex list-none flex-wrap gap-2 p-0">
+        <li v-for="field in existingSecretLabels" :key="field.name" class="min-w-0 wrap-anywhere">
+          <ZTag type="primary">
+            {{ field.label }}
+          </ZTag>
+        </li>
+      </ul>
+      <div v-if="secretMode === 'replace'" ref="secretFieldsRoot" class="grid items-end gap-4 sm:grid-cols-2">
         <ZFormItem
-          v-for="field in secretMode === 'replace' ? secretSchemas : []"
+          v-for="field in secretSchemas"
           :key="field.name"
           :label="field.schema.title || field.name"
           :required="field.required"
@@ -204,11 +228,11 @@ defineExpose({ focusInvalid, validationMessage })
             :disabled="disabled"
             :aria-label="field.schema.title || field.name"
             :aria-invalid="field.required && !valuePresent(secrets[field.name])"
-            placeholder="输入新值"
+            :placeholder="existingSecretFields.includes(field.name) ? '留空将清除此项' : '输入新值'"
             @update:model-value="setSecret(field.name, $event)"
           />
         </ZFormItem>
       </div>
-    </template>
+    </section>
   </div>
 </template>

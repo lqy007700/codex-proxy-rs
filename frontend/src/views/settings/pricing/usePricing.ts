@@ -1,8 +1,8 @@
 import type { PricingCatalog, PricingChange, PricingSyncPreview } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { getPricing, previewPricingSync, syncPricing, updatePricing } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import { pricingProviders, pricingRows } from './model'
 

@@ -1,10 +1,10 @@
 import type { Ref } from 'vue'
 import type { ApiKey } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef, watch } from 'vue'
 import { deleteApiKey, disableApiKey, enableApiKey } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useIdSet } from '@/composables/useIdSet'
+import { notification as ZNotification } from '@/utils/notification'
 
 export function useApiKeyMutations(options: {
   selectedIds: Ref<Set<string>>

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ZFormItem as FormItem, ZButton, ZDialog, ZInput, ZNotification } from '@codex-proxy/ui'
+import { ZFormItem as FormItem, ZButton, ZDialog, ZInput } from '@codex-proxy/ui'
 import { computed, reactive, shallowRef, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { changeAdminPassword } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useAuthStore } from '@/stores/modules/auth'
+import { notification as ZNotification } from '@/utils/notification'
 
 const open = defineModel<boolean>({ default: false })
 const formId = useId()

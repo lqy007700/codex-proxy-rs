@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { ApiKey } from '@/api'
-import { ZButton, ZDialog, ZNotification, ZSegmented } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZSegmented } from '@codex-proxy/ui'
 import { ArrowRight } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import { resetApiKeyBudget } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
+import { notification as ZNotification } from '@/utils/notification'
 
 const props = defineProps<{ apiKey: ApiKey | null }>()
 const emit = defineEmits<{ reset: [] }>()

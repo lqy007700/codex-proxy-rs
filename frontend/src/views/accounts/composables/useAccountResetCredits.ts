@@ -1,12 +1,12 @@
 import type { AccountResetCredit } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { computed, shallowReactive, shallowRef, watch } from 'vue'
-
 import {
   consumeAccountResetCredit,
   getAccountResetCredits,
 } from '@/api'
+
 import { ApiError } from '@/api/request'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage, generateRequestId } from '@/utils/operation'
 
 interface PendingResetCreditOperation {

@@ -1,10 +1,10 @@
 import type { ApiKey } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
-import { ZNotification } from '@codex-proxy/ui'
 import { cloneDeep } from 'es-toolkit'
 import { ref, shallowRef } from 'vue'
 import { createApiKey, updateApiKey } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
+import { notification as ZNotification } from '@/utils/notification'
 
 export interface ApiKeyFormValue {
   providerRequestProfileOverrides: ProviderRequestProfiles
@@ -52,7 +52,7 @@ export function useApiKeyEditor(options: {
   }
 
   function requestSave() {
-    if (!validateForm() || savingKey.value)
+    if (savingKey.value)
       return
     if (form.value.groupIds.length === 0) {
       showAllAccountsConfirm.value = true
@@ -67,7 +67,7 @@ export function useApiKeyEditor(options: {
   }
 
   async function save() {
-    if (!validateForm() || savingKey.value)
+    if (savingKey.value)
       return
 
     await savingKeyAction.run(
@@ -114,34 +114,6 @@ export function useApiKeyEditor(options: {
       },
       { onError: () => void options.reload() },
     )
-  }
-
-  function validateForm() {
-    for (const [label, value] of [['日限额', form.value.dailyLimitUsd], ['周限额', form.value.weeklyLimitUsd]]) {
-      if (value.trim() && !/^\d{1,10}(?:\.\d{1,10})?$/.test(value.trim())) {
-        ZNotification.warning({ message: `${label}必须是非负金额，最多 10 位小数` })
-        return false
-      }
-    }
-    if (!form.value.name.trim()) {
-      ZNotification.warning({ message: '请输入 API Key 名称' })
-      return false
-    }
-    if (!editingKey.value && form.value.customKey && !/^[\x21-\x7E]+$/.test(form.value.customKey)) {
-      ZNotification.warning({ message: '自定义 Key 只能包含 HTTP 可传输的可见字符，不能包含空格或换行' })
-      return false
-    }
-    for (const [label, value] of [
-      ['最大并发', form.value.maxConcurrency],
-      ['每分钟请求数', form.value.requestsPerMinute],
-    ] as const) {
-      const parsed = Number(value)
-      if (!Number.isSafeInteger(parsed) || parsed < 0) {
-        ZNotification.warning({ message: `${label}必须是非负整数` })
-        return false
-      }
-    }
-    return true
   }
 
   function clearCustomKey() {

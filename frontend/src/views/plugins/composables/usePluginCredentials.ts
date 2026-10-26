@@ -1,10 +1,10 @@
 import type { Ref } from 'vue'
 import type { PluginRefreshContext } from '../utils/actions'
 import type { CreatePluginSourceCredentialRequest, PluginSourceCredential } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { createPluginSourceCredential, deletePluginSourceCredential } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
+import { notification as ZNotification } from '@/utils/notification'
 import { notifyPluginError } from '../utils/actions'
 
 interface CredentialContext extends PluginRefreshContext {
