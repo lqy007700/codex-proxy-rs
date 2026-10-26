@@ -1459,16 +1459,21 @@ async fn websocket_execute_response_create_request_should_return_error_terminal_
     assert!(response.body.contains("No tool output found"));
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn codex_backend_client_should_timeout_when_upstream_is_silent() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let (request_sent, request_received) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
+        let mut request_sent = Some(request_sent);
         let mut websockets = Vec::new();
         for _ in 0..2 {
             let (stream, _) = listener.accept().await.unwrap();
             let mut websocket = accept_codex_test_websocket(stream).await;
             let _message = websocket.next().await.unwrap().unwrap();
+            if let Some(sent) = request_sent.take() {
+                sent.send(()).unwrap();
+            }
             websockets.push(websocket);
         }
         futures::future::pending::<()>().await;
@@ -1482,12 +1487,23 @@ async fn codex_backend_client_should_timeout_when_upstream_is_silent() {
     request.set_previous_response_id(Some("resp_previous".to_string()));
     request.previous_response_scope = Some(PreviousResponseScope::Persisted);
 
-    let error = backend
-        .create_response(
-            &request,
-            request_context("req_silent_websocket", Some("chatgpt-account")),
-        )
+    let response = tokio::spawn(async move {
+        backend
+            .create_response(
+                &request,
+                request_context("req_silent_websocket", Some("chatgpt-account")),
+            )
+            .await
+    });
+    request_received
         .await
+        .expect("request reaches the WebSocket peer");
+    tokio::task::yield_now().await;
+    // 真实 TCP opening 完成后再推进虚拟空闲时间，避免快路径预算先于 I/O 被自动耗尽
+    tokio::time::pause();
+    let error = response
+        .await
+        .expect("response task completes")
         .expect_err("silent upstream should time out");
     server.abort();
 
@@ -1689,7 +1705,7 @@ async fn codex_backend_client_stream_should_reject_binary_websocket_event() {
     );
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn codex_backend_client_stream_should_keep_socket_after_structural_activity() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -1751,7 +1767,13 @@ async fn codex_backend_client_stream_should_keep_socket_after_structural_activit
         .expect("structural activity should keep the websocket stream open");
     let decision = response.websocket_pool_decision;
     let mut stream = response.body;
-    let mut body = String::new();
+    let first = stream
+        .next()
+        .await
+        .expect("structural frame arrives before virtual time advances")
+        .expect("structural frame is valid");
+    let mut body = std::str::from_utf8(&first).unwrap().to_owned();
+    tokio::time::pause();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.expect("delayed websocket stream chunk should be valid");
         body.push_str(std::str::from_utf8(&chunk).unwrap());
@@ -2001,6 +2023,12 @@ async fn codex_backend_client_stream_should_cancel_while_inbound_is_backpressure
                     | Some(Err(tungstenite::Error::Protocol(
                         tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
                     ))) => return,
+                    // 取消直接中止发送泵，仍有未读数据时 Darwin 可返回 TCP reset
+                    Some(Err(tungstenite::Error::Io(error)))
+                        if error.kind() == std::io::ErrorKind::ConnectionReset =>
+                    {
+                        return;
+                    }
                     Some(Ok(_)) => continue,
                     Some(Err(error)) => panic!("unexpected websocket cleanup error: {error}"),
                 }
@@ -2032,7 +2060,7 @@ async fn codex_backend_client_stream_should_cancel_while_inbound_is_backpressure
     server.await.unwrap();
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn codex_backend_client_stream_should_wait_for_terminal_after_active_websocket_gap() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -2084,6 +2112,7 @@ async fn codex_backend_client_stream_should_wait_for_terminal_after_active_webso
         .expect("stream should yield partial frame")
         .expect("partial frame should be valid");
     assert!(std::str::from_utf8(&first).unwrap().contains("partial"));
+    tokio::time::pause();
     tokio::time::advance(Duration::from_secs(30)).await;
     tokio::task::yield_now().await;
     let terminal = response
@@ -2101,7 +2130,7 @@ async fn codex_backend_client_stream_should_wait_for_terminal_after_active_webso
     );
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn codex_backend_client_stream_should_timeout_when_active_websocket_stalls() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -2146,6 +2175,7 @@ async fn codex_backend_client_stream_should_timeout_when_active_websocket_stalls
         .expect("stream should yield partial frame")
         .expect("partial frame should be valid");
     assert!(std::str::from_utf8(&first).unwrap().contains("partial"));
+    tokio::time::pause();
     tokio::time::advance(Duration::from_secs(5 * 60)).await;
     tokio::task::yield_now().await;
     let error = response
