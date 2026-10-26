@@ -182,7 +182,9 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 | 账号 | 账号列表在前、概览卡在后；启停调度开关紧邻状态，保留 WS 降级提示和保底标识 | [accounts/index.vue](../frontend/src/views/accounts/index.vue)、[AccountSchedulingSwitch.vue](../frontend/src/views/accounts/components/AccountSchedulingSwitch.vue)、[AccountIdentityCell.vue](../frontend/src/views/accounts/components/AccountIdentityCell.vue) |
 | 并发明细 | 显示当前占用与并发上限，提供手动刷新并保留每 5 秒自动刷新 | [AccountConcurrencyModal.vue](../frontend/src/views/accounts/components/AccountConcurrencyModal.vue)、[useAccountConcurrency.ts](../frontend/src/views/accounts/composables/useAccountConcurrency.ts) |
 | Dashboard | 请求健康时间线与账号概览优先于汇总统计卡 | [DashboardContent.vue](../frontend/src/views/dashboard/components/DashboardContent.vue) |
-| 导航 | 侧边栏隐藏主题设置入口，保留主题页面和路由 | [AppSidebar.vue](../frontend/src/layout/components/AppSidebar.vue) |
+| 列表与表单 | 账号及 API Key 排序偏好保存在当前浏览器；密钥表单按字段校验，校验失败时滚动并聚焦错误字段 | [useTableSort.ts](../frontend/src/composables/useTableSort.ts)、[ApiKeyFormModal.vue](../frontend/src/views/keys/components/ApiKeyFormModal.vue) |
+| 设置草稿 | 基础设置与备份草稿有未保存改动时，离开设置区域需要确认，取消离开保留输入，关闭或刷新页面使用浏览器原生提醒 | [useSettingsLeaveGuard.ts](../frontend/src/views/settings/composables/useSettingsLeaveGuard.ts)、[useBackupSettings.ts](../frontend/src/views/settings/composables/useBackupSettings.ts) |
+| 导航 | 侧边栏隐藏主题设置入口，保留主题页面和路由；移动端侧栏支持 Tab 焦点循环、Esc 关闭及关闭后恢复焦点 | [布局](../frontend/src/layout/index.vue)、[AppSidebar.vue](../frontend/src/layout/components/AppSidebar.vue) |
 
 出口检测区分显式代理和直连的失败文案，显式代理连接失败不能偷偷改为直连。
 管理员 API 保留 `/api/admin/proxies/probe/direct`，返回网关直连出口与地区；前端 API 封装不代表页面已有独立按钮。

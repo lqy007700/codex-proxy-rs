@@ -360,6 +360,9 @@ Key 创建与编辑共用 `useApiKeyEditor` 和 `ApiKeyFormModal`，创建结果
 用量表格的列、展示投影及健康时间线规则集中在 `components/usage/shared/`，管理页面与 Key 用量页共用展示，
 各自的查询仍使用对应身份允许的 API
 
+管理端通过 `ZConfigProvider` 使用简体中文组件文案，独立渲染的通知统一使用 `utils/notification.ts` 中的中文实例。
+组件库中的主题预置展示名称从同一中文语言包读取，不依赖组件库默认语言
+
 `useRequestState` 管理取消、请求序号与失效结果；分页按接口合同分别复用 `usePagedQuery` 或 `useStablePagedQuery`。
 `useAsyncAction` 的 `loading` 是动作进行状态，调用方直接使用；接口错误由请求层提示，本地操作错误按动作配置处理。
 可由草稿与保存快照比较得到的修改状态使用派生值，不另维护同步标志。
