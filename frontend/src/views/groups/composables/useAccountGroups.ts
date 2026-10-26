@@ -1,7 +1,7 @@
 import type { AccountGroup, ApiKey, FastMode } from '@/api'
-import { normalizeRgbaHexColor, ZNotification } from '@codex-proxy/ui'
-
+import { normalizeRgbaHexColor } from '@codex-proxy/ui'
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+
 import {
   createAccountGroup,
   deleteAccountGroup,
@@ -15,6 +15,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useIdSet } from '@/composables/useIdSet'
 import { usePagedQuery } from '@/composables/usePagedQuery'
 import { useRequestState } from '@/composables/useRequestState'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import { DEFAULT_ACCOUNT_GROUP_COLOR } from '../constants'
 

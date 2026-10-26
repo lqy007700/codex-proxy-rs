@@ -1,6 +1,6 @@
 import type { BackupSettingsView, UpdateBackupStoragePayload } from '@/api'
 
-import { ZNotification } from '@codex-proxy/ui'
+import { isEqual } from 'es-toolkit'
 import { computed, ref, shallowRef } from 'vue'
 import {
   getBackupSettings,
@@ -8,6 +8,7 @@ import {
   updateBackupSchedule,
   updateBackupStorage,
 } from '@/api'
+import { notification as ZNotification } from '@/utils/notification'
 
 /** 存储与计划配置共用的加载/保存/测试 composable。 */
 export function useBackupSettings() {
@@ -39,6 +40,10 @@ export function useBackupSettings() {
     retentionCount: '7',
   })
 
+  const savedStorage = shallowRef({ ...storage.value })
+  const savedSchedule = shallowRef({ ...schedule.value })
+  const hasChanges = computed(() => loaded.value && (!isEqual(storage.value, savedStorage.value) || !isEqual(schedule.value, savedSchedule.value)))
+
   async function load(): Promise<void> {
     if (loaded.value || busy.value)
       return
@@ -67,6 +72,7 @@ export function useBackupSettings() {
       prefix: data.prefix ?? 'backups/',
       forcePathStyle: data.forcePathStyle,
     }
+    savedStorage.value = { ...storage.value }
   }
 
   function applySchedule(data: BackupSettingsView): void {
@@ -76,6 +82,7 @@ export function useBackupSettings() {
       retentionDays: String(data.retentionDays),
       retentionCount: String(data.retentionCount),
     }
+    savedSchedule.value = { ...schedule.value }
   }
 
   function storagePayload(): UpdateBackupStoragePayload {
@@ -100,8 +107,10 @@ export function useBackupSettings() {
       const schedulePaused = storageChanged && schedule.value.scheduleEnabled && !data.scheduleEnabled
       applyStorage(data)
       // 仅存储版本变化时同步服务端暂停状态，普通保存不覆盖计划草稿。
-      if (storageChanged)
+      if (storageChanged) {
         schedule.value.scheduleEnabled = data.scheduleEnabled
+        savedSchedule.value = { ...savedSchedule.value, scheduleEnabled: data.scheduleEnabled }
+      }
       ZNotification.success({ message: schedulePaused ? '存储配置已保存，定时备份已暂停，请测试连接后重新启用' : '存储配置已保存' })
       return true
     }
@@ -166,6 +175,7 @@ export function useBackupSettings() {
     testing,
     savingSchedule,
     loaded,
+    hasChanges,
     verified,
     storage,
     schedule,

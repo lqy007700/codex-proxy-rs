@@ -15,12 +15,12 @@ pub(crate) use http::{
     responses,
 };
 pub use http::{collect_execution_response, stream_execution_response};
-pub(crate) use request::decode_request_with_body;
 pub(crate) use request::decompress_request_body;
 pub use request::{
     ContinuationIntent, DecodedResponsesRequest, OpenAiRequestHeaders, ResponsesRequestMetadata,
     decode_request_with_headers,
 };
+pub(crate) use request::{decode_request_with_body, passthrough_request_headers};
 pub use response::OpenAiResponsesEncoder;
 pub(crate) use websocket::responses_websocket;
 pub use websocket::{ResponseCreateFrameError, decode_response_create_with_context};

@@ -1,9 +1,9 @@
 import type { Ref } from 'vue'
 import type { Account, AccountQuotaForecastResponse } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { onScopeDispose, shallowRef, watch } from 'vue'
 import { getAccountQuotaForecast, refreshAccountQuota } from '@/api'
 import { useRequestState } from '@/composables/useRequestState'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
 export function useAccountQuotaForecast(

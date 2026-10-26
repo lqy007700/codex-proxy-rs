@@ -1,14 +1,14 @@
 import type { rotationOptions } from '../constants'
 import type { AccountAffinity, CodexPrivacyPolicy, SmartSchedulingConfig } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
-import { ZNotification } from '@codex-proxy/ui'
 import { cloneDeep, isEqual } from 'es-toolkit'
-
 import { computed, onScopeDispose, reactive, ref, shallowRef } from 'vue'
+
 import { detectRequestLocation, getSettings, updateSettings } from '@/api'
 import { ApiError } from '@/api/request'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { normalizeRequestLocation, requestLocationError } from '@/utils/location'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
 type RotationStrategy = (typeof rotationOptions)[number]['value']

@@ -45,11 +45,13 @@ fn host_compatibility_requires_the_trusted_middleware_contract() {
     assert!(!compatibility.supports_capability("middleware", 2));
     assert!(!compatibility.supports_capability("middleware", 3));
     assert!(!compatibility.supports_capability("middleware", 4));
-    assert!(compatibility.supports_capability("middleware", 5));
+    assert!(!compatibility.supports_capability("middleware", 5));
+    assert!(compatibility.supports_capability("middleware", 6));
     assert!(!compatibility.supports_capability("upstream_adapter", 1));
     assert!(!compatibility.supports_capability("upstream_adapter", 2));
     assert!(!compatibility.supports_capability("upstream_adapter", 3));
-    assert!(compatibility.supports_capability("upstream_adapter", 4));
+    assert!(!compatibility.supports_capability("upstream_adapter", 4));
+    assert!(compatibility.supports_capability("upstream_adapter", 5));
     assert!(!compatibility.supports_capability("openai", 1));
 }
 
@@ -80,7 +82,7 @@ async fn package_inspector_returns_static_requirements_without_starting_the_plug
         requirements.protocol_version,
         gateway_plugin_sdk::PROTOCOL_VERSION
     );
-    assert_eq!(requirements.capabilities, vec![("middleware".into(), 5)]);
+    assert_eq!(requirements.capabilities, vec![("middleware".into(), 6)]);
 }
 
 #[tokio::test]

@@ -27,7 +27,7 @@ env:
 
 jobs:
   release-info:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     outputs:
       tag: ${{ steps.version.outputs.tag }}
@@ -165,7 +165,7 @@ jobs:
   frontend:
     if: inputs.reuse_run_id == ''
     needs: release-info
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     env:
       CI: 'true'
@@ -250,7 +250,7 @@ jobs:
       ${{ !cancelled() && needs.release-info.result == 'success' &&
           (inputs.reuse_run_id != '' ||
            (needs.frontend.result == 'success' && needs.build-docker-binary.result == 'success')) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       actions: read
@@ -433,7 +433,7 @@ jobs:
           needs.quality.result == 'success' && needs.package-assets.result == 'success' &&
           ((inputs.reuse_run_id != '' && needs.build-docker-image.result == 'skipped') ||
            (inputs.reuse_run_id == '' && needs.build-docker-image.result == 'success')) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       actions: read

@@ -12,6 +12,7 @@ const probeEnabled = defineModel<boolean>('probeEnabled', { required: true })
 const probeModel = defineModel<string>('probeModel', { required: true })
 const adaptiveConcurrency = defineModel<boolean>('adaptiveConcurrency', { required: true })
 const adaptiveConcurrencyHintId = useId()
+const probeModelId = useId()
 </script>
 
 <template>
@@ -93,6 +94,7 @@ const adaptiveConcurrencyHintId = useId()
       </ZFormItem>
       <ZFormItem
         label="恢复探测模型"
+        :for="probeModelId"
         description="启用后需探测成功才恢复，模型留空时选择首个可用模型"
       >
         <template #extra>
@@ -103,6 +105,7 @@ const adaptiveConcurrencyHintId = useId()
           />
         </template>
         <ZInput
+          :id="probeModelId"
           v-model="probeModel"
           :disabled="!enabled || !probeEnabled"
           aria-label="恢复探测模型"

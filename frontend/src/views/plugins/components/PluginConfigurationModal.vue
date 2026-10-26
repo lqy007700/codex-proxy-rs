@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { ConfigurePluginInstanceRequest, PluginArtifact, PluginInstance, PluginVersionPlan } from '@/api'
-import { ZButton, ZDialog, ZNotification, ZSegmented } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZSegmented } from '@codex-proxy/ui'
 import { Blocks, Save, Settings2, ShieldCheck } from '@lucide/vue'
 import { cloneDeep } from 'es-toolkit'
 import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { notification as ZNotification } from '@/utils/notification'
 import { pluginRequestBindingEntries } from '../utils/model'
 import PluginBindingEditor from './PluginBindingEditor.vue'
 import PluginConfigurationFields from './PluginConfigurationFields.vue'
@@ -45,11 +46,6 @@ const sections = computed(() => [
   ...(authenticationContribution.value ? [{ label: '客户端认证', value: 'authentication', icon: ShieldCheck }] : []),
 ])
 const primaryLabel = computed(() => versionChanged.value ? '应用并切换' : props.instance?.configurationRequired ? '保存并启用' : '保存设置')
-const secretModes = [
-  { label: '保留已有值', value: 'preserve' },
-  { label: '替换全部值', value: 'replace' },
-  { label: '清除全部值', value: 'clear' },
-]
 
 async function focusConfigurationInvalid() {
   section.value = 'general'
@@ -118,22 +114,14 @@ function clearSecrets() {
       </div>
       <ZSegmented v-if="sections.length > 1" v-model="section" :options="sections" aria-label="插件设置分区" :disabled="saving" class="w-fit max-w-full" />
       <div v-show="section === 'general'" class="grid gap-5">
-        <ZSegmented
-          v-if="existingSecretFields.length"
-          v-model="secretMode"
-          :options="secretModes"
-          aria-label="敏感配置保存方式"
-          :disabled="saving"
-          class="w-full sm:w-auto"
-        />
         <PluginConfigurationFields
           ref="configurationFields"
           v-model:configuration="configuration"
           v-model:secrets="secretValues"
+          v-model:secret-mode="secretMode"
           :schema="artifact.metadata.configurationSchema"
           :secret-fields="artifact.metadata.secretFields"
           :existing-secret-fields="existingSecretFields"
-          :secret-mode="secretMode"
           :disabled="saving"
           @validity-change="configurationValid = $event"
         />

@@ -4,9 +4,10 @@ import type { AccountGroupRef } from '@/api'
 import { ZButton, ZDialog, ZForm, ZFormItem, ZInput } from '@codex-proxy/ui'
 
 import { DollarSign, KeyRound } from '@lucide/vue'
-import { computed } from 'vue'
+import { computed, useTemplateRef, watch } from 'vue'
 import AccountGroupCheckboxGrid from '@/components/AccountGroupCheckboxGrid.vue'
 import ProviderRequestProfilesEditor from '@/components/client-profile/ProviderRequestProfilesEditor.vue'
+import { useApiKeyFormRules } from '../composables/useApiKeyFormRules'
 
 const props = defineProps<{
   groups: AccountGroupRef[]
@@ -21,6 +22,16 @@ const emit = defineEmits<{
 const open = defineModel<boolean>({ default: false })
 const form = defineModel<ApiKeyFormValue>('form', { required: true })
 const title = computed(() => props.editing ? '编辑密钥' : '创建 API Key')
+const formRef = useTemplateRef<InstanceType<typeof ZForm>>('formElement')
+const rules = useApiKeyFormRules()
+
+watch(open, () => formRef.value?.clearValidate())
+
+async function requestSave() {
+  if (props.saving || !await formRef.value?.validate().catch(() => false))
+    return
+  emit('save')
+}
 
 function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFormValue[Key]) {
   form.value = { ...form.value, [key]: value }
@@ -41,8 +52,8 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
       <KeyRound class="text-cp-text" :size="20" aria-hidden="true" />
     </template>
 
-    <ZForm class="grid gap-6">
-      <ZFormItem label="名称" required>
+    <ZForm ref="formElement" :model="form" :rules="rules" scroll-to-error focus-on-error novalidate class="grid gap-6" @submit="requestSave">
+      <ZFormItem prop="name" label="名称">
         <ZInput
           :model-value="form.name" aria-label="名称"
           placeholder="例如：生产环境"
@@ -63,6 +74,7 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
 
         <ZFormItem
           v-if="!editing"
+          prop="customKey"
           label="自定义 Key（可选）"
         >
           <ZInput
@@ -96,7 +108,7 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
       </ZFormItem>
 
       <div class="grid gap-6 sm:grid-cols-2">
-        <ZFormItem label="日限额">
+        <ZFormItem prop="dailyLimitUsd" label="日限额">
           <ZInput
             :model-value="form.dailyLimitUsd" type="number"
             min="0"
@@ -111,7 +123,7 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
             </template>
           </ZInput>
         </ZFormItem>
-        <ZFormItem label="周限额">
+        <ZFormItem prop="weeklyLimitUsd" label="周限额">
           <ZInput
             :model-value="form.weeklyLimitUsd" type="number"
             min="0"
@@ -129,7 +141,7 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
       </div>
 
       <div class="grid gap-6 sm:grid-cols-2">
-        <ZFormItem label="最大并发">
+        <ZFormItem prop="maxConcurrency" label="最大并发">
           <ZInput
             :model-value="form.maxConcurrency" type="number"
             aria-label="最大并发"
@@ -140,7 +152,7 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
             @update:model-value="updateForm('maxConcurrency', $event)"
           />
         </ZFormItem>
-        <ZFormItem label="每分钟请求数（RPM）">
+        <ZFormItem prop="requestsPerMinute" label="每分钟请求数（RPM）">
           <ZInput
             :model-value="form.requestsPerMinute" type="number"
             aria-label="每分钟请求数（RPM）"
@@ -161,8 +173,7 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
       <ZButton
         type="primary"
         :loading="saving"
-        :disabled="!form.name.trim()"
-        @click="emit('save')"
+        @click="requestSave"
       >
         {{ editing ? '保存更改' : '创建' }}
       </ZButton>

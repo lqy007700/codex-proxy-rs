@@ -1,8 +1,8 @@
-import { ZNotification } from '@codex-proxy/ui'
 import { computed, shallowRef, watch } from 'vue'
 import { getProxyAccounts, removeProxyAccount } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { usePagedQuery } from '@/composables/usePagedQuery'
+import { notification as ZNotification } from '@/utils/notification'
 
 export function useProxyAccounts(options: {
   isOpen: () => boolean

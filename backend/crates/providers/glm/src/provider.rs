@@ -598,7 +598,10 @@ impl Provider for GlmProvider {
             ));
         };
         prepare_body(generate, &model, &context)?;
-        if context.upstream_adapter(&self.kind, &model)?.is_some() {
+        if !matches!(
+            context.upstream_adapter(&self.kind, &model)?,
+            gateway_core::engine::upstream_adapter::UpstreamAdapterSelection::Native
+        ) {
             return Err(error(
                 ProviderErrorKind::Unsupported,
                 UpstreamSendState::NotSent,

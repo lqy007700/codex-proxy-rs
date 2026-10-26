@@ -1,6 +1,6 @@
 import type { RequestConfig } from '../index'
 import type { RequestContext, RequestNext } from './index'
-import { ZNotification } from '@codex-proxy/ui'
+import { notification as ZNotification } from '@/utils/notification'
 import { ApiError, isSessionRequired } from './error'
 
 // 会话失效是后端业务事实，登录凭据错误和 403 不清除已有会话

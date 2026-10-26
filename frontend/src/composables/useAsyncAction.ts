@@ -1,7 +1,7 @@
-import { ZNotification } from '@codex-proxy/ui'
-
 import { shallowRef } from 'vue'
+
 import { ApiError } from '@/api/request'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage, withMinimumDuration } from '@/utils/operation'
 
 type MaybePromise<T> = T | Promise<T>

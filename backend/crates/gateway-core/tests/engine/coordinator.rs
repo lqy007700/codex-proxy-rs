@@ -1449,6 +1449,16 @@ fn success_updates_one_model_request_and_persists_usage() {
     assert!(finalization.committed);
     assert_eq!(finalization.client_status_code, Some(200));
     assert_eq!(finalization.total_tokens, Some(12));
+    let trace: Value =
+        serde_json::from_str(finalization.diagnostic_trace_json.as_deref().unwrap()).unwrap();
+    let evidence = trace["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["stage"] == "request.usage")
+        .unwrap();
+    assert_eq!(evidence["data"]["totalTokens"], 12);
+    assert_eq!(evidence["data"]["downstreamCommitted"], true);
     assert!(finalization.latency_ms.is_some());
     assert_eq!(finalization.client_response_id.as_deref(), Some(started_id));
     assert_eq!(
@@ -1734,6 +1744,16 @@ fn failure_request_id_prefers_error_then_response_observation() {
             Some(error_request_id.unwrap_or("upstream-opening"))
         );
         assert_eq!(finalization.upstream_status_code, Some(400));
+        let trace: Value =
+            serde_json::from_str(finalization.diagnostic_trace_json.as_deref().unwrap()).unwrap();
+        assert!(
+            trace["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|event| event["stage"] == "request.usage"
+                    && event["data"]["boundary"] == "finalization_prepared")
+        );
     }
 }
 

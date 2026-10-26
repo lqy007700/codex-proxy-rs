@@ -1,10 +1,10 @@
 import type { Account, AccountModelAccess, ApiKeyConfiguration } from '@/api'
 
-import { ZNotification } from '@codex-proxy/ui'
 import { ref, shallowRef, watch } from 'vue'
 import { getAccountDetail, updateAccount } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
+import { notification as ZNotification } from '@/utils/notification'
 import { accountModelAccessError } from '../utils/modelAccess'
 import { concurrencyLimitInput, parseAccountSchedulingForm } from '../utils/schedulingForm'
 import { apiKeyAccountError, emptyApiKeyAccountForm, isApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'

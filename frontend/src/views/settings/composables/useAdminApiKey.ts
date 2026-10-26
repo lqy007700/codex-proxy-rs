@@ -1,6 +1,5 @@
-import { ZNotification } from '@codex-proxy/ui'
-
 import { reactive, shallowRef } from 'vue'
+
 import {
   deleteAdminApiKey,
   getAdminApiKeyStatus,
@@ -8,6 +7,7 @@ import {
 } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useCopyText } from '@/composables/useCopyText'
+import { notification as ZNotification } from '@/utils/notification'
 
 export function useAdminApiKey() {
   const loading = shallowRef(true)

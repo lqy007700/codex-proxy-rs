@@ -72,7 +72,7 @@ mod usage;
 mod websocket;
 mod websocket_pool;
 
-fn websocket_accept_config() -> WebSocketConfig {
+pub(crate) fn websocket_accept_config() -> WebSocketConfig {
     let mut extensions = ExtensionsConfig::default();
     extensions.permessage_deflate = Some(DeflateConfig::default());
     let mut config = WebSocketConfig::default();
@@ -140,6 +140,7 @@ fn test_wire_profile() -> CodexWireProfileState {
         terminal: "transport-test".to_owned(),
         exact_user_agent: None,
         residency: None,
+        account_routing_override: None,
         verified_at: Utc::now(),
     })
 }

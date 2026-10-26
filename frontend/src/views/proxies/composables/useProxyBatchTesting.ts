@@ -1,8 +1,8 @@
 import type { ProxyTestExecutor } from './useProxyBatchTest'
 import type { OutboundProxyRecord } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { getProxies } from '@/api'
 import { useRequestState } from '@/composables/useRequestState'
+import { notification as ZNotification } from '@/utils/notification'
 import { useProxyBatchTest } from './useProxyBatchTest'
 
 export function useProxyBatchTesting(options: { test: ProxyTestExecutor, reload: () => Promise<unknown> }) {

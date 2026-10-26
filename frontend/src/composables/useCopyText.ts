@@ -1,6 +1,6 @@
-import { ZNotification } from '@codex-proxy/ui'
-
 import { useClipboard } from '@vueuse/core'
+
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
 interface CopyTextOptions {

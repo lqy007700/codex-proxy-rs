@@ -1,7 +1,6 @@
 import type { Account, AccountModelsResponse } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
-
 import { CheckCircle2, Clock3, Wifi, XCircle } from '@lucide/vue'
+
 import { useEventSource } from '@vueuse/core'
 import { clamp } from 'es-toolkit'
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
@@ -9,6 +8,7 @@ import { getAccountModels, refreshAccountModels } from '@/api'
 import { API_BASE_URL } from '@/api/constants'
 import { useIdSet } from '@/composables/useIdSet'
 import { useRequestState } from '@/composables/useRequestState'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage, withMinimumDuration } from '@/utils/operation'
 
 interface ConnectionTestRun {

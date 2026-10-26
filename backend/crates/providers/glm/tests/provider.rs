@@ -593,3 +593,97 @@ async fn busy_account_returns_capacity_error_without_sending_or_leaking_lease() 
     assert!(server.received_requests().await.unwrap().is_empty());
     assert_eq!(store.in_flight.load(Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn adapter_selection_preserves_native_execution_and_rejects_unresolved_accounts() {
+    use gateway_core::{
+        account::ProviderAccountId,
+        engine::upstream_adapter::{
+            FrozenUpstreamAdapterPlan, UpstreamAdapterPlan, UpstreamAdapterSelection,
+        },
+        error::ProviderError,
+        routing::extensions::{ExtensionSetId, ExtensionSetLease, ExtensionSetReference},
+        upstream::UpstreamSendState,
+    };
+
+    struct ReadyLease;
+    impl ExtensionSetLease for ReadyLease {
+        fn is_ready(&self) -> bool {
+            true
+        }
+    }
+
+    #[derive(Debug)]
+    struct SelectionPlan {
+        pending: bool,
+    }
+    impl UpstreamAdapterPlan for SelectionPlan {
+        fn select(
+            &self,
+            _: &AttemptContext,
+            _: &ProviderKind,
+            _: &UpstreamModelId,
+            _: Option<&ProviderAccountId>,
+        ) -> Result<UpstreamAdapterSelection, ProviderError> {
+            Ok(if self.pending {
+                UpstreamAdapterSelection::PendingAccount
+            } else {
+                UpstreamAdapterSelection::Native
+            })
+        }
+    }
+
+    for pending in [false, true] {
+        let (server, store) = setup().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(stream(normal()), "text/event-stream"),
+            )
+            .mount(&server)
+            .await;
+        let scope = scope(&store);
+        let ctx = AttemptContext::new(
+            RequestAttemptContext::new(
+                ModelRequestId::new("req_glm_adapter").unwrap(),
+                ClientApiKeyId::new("key_glm_fixture").unwrap(),
+            )
+            .with_upstream_adapters(Some(FrozenUpstreamAdapterPlan::new(
+                Arc::new(SelectionPlan { pending }),
+                ExtensionSetReference::new(
+                    ExtensionSetId::new("glm-adapter-selection".to_owned()).unwrap(),
+                    Arc::new(ReadyLease),
+                ),
+            ))),
+            NonZeroU32::MIN,
+            SystemTime::now() + Duration::from_secs(5),
+            AccountSelectionPolicy::new(
+                gateway_core::account::RotationStrategy::RoundRobin,
+                gateway_core::account::AccountConcurrency::new(2),
+            ),
+            AccountAttemptContext::new(BTreeSet::new(), None, None)
+                .with_account_scope(scope.clone()),
+            None,
+            CancellationToken::new(),
+        );
+        let result = provider(store.clone())
+            .execute(
+                request(scope, json!({"model":"glm-5.3","input":"test"})),
+                ctx,
+            )
+            .await;
+        if pending {
+            let failure = result.err().unwrap();
+            assert_eq!(failure.kind(), ProviderErrorKind::Unsupported);
+            assert_eq!(failure.send_state(), UpstreamSendState::NotSent);
+            assert!(server.received_requests().await.unwrap().is_empty());
+        } else {
+            let mut result = result.unwrap();
+            while let Some(event) = result.next().await {
+                event.unwrap();
+            }
+            drop(result);
+            assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        }
+        assert_eq!(store.in_flight.load(Ordering::SeqCst), 0);
+    }
+}

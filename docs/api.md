@@ -314,8 +314,10 @@ API Key 与 OAuth 共用模拟客户端画像（`User-Agent`、`originator`、`v
 包括会话、线程、Lite 和其他业务扩展头。
 上游认证只来自选中的账号；API Key 不携带 OAuth Cookie、ChatGPT 账号身份或下游的
 `X-OpenAI-Actor-Authorization` 托管认证声明。
-下游的 `x-openai-account-routing-override`、`x-openai-fedramp` 也不透传，
-工作区路由与合规属性不能从原账号继承。
+下游的 `x-openai-internal-codex-residency`、`x-openai-account-routing-override`、`x-openai-fedramp`
+也不透传，地域、工作区路由与合规属性不能从原账号继承。
+前两项仅按部署配置 `openai.residency`、`openai.account_routing_override` 的字符串值生成，
+省略或 `null` 时不发送，配置说明见 [部署与运维](../deploy/README.md#启动后的运行设置)
 上述过滤描述原生转发；已信任插件的显式 header 改写可以覆盖账号与画像生成的默认头，
 不按认证或会话字段名称拦截，边界见 [SDK 请求中间件](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#模型请求与-attempt)
 
@@ -326,7 +328,21 @@ Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和
 两者同时存在时仍优先使用 `session-id`。正文中的 `client_metadata.session_id`、
 `prompt_cache_key` 不受这条请求头规则影响。
 `thread-id`、turn metadata 等 Codex 协议字段及未知业务扩展不受下游环境头过滤规则影响；
-`traceparent`、`tracestate` 不因属于追踪字段而被删除
+出站移除下游的 `traceparent`、`tracestate` 及 WS metadata 中对应的
+`ws_request_header_traceparent`、`ws_request_header_tracestate`
+
+会话、线程、窗口及父子线程引用在出站时按本次安装身份稳定映射为 UUID；
+默认使用账号安装身份，同账号保留引用关系，换账号使用不同标识。HTTP 请求头、正文 metadata、WS 副本及
+已识别的 Desktop 自动 Git 上下文使用一致映射。
+轮次及父子轮次引用保留客户端原值，包括输入项的 `internal_chat_message_metadata_passthrough.turn_id`、
+请求 metadata 中的 `turn_id`、`parent_turn_id`、`root_turn_id`，以及 `x-client-turn-id`、
+Images 的 `x-codex-image-turn-id` 和 Desktop 自动 Git 上下文的 `clientUserMessageId`。
+输入项元数据保持不变。Search 的会话 `id` 按同一安装身份域映射，只替换该值的原始字节，其余正文保持不变。
+`prompt_cache_key` 同样按安装身份映射，保留同一身份内的缓存共享关系；未提供时不补造。
+受信任插件可读取原始请求，自行生成身份并在 `outbound` 改写完整请求与关联字段；宿主不重新派生或补回业务字段，
+实际选号与计费归属保持不变，详见 [SDK 出站请求准备](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#上游出站准备)。
+续接 response ID、历史 item/call ID、业务正文和未知扩展不参与映射，
+该处理减少显式追踪标识的跨账号复用，不保证会话内容或业务 metadata 无法关联
 
 #### 正文兼容
 
@@ -485,7 +501,7 @@ Images 排除已知为 Free 套餐的 OAuth 账号；套餐缺失或未知时不
 
 `/v1/alpha/search` 使用相同的 OpenAI Provider 原生端点边界：正文原样转发，模型不映射，
 Provider 旁路读取请求中的 `model`，按[账号模型限制](#账号模型限制)选号。
-`x-codex-turn-metadata` 在移除客户端账号身份并按当前 lease 重写 installation ID 后转发；上游账号
+`x-codex-turn-metadata` 在移除客户端账号身份并按选中账号重写 installation ID 后转发；上游账号
 Authorization、Cookie、account ID、originator 和 User-Agent 均由代理安全重建。
 Images 与 Search 保留通过现有过滤规则的普通业务请求头及多值字节；Responses 原连接的 turn state
 不随独立端点转发，turn metadata 仍由所属端点按当前账号处理。
@@ -634,12 +650,17 @@ OpenAI 选号阶段确认本次可选账号全部额度耗尽时，HTTP 返回 `
 `application/sdp` / `text/plain` 包装为 `sdp` 字段、`multipart/form-data` 取 `sdp` 与 `session` 两个部分。
 `session.model` 或顶层 `model` 中的 `gpt-realtime` 系模型名归一为 `gpt-live-1-codex`，其余模型原样透传；
 模型字段缺失时按默认语音模型参与检查。归一后的模型参与账号模型权限检查：账号范围整体禁止该模型时
-引导请求按路由错误拒绝，被禁账号不会服务语音通话。语音语义请求头按允许清单转发：`OpenAI-Alpha`、
-`X-Session-Id`、`Session-Id`、`Thread-Id`、`OpenAI-Safety-Identifier`；认证、组织、项目和设备证明等
-身份头不透传，上游账号身份由选中的账号提供
+引导请求按路由错误拒绝，被禁账号不会服务语音通话
 
-引导响应透传上游状态码，并只回传 `Content-Type`、`Location`、`Retry-After`、`X-Request-Id`、
-`OpenAI-Request-Id` 五个响应头；正文按字节透传。sideband 中继不做协议解释：Text/Binary 帧双向透传，
+引导、sideband 与 hangup 的业务扩展头默认透传；认证、账号身份、下游环境与传输头遵守
+[请求头与身份](#请求头与身份)边界。`X-Session-Id`、`Voice-Session-Id` 是 Live 业务会话标识，原样透传。
+`Session-Id`、`Thread-Id` 等已识别追踪标识按选中账号的安装身份稳定映射，同账号各阶段保持一致，
+换账号使用不同标识；客户端 trace 被剥离。创建请求可由 attempt 插件改写本次构造身份，后续 sideband / hangup 仍使用钉住账号的身份。
+Live 不继承 Responses 的路由提示与续接状态；turn metadata 中的原账号绑定信息清理后保留其他字段。
+真实 call ID 保留用于钉住账号访问通话。HTTP 业务头保留原始多值字节，sideband 握手沿用 WebSocket 可编码的头值
+
+引导与 hangup 的成功响应透传上游状态码、普通业务响应头和 `Content-Type`，剥离认证、账号身份、Cookie
+及传输字段；正文按字节透传。sideband 中继不做协议解释：Text/Binary 帧双向透传，
 Ping 由网关本地应答，关闭帧保留原关闭码，异常中断投影为正常关闭。同一 call id 只允许一条 sideband，重复加入返回 `409`；
 非创建该通话的 Client Key 访问 sideband 或 hangup 返回 `403`；call id 未知或已过期返回 `404`。
 hangup 不受 sideband 占用限制，通话中可随时挂断；挂断与 sideband 都走钉住账号的出口代理。
@@ -975,7 +996,7 @@ API 的 `autoLocation` 默认为 `false`；开启时使用已检测位置，测�
 关联账号的 OpenAI/Codex Responses 请求（HTTP/SSE、WebSocket）优先使用代理位置，否则使用全局
 运行设置中已开启的 `requestLocation`；两者均未开启时保留客户端原有位置和时区。全局覆盖按请求冻结，
 新请求使用保存后的设置，无需重启；代理覆盖在每次执行时读取，
-换号或换出口按该次选定账号解析。位置只影响客户端时间上下文的日期/时区和 Web Search 的结构化位置，
+换号或换出口按该次选定账号解析。位置只影响客户端时间上下文的时区和 Web Search 的结构化位置，
 不改变 epoch 时间戳、真实出口 IP、服务或管理端时区、数据驻留约束及 xAI 请求
 
 时间上下文支持以下两种消息，文本块均为 `type: "input_text"`：
@@ -985,7 +1006,8 @@ API 的 `autoLocation` 默认为 `false`；开启时使用已检测位置，测�
 | `user` | `environment_context` | `environments.environment_context` |
 | `developer` | `codex_apps_client_time_context` | `additional_content.codex_apps_client_time_context` |
 
-文本去除首尾空白后须由对应标签完整包围且为合法 XML，只替换根节点直属的 `current_date` 和 `timezone`。
+文本去除首尾空白后须由对应标签完整包围且为合法 XML，只替换根节点直属的 `timezone`。
+`current_date` 保留客户端原值，不按请求时间刷新历史日期，也不根据仅有的日期推算目标时区日期。
 有 `internal_chat_message_metadata_passthrough.content_item_kinds` 数组时，文本块的对应分类须匹配上表；
 没有分类时，按消息角色和完整 XML 识别。
 显式标为 `user.text` 或其他分类的内容、普通聊天中引用的示例、工具结果及无法解析的上下文保持原样。
@@ -1553,14 +1575,15 @@ WebSocket 使用对应错误事件。等待期间不发送上游请求，取消�
 SSE 在 Key 准入完成并取得执行会话前不发送保活帧，此阶段保留 HTTP 错误状态；
 取得会话后的账号等待受 SSE 保活覆盖，已开始交付的失败沿用流内错误合同
 
-任一已结算金额达到限额后拒绝新请求，已准入请求可完成并使金额超过阈值。
+任一周期的已落库金额与当前进程已接管的待结算费用合计达到限额后拒绝新请求，已准入请求可完成并使金额超过阈值。
 HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly_budget_exceeded`，
 并附 `Retry-After`；WebSocket 每次 `response.create` 执行相同检查并返回协议错误事件。
 只累计上游上报或按用量与模型价格计算出的 USD 费用；无法取得费用的尝试按零累计，
 保留错误和用量诊断，不产生待核账记录或阻断。内部重试中已经取得的费用仍会累计。
-预算存储不可用时返回 `503`、`key_budget_unavailable`
+预算检查超时、存储不可用或待结算队列无法接受新请求时返回 `503`、`key_budget_unavailable`
 
-自动结算按网关请求 ID 幂等执行。账本独立于使用统计日志，记录保留至删除 Key，
+自动结算按网关请求 ID 幂等执行，响应交付不等待费用落库，额度查询中的已用金额在后台写入后可见。
+账本独立于使用统计日志，记录保留至删除 Key，
 不受 `usageRetentionDays` 影响
 
 ## 8. 运行设置
@@ -1669,9 +1692,13 @@ JSON 路径支持 `$`、`.成员`、`["带特殊字符的键"]`、`[索引]`、`
 `$.workspaces.*.associated_remote_urls.*` 配合 `remove_field` 和 `pattern: "private-org"` 只删除命中的远端；
 `$.workspaces` 配合 `rename_key` 可改写工作区路径键名。环境文本替换必须保留 XML 包裹结构
 
-管理端提供「统一工作区信息」预设，生成一条含多个通用步骤的规则。
-预设统一路径中的用户名为 `user`，工作区路径键和环境工作目录保留实际目录名并改为 `/workspace/<项目名>`，
-保留实际仓库、提交、分支、工作区标识和会话关联信息。安装身份由账号隔离逻辑处理，
+管理端提供「统一工作区信息」预设，生成一条含多个步骤的规则，仅处理 turn metadata 的 `workspaces`：
+
+- `/home/<用户名>`、`/Users/<用户名>` 及 Windows 用户目录中的用户名改为 `user`，保留其余目录结构和项目名
+- Git 远端 URL 的账号或组织路径段改为 `alex`，保留协议、主机和仓库名，支持 HTTP(S)、SSH、Git 协议和 `git@host:owner/repo` 形式；多级命名空间及本地远端路径保持原值
+
+提交、分支、工作区标识和会话关联信息保持原值。正文中的工作目录及其他执行路径也保持原值，
+供客户端工具使用，仍可能包含真实用户名和项目名。安装身份由账号隔离逻辑处理，
 UA、平台参数及自动 Git 上下文版本由 [OpenAI 上游客户端身份](#openai-上游客户端身份)管理。
 预设和自定义规则使用同一编辑器，步骤均可增删、修改和排序；调整预设不覆盖已保存的规则
 
@@ -2074,7 +2101,7 @@ errorCode, errorMessage, startedAt, completedAt, expiresAt, createdAt, updatedAt
 | `GET` | `/api/admin/usage/insights/overview` | 用量、成本与成功率洞察 |
 | `GET` | `/api/admin/usage/insights/diagnostics` | 按维度聚合诊断 |
 | `GET` | `/api/admin/operations/errors` | 运维错误分页列表 |
-| `GET` | `/api/admin/diagnostics/export` | 按 `requestId` 或 `errorId` 下载诊断 JSON 附件 |
+| `GET` | `/api/admin/diagnostics/export` | 按 `requestId` 或 `errorId` 下载诊断 ZIP 附件 |
 
 ### Dashboard 容量与账号用量
 
@@ -2219,9 +2246,11 @@ WebSocket 握手不主动添加专项计时请求头，客户端显式提供的�
 `attempt.failed.data` 的 `kind / sendState / upstreamStatus` 与 `diagnostic.stage / diagnostic.code` 来自 Core 和 Provider 的结构化失败事实，
 `diagnostic.message` 保存安全摘要，截断时带有 `truncated` 标记；发送状态为 `not_sent / sent / ambiguous`
 
-管理员通过 `GET /api/admin/diagnostics/export` 下载 JSON 附件，必须且只能指定
+管理员通过 `GET /api/admin/diagnostics/export` 下载 ZIP 附件，必须且只能指定
 `requestId` 或 `errorId`；`errorId` 指运维错误事件 ID，无模型请求的后台错误也能导出。
-响应不使用普通 JSON 信封，设置 `Content-Disposition: attachment` 与 `Cache-Control: private, no-store`
+响应类型为 `application/zip`，设置 `Content-Disposition: attachment` 与 `Cache-Control: private, no-store`。
+包内 `diagnostics.json` 保存完整结构化证据，`summary.txt` 汇总请求结果、模型、时延、用量与缺口，
+`README.txt` 说明证据边界；三个文件均来自服务端脱敏后的文档
 
 诊断包 `schemaVersion: 6` 用于故障分析，不是备份或导入格式。后端按目标 ID 收集请求、尝试、
 完整已存时间线、错误原因链、原始上游错误及恢复关联；前端只负责下载。
@@ -2235,6 +2264,23 @@ WebSocket 握手不主动添加专项计时请求头，客户端显式提供的�
 瞬态剩余预算在本次决策消耗前记录；`client_retry.loaded` 保存入场时的轮次失败标记。
 `provider.precommit.released` 保存已有记录的释放原因、预取字节数和等待时间，不等同于下游已提交。
 允许重试不代表已经执行，实际重试与换号需结合后续 `attempt.started`、`attemptCount` 和账号核对
+
+Trace v3 为路由、账号选择、失败、重试、响应边界及终态事实预留独立的 64 KiB 预算，
+普通事件另有 64 KiB 预算，总事件数最多 128。包含元数据的完整 JSON 快照最多 128 KiB，
+生成与持久化共用同一上限；完整编码超限时先淘汰普通事件，再淘汰关键证据。
+`stageCounts` 记录至多 64 类已采集阶段的次数，
+事件淘汰不抹除阶段计数；`droppedEvidenceEvents` 与 `stageCountOverflow` 分别报告关键证据淘汰和阶段统计超限
+
+OpenAI Responses 的 `provider.request.input` 与 `provider.request.outbound` 分别记录 Provider 收到的
+已解析正文和最终准备发送的正文指纹，包括指令、工具、缓存键、模型设置与有序输入。
+输入保留前 16 项的独立指纹、每 16 项一块的前 32 块指纹及全量输入指纹，超出分段范围明确计数。
+出站关联头仅保存指纹，`provider.request.account_scope` 保存账号归属依据及状态处理前后的指纹。
+这些观测不重组转发正文，准备发送不等同于确认发送，指纹也不证明上游缓存仍存在
+
+`provider.response.usage` 从已解析的上游终态单独提取已知数值字段，区分缺失、无效和明确的零，
+同时保存共享 parser 的解析结果；`request.usage` 保存最终提交持久化前的网关归集值。
+`provider.response.parse_gap` 标记 JSON 或 canonical 投影失败，原始 wire 仍按原有规则透传。
+上述关键事实复用现有 trace JSON 随请求终态保存，不新增诊断表或列；旧记录不能补生成未采集的事实
 
 采集阶段仍按有界 trace 合同处理未知 JSON 键和值，未知事件名称保留摘要；导出不会补造被省略的原文。
 下载端按 Provider 凭据、管理认证与传输头合同移除令牌、密钥、认证头、Cookie 和 URL 认证部分，
@@ -2555,9 +2601,13 @@ GitHub 的 `location` 使用 `kind: "github"`、`repository: "owner/repo"`、`ta
 `model_catalog`、`management`、`command_line` 和 `maintenance` 按清单声明注册，不接受 binding；
 `frontend_authentication` 必须由管理员显式配置身份映射，也不自动创建
 
-`middleware` v5 可绑定 `http`、`websocket`、`service`、`request` 和 `attempt`，按声明的挂载阶段分别配置。
+`middleware` v6 可绑定 `http`、`websocket`、`service`、`request`、`attempt` 和 `outbound`，按声明的挂载阶段分别配置。
 `http`、`websocket` 和 `service` 不使用 Key、分组、Provider 或模型范围，这些数组必须为空；插件在处理器内匹配路径、消息或服务操作。
-`request` 与 `routing` 支持 Key、分组和公开模型范围，Provider 范围必须为空；`attempt`、`upstream`、`scheduling`、`retry` 与 `observation` 可使用 Provider 范围
+`request` 与 `routing` 支持 Key、分组和公开模型范围，Provider 范围必须为空；`attempt`、`outbound`、`upstream`、`scheduling`、`retry` 与 `observation` 可使用 Provider 范围
+
+`outbound` 准备原生 Provider 交给 transport 的请求，覆盖 OpenAI Responses HTTP / WS、Images、Search、Live 创建及 xAI 生成与压缩。
+它使用最终上游模型匹配范围，下一层返回准备后的请求，不执行发送；字节、headers、HTTP 方法和目标的合同见 [SDK 出站请求准备](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#上游出站准备)。
+该阶段不包括 OAuth、额度刷新等后台请求，也不包括由 `upstream_adapter` 自行执行的发送
 
 `observer` 固定使用 `observation/observe`，必填 `event` 为 `request_completed` 或 `websocket_response`。
 每种事件最多一条绑定，可分别设置请求范围；同一实例两类事件的 `order` 必须相同。其他能力不接受非空 `event`。

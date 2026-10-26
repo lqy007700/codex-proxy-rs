@@ -51,6 +51,7 @@ const groupOptions = computed(() => [
     >
       <ZInput
         v-model="search"
+        aria-label="搜索账号"
         placeholder="搜索账号"
         class="col-span-2 min-w-0 sm:col-span-3 xl:w-80 xl:flex-none"
       >
