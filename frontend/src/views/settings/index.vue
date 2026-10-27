@@ -8,6 +8,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AccountAffinityCard from './components/AccountAffinityCard.vue'
 import AccountAutoFreezeCard from './components/AccountAutoFreezeCard.vue'
 import AccountWarmupCard from './components/AccountWarmupCard.vue'
+import SettingsAlertsSection from './components/alerts/SettingsAlertsSection.vue'
 import SettingsBackupSection from './components/backup/SettingsBackupSection.vue'
 import ClientProfileCard from './components/ClientProfileCard.vue'
 import ConcurrencyPolicyCard from './components/ConcurrencyPolicyCard.vue'
@@ -32,6 +33,7 @@ const sectionOptions = [
   { label: '模型定价', value: 'pricing' },
   { label: '安全与访问', value: 'access' },
   { label: '数据备份', value: 'backup' },
+  { label: '告警通知', value: 'alerts' },
 ]
 const section = computed(() => {
   switch (route.name) {
@@ -39,10 +41,11 @@ const section = computed(() => {
     case 'settings-access': return 'access'
     case 'settings-pricing': return 'pricing'
     case 'settings-backup': return 'backup'
+    case 'settings-alerts': return 'alerts'
     default: return 'runtime'
   }
 })
-const isBasicSection = computed(() => section.value !== 'pricing' && section.value !== 'backup')
+const isBasicSection = computed(() => !['pricing', 'backup', 'alerts'].includes(section.value))
 const visited = reactive(new Set<string>())
 const settingsVisited = shallowRef(false)
 
@@ -90,7 +93,8 @@ const {
   loadSettings,
 } = useSettingsForm()
 const backupSection = useTemplateRef<InstanceType<typeof SettingsBackupSection>>('backupSection')
-const hasUnsavedChanges = computed(() => hasChanges.value || !!backupSection.value?.hasChanges)
+const alertsSection = useTemplateRef<InstanceType<typeof SettingsAlertsSection>>('alertsSection')
+const hasUnsavedChanges = computed(() => hasChanges.value || !!backupSection.value?.hasChanges || !!alertsSection.value?.hasChanges)
 const { showLeaveConfirm, confirmLeave } = useSettingsLeaveGuard(hasUnsavedChanges)
 
 watch(() => !loading.value && route.hash === '#reset-credits', async (ready) => {
@@ -130,7 +134,7 @@ watch(section, (value) => {
         :options="sectionOptions"
         @update:model-value="switchSection"
       />
-      <div v-if="isBasicSection || hasChanges" class="ml-auto flex items-center justify-end gap-2">
+      <div v-if="section !== 'alerts' && (isBasicSection || hasChanges)" class="ml-auto flex items-center justify-end gap-2">
         <span v-if="hasChanges" class="mr-1 size-1.5 shrink-0 rounded-full bg-cp-warning" aria-hidden="true" />
         <ZIconButton v-if="hasChanges" aria-label="撤销全部基础设置更改" variant="solid" :disabled="saving || loading || detectingLocation" @click="resetSettings">
           <Undo2 class="size-4" />
@@ -235,6 +239,7 @@ watch(section, (value) => {
       </fieldset>
     </div>
 
+    <SettingsAlertsSection v-if="visited.has('alerts')" v-show="section === 'alerts'" ref="alertsSection" class="mt-5" :active="section === 'alerts'" />
     <SettingsBackupSection v-if="visited.has('backup')" v-show="section === 'backup'" ref="backupSection" class="mt-5" :active="section === 'backup'" />
     <PricingSection v-if="visited.has('pricing')" v-show="section === 'pricing'" class="mt-5 min-h-0 flex-1" />
     <ZConfirmDialog

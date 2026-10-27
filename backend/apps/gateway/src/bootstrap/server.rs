@@ -86,6 +86,7 @@ pub async fn run() -> Result<(), BootstrapError> {
                 plugin_inspector,
                 plugin_distribution,
                 pricing_source: std::sync::Arc::new(gateway_host::pricing::ModelsDevPricing),
+                email_sender: std::sync::Arc::new(gateway_host::email::SmtpEmailSender),
                 snapshot: core.snapshot_control(),
                 account_probe: core.account_probe(),
                 proxy_probe: host.proxy_probe(provider_openai::build_reqwest_client_with_custom_ca),

@@ -2,6 +2,7 @@
 
 mod account_groups;
 mod accounts;
+use crate::alerts::policy as alerts;
 mod auth;
 mod auth_key;
 mod backup;
@@ -277,6 +278,7 @@ impl AdminHarness {
                 Arc::new(plugins::TestPluginPorts),
                 Arc::new(plugins::TestPluginPorts),
                 Arc::new(plugins::TestPluginPorts),
+                Arc::new(alerts::TestAlertPorts),
             ),
             gateway_admin::AdminRuntimePorts {
                 timezone: Default::default(),
@@ -287,6 +289,7 @@ impl AdminHarness {
                 plugin_inspector: self.plugin_inspector,
                 plugin_distribution: Arc::new(plugins::TestPluginPorts),
                 pricing_source: Arc::new(UnavailablePricingSource),
+                email_sender: Arc::new(alerts::TestAlertPorts),
                 providers: gateway_admin::ports::provider::ProviderAdminRegistry::new(
                     self.providers,
                 )

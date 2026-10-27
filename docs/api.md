@@ -1942,6 +1942,47 @@ User-Agent 使用 `grok-shell/<版本> (<系统>; <架构>)`，其中 `arm64` �
 观测在途峰值的 80%（下限 2，只降不升）。这会持久修改账号并发设置；跟随全局默认的账号也会设为独立上限，
 解冻后不自动恢复，管理员可手动改回
 
+### 邮件告警
+
+告警位于“系统设置 → 告警通知”，使用独立配置版本，不改变运行设置或请求路由快照
+所有端点仅允许管理员访问，响应沿用管理接口信封及 `no-store`
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `GET /api/admin/settings/alerts` | 读取规则和非秘密邮件配置 |
+| `POST /api/admin/settings/alerts/update` | 使用 `revision` 替换告警配置 |
+| `GET /api/admin/settings/alerts/status` | 当前评估状态、最近 10 条事件和最近 10 条收件人投递结果 |
+| `GET /api/admin/settings/alerts/preview` | 按已保存规则只读预览当前窗口，不改变告警状态 |
+| `POST /api/admin/settings/alerts/test` | 提交 `{ "revision": N }`，按已保存邮件配置排队发送测试邮件 |
+
+规则默认关闭，`windowMinutes` 为 1～60（默认 5），`minimumRequests` 为 1～1,000,000（默认 20），
+`failureThresholdPercent` 为 2～100（默认 20），`consecutiveEvaluations` 为 1～10（默认 2）。
+`recoveryThresholdPercent` 默认 10，必须至少为 1 且小于触发阈值。`reminderMinutes` 为 `null` 或 5～1,440，
+默认 30，`null` 关闭持续提醒；`recoveryNotification` 默认开启
+
+每分钟检查一个滑动窗口，按完成时间统计原始模型请求终态，`failed` 与 `incomplete` 为分子，
+`succeeded`、`failed` 与 `incomplete` 合计为分母。排除取消、运行中、预热和内部调用，仅计模型生成与图片生成操作。
+同一请求的内部重试不重复计数，HTTP 200 不代表流式请求最终成功。请求记录为异步观测，可能延迟或丢失，
+此指标不覆盖执行会话前的鉴权、解析、路由和准入拒绝，也不等同于全部 HTTP 接口错误率
+
+连续满足触发阈值后创建一个告警事件，持续异常沿同一事件按提醒间隔通知，连续两次低于恢复阈值后恢复。
+无请求、样本不足、查询失败或相邻检查间隔过长会中断连续计数，不据此关闭已有故障。
+`evaluationStatus` 区分 `disabled`、`waiting`、`ready`、`insufficient_samples`、`unavailable`，
+`stale` 表示最近检查已超过时效。修改配置结束当前事件并取消旧版本待发送通知，不发送业务恢复邮件
+
+邮件配置包括 `smtpHost`、`smtpPort`、`smtpSecurity`（`tls` 或 `start_tls`）、`smtpUsername`、
+`senderAddress`、`senderName` 和最多 10 个 `recipients`。启用时必须具有完整投递配置。
+读取只返回 `passwordConfigured`；更新中 `smtpPassword` 缺省表示保留，非空值表示替换，
+`clearPassword: true` 表示清除，不能同时提交替换与清除。SMTP 密码不进入普通响应、Debug 或审计
+
+测试每分钟最多一次，成功排队返回 HTTP 202，不表示邮件已经送达。投递结果按收件人独立记录，
+`pending`、`sending`、`sent`、`failed`、`cancelled` 分别表示待发送、发送中、已发送、失败和取消。
+每条投递最多尝试 3 次，失败后分别等待 60 秒与 300 秒；SMTP 发送不持有数据库事务或连接。
+通知为尽力的至少一次尝试，发送成功而结果未能持久化时仍可能重复，已开始的投递不能因关闭配置而撤回
+
+事件恢复后停止旧异常通知的后续尝试，在途发送成功仍记为已发送，失败则取消重试；
+租约到期但结果未确认的旧异常通知也不再重新领取，测试邮件与恢复通知按原有投递策略处理
+
 ### Windows 客户端下载
 
 Windows 离线包接口固定解析 Microsoft Store Product ID `9PLM9XGG6VKS` 的 Retail 包，不接受调用方提供

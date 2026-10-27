@@ -86,6 +86,7 @@ use gateway_core::{
 
 mod account_groups;
 mod accounts;
+mod alerts;
 mod auth;
 mod client_keys;
 mod compression;
@@ -186,6 +187,7 @@ impl AdminTestFixture {
             plugin_ports.clone(),
             plugin_ports.clone(),
             plugin_ports.clone(),
+            Arc::new(alerts::MemoryAlerts::default()),
         );
         let providers: Vec<Arc<dyn ProviderAdmin>> = vec![
             Arc::new(UnusedProvider::new("openai", Arc::clone(&provider_error))),
@@ -209,6 +211,7 @@ impl AdminTestFixture {
                 plugin_inspector: plugin_ports.clone(),
                 plugin_distribution: plugin_ports.clone(),
                 pricing_source: Arc::new(StaticPricingSource),
+                email_sender: Arc::new(alerts::TestEmailSender),
                 providers: gateway_admin::ports::provider::ProviderAdminRegistry::new(providers)
                     .unwrap(),
                 snapshot: Arc::new(NoopSnapshot),

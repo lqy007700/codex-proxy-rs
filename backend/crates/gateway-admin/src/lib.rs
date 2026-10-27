@@ -16,6 +16,7 @@ use gateway_core::{
 use secrecy::{ExposeSecret as _, SecretString};
 use serde::Deserialize;
 
+pub mod alerts;
 pub mod backup;
 pub mod freeze_recovery;
 pub mod model;
@@ -219,6 +220,7 @@ pub struct AdminServices {
     client_distribution: Arc<dyn ClientDistributionService>,
     observability: Arc<dyn ObservabilityService>,
     settings: Arc<dyn SettingsService>,
+    alerts: Arc<dyn alerts::AlertService>,
     usage_data: Arc<dyn UsageDataService>,
     system: Arc<dyn SystemService>,
     credentials: Arc<CredentialsService>,
@@ -298,6 +300,11 @@ impl AdminServices {
         self.observability.as_ref()
     }
 
+    #[must_use]
+    pub fn alerts(&self) -> &dyn alerts::AlertService {
+        self.alerts.as_ref()
+    }
+
     pub fn settings(&self) -> &dyn SettingsService {
         self.settings.as_ref()
     }
@@ -346,6 +353,7 @@ pub struct AdminRuntimePorts {
     pub plugin_distribution: Arc<dyn ports::plugins::PluginDistribution>,
     pub plugin_inspector: Arc<dyn ports::plugins::PluginPackageInspector>,
     pub pricing_source: Arc<dyn ports::pricing::PricingSource>,
+    pub email_sender: Arc<dyn ports::alerts::EmailSender>,
     pub providers: ProviderAdminRegistry,
     pub snapshot: Arc<dyn SnapshotControl>,
     pub account_probe: Arc<dyn AccountProbe>,
@@ -396,6 +404,7 @@ async fn initialize_inner(
         plugin_distribution,
         plugin_inspector,
         pricing_source,
+        email_sender,
         providers,
         snapshot,
         account_probe: probe,
@@ -482,6 +491,13 @@ async fn initialize_inner(
     public_services.register_settings(&settings)?;
     public_services.register_accounts(&accounts)?;
     public_services.register_usage_data(&usage_data)?;
+    let alerts = Arc::new(alerts::DefaultAlertService::new(
+        store.alerts(),
+        email_sender,
+    ));
+    let alert_workers = alerts
+        .workers()
+        .map_err(|_| AdminError::internal("告警任务注册失败"))?;
     let services = AdminServices {
         timezone,
         public_services: Arc::new(public_services),
@@ -528,6 +544,7 @@ async fn initialize_inner(
             system.clone(),
         )),
         settings,
+        alerts,
         usage_data,
         system,
         credentials,
@@ -543,6 +560,7 @@ async fn initialize_inner(
             settings: store.settings(),
         });
     let mut worker_contributions = backup_worker_contribution(backup_task)?;
+    worker_contributions.extend(alert_workers);
     let id = WorkerId::try_new(WorkerKind::AccountImport, "admin")
         .map_err(|_| AdminError::internal("导入 Worker ID 不合法"))?;
     let restart = DaemonRestartPolicy::try_new(Duration::from_secs(1), Duration::from_secs(60))

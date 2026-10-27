@@ -7,6 +7,8 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutationAuditOperation {
+    AlertSettingsUpdate,
+    AlertEmailTest,
     ModelPricingSync,
     ModelPricingUpdate,
     RuntimeSettingsReplace,
@@ -59,6 +61,8 @@ impl MutationAuditOperation {
     #[must_use]
     pub const fn classification(self) -> (&'static str, &'static str) {
         match self {
+            Self::AlertSettingsUpdate => ("alerts.settings_updated", "alert_settings"),
+            Self::AlertEmailTest => ("alerts.email_test", "alert_settings"),
             Self::ModelPricingSync => ("pricing.sync", "model_pricing"),
             Self::ModelPricingUpdate => ("pricing.update", "model_pricing"),
             Self::RuntimeSettingsReplace => ("settings.replace", "runtime_settings"),

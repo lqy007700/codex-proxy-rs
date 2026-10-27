@@ -64,6 +64,32 @@ async fn healthz_should_ignore_provider_maintenance_worker_failure() {
 }
 
 #[tokio::test]
+async fn healthz_ignores_all_noncritical_alert_worker_states() {
+    for kind in [WorkerKind::AlertEvaluation, WorkerKind::AlertDelivery] {
+        for state in [
+            WorkerRuntimeState::Starting,
+            WorkerRuntimeState::BackingOff,
+            WorkerRuntimeState::Stopped,
+        ] {
+            let response = crate::openai::api_router_with_worker_health(
+                Arc::new(UnusedExecution),
+                Arc::new(StaticWorkerHealth(vec![worker_snapshot(kind, state)])),
+            )
+            .await
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        }
+    }
+}
+
+#[tokio::test]
 async fn healthz_should_reject_critical_worker_failure() {
     let worker_health = StaticWorkerHealth(vec![worker_snapshot(
         WorkerKind::RuntimeSnapshotReconciliation,

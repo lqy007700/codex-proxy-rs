@@ -3,6 +3,7 @@
 mod account_groups;
 mod admin_security_audit;
 mod admission_recovery;
+mod alerts;
 mod backup;
 mod client_budget_buffer;
 mod client_budgets;
@@ -27,6 +28,7 @@ mod usage_facts;
 pub use account_groups::*;
 pub use admin_security_audit::*;
 pub use admission_recovery::*;
+pub use alerts::PgAlertRepository;
 pub use backup::*;
 pub use client_budget_buffer::{BufferedClientBudgetStore, ClientBudgetWriter};
 pub use client_budgets::PgClientBudgetStore;

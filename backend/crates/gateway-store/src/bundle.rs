@@ -220,6 +220,10 @@ async fn connect(
         plugins.clone(),
         plugins,
         usage_data,
+        Arc::new(postgres::PgAlertRepository::new(
+            pool.clone(),
+            observability_query_budget.clone(),
+        )),
     );
 
     let execution_repository = Arc::new(postgres::PgExecutionStore::new(pool.clone()));

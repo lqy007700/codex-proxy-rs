@@ -17,6 +17,7 @@ use gateway_admin::model::{
     settings::AdminApiKey,
 };
 
+mod alerts;
 mod backup;
 mod model;
 mod use_case;

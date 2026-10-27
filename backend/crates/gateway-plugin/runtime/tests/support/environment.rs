@@ -600,6 +600,7 @@ impl Environment {
                     "1.0.0".parse().unwrap(),
                 )),
                 pricing_source: unavailable.clone(),
+                email_sender: Arc::new(gateway_host::email::SmtpEmailSender),
                 providers: super::native::admin_registry(),
                 snapshot: core.snapshot_control(),
                 account_probe: core.account_probe(),

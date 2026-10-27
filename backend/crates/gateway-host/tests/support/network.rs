@@ -271,7 +271,7 @@ async fn socks(
     Ok(())
 }
 
-fn tls_acceptor(http2: bool) -> TlsAcceptor {
+pub(crate) fn tls_acceptor(http2: bool) -> TlsAcceptor {
     use rustls::{
         ServerConfig,
         pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},

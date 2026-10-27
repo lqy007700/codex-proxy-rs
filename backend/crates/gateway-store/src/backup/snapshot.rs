@@ -13,6 +13,8 @@ const EXCLUDED_DATA: &[&str] = &[
     "model_request_leases",
     "ops_events",
     "admin_audit_events",
+    "alert_events",
+    "alert_notifications",
     "client_api_key_charge_events",
     "request_analytics_facts",
     "request_analytics_15m",
@@ -135,9 +137,13 @@ impl BusinessSnapshot {
             writer.write_all(&bytes).await.map_err(write_failed)?;
         }
         drop(stream);
+        let alert_runtime =
+            serde_json::to_string(&gateway_admin::model::alerts::AlertRuntime::default())
+                .map_err(|_| pg_dump_failed("无法生成告警恢复状态"))?;
         let footer = format!(
-            "\\.\nINSERT INTO {}.request_analytics_build_state (singleton) VALUES (true);\n",
-            self.schema
+            "\\.\nINSERT INTO {schema}.request_analytics_build_state (singleton) VALUES (true);\nUPDATE {schema}.alert_settings SET values_json=jsonb_set(values_json,'{{enabled}}','false'::jsonb),runtime_json='{runtime}'::jsonb,revision=revision+1,last_test_at=null;\n",
+            schema = self.schema,
+            runtime = alert_runtime.replace('\'', "''"),
         );
         writer
             .write_all(footer.as_bytes())
