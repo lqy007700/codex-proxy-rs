@@ -14,7 +14,12 @@ const columns: TableColumn<PricingRow>[] = [
   { key: 'input', label: '输入', kind: 'numeric' },
   { key: 'output', label: '输出', kind: 'numeric' },
   { key: 'cacheRead', label: '缓存读取', kind: 'numeric' },
-  { key: 'multiplier', label: '倍率', kind: 'numeric', align: 'center' },
+  {
+    key: 'multiplier',
+    label: '倍率',
+    kind: 'numeric',
+    align: 'center',
+  },
   { key: 'actions', label: '操作', kind: 'actions' },
 ]
 

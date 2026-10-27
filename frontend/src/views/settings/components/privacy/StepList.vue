@@ -14,13 +14,19 @@ const list = useTemplateRef<HTMLOListElement>('list')
 const scrollbar = useTemplateRef('scrollbar')
 const items = computed(() => props.steps.map((step, index) => {
   const field = fieldsByScope[step.scope]?.find(field => field.value && field.value === step.selector)?.label
-    || (step.selector === '$' && step.scope !== 'request_header' ? (step.scope === 'environment_text' ? '整段环境文本' : '完整内容') : step.selector.trim() || '未选择字段')
+    || (step.selector === '$' && step.scope !== 'request_header'
+      ? (step.scope === 'environment_text'
+          ? '整段环境文本'
+          : '完整内容')
+      : step.selector.trim() || '未选择字段')
   const scope = scopes.find(scope => scope.value === step.scope)?.label
   const action = actions.find(action => action.value === step.action)?.label
   const effect = step.action === 'set_value'
     ? `→ ${props.fixedValues[index] ?? '""'}`
     : step.action === 'remove_field'
-      ? (step.pattern === null ? '删除匹配的字段或数组项' : `匹配后删除：${step.pattern || '未填写表达式'}`)
+      ? (step.pattern === null
+          ? '删除匹配的字段或数组项'
+          : `匹配后删除：${step.pattern || '未填写表达式'}`)
       : `→ ${step.replacement || '清空匹配内容'}`
   return { step, field, scope, action, effect }
 }))
@@ -37,7 +43,9 @@ function stepKey(step: PrivacyStep) {
 const reorderHelpId = useId()
 const announcement = shallowRef('')
 const preferredMotion = usePreferredReducedMotion()
-const animation = computed(() => preferredMotion.value === 'reduce' ? 0 : 200)
+const animation = computed(() => preferredMotion.value === 'reduce'
+  ? 0
+  : 200)
 const sortingDisabled = computed(() => props.steps.length < 2)
 const sortableSteps = computed({
   get: () => props.steps,

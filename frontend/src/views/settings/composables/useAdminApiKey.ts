@@ -40,7 +40,9 @@ export function useAdminApiKey() {
         const wasEnabled = status.exists
         generatedKey.value = (await regenerateAdminApiKey()).key
         status.exists = true
-        ZNotification.success({ message: wasEnabled ? '管理员 API Key 已更新' : '管理员 API Key 已生成' })
+        ZNotification.success({
+          message: wasEnabled ? '管理员 API Key 已更新' : '管理员 API Key 已生成',
+        })
       },
     )
   }

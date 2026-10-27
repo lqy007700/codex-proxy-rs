@@ -11,11 +11,37 @@ defineProps<{
 }>()
 
 const columns = defineTableColumns<AccountConcurrencyEntry>([
-  { key: 'key', label: '密钥', kind: 'identity', size: '2xl' },
-  { key: 'model', label: '模型', kind: 'mono', size: 'lg' },
-  { key: 'clientIp', label: '来源 IP', kind: 'custom', size: '4xl' },
-  { key: 'startedAtDisplay', label: '开始时间', kind: 'datetime', size: 'xl' },
-  { key: 'occupiedMs', label: '占用时长', kind: 'numeric', size: 'lg', formatter: (_, row) => formatDuration(row.occupiedMs) },
+  {
+    key: 'key',
+    label: '密钥',
+    kind: 'identity',
+    size: '2xl',
+  },
+  {
+    key: 'model',
+    label: '模型',
+    kind: 'mono',
+    size: 'lg',
+  },
+  {
+    key: 'clientIp',
+    label: '来源 IP',
+    kind: 'custom',
+    size: '4xl',
+  },
+  {
+    key: 'startedAtDisplay',
+    label: '开始时间',
+    kind: 'datetime',
+    size: 'xl',
+  },
+  {
+    key: 'occupiedMs',
+    label: '占用时长',
+    kind: 'numeric',
+    size: 'lg',
+    formatter: (_, row) => formatDuration(row.occupiedMs),
+  },
 ])
 </script>
 

@@ -17,8 +17,11 @@ const form = reactive({ currentPassword: '', newPassword: '', confirmation: '' }
 const passwordError = computed(() => {
   if (!submitted.value)
     return undefined
-  if ([...form.newPassword.trim()].length < 12)
+  if ([
+    ...form.newPassword.trim(),
+  ].length < 12) {
     return '新密码至少需要 12 个字符'
+  }
   if (new TextEncoder().encode(form.newPassword).length > 1024)
     return '新密码不能超过 1024 字节'
   if (form.newPassword === form.currentPassword)

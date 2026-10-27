@@ -21,21 +21,29 @@ function normalizeBuildValue(value: string | undefined) {
     return ''
   }
 
-  return ['unknown', 'null'].includes(normalized.toLowerCase()) ? '' : normalized
+  return ['unknown', 'null'].includes(normalized.toLowerCase())
+    ? ''
+    : normalized
 }
 
 const versionDisplay = computed(() => {
   const versionText = normalizeBuildValue(props.version?.version).replace(/^v/i, '')
-  return versionText ? `v${versionText}` : ''
+  return versionText
+    ? `v${versionText}`
+    : ''
 })
 const gitShaDisplay = computed(() => {
   const gitSha = normalizeBuildValue(props.version?.gitSha)
-  return gitSha ? gitSha.slice(0, 8) : ''
+  return gitSha
+    ? gitSha.slice(0, 8)
+    : ''
 })
 
 const versionLine = computed(() => {
   const parts = [versionDisplay.value, gitShaDisplay.value].filter(Boolean)
-  return parts.length ? `版本 ${parts.join(' · ')}` : '版本信息不可用'
+  return parts.length
+    ? `版本 ${parts.join(' · ')}`
+    : '版本信息不可用'
 })
 
 const linkItems = [

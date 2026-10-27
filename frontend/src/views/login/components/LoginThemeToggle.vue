@@ -8,7 +8,9 @@ import { useThemeStore } from '@/stores/modules/theme'
 const themeStore = useThemeStore()
 const { effectiveTheme } = storeToRefs(themeStore)
 
-const label = computed(() => effectiveTheme.value === 'dark' ? '切换浅色模式' : '切换暗黑模式')
+const label = computed(() => effectiveTheme.value === 'dark'
+  ? '切换浅色模式'
+  : '切换暗黑模式')
 </script>
 
 <template>

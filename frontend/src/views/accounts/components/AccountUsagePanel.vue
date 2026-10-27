@@ -17,15 +17,60 @@ const totalBillingDisplay = computed(() => totalBilling.value?.estimatedAmountDi
 const hasUsageSummary = computed(() => (props.account.usage.totalTokens ?? 0) > 0 || totalBilling.value !== undefined)
 
 const modelUsageColumns = defineTableColumns<AccountModelUsage>([
-  { key: 'model', label: '模型', kind: 'text', size: 'lg' },
-  { key: 'requestCountDisplay', label: '调用', kind: 'numeric', size: 'xs' },
-  { key: 'successRateDisplay', label: '成功率', kind: 'numeric', size: 'sm' },
-  { key: 'inputTokensDisplay', label: '输入', kind: 'numeric', size: 'xs' },
-  { key: 'outputTokensDisplay', label: '输出', kind: 'numeric', size: 'xs' },
-  { key: 'cachedInputTokensDisplay', label: '缓存', kind: 'numeric', size: 'xs' },
-  { key: 'totalTokensDisplay', label: '总计', kind: 'numeric', size: 'xs' },
-  { key: 'billingAmountUsdDisplay', label: '计费', kind: 'numeric', size: 'sm' },
-  { key: 'lastUsedAtDisplay', label: '最近请求', kind: 'datetime', size: 'sm' },
+  {
+    key: 'model',
+    label: '模型',
+    kind: 'text',
+    size: 'lg',
+  },
+  {
+    key: 'requestCountDisplay',
+    label: '调用',
+    kind: 'numeric',
+    size: 'xs',
+  },
+  {
+    key: 'successRateDisplay',
+    label: '成功率',
+    kind: 'numeric',
+    size: 'sm',
+  },
+  {
+    key: 'inputTokensDisplay',
+    label: '输入',
+    kind: 'numeric',
+    size: 'xs',
+  },
+  {
+    key: 'outputTokensDisplay',
+    label: '输出',
+    kind: 'numeric',
+    size: 'xs',
+  },
+  {
+    key: 'cachedInputTokensDisplay',
+    label: '缓存',
+    kind: 'numeric',
+    size: 'xs',
+  },
+  {
+    key: 'totalTokensDisplay',
+    label: '总计',
+    kind: 'numeric',
+    size: 'xs',
+  },
+  {
+    key: 'billingAmountUsdDisplay',
+    label: '计费',
+    kind: 'numeric',
+    size: 'sm',
+  },
+  {
+    key: 'lastUsedAtDisplay',
+    label: '最近请求',
+    kind: 'datetime',
+    size: 'sm',
+  },
 ])
 </script>
 

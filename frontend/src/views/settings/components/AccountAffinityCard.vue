@@ -8,7 +8,11 @@ const accountAffinity = defineModel<AccountAffinity | ''>({ required: true })
 const affinityTtlHours = defineModel<string>('ttlHours', { required: true })
 const maxAccountRotations = defineModel<string>('maxAccountRotations', { required: true })
 const recoveryAttempts = defineModel<string>('recoveryAttempts', { required: true })
-const affinityOptions = [{ label: '宽松', value: 'relaxed' }, { label: '优先', value: 'preferred' }, { label: '严格', value: 'strict' }]
+const affinityOptions = [
+  { label: '宽松', value: 'relaxed' },
+  { label: '优先', value: 'preferred' },
+  { label: '严格', value: 'strict' },
+]
 </script>
 
 <template>

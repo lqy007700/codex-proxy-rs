@@ -32,8 +32,19 @@ const priceMode = computed({
 const bandOptions = computed(() => bands
   .filter(band => props.row?.base.bands.image
     ? ['standard', 'image'].includes(band.value)
-    : props.provider !== 'xai' || !['flex', 'long_flex', 'ultrafast', 'long_ultrafast', 'image'].includes(band.value))
-  .map(band => ({ ...band, label: band.value === 'standard' && props.row?.base.bands.image ? '文本 Token' : band.label })))
+    : props.provider !== 'xai' || ![
+      'flex',
+      'long_flex',
+      'ultrafast',
+      'long_ultrafast',
+      'image',
+    ].includes(band.value))
+  .map(band => ({
+    ...band,
+    label: band.value === 'standard' && props.row?.base.bands.image
+      ? '文本 Token'
+      : band.label,
+  })))
 
 watch(open, (value) => {
   if (!value)
@@ -51,9 +62,19 @@ watch([model, multiplier, draft], () => {
   validation.value = ''
 }, { deep: true })
 function toggleBand(enabled: boolean) {
-  if (enabled)
-    draft.value[selectedBand.value] = { ...(base.value ?? { input: '', output: '', cacheRead: '', cacheWrite: '' }) }
-  else delete draft.value[selectedBand.value]
+  if (enabled) {
+    draft.value[selectedBand.value] = {
+      ...(base.value ?? {
+        input: '',
+        output: '',
+        cacheRead: '',
+        cacheWrite: '',
+      }),
+    }
+  }
+  else {
+    delete draft.value[selectedBand.value]
+  }
 }
 function updatePrice(field: keyof TokenPrices, value: string) {
   if (current.value && !props.saving)

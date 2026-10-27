@@ -10,7 +10,9 @@ const props = defineProps<{
 }>()
 
 function averageLatencyDisplay(value: string) {
-  return !value || value === '—' || value === '-' ? '0 ms' : value
+  return !value || value === '—' || value === '-'
+    ? '0 ms'
+    : value
 }
 
 const items = computed(() => [

@@ -39,5 +39,11 @@ export function useRequestDiagnostics(requestId: () => string, isActive: () => b
     }
   }, { immediate: true })
 
-  return { selectedId, detail, loading, error, refresh: () => revision.value++ }
+  return {
+    selectedId,
+    detail,
+    loading,
+    error,
+    refresh: () => revision.value++,
+  }
 }

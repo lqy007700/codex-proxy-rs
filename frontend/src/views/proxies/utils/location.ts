@@ -15,9 +15,13 @@ export function proxyExitLocation(proxy: OutboundProxyRecord) {
 }
 
 export function countryName(code: string): string {
-  return /^[A-Z]{2}$/u.test(code) ? countryNames.of(code) ?? code : code
+  return /^[A-Z]{2}$/u.test(code)
+    ? countryNames.of(code) ?? code
+    : code
 }
 
 export function countryFlagUrl(code: string): string | undefined {
-  return /^[A-Z]{2}$/u.test(code) ? flags[`/node_modules/circle-flags/flags/${code.toLowerCase()}.svg`] : undefined
+  return /^[A-Z]{2}$/u.test(code)
+    ? flags[`/node_modules/circle-flags/flags/${code.toLowerCase()}.svg`]
+    : undefined
 }

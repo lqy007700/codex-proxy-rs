@@ -53,7 +53,10 @@ export function useAccountEditor(options: {
       const configuration = parseApiKeyConfiguration(detail.credentialConfiguration)
       if (!configuration)
         throw new Error('该账号没有 API Key 上游设置')
-      apiKey.value = { ...emptyApiKeyAccountForm(), ...configuration }
+      apiKey.value = {
+        ...emptyApiKeyAccountForm(),
+        ...configuration,
+      }
       savedConfiguration.value = configuration
       configurationReady.value = true
     }
@@ -75,7 +78,10 @@ export function useAccountEditor(options: {
     schedulingEnabled.value = account.enabled
     concurrencyLimit.value = concurrencyLimitInput(account.concurrencyLimit)
     weight.value = String(account.weight)
-    modelAccess.value = { ...account.modelAccess, models: [...account.modelAccess.models] }
+    modelAccess.value = {
+      ...account.modelAccess,
+      models: [...account.modelAccess.models],
+    }
     selectedGroupIds.value = account.groups.map(group => group.id)
     apiKey.value = emptyApiKeyAccountForm()
     oauthTransport.value = 'prefer_websocket'
@@ -121,13 +127,19 @@ export function useAccountEditor(options: {
       const settings = {
         accountId,
         notes: notes.value,
-        outboundProxyId: proxyMode.value === 'preserve' ? undefined : proxyMode.value === 'direct' ? '' : proxyId.value.trim(),
+        outboundProxyId: proxyMode.value === 'preserve'
+          ? undefined
+          : proxyMode.value === 'direct'
+            ? ''
+            : proxyId.value.trim(),
         enabled: schedulingEnabled.value,
         schedulingRole: schedulingRole.value,
         concurrencyLimit: scheduling.values.concurrencyLimit,
         weight: scheduling.values.weight,
         modelAccess: modelAccess.value,
-        groupIds: [...new Set(selectedGroupIds.value)],
+        groupIds: [
+          ...new Set(selectedGroupIds.value),
+        ],
       }
       const connectionChanged = isApiKey && (
         apiKey.value.apiKey !== ''
@@ -137,14 +149,21 @@ export function useAccountEditor(options: {
       await updateAccount({
         ...settings,
         connection: connectionChanged
-          ? { baseUrl: apiKey.value.base_url.trim(), transport: apiKey.value.transport, apiKey: apiKey.value.apiKey || undefined }
+          ? {
+              baseUrl: apiKey.value.base_url.trim(),
+              transport: apiKey.value.transport,
+              apiKey: apiKey.value.apiKey || undefined,
+            }
           : isOAuth && configurationReady.value && oauthTransport.value !== savedOAuthTransport.value
             ? { transport: oauthTransport.value }
             : undefined,
       })
       showEditModal.value = false
       ZNotification.success({ message: '账号已更新' })
-      void Promise.allSettled([options.reloadAccounts(), options.reloadGroups()])
+      void Promise.allSettled([
+        options.reloadAccounts(),
+        options.reloadGroups(),
+      ])
     })
   }
 

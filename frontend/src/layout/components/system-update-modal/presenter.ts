@@ -46,7 +46,9 @@ export function resolveSystemUpdateLogClasses(level: string) {
 function resolveStatus(input: SystemUpdatePresentationInput) {
   if (input.restarting || input.updating || input.checking || input.loading) {
     return {
-      label: input.restarting ? '重启中' : input.updating ? '更新中' : '检查中',
+      label: input.restarting
+        ? '重启中'
+        : input.updating ? '更新中' : '检查中',
       icon: RefreshCw,
       badge: 'bg-cp-info-container text-cp-info-on-container',
       iconClass: 'text-cp-info',
@@ -62,7 +64,9 @@ function resolveStatus(input: SystemUpdatePresentationInput) {
   }
   if (input.needRestart || input.hasUpdate || input.updateInfo) {
     return {
-      label: input.needRestart ? '待重启' : input.hasUpdate ? '有可用更新' : '无可用更新',
+      label: input.needRestart
+        ? '待重启'
+        : input.hasUpdate ? '有可用更新' : '无可用更新',
       icon: input.hasUpdate ? ArrowUpCircle : CheckCircle2,
       badge: 'bg-cp-success-container text-cp-success-on-container',
       iconClass: 'text-cp-success',
@@ -81,7 +85,9 @@ function resolveSummaryItems(input: SystemUpdatePresentationInput) {
     {
       key: 'current',
       label: '当前版本',
-      value: input.loading ? '...' : versionLabel(input.updateInfo?.currentVersion ?? input.version?.version),
+      value: input.loading
+        ? '...'
+        : versionLabel(input.updateInfo?.currentVersion ?? input.version?.version),
       title: input.updateInfo?.currentVersion ?? input.version?.version,
     },
     {
@@ -108,16 +114,32 @@ function resolveSummaryItems(input: SystemUpdatePresentationInput) {
 
 function resolveConfirmRows(input: SystemUpdatePresentationInput) {
   return [
-    { key: 'current', label: '当前版本', value: versionLabel(input.version?.version) },
-    { key: 'previous', label: '已显示目标', value: versionLabel(input.previousTargetVersion) },
-    { key: 'target', label: '远端最新目标', value: versionLabel(input.confirmedTargetVersion) },
+    {
+      key: 'current',
+      label: '当前版本',
+      value: versionLabel(input.version?.version),
+    },
+    {
+      key: 'previous',
+      label: '已显示目标',
+      value: versionLabel(input.previousTargetVersion),
+    },
+    {
+      key: 'target',
+      label: '远端最新目标',
+      value: versionLabel(input.confirmedTargetVersion),
+    },
   ]
 }
 
 function versionLabel(value?: string | null) {
-  return value ? `v${value}` : '-'
+  return value
+    ? `v${value}`
+    : '-'
 }
 
 function displayValue(value: unknown) {
-  return value ? String(value) : '-'
+  return value
+    ? String(value)
+    : '-'
 }

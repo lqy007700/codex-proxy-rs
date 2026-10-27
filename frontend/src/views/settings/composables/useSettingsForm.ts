@@ -32,7 +32,12 @@ export function useSettingsForm() {
     providerRequestProfiles: {} as ProviderRequestProfiles,
     codexPrivacyPolicy: { enabled: false, onError: 'skip_rule', rules: [] } as CodexPrivacyPolicy,
     requestLocationEnabled: false,
-    requestLocation: { country: '', region: '', city: '', timezone: '' },
+    requestLocation: {
+      country: '',
+      region: '',
+      city: '',
+      timezone: '',
+    },
     refreshMarginSeconds: null as number | null,
     refreshConcurrency: null as number | null,
     maxConcurrentPerAccount: null as number | null,
@@ -85,14 +90,18 @@ export function useSettingsForm() {
 
   function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'recoveryAttempts' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays' | 'accountAutoFreezeThreshold' | 'accountAutoFreezeWindowSeconds' | 'accountAutoFreezeDurationSeconds') {
     return computed({
-      get: () => (form[key] === null ? '' : String(form[key])),
+      get: () => (form[key] === null
+        ? ''
+        : String(form[key])),
       set: (value: string) => {
         if (!value.trim()) {
           form[key] = null
           return
         }
         const parsed = Number(value)
-        form[key] = Number.isFinite(parsed) ? parsed : null
+        form[key] = Number.isFinite(parsed)
+          ? parsed
+          : null
       },
     })
   }
@@ -120,7 +129,9 @@ export function useSettingsForm() {
 
   function versionError(value: string): string {
     const normalized = value.trim()
-    return normalized && !isSemver(normalized) ? '请输入标准 SemVer，例如 0.152.0' : ''
+    return normalized && !isSemver(normalized)
+      ? '请输入标准 SemVer，例如 0.152.0'
+      : ''
   }
 
   function applySettings(data: Awaited<ReturnType<typeof getSettings>>) {
@@ -203,13 +214,20 @@ export function useSettingsForm() {
         ZNotification.warning({ message: 'IPv4 与 IPv6 出口时区不一致，请手动填写' })
       }
       else {
-        ZNotification.warning({ message: result.status === 'failed' ? result.message : '未获取到出口位置' })
+        ZNotification.warning({
+          message: result.status === 'failed'
+            ? result.message
+            : '未获取到出口位置',
+        })
       }
     })
   }
 
   function addMapping() {
-    mappings.value = [...mappings.value, { requestedModel: '', upstreamModel: '' }]
+    mappings.value = [
+      ...mappings.value,
+      { requestedModel: '', upstreamModel: '' },
+    ]
   }
 
   function updateMapping(index: number, key: 'requestedModel' | 'upstreamModel', value: string) {
@@ -437,7 +455,10 @@ function requestProfileUpdates(
 ): ProviderRequestProfileUpdates {
   const updates: ProviderRequestProfileUpdates = {}
   const clonedCurrent = cloneDeep(current)
-  for (const provider of new Set([...Object.keys(previous), ...Object.keys(current)])) {
+  for (const provider of new Set([
+    ...Object.keys(previous),
+    ...Object.keys(current),
+  ])) {
     if (isEqual(previous[provider], current[provider]))
       continue
     updates[provider] = clonedCurrent[provider] ?? null

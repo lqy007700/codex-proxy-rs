@@ -37,7 +37,9 @@ export function useProxyBatchTesting(options: { test: ProxyTestExecutor, reload:
         ZNotification.warning({ message: '所选代理已不存在，请刷新列表' })
         return
       }
-      await tests.run([...collected.values()])
+      await tests.run([
+        ...collected.values(),
+      ])
       if (!request.isCurrent(requestId))
         return
       await options.reload()
@@ -57,8 +59,12 @@ export function useProxyBatchTesting(options: { test: ProxyTestExecutor, reload:
       const firstFailure = incomplete.find(item => item.status !== 'skipped')
       if (firstFailure)
         summary.push(`${firstFailure.name}：${firstFailure.message}`)
-      const notify = incomplete.length || locationPending || missing ? ZNotification.warning : ZNotification.success
-      notify({ message: summary.join('，') })
+      const notify = incomplete.length || locationPending || missing
+        ? ZNotification.warning
+        : ZNotification.success
+      notify({
+        message: summary.join('，'),
+      })
     }
     catch (cause) {
       request.fail(requestId, cause)

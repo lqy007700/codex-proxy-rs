@@ -7,8 +7,12 @@ import { countryFlagUrl, countryName, proxyExitLocation } from '../utils/locatio
 const props = defineProps<{ proxy: OutboundProxyRecord }>()
 const location = computed(() => proxyExitLocation(props.proxy))
 const customLocation = computed(() => props.proxy.autoLocation ? null : props.proxy.location)
-const customLabel = computed(() => customLocation.value ? `${countryName(customLocation.value.country)} · ${customLocation.value.city}` : '')
-const flag = computed(() => location.value ? countryFlagUrl(location.value.country) : undefined)
+const customLabel = computed(() => customLocation.value
+  ? `${countryName(customLocation.value.country)} · ${customLocation.value.city}`
+  : '')
+const flag = computed(() => location.value
+  ? countryFlagUrl(location.value.country)
+  : undefined)
 const label = computed(() => {
   if (props.proxy.lastTest?.success === false)
     return '连接失败'
@@ -29,7 +33,9 @@ const description = computed(() => {
     return detection.message
   if (detection?.status === 'conflict')
     return 'IPv4 与 IPv6 出口时区不一致'
-  return location.value ? `出口地区：${label.value} · ${location.value.timezone}` : '测试代理时解析出口地区'
+  return location.value
+    ? `出口地区：${label.value} · ${location.value.timezone}`
+    : '测试代理时解析出口地区'
 })
 </script>
 

@@ -27,7 +27,11 @@ export function useCopyText() {
       ZNotification.success({ message: options.successText })
     }
     catch (error: unknown) {
-      ZNotification.error({ message: options.errorFromException ? errorMessage(error, '复制失败') : '复制失败' })
+      ZNotification.error({
+        message: options.errorFromException
+          ? errorMessage(error, '复制失败')
+          : '复制失败',
+      })
     }
   }
 }

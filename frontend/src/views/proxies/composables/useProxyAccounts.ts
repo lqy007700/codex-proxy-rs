@@ -57,7 +57,9 @@ export function useProxyAccounts(options: {
 
   watch([options.isOpen, options.proxyId], () => {
     // 关闭或切换代理后丢弃旧请求，避免上一条代理的账号覆盖新列表。
-    query.invalidate({ resetLoading: options.isOpen() })
+    query.invalidate({
+      resetLoading: options.isOpen(),
+    })
     if (!options.isOpen())
       return
     search.value = ''

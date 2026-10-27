@@ -18,7 +18,9 @@ export function formatInteger(value: number) {
 }
 
 export function formatLocalizedCompactNumber(value: number) {
-  return localizedCompactFormatter.format(Number.isFinite(value) ? value : 0)
+  return localizedCompactFormatter.format(Number.isFinite(value)
+    ? value
+    : 0)
 }
 
 export function formatCompactNumber(value: number) {
@@ -31,7 +33,9 @@ export function formatCompactNumber(value: number) {
       continue
 
     const scaled = normalized / threshold
-    const rounded = scaled >= 10 ? scaled.toFixed(1) : scaled.toFixed(2)
+    const rounded = scaled >= 10
+      ? scaled.toFixed(1)
+      : scaled.toFixed(2)
     return `${rounded.replace(/\.?0+$/, '')}${unit}`
   }
 
@@ -44,7 +48,9 @@ const percentFormatter = new Intl.NumberFormat('zh-CN', {
 })
 
 export function formatPercent(value?: number | null) {
-  return value == null || !Number.isFinite(value) ? '—' : percentFormatter.format(value)
+  return value == null || !Number.isFinite(value)
+    ? '—'
+    : percentFormatter.format(value)
 }
 
 export function formatDuration(value?: number | null) {
@@ -54,7 +60,9 @@ export function formatDuration(value?: number | null) {
     return `${Math.round(value)} ms`
   if (value < 60_000) {
     const seconds = value / 1_000
-    return `${seconds.toFixed(seconds >= 10 ? 1 : 2).replace(/\.0+$|(?<=\.\d)0$/, '')} s`
+    return `${seconds.toFixed(seconds >= 10
+      ? 1
+      : 2).replace(/\.0+$|(?<=\.\d)0$/, '')} s`
   }
   return `${(value / 60_000).toFixed(1).replace(/\.0$/, '')} min`
 }
@@ -62,15 +70,21 @@ export function formatDuration(value?: number | null) {
 export function decimalDisplayNumber(value?: string | number | null) {
   if (value == null)
     return null
-  const parsed = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(parsed) ? parsed : null
+  const parsed = typeof value === 'number'
+    ? value
+    : Number(value)
+  return Number.isFinite(parsed)
+    ? parsed
+    : null
 }
 
 export function formatUsd(value?: string | number | null, precise = false) {
   const parsed = decimalDisplayNumber(value)
   if (parsed == null)
     return '—'
-  const fractionDigits = precise || (Math.abs(parsed) > 0 && Math.abs(parsed) < 0.01) ? 4 : 2
+  const fractionDigits = precise || (Math.abs(parsed) > 0 && Math.abs(parsed) < 0.01)
+    ? 4
+    : 2
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',

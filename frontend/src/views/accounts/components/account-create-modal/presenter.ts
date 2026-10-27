@@ -47,21 +47,33 @@ export function resolveAccountCreatePresentation(input: {
     modeOptions: modes,
     available,
     modal: {
-      title: configuring ? '账号设置' : input.reauthorizing ? '重新授权账号' : '导入账号',
-      description: configuring ? '设置将应用于本次导入的账号' : input.reauthorizing ? '完成授权后更新账号凭据' : description,
+      title: configuring
+        ? '账号设置'
+        : input.reauthorizing ? '重新授权账号' : '导入账号',
+      description: configuring
+        ? '设置将应用于本次导入的账号'
+        : input.reauthorizing ? '完成授权后更新账号凭据' : description,
       type: configuring ? 'default' as const : 'info' as const,
       width: configuring ? '42rem' : '36rem',
     },
     oauth: {
-      callbackLabel: id === 'xai' ? '回调地址或授权码' : '回调地址',
-      callbackPlaceholder: id === 'openai' ? 'http://localhost:1455/auth/callback?code=...&state=...' : '回调地址、?code=...&state=... 或授权码',
+      callbackLabel: id === 'xai'
+        ? '回调地址或授权码'
+        : '回调地址',
+      callbackPlaceholder: id === 'openai'
+        ? 'http://localhost:1455/auth/callback?code=...&state=...'
+        : '回调地址、?code=...&state=... 或授权码',
       description: '打开授权链接，完成浏览器授权后粘贴回调地址或授权码',
     },
     importInput: form.mode === 'access_token'
       ? { label: 'Access Token', placeholder: '每行粘贴一个 Access Token', uploadable: false }
       : form.mode === 'refresh_token'
         ? { label: 'Refresh Token', placeholder: '每行粘贴一个 Refresh Token', uploadable: false }
-        : { label: isBatch ? '批量账号文件' : '账号文件', placeholder: isBatch ? '粘贴 CPR 多平台导出文件内容' : '粘贴账号 JSON 内容', uploadable: true },
+        : {
+            label: isBatch ? '批量账号文件' : '账号文件',
+            placeholder: isBatch ? '粘贴 CPR 多平台导出文件内容' : '粘贴账号 JSON 内容',
+            uploadable: true,
+          },
     canSubmit,
     submitLabel: form.mode === 'oauth'
       ? input.reauthorizing ? '完成重新授权' : '完成导入'

@@ -54,39 +54,164 @@ const emit = defineEmits<{
 const component = defineModel<ThemeEditorComponent>({ required: true })
 
 const components: readonly ComponentOption[] = [
-  { id: 'action', label: 'Action', description: '按钮与动作', icon: MousePointerClick },
-  { id: 'form', label: 'Form', description: '表单与输入', icon: FormInput },
-  { id: 'surface', label: 'Surface', description: '卡片与容器', icon: CreditCard },
-  { id: 'data', label: 'Data Display', description: '数据展示', icon: TableProperties },
-  { id: 'navigation', label: 'Navigation', description: '导航', icon: Compass },
-  { id: 'layout', label: 'Layout', description: '布局与滚动', icon: LayoutPanelLeft },
+  {
+    id: 'action',
+    label: 'Action',
+    description: '按钮与动作',
+    icon: MousePointerClick,
+  },
+  {
+    id: 'form',
+    label: 'Form',
+    description: '表单与输入',
+    icon: FormInput,
+  },
+  {
+    id: 'surface',
+    label: 'Surface',
+    description: '卡片与容器',
+    icon: CreditCard,
+  },
+  {
+    id: 'data',
+    label: 'Data Display',
+    description: '数据展示',
+    icon: TableProperties,
+  },
+  {
+    id: 'navigation',
+    label: 'Navigation',
+    description: '导航',
+    icon: Compass,
+  },
+  {
+    id: 'layout',
+    label: 'Layout',
+    description: '布局与滚动',
+    icon: LayoutPanelLeft,
+  },
 ]
 
 const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
   action: [
-    { name: '--cp-button-primary-color', label: '主按钮文字', kind: 'color', description: 'primaryColor' },
-    { name: '--cp-button-primary-bg', label: '主按钮背景', kind: 'color', description: 'primaryBg' },
-    { name: '--cp-button-primary-hover-bg', label: '主按钮 Hover', kind: 'color', description: 'primaryHoverBg' },
-    { name: '--cp-button-primary-active-bg', label: '主按钮 Active', kind: 'color', description: 'primaryActiveBg' },
-    { name: '--cp-button-secondary-bg', label: '次要按钮背景', kind: 'color', description: 'secondaryBg' },
-    { name: '--cp-button-secondary-hover-bg', label: '次要按钮 Hover', kind: 'color', description: 'secondaryHoverBg' },
-    { name: '--cp-button-secondary-active-bg', label: '次要按钮 Active', kind: 'color', description: 'secondaryActiveBg' },
-    { name: '--cp-icon-button-secondary-bg', label: '次要图标按钮背景', kind: 'color', description: 'secondaryBg' },
-    { name: '--cp-icon-button-secondary-hover-bg', label: '次要图标按钮 Hover', kind: 'color', description: 'secondaryHoverBg' },
-    { name: '--cp-icon-button-secondary-active-bg', label: '次要图标按钮 Active', kind: 'color', description: 'secondaryActiveBg' },
+    {
+      name: '--cp-button-primary-color',
+      label: '主按钮文字',
+      kind: 'color',
+      description: 'primaryColor',
+    },
+    {
+      name: '--cp-button-primary-bg',
+      label: '主按钮背景',
+      kind: 'color',
+      description: 'primaryBg',
+    },
+    {
+      name: '--cp-button-primary-hover-bg',
+      label: '主按钮 Hover',
+      kind: 'color',
+      description: 'primaryHoverBg',
+    },
+    {
+      name: '--cp-button-primary-active-bg',
+      label: '主按钮 Active',
+      kind: 'color',
+      description: 'primaryActiveBg',
+    },
+    {
+      name: '--cp-button-secondary-bg',
+      label: '次要按钮背景',
+      kind: 'color',
+      description: 'secondaryBg',
+    },
+    {
+      name: '--cp-button-secondary-hover-bg',
+      label: '次要按钮 Hover',
+      kind: 'color',
+      description: 'secondaryHoverBg',
+    },
+    {
+      name: '--cp-button-secondary-active-bg',
+      label: '次要按钮 Active',
+      kind: 'color',
+      description: 'secondaryActiveBg',
+    },
+    {
+      name: '--cp-icon-button-secondary-bg',
+      label: '次要图标按钮背景',
+      kind: 'color',
+      description: 'secondaryBg',
+    },
+    {
+      name: '--cp-icon-button-secondary-hover-bg',
+      label: '次要图标按钮 Hover',
+      kind: 'color',
+      description: 'secondaryHoverBg',
+    },
+    {
+      name: '--cp-icon-button-secondary-active-bg',
+      label: '次要图标按钮 Active',
+      kind: 'color',
+      description: 'secondaryActiveBg',
+    },
   ],
   form: [
-    { name: '--cp-input-bg', label: '输入框背景', kind: 'color', description: 'controlBg' },
-    { name: '--cp-input-hover-bg', label: '输入框 Hover', kind: 'color', description: 'hoverBg' },
-    { name: '--cp-input-active-bg', label: '输入框 Active', kind: 'color', description: 'activeBg' },
-    { name: '--cp-input-shadow', label: '输入框阴影', kind: 'shadow', description: 'shadow' },
-    { name: '--cp-input-hover-shadow', label: '输入框 Hover 阴影', kind: 'shadow', description: 'hoverShadow' },
-    { name: '--cp-input-active-shadow', label: '输入框焦点外圈', kind: 'shadow', description: 'activeShadow' },
+    {
+      name: '--cp-input-bg',
+      label: '输入框背景',
+      kind: 'color',
+      description: 'controlBg',
+    },
+    {
+      name: '--cp-input-hover-bg',
+      label: '输入框 Hover',
+      kind: 'color',
+      description: 'hoverBg',
+    },
+    {
+      name: '--cp-input-active-bg',
+      label: '输入框 Active',
+      kind: 'color',
+      description: 'activeBg',
+    },
+    {
+      name: '--cp-input-shadow',
+      label: '输入框阴影',
+      kind: 'shadow',
+      description: 'shadow',
+    },
+    {
+      name: '--cp-input-hover-shadow',
+      label: '输入框 Hover 阴影',
+      kind: 'shadow',
+      description: 'hoverShadow',
+    },
+    {
+      name: '--cp-input-active-shadow',
+      label: '输入框焦点外圈',
+      kind: 'shadow',
+      description: 'activeShadow',
+    },
   ],
   surface: [
-    { name: '--cp-card-bg', label: '卡片背景', kind: 'color', description: 'colorBgContainer' },
-    { name: '--cp-modal-bg', label: '弹窗背景', kind: 'color', description: 'contentBg' },
-    { name: '--cp-popover-header-bg', label: '浮层标题背景', kind: 'color', description: 'headerBg' },
+    {
+      name: '--cp-card-bg',
+      label: '卡片背景',
+      kind: 'color',
+      description: 'colorBgContainer',
+    },
+    {
+      name: '--cp-modal-bg',
+      label: '弹窗背景',
+      kind: 'color',
+      description: 'contentBg',
+    },
+    {
+      name: '--cp-popover-header-bg',
+      label: '浮层标题背景',
+      kind: 'color',
+      description: 'headerBg',
+    },
     {
       name: '--cp-card-border-radius',
       label: '卡片圆角',
@@ -96,7 +221,12 @@ const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
       min: 0,
       max: 32,
     },
-    { name: '--cp-card-shadow', label: '卡片阴影', kind: 'shadow', description: 'cardShadow' },
+    {
+      name: '--cp-card-shadow',
+      label: '卡片阴影',
+      kind: 'shadow',
+      description: 'cardShadow',
+    },
   ],
   data: [
     {
@@ -108,22 +238,82 @@ const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
       min: 44,
       max: 84,
     },
-    { name: '--cp-table-header-bg', label: '表头背景', kind: 'color', description: 'headerBg' },
-    { name: '--cp-table-row-bg', label: '行背景', kind: 'color', description: 'rowBg' },
-    { name: '--cp-table-row-stripe-bg', label: '斑马纹背景', kind: 'color', description: 'rowStripeBg' },
-    { name: '--cp-table-row-hover-bg', label: '行 Hover', kind: 'color', description: 'rowHoverBg' },
-    { name: '--cp-table-row-selected-bg', label: '选中行背景', kind: 'color', description: 'rowSelectedBg' },
-    { name: '--cp-table-row-selected-hover-bg', label: '选中行 Hover', kind: 'color', description: 'rowSelectedHoverBg' },
-    { name: '--cp-progress-remaining-color', label: '进度轨道', kind: 'color', description: 'progressRemainingColor' },
+    {
+      name: '--cp-table-header-bg',
+      label: '表头背景',
+      kind: 'color',
+      description: 'headerBg',
+    },
+    {
+      name: '--cp-table-row-bg',
+      label: '行背景',
+      kind: 'color',
+      description: 'rowBg',
+    },
+    {
+      name: '--cp-table-row-stripe-bg',
+      label: '斑马纹背景',
+      kind: 'color',
+      description: 'rowStripeBg',
+    },
+    {
+      name: '--cp-table-row-hover-bg',
+      label: '行 Hover',
+      kind: 'color',
+      description: 'rowHoverBg',
+    },
+    {
+      name: '--cp-table-row-selected-bg',
+      label: '选中行背景',
+      kind: 'color',
+      description: 'rowSelectedBg',
+    },
+    {
+      name: '--cp-table-row-selected-hover-bg',
+      label: '选中行 Hover',
+      kind: 'color',
+      description: 'rowSelectedHoverBg',
+    },
+    {
+      name: '--cp-progress-remaining-color',
+      label: '进度轨道',
+      kind: 'color',
+      description: 'progressRemainingColor',
+    },
   ],
   navigation: [
-    { name: '--cp-menu-item-selected-bg', label: '菜单选中背景', kind: 'color', description: 'itemSelectedBg' },
+    {
+      name: '--cp-menu-item-selected-bg',
+      label: '菜单选中背景',
+      kind: 'color',
+      description: 'itemSelectedBg',
+    },
   ],
   layout: [
-    { name: '--cp-layout-sider-bg', label: '侧栏背景', kind: 'color', description: 'siderBg' },
-    { name: '--cp-layout-sider-shadow', label: '侧栏阴影', kind: 'shadow', description: 'siderShadow' },
-    { name: '--cp-scrollbar-thumb-bg', label: '滚动条滑块', kind: 'color', description: 'scrollbarThumbBg' },
-    { name: '--cp-scrollbar-thumb-hover-bg', label: '滚动条 Hover', kind: 'color', description: 'scrollbarThumbHoverBg' },
+    {
+      name: '--cp-layout-sider-bg',
+      label: '侧栏背景',
+      kind: 'color',
+      description: 'siderBg',
+    },
+    {
+      name: '--cp-layout-sider-shadow',
+      label: '侧栏阴影',
+      kind: 'shadow',
+      description: 'siderShadow',
+    },
+    {
+      name: '--cp-scrollbar-thumb-bg',
+      label: '滚动条滑块',
+      kind: 'color',
+      description: 'scrollbarThumbBg',
+    },
+    {
+      name: '--cp-scrollbar-thumb-hover-bg',
+      label: '滚动条 Hover',
+      kind: 'color',
+      description: 'scrollbarThumbHoverBg',
+    },
   ],
 }
 
@@ -140,7 +330,9 @@ function overridden(name: ThemeTokenName) {
 }
 
 function componentOverridden(key: keyof ThemeComponentOverrides | undefined) {
-  return key ? Object.hasOwn(props.draft.customization.component ?? {}, key) : false
+  return key
+    ? Object.hasOwn(props.draft.customization.component ?? {}, key)
+    : false
 }
 
 function numericTokenValue(name: ThemeTokenName) {

@@ -202,11 +202,13 @@ function requestBuckets(value: unknown) {
     ) {
       return []
     }
-    return [{
-      bucketStart: item.bucketStart,
-      label: item.label,
-      requestCount: item.requestCount,
-    }]
+    return [
+      {
+        bucketStart: item.bucketStart,
+        label: item.label,
+        requestCount: item.requestCount,
+      },
+    ]
   })
 }
 
@@ -242,7 +244,9 @@ function requestCountDisplay(localUsage: AccountLocalUsage | null) {
   if (typeof display === 'string' && display.trim())
     return display.trim()
   const count = localUsage?.requestCount
-  return typeof count === 'number' ? formatInteger(count) : '0'
+  return typeof count === 'number'
+    ? formatInteger(count)
+    : '0'
 }
 
 function rollingWindowDurationDisplay(windowSeconds: number | null | undefined) {
@@ -266,7 +270,9 @@ export function quotaWindowPresentation(window: AccountQuotaWindow, minimumWidth
   return {
     barStyle: {
       width: `${percent}%`,
-      minWidth: percent > 0 ? minimumWidth : '0',
+      minWidth: percent > 0
+        ? minimumWidth
+        : '0',
     },
     barClass: quotaToneClasses[tone].bar,
     percentTextClass: quotaToneClasses[tone].text,
@@ -288,7 +294,9 @@ function requestTimeline(buckets: NonNullable<AccountLocalUsage['requestBuckets'
   return buckets.map(bucket => ({
     key: bucket.bucketStart,
     requestCount: bucket.requestCount,
-    height: bucket.requestCount === 0 ? '0' : `${Math.max(25, Math.round(bucket.requestCount / maximum * 100))}%`,
+    height: bucket.requestCount === 0
+      ? '0'
+      : `${Math.max(25, Math.round(bucket.requestCount / maximum * 100))}%`,
     title: bucket.label,
   }))
 }

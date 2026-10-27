@@ -18,31 +18,76 @@ const panelTitleClass = 'm-0 text-cp-sm leading-none font-heavy text-cp-text-sec
 
 const errorMessage = computed(() => {
   const message = props.record?.message?.trim()
-  return message && message !== props.record?.logicalOutcome ? message : '未记录具体错误消息'
+  return message && message !== props.record?.logicalOutcome
+    ? message
+    : '未记录具体错误消息'
 })
-const responseText = computed(() => props.record ? visibleResponseText(props.record) : '')
+const responseText = computed(() => props.record
+  ? visibleResponseText(props.record)
+  : '')
 const metadataText = computed(() => props.record && Object.keys(props.record.metadata).length
   ? JSON.stringify(props.record.metadata, null, 2)
   : '')
 const contextItems = computed(() => [
-  { label: '账号', value: props.record ? usageAccountText(props.record) : null, mono: true, fullWidth: true },
+  {
+    label: '账号',
+    value: props.record
+      ? usageAccountText(props.record)
+      : null,
+    mono: true,
+    fullWidth: true,
+  },
   { label: '时间', value: props.record?.createdAtDisplay, mono: true },
   { label: '总尝试', value: props.record?.attemptCount, mono: true },
   { label: '总耗时', value: props.record?.latencyMsDisplay, mono: true },
   { label: '平台', value: props.record?.provider, mono: true },
   { label: '端点', value: props.record?.route, mono: true },
-  { label: '请求模型', value: props.record ? usageModelDisplay(props.record).primary : null, mono: true },
+  {
+    label: '请求模型',
+    value: props.record
+      ? usageModelDisplay(props.record).primary
+      : null,
+    mono: true,
+  },
   { label: '上游模型', value: props.record?.upstreamModel, mono: true },
-  { label: '客户端传输', value: usageTransportType(props.record?.clientTransport), mono: true },
-  { label: '上游传输', value: usageTransportType(props.record?.upstreamTransport), mono: true },
+  {
+    label: '客户端传输',
+    value: usageTransportType(props.record?.clientTransport),
+    mono: true,
+  },
+  {
+    label: '上游传输',
+    value: usageTransportType(props.record?.upstreamTransport),
+    mono: true,
+  },
 ])
 const identifierItems = computed(() => [
   { label: '客户端状态码', value: props.record?.clientStatusCode, mono: true },
   { label: '上游状态码', value: props.record?.upstreamStatusCode, mono: true },
-  { label: '请求 ID', value: props.record?.requestId, mono: true, fullWidth: true },
-  { label: '上游请求 ID', value: props.record?.upstreamRequestId, mono: true, fullWidth: true },
-  { label: '响应 ID', value: props.record?.responseId, mono: true, fullWidth: true },
-  { label: '客户端 Key ID', value: props.record?.clientApiKeyId, mono: true, fullWidth: true },
+  {
+    label: '请求 ID',
+    value: props.record?.requestId,
+    mono: true,
+    fullWidth: true,
+  },
+  {
+    label: '上游请求 ID',
+    value: props.record?.upstreamRequestId,
+    mono: true,
+    fullWidth: true,
+  },
+  {
+    label: '响应 ID',
+    value: props.record?.responseId,
+    mono: true,
+    fullWidth: true,
+  },
+  {
+    label: '客户端 Key ID',
+    value: props.record?.clientApiKeyId,
+    mono: true,
+    fullWidth: true,
+  },
 ])
 const attempts = computed(() => (props.record?.attempts ?? []).map(attempt => ({
   id: attempt.id,
@@ -52,10 +97,22 @@ const attempts = computed(() => (props.record?.attempts ?? []).map(attempt => ({
   items: [
     { label: '错误码', value: attempt.providerErrorCode, mono: true },
     { label: '失败分类', value: attempt.failureClass, mono: true },
-    { label: '账号', value: usageAccountText(attempt), mono: true },
+    {
+      label: '账号',
+      value: usageAccountText(attempt),
+      mono: true,
+    },
     { label: '平台', value: attempt.provider, mono: true },
-    { label: '上游传输', value: usageTransportType(attempt.transport), mono: true },
-    { label: '耗时', value: formatDuration(attempt.latencyMs), mono: true },
+    {
+      label: '上游传输',
+      value: usageTransportType(attempt.transport),
+      mono: true,
+    },
+    {
+      label: '耗时',
+      value: formatDuration(attempt.latencyMs),
+      mono: true,
+    },
     { label: '触发方式', value: attempt.trigger, mono: true },
     { label: '发送状态', value: attempt.sendState, mono: true },
   ],

@@ -33,10 +33,20 @@ const http = axios.create({
 })
 
 // 从外到内：提示、会话恢复、重试、错误归一化、原始响应处理、实际传输
-const plugins: RequestPlugin[] = [feedbackPlugin, sessionPlugin, retryPlugin, errorPlugin, rawPlugin]
+const plugins: RequestPlugin[] = [
+  feedbackPlugin,
+  sessionPlugin,
+  retryPlugin,
+  errorPlugin,
+  rawPlugin,
+]
 
 function execute(config: RequestConfig, raw?: RawResponseOptions) {
-  const context: RequestContext = { config, raw, isCurrent: () => !config.signal?.aborted }
+  const context: RequestContext = {
+    config,
+    raw,
+    isCurrent: () => !config.signal?.aborted,
+  }
   const transport: RequestNext = () => http.request<unknown>(context.config)
   return plugins.reduceRight<RequestNext>((next, plugin) => () => plugin(context, next), transport)()
 }

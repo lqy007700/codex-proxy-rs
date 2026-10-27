@@ -55,7 +55,9 @@ export function useAccountGroups() {
         page,
         pageSize,
         search: searchQuery.value.trim() || undefined,
-        enabled: statusQuery.value ? statusQuery.value === 'enabled' : undefined,
+        enabled: statusQuery.value
+          ? statusQuery.value === 'enabled'
+          : undefined,
       }, options),
   })
 
@@ -149,7 +151,14 @@ export function useAccountGroups() {
       const fastMode = form.value.fastMode
       const allowImageGeneration = form.value.allowImageGeneration
       if (editingGroup.value) {
-        await updateAccountGroup({ id: editingGroup.value.id, name, description, color, fastMode, allowImageGeneration })
+        await updateAccountGroup({
+          id: editingGroup.value.id,
+          name,
+          description,
+          color,
+          fastMode,
+          allowImageGeneration,
+        })
       }
       else {
         await createAccountGroup({
@@ -161,8 +170,13 @@ export function useAccountGroups() {
         })
       }
       showFormModal.value = false
-      await Promise.all([query.execute(), loadReferenceKeys()])
-      ZNotification.success({ message: updating ? '分组已更新' : '分组已创建' })
+      await Promise.all([
+        query.execute(),
+        loadReferenceKeys(),
+      ])
+      ZNotification.success({
+        message: updating ? '分组已更新' : '分组已创建',
+      })
     })
   }
 
@@ -193,7 +207,9 @@ export function useAccountGroups() {
         const mutation = group.enabled ? disableAccountGroup : enableAccountGroup
         await mutation({ id: group.id })
         await query.execute()
-        ZNotification.success({ message: group.enabled ? '分组已禁用' : '分组已启用' })
+        ZNotification.success({
+          message: group.enabled ? '分组已禁用' : '分组已启用',
+        })
       }
       catch {}
     })
@@ -216,7 +232,9 @@ export function useAccountGroups() {
       showDeleteModal.value = false
       await query.execute()
       ZNotification.success({ message: '分组已删除' })
-    }, { onError: () => void query.execute() })
+    }, {
+      onError: () => void query.execute(),
+    })
   }
 
   async function confirmBatchDelete() {
@@ -249,9 +267,11 @@ export function useAccountGroups() {
       errorText: false,
       onError: (error) => {
         void query.execute().catch(() => undefined)
-        ZNotification.error({ message: deletedCount > 0
-          ? `已删除 ${deletedCount} 个分组，其余未删除：${errorMessage(error, '操作失败')}`
-          : errorMessage(error, '批量删除失败') })
+        ZNotification.error({
+          message: deletedCount > 0
+            ? `已删除 ${deletedCount} 个分组，其余未删除：${errorMessage(error, '操作失败')}`
+            : errorMessage(error, '批量删除失败'),
+        })
       },
     })
   }
@@ -274,7 +294,10 @@ export function useAccountGroups() {
     void query.reloadFromStart()
   })
   onMounted(() => {
-    void Promise.all([query.execute(), loadReferenceKeys()])
+    void Promise.all([
+      query.execute(),
+      loadReferenceKeys(),
+    ])
   })
 
   return {
@@ -313,5 +336,11 @@ export function useAccountGroups() {
 }
 
 function emptyForm(): AccountGroupFormValue {
-  return { name: '', description: '', color: DEFAULT_ACCOUNT_GROUP_COLOR, fastMode: 'default', allowImageGeneration: true }
+  return {
+    name: '',
+    description: '',
+    color: DEFAULT_ACCOUNT_GROUP_COLOR,
+    fastMode: 'default',
+    allowImageGeneration: true,
+  }
 }

@@ -47,7 +47,9 @@ const visited = reactive(new Set<string>())
 const settingsVisited = shallowRef(false)
 
 function switchSection(value = 'runtime'): void {
-  void router.push(value === 'runtime' ? '/settings' : `/settings/${value}`)
+  void router.push(value === 'runtime'
+    ? '/settings'
+    : `/settings/${value}`)
 }
 
 const {

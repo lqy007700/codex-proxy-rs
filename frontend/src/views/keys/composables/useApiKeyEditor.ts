@@ -75,7 +75,9 @@ export function useApiKeyEditor(options: {
         const payload = {
           name: form.value.name.trim(),
           label: form.value.label.trim() || null,
-          groupIds: [...new Set(form.value.groupIds)],
+          groupIds: [
+            ...new Set(form.value.groupIds),
+          ],
           maxConcurrency: Number(form.value.maxConcurrency),
           requestsPerMinute: Number(form.value.requestsPerMinute),
           dailyLimitUsd: form.value.dailyLimitUsd.trim() || '0',
@@ -112,7 +114,9 @@ export function useApiKeyEditor(options: {
           ZNotification.success({ message: 'API Key 创建成功' })
         }
       },
-      { onError: () => void options.reload() },
+      {
+        onError: () => void options.reload(),
+      },
     )
   }
 
@@ -120,7 +124,18 @@ export function useApiKeyEditor(options: {
     form.value.customKey = ''
   }
 
-  return { showFormModal, showAllAccountsConfirm, editingKey, savingKey, form, openCreate, openEdit, clearCustomKey, requestSave, confirmAllAccountsScope }
+  return {
+    showFormModal,
+    showAllAccountsConfirm,
+    editingKey,
+    savingKey,
+    form,
+    openCreate,
+    openEdit,
+    clearCustomKey,
+    requestSave,
+    confirmAllAccountsScope,
+  }
 }
 
 function emptyForm(): ApiKeyFormValue {
@@ -150,5 +165,7 @@ function profileOverrideUpdates(
 }
 
 function limitInputValue(limit: string | number) {
-  return Number(limit) === 0 ? '' : String(limit)
+  return Number(limit) === 0
+    ? ''
+    : String(limit)
 }

@@ -75,7 +75,9 @@ const chartOption = computed<EChartsOption>(() => {
     ...successRateSeries.map((item, index) => index === 0
       ? {
           ...item,
-          symbol: activePointCount <= 16 ? 'circle' : 'none',
+          symbol: activePointCount <= 16
+            ? 'circle'
+            : 'none',
           symbolSize: 4,
         }
       : item),
@@ -91,7 +93,14 @@ const chartOption = computed<EChartsOption>(() => {
       outerBoundsMode: 'same',
       outerBoundsContain: 'axisLabel',
     },
-    legend: usageLegend(theme, ['成功', '服务失败', '取消', '未完成', '调用方错误', '服务成功率']),
+    legend: usageLegend(theme, [
+      '成功',
+      '服务失败',
+      '取消',
+      '未完成',
+      '调用方错误',
+      '服务成功率',
+    ]),
     tooltip: usageTooltip(theme, formatTooltip),
     xAxis: usageCategoryAxis(
       chartPoints.map(point => point.label),
@@ -117,7 +126,9 @@ function serviceSuccessRate(point: HealthPoint) {
   const total = healthEligibleRequestCount(point)
   if (total > 0)
     return 1 - point.errorRate
-  return requestCount(point) === 0 ? 0 : null
+  return requestCount(point) === 0
+    ? 0
+    : null
 }
 
 function outcomeSeries(name: string, data: number[], color: string) {
@@ -149,7 +160,9 @@ function formatTooltip(params: unknown) {
     usageTooltipItem('调用方错误', formatCompactNumber(point.callerErrorRequests), theme.normal),
     usageTooltipItem(
       '服务成功率',
-      successRate == null ? '无服务结果' : formatPercent(successRate),
+      successRate == null
+        ? '无服务结果'
+        : formatPercent(successRate),
       theme.success,
     ),
   ])

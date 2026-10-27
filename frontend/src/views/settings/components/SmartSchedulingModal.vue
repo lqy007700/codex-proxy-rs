@@ -20,12 +20,22 @@ const fields = [
   { key: 'resetWeight', label: '额度重置系数', help: '越大越偏向即将重置额度的账号，重置时间未知或已过期时不加分' },
   { key: 'queueWeight', label: '排队系数', help: '需要排队时，越大越偏向等待请求较少的账号，设为 0 时沿用最短队列规则' },
 ] as const
-const draft = reactive({ loadWeight: '', quotaWeight: '', healthWeight: '', latencyWeight: '', resetWeight: '', queueWeight: '' })
+const draft = reactive({
+  loadWeight: '',
+  quotaWeight: '',
+  healthWeight: '',
+  latencyWeight: '',
+  resetWeight: '',
+  queueWeight: '',
+})
 const submitted = shallowRef(false)
 const errors = computed(() => Object.fromEntries(fields.map(({ key }) => {
   const value = Number(draft[key])
   const valid = draft[key].trim() && Number.isFinite(value) && value >= 0 && value <= 10 && Math.round(value * 10) / 10 === value
-  return [key, valid ? undefined : '请输入 0～10 的数值，最多一位小数']
+  return [
+    key,
+    valid ? undefined : '请输入 0～10 的数值，最多一位小数',
+  ]
 })))
 const emptyWeights = computed(() => fields.every(({ key }) => Number(draft[key]) === 0))
 

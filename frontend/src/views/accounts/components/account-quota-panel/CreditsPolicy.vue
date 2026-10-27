@@ -21,7 +21,10 @@ async function toggle(allowCredits: boolean) {
   enabled.value = allowCredits
   let saved = false
   await saveAction.run(async () => {
-    await batchUpdateAccounts({ accountIds: [accountId], allowCredits })
+    await batchUpdateAccounts({
+      accountIds: [accountId],
+      allowCredits,
+    })
     saved = true
     if (props.account.id !== accountId)
       return

@@ -7,7 +7,9 @@ const props = defineProps<{
 }>()
 
 const fullNames = computed(() =>
-  props.groups.map(group => (group.enabled ? group.name : `${group.name}（已禁用）`)).join('、'),
+  props.groups.map(group => (group.enabled
+    ? group.name
+    : `${group.name}（已禁用）`)).join('、'),
 )
 </script>
 

@@ -54,7 +54,13 @@ const diagnosticColumns = computed(() => defineTableColumns<DiagnosticDisplayIte
   },
   ...(resultDimension.value === 'account'
     ? defineTableColumns<DiagnosticDisplayItem>([
-        { key: 'accountPlanType', label: '订阅', kind: 'status', size: 'sm', fixedWidth: true },
+        {
+          key: 'accountPlanType',
+          label: '订阅',
+          kind: 'status',
+          size: 'sm',
+          fixedWidth: true,
+        },
       ])
     : []),
   {
@@ -69,7 +75,12 @@ const diagnosticColumns = computed(() => defineTableColumns<DiagnosticDisplayIte
     kind: 'numeric',
     size: 'xs',
   },
-  { key: 'firstTokenP95Ms', label: '性能', kind: 'numeric', size: 'lg' },
+  {
+    key: 'firstTokenP95Ms',
+    label: '性能',
+    kind: 'numeric',
+    size: 'lg',
+  },
   {
     key: 'estimatedCost',
     label: '费用',
@@ -93,7 +104,9 @@ const hasData = computed(() => !props.loading && displayItems.value.length > 0)
 function diagnosticNameDisplay(name: string) {
   const raw = name.trim() || '未知'
   const full
-    = resultDimension.value === 'transport' ? ({ websocket: 'WS', http_sse: 'SSE' }[raw] ?? raw) : raw
+    = resultDimension.value === 'transport'
+      ? ({ websocket: 'WS', http_sse: 'SSE' }[raw] ?? raw)
+      : raw
   if (resultDimension.value !== 'model' && resultDimension.value !== 'account') {
     return { primary: full, secondary: '', full }
   }

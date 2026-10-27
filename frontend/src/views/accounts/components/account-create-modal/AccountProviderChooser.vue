@@ -16,11 +16,18 @@ const options = [
   })),
 ]
 const selected = computed({
-  get: () => source.value?.kind === 'provider' ? `provider:${source.value.id}` : source.value?.kind ?? '',
+  get: () => source.value?.kind === 'provider'
+    ? `provider:${source.value.id}`
+    : source.value?.kind ?? '',
   set: (value: string) => {
     if (!options.some(option => option.value === value))
       return
-    source.value = value === 'bundle' ? { kind: 'bundle' } : { kind: 'provider', id: value.slice('provider:'.length) }
+    source.value = value === 'bundle'
+      ? { kind: 'bundle' }
+      : {
+          kind: 'provider',
+          id: value.slice('provider:'.length),
+        }
   },
 })
 </script>

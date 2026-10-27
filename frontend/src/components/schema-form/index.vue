@@ -28,7 +28,9 @@ const incompatibleValue = computed(() => fields.value?.some((field) => {
     return !field.values.some(option => option === item)
   if (field.type === 'number' || field.type === 'integer')
     return typeof item !== 'number' && typeof item !== 'string'
-  return field.type === 'boolean' ? typeof item !== 'boolean' : typeof item !== 'string'
+  return field.type === 'boolean'
+    ? typeof item !== 'boolean'
+    : typeof item !== 'string'
 }) ?? false)
 const showJson = computed(() => jsonMode.value || fields.value === null || hasExtra.value || incompatibleValue.value || Boolean(error.value))
 const empty = computed(() => fields.value?.length === 0 && props.schema.additionalProperties === false && !showJson.value)
@@ -43,14 +45,25 @@ function fieldValue(field: InputField) {
 }
 
 function inputValue(key: string) {
-  return value.value && Object.hasOwn(value.value, key) ? value.value[key] : undefined
+  return value.value && Object.hasOwn(value.value, key)
+    ? value.value[key]
+    : undefined
 }
 
 function fieldOptions(field: InputField) {
   const options = field.values
-    ? field.values.map((item, index) => ({ value: String(index), label: String(item) }))
-    : [{ value: 'true', label: '是' }, { value: 'false', label: '否' }]
-  return [{ value: '', label: '未填写' }, ...options]
+    ? field.values.map((item, index) => ({
+        value: String(index),
+        label: String(item),
+      }))
+    : [
+        { value: 'true', label: '是' },
+        { value: 'false', label: '否' },
+      ]
+  return [
+    { value: '', label: '未填写' },
+    ...options,
+  ]
 }
 
 function update(field: InputField, input: string) {
@@ -66,7 +79,9 @@ function update(field: InputField, input: string) {
   }
   else if (field.type === 'number' || field.type === 'integer') {
     // 不把尚未输入完整的数字静默替换成 0，保留原值供服务端校验。
-    next = Number.isFinite(Number(input)) ? Number(input) : input
+    next = Number.isFinite(Number(input))
+      ? Number(input)
+      : input
   }
   else {
     next = input
@@ -82,7 +97,9 @@ async function focusField(key?: string) {
   await nextTick()
 
   const control = editableField && !showJson.value
-    ? [...(root.value?.querySelectorAll<HTMLElement>('[data-schema-control]') ?? [])]
+    ? [
+        ...(root.value?.querySelectorAll<HTMLElement>('[data-schema-control]') ?? []),
+      ]
         .find(element => element.dataset.schemaControl === key)
     : root.value?.querySelector<HTMLElement>('[data-schema-json-control], textarea')
   control?.focus()

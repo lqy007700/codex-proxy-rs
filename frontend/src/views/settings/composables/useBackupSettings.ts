@@ -111,7 +111,9 @@ export function useBackupSettings() {
         schedule.value.scheduleEnabled = data.scheduleEnabled
         savedSchedule.value = { ...savedSchedule.value, scheduleEnabled: data.scheduleEnabled }
       }
-      ZNotification.success({ message: schedulePaused ? '存储配置已保存，定时备份已暂停，请测试连接后重新启用' : '存储配置已保存' })
+      ZNotification.success({
+        message: schedulePaused ? '存储配置已保存，定时备份已暂停，请测试连接后重新启用' : '存储配置已保存',
+      })
       return true
     }
     catch {

@@ -52,7 +52,9 @@ const hasNoCacheCost = computed(() =>
 const coverageRate = computed(() => {
   const { known, partial, unknown } = props.cost.coverage
   const total = known + partial + unknown
-  return total > 0 ? (known + partial) / total : null
+  return total > 0
+    ? (known + partial) / total
+    : null
 })
 
 const viewOptions = [
@@ -96,8 +98,12 @@ const chartOption = computed<EChartsOption>(() => {
       theme,
     ),
     yAxis: usageValueAxis(theme, axisFormatter(), {
-      min: activeView.value === 'cache' ? 0 : undefined,
-      max: activeView.value === 'cache' ? 1 : undefined,
+      min: activeView.value === 'cache'
+        ? 0
+        : undefined,
+      max: activeView.value === 'cache'
+        ? 1
+        : undefined,
     }),
     series,
   }
@@ -108,7 +114,9 @@ function legendNames() {
     return ['缓存节省']
   if (activeView.value === 'cache')
     return ['缓存 Token 占比', '命中请求率']
-  return hasNoCacheCost.value ? ['实际费用', '无缓存费用'] : ['实际费用']
+  return hasNoCacheCost.value
+    ? ['实际费用', '无缓存费用']
+    : ['实际费用']
 }
 
 function axisFormatter() {
@@ -219,7 +227,9 @@ function formatTooltip(params: unknown) {
 }
 
 function costAmount(value: string | null, pointIndex: number) {
-  return value ?? (requestActivity.value[pointIndex] === false ? '0' : null)
+  return value ?? (requestActivity.value[pointIndex] === false
+    ? '0'
+    : null)
 }
 </script>
 

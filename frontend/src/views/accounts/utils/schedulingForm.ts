@@ -14,7 +14,9 @@ export function parseAccountSchedulingForm(
   weight: string,
 ): AccountSchedulingParseResult {
   const limitText = concurrencyLimit.trim()
-  const parsedLimit = limitText === '' ? null : Number(limitText)
+  const parsedLimit = limitText === ''
+    ? null
+    : Number(limitText)
   if (
     parsedLimit !== null
     && (!Number.isSafeInteger(parsedLimit)
@@ -39,5 +41,7 @@ export function parseAccountSchedulingForm(
 }
 
 export function concurrencyLimitInput(value: number | null) {
-  return value === null ? '' : String(value)
+  return value === null
+    ? ''
+    : String(value)
 }

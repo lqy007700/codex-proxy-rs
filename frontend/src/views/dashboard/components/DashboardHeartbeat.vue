@@ -16,7 +16,9 @@ const preferredMotion = usePreferredReducedMotion()
 const heartbeatDot = useTemplateRef<HTMLElement>('heartbeatDot')
 const heartbeatRing = useTemplateRef<HTMLElement>('heartbeatRing')
 const statusLabel = computed(() =>
-  props.updatedAt ? `自动刷新 30s，最近刷新 ${props.updatedAt}` : '自动刷新 30s，等待首次刷新',
+  props.updatedAt
+    ? `自动刷新 30s，最近刷新 ${props.updatedAt}`
+    : '自动刷新 30s，等待首次刷新',
 )
 
 function pulse() {

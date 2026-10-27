@@ -46,12 +46,16 @@ export function chartTooltipStyle(
 }
 
 export function tooltipRows(params: unknown): Record<string, unknown>[] {
-  const values = Array.isArray(params) ? params : [params]
+  const values = Array.isArray(params)
+    ? params
+    : [params]
   return values.filter(isRecord)
 }
 
 export function tooltipIndex(source: unknown) {
   if (!isRecord(source))
     return -1
-  return typeof source.dataIndex === 'number' ? source.dataIndex : -1
+  return typeof source.dataIndex === 'number'
+    ? source.dataIndex
+    : -1
 }

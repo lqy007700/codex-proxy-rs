@@ -28,7 +28,12 @@ const props = withDefaults(defineProps<{
   reauthorizing?: boolean
   account?: Account | null
   authorization: AccountAuthorizationView
-}>(), { saving: false, oauthLoading: false, reauthorizing: false, account: null })
+}>(), {
+  saving: false,
+  oauthLoading: false,
+  reauthorizing: false,
+  account: null,
+})
 
 const emit = defineEmits<{ create: [], generateOauth: [] }>()
 const open = defineModel<boolean>({ default: false })
@@ -62,7 +67,9 @@ const mode = computed({
   },
 })
 const importText = computed({
-  get: () => form.value.mode === 'oauth' || form.value.mode === 'api_key' ? '' : form.value.importTexts[form.value.mode],
+  get: () => form.value.mode === 'oauth' || form.value.mode === 'api_key'
+    ? ''
+    : form.value.importTexts[form.value.mode],
   set: (value: string) => {
     if (form.value.mode !== 'oauth' && form.value.mode !== 'api_key')
       form.value.importTexts[form.value.mode] = value

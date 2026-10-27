@@ -137,7 +137,9 @@ function connectionTestFailureText(event: ConnectionTestFailureEvent) {
 }
 
 function connectionTestFailureLabel(event: ConnectionTestFailureEvent) {
-  return event.source ? CONNECTION_TEST_SOURCE_LABEL[event.source] || '测试失败' : '测试失败'
+  return event.source
+    ? CONNECTION_TEST_SOURCE_LABEL[event.source] || '测试失败'
+    : '测试失败'
 }
 
 function connectionTestFailureDiagnostics(event: ConnectionTestFailureEvent) {
@@ -307,7 +309,9 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
       return
     }
     connectionTestLogs.value = connectionTestLogs.value.map((item, itemIndex) =>
-      itemIndex === index ? { ...next, time: item.time } : item,
+      itemIndex === index
+        ? { ...next, time: item.time }
+        : item,
     )
   }
 
@@ -537,7 +541,10 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
       failConnectionTest('测试连接已断开')
   })
 
-  watch([showConnectionTestModal, () => testingAccount.value?.id], ([open]) => {
+  watch([
+    showConnectionTestModal,
+    () => testingAccount.value?.id,
+  ], ([open]) => {
     modelsRequest.invalidate({ resetLoading: open })
     if (!open) {
       abortConnectionTest()

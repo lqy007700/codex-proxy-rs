@@ -50,7 +50,9 @@ export async function rawPlugin(context: RequestContext, next: RequestNext) {
   if (normalized)
     throw normalized
   throw new ApiError(
-    response.status >= 400 ? `请求失败（HTTP ${response.status}）` : '服务返回了不受支持的响应',
+    response.status >= 400
+      ? `请求失败（HTTP ${response.status}）`
+      : '服务返回了不受支持的响应',
     response.status,
     undefined,
     rawHeader(response.headers, 'x-request-id'),
@@ -62,8 +64,12 @@ function rawHeader(headers: unknown, name: string) {
   if (!headers || typeof headers !== 'object')
     return undefined
   const source = headers as { get?: (key: string) => unknown, [key: string]: unknown }
-  const value = typeof source.get === 'function' ? source.get(name) : source[name]
-  return typeof value === 'string' && value ? value : undefined
+  const value = typeof source.get === 'function'
+    ? source.get(name)
+    : source[name]
+  return typeof value === 'string' && value
+    ? value
+    : undefined
 }
 
 function decodeRawEnvelope(body: ArrayBuffer): unknown {

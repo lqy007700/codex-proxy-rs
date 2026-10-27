@@ -138,8 +138,11 @@ export function useBackupRecords() {
       link.remove()
     }
     catch (cause) {
-      if (!(cause instanceof ApiError))
-        ZNotification.error({ message: errorMessage(cause, '下载备份失败') })
+      if (!(cause instanceof ApiError)) {
+        ZNotification.error({
+          message: errorMessage(cause, '下载备份失败'),
+        })
+      }
     }
     finally {
       downloadStates.value = { ...downloadStates.value, [record.id]: false }

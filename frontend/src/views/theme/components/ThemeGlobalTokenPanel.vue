@@ -39,7 +39,10 @@ const emit = defineEmits<{
 const category = defineModel<ThemeEditorGlobalCategory>('category', { required: true })
 const derivedOpen = shallowRef(false)
 
-const localizedPresets = THEME_COLOR_PRESETS.map(preset => ({ ...preset, ...zhHans.theme[preset.id] }))
+const localizedPresets = THEME_COLOR_PRESETS.map(preset => ({
+  ...preset,
+  ...zhHans.theme[preset.id],
+}))
 const colorPresets = THEME_COLOR_PRESETS.map(preset => preset.seed)
 const categoryOptions = [
   { label: '颜色', value: 'color' },

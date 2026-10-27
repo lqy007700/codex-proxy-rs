@@ -60,7 +60,9 @@ const triggerLabel = computed(() => {
       ? `查看主动重置卡，查询失败，最近查询 ${availableCount.value} 张可用`
       : '查看主动重置卡，查询失败'
   }
-  return hasSnapshot.value ? `查看主动重置卡，最近查询 ${availableCount.value} 张可用` : '查看主动重置卡'
+  return hasSnapshot.value
+    ? `查看主动重置卡，最近查询 ${availableCount.value} 张可用`
+    : '查看主动重置卡'
 })
 const showTriggerCount = computed(() => hasSnapshot.value && availableCount.value > 0)
 const confirmCreditTitle = computed(() => confirmation.value?.credit
@@ -69,7 +71,9 @@ const confirmCreditTitle = computed(() => confirmation.value?.credit
 const creditItems = computed(() => availableCredits.value.map(credit => ({
   id: credit.id,
   title: creditTitle(credit),
-  expiry: credit.expiresAtDisplay ? `将于 ${credit.expiresAtDisplay} 到期` : '有效期由上游决定',
+  expiry: credit.expiresAtDisplay
+    ? `将于 ${credit.expiresAtDisplay} 到期`
+    : '有效期由上游决定',
 })))
 const showCountOnlyAction = computed(() => !loadError.value
   && hasSnapshot.value
@@ -92,8 +96,11 @@ watch(panelOpen, (isOpen) => {
 })
 
 watch(showConfirm, (confirming) => {
-  if (panelOpen.value)
-    confirmation.value = confirming ? { credit: consumptionCredit.value, ambiguous: ambiguous.value } : null
+  if (panelOpen.value) {
+    confirmation.value = confirming
+      ? { credit: consumptionCredit.value, ambiguous: ambiguous.value }
+      : null
+  }
 })
 
 function creditTitle(credit: AccountResetCredit | undefined) {

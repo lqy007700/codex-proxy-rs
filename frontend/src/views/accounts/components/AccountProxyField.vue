@@ -11,34 +11,50 @@ const { proxies, loading } = useProxyCatalog()
 const currentSelection = computed(() => props.currentProxyId || (props.endpoint ? 'preserve' : 'direct'))
 const options = computed(() => [
   ...(props.preserve && !props.accountId
-    ? [{
-        label: '保持当前',
-        value: 'preserve',
-        description: '保留各账号的连接设置',
-      }]
+    ? [
+        {
+          label: '保持当前',
+          value: 'preserve',
+          description: '保留各账号的连接设置',
+        },
+      ]
     : []),
   ...(props.preserve && props.accountId && props.endpoint && !proxies.value.some(proxy => proxy.id === props.currentProxyId)
-    ? [{ label: props.endpoint, value: currentSelection.value }]
+    ? [
+        { label: props.endpoint, value: currentSelection.value },
+      ]
     : []),
   { label: '直连', value: 'direct', description: '不使用代理' },
   ...proxies.value.map(proxy => ({
-    label: `${proxy.name.trim() || proxy.endpoint}${!proxy.enabled ? '（已禁用）' : proxy.lastTest?.success ? '' : proxy.lastTest ? '（测试失败）' : '（未测试）'}`,
+    label: `${proxy.name.trim() || proxy.endpoint}${!proxy.enabled
+      ? '（已禁用）'
+      : proxy.lastTest?.success
+        ? ''
+        : proxy.lastTest ? '（测试失败）' : '（未测试）'}`,
     value: proxy.id,
-    description: proxy.name.trim() ? proxy.endpoint : undefined,
+    description: proxy.name.trim()
+      ? proxy.endpoint
+      : undefined,
     disabled: !proxy.enabled,
   })),
 ])
 const selection = computed({
   get: () => mode.value === 'proxy'
     ? proxyId.value
-    : mode.value === 'preserve' && props.accountId ? currentSelection.value : mode.value,
+    : mode.value === 'preserve' && props.accountId
+      ? currentSelection.value
+      : mode.value,
   set: (value: string) => {
     // 显示已绑定代理，未改选择时仍省略写入，保留禁用代理及仅地址配置
     const nextMode = props.preserve && props.accountId && value === currentSelection.value
       ? 'preserve'
-      : value === 'preserve' || value === 'direct' ? value : 'proxy'
+      : value === 'preserve' || value === 'direct'
+        ? value
+        : 'proxy'
     mode.value = nextMode
-    proxyId.value = nextMode === 'proxy' ? value : ''
+    proxyId.value = nextMode === 'proxy'
+      ? value
+      : ''
   },
 })
 </script>

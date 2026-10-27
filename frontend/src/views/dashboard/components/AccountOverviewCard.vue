@@ -26,9 +26,24 @@ const scheduleStats = computed(() => {
     ? '—'
     : formatCompactNumber(value)
   return [
-    { label: '默认并发', value: cap?.maxConcurrentPerAccount === 0 ? '不限制' : display(cap?.maxConcurrentPerAccount) },
-    { label: '总槽位', value: unlimitedCapacity.value ? '不限制' : display(cap?.totalSlots) },
-    { label: '空闲槽位', value: unlimitedCapacity.value ? '不限制' : display(cap?.availableSlots) },
+    {
+      label: '默认并发',
+      value: cap?.maxConcurrentPerAccount === 0
+        ? '不限制'
+        : display(cap?.maxConcurrentPerAccount),
+    },
+    {
+      label: '总槽位',
+      value: unlimitedCapacity.value
+        ? '不限制'
+        : display(cap?.totalSlots),
+    },
+    {
+      label: '空闲槽位',
+      value: unlimitedCapacity.value
+        ? '不限制'
+        : display(cap?.availableSlots),
+    },
   ]
 })
 
@@ -39,14 +54,19 @@ const usedProgressStyle = computed(() => {
 
   return {
     width: `${(capacity.usedSlots / capacity.totalSlots) * 100}%`,
-    minWidth: capacity.usedSlots > 0 ? '3px' : undefined,
+    minWidth: capacity.usedSlots > 0
+      ? '3px'
+      : undefined,
   }
 })
 
 const usedRatio = computed(() => {
   const cap = props.capacity
-  if (unlimitedCapacity.value)
-    return `${cap?.usedSlots === null || cap?.usedSlots === undefined ? '—' : formatCompactNumber(cap.usedSlots)} / ∞`
+  if (unlimitedCapacity.value) {
+    return `${cap?.usedSlots === null || cap?.usedSlots === undefined
+      ? '—'
+      : formatCompactNumber(cap.usedSlots)} / ∞`
+  }
   if (!cap || cap.totalSlots === null || cap.totalSlots === undefined)
     return '— / —'
   if (cap.usedSlots === null || cap.usedSlots === undefined)
@@ -100,10 +120,34 @@ const statusRows = computed(() => {
   const counts = accountStatusCounts.value
   if (!p || !counts) {
     return [
-      { label: '正常', description: '暂无账号池观测', value: '—', tone: 'success', icon: CircleCheck },
-      { label: '配额耗尽', description: '暂无账号池观测', value: '—', tone: 'warning', icon: TriangleAlert },
-      { label: '限流中', description: '暂无账号池观测', value: '—', tone: 'normal', icon: RefreshCw },
-      { label: '待处理', description: '停用 — · 错误 —', value: '—', tone: 'danger', icon: ShieldAlert },
+      {
+        label: '正常',
+        description: '暂无账号池观测',
+        value: '—',
+        tone: 'success',
+        icon: CircleCheck,
+      },
+      {
+        label: '配额耗尽',
+        description: '暂无账号池观测',
+        value: '—',
+        tone: 'warning',
+        icon: TriangleAlert,
+      },
+      {
+        label: '限流中',
+        description: '暂无账号池观测',
+        value: '—',
+        tone: 'normal',
+        icon: RefreshCw,
+      },
+      {
+        label: '待处理',
+        description: '停用 — · 错误 —',
+        value: '—',
+        tone: 'danger',
+        icon: ShieldAlert,
+      },
     ]
   }
 

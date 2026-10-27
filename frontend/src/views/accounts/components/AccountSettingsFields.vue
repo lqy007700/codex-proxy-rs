@@ -27,7 +27,11 @@ const concurrencyLimit = defineModel<string>('concurrencyLimit', { required: tru
 const weight = defineModel<string>('weight', { required: true })
 const schedulingRole = defineModel<AccountSchedulingRole | 'preserve'>('schedulingRole', { default: 'regular' })
 const schedulingRoleOptions = computed(() => [
-  ...(props.preserveSchedulingRole ? [{ label: '保持原值', value: 'preserve' }] : []),
+  ...(props.preserveSchedulingRole
+    ? [
+        { label: '保持原值', value: 'preserve' },
+      ]
+    : []),
   { label: '常规', value: 'regular' },
   { label: '仅保底', value: 'fallback' },
 ])

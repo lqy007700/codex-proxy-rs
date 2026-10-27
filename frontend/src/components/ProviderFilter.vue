@@ -7,7 +7,11 @@ defineProps<{ disabled?: boolean }>()
 const provider = defineModel<string>({ required: true })
 const options = [
   { label: '全部平台', value: '', icon: LayoutGrid },
-  ...PROVIDER_IDS.map(value => ({ label: formatProviderLabel(value), value, icon: providerIcon(value) })),
+  ...PROVIDER_IDS.map(value => ({
+    label: formatProviderLabel(value),
+    value,
+    icon: providerIcon(value),
+  })),
 ]
 </script>
 

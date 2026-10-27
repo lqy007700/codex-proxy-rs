@@ -9,14 +9,28 @@ export const itemStates: Record<ImportItemStatus, { label: string, color: string
   skipped: { label: '未执行', color: 'bg-cp-fill-tertiary text-cp-text-secondary', fill: 'bg-cp-text-quaternary' },
 }
 
-export const outcomeOrder: ImportItemStatus[] = ['succeeded', 'failed', 'unknown', 'running', 'pending', 'skipped']
+export const outcomeOrder: ImportItemStatus[] = [
+  'succeeded',
+  'failed',
+  'unknown',
+  'running',
+  'pending',
+  'skipped',
+]
 
 export function taskLabel(task: AccountImportTask) {
-  if (!task.finishedAt)
-    return task.stopRequested ? '正在停止' : task.counts.running > 0 ? '导入中' : '排队中'
+  if (!task.finishedAt) {
+    return task.stopRequested
+      ? '正在停止'
+      : task.counts.running > 0
+        ? '导入中'
+        : '排队中'
+  }
   if (task.stopRequested)
     return '已停止'
-  return task.counts.failed + task.counts.unknown > 0 ? '已结束 · 有待处理项' : '全部完成'
+  return task.counts.failed + task.counts.unknown > 0
+    ? '已结束 · 有待处理项'
+    : '全部完成'
 }
 
 export function processed(task: AccountImportTask) {

@@ -22,7 +22,9 @@ const reasonLabels: Record<string, string> = {
 }
 
 function text(value: unknown) {
-  return typeof value === 'string' && value ? value : undefined
+  return typeof value === 'string' && value
+    ? value
+    : undefined
 }
 
 function duration(value: unknown) {
@@ -61,24 +63,51 @@ const diagnosis = computed(() => {
   const reused = failure?.data.reused ?? connection?.data.reused
   const closeCode = failure?.data.code
   const fallback = failure?.stage === 'upstream.close'
-    ? `上游在响应完成前关闭连接${typeof closeCode === 'number' ? `（关闭码 ${closeCode}）` : ''}`
+    ? `上游在响应完成前关闭连接${typeof closeCode === 'number'
+      ? `（关闭码 ${closeCode}）`
+      : ''}`
     : failure?.stage === 'upstream.eof'
       ? '上游连接在响应完成前结束'
-      : failure?.stage === 'upstream.send.failed' ? '向上游发送请求失败' : '读取上游响应失败'
+      : failure?.stage === 'upstream.send.failed'
+        ? '向上游发送请求失败'
+        : '读取上游响应失败'
 
   return {
     message: message ?? (!preciseReason && storedReason === 'tcp_reset'
       ? '上游连接异常结束（旧版汇总分类，无法区分 TCP 重置与缺失关闭握手）'
-      : reason ? reasonLabels[reason] ?? fallback : fallback),
+      : reason
+        ? reasonLabels[reason] ?? fallback
+        : fallback),
     reason,
     sequence: (attempt ?? failure)?.sequence,
     elapsed: duration((attempt ?? failure)?.elapsedMs),
     fields: [
-      { label: '失败阶段', value: text(diagnostic?.stage) },
-      { label: '连接使用', value: reused === true ? '复用已有连接' : reused === false ? '新建连接' : undefined },
-      { label: '连接年龄', value: duration(failure?.data.connectionAgeMs ?? metadata?.upstreamConnectionAgeMs) },
-      { label: '距最近活动', value: duration(failure?.data.connectionIdleMs ?? metadata?.upstreamConnectionIdleMs) },
-      { label: '最后事件', value: failure?.data.lastEventType === null ? '尚未收到事件' : text(failure?.data.lastEventType) },
+      {
+        label: '失败阶段',
+        value: text(diagnostic?.stage),
+      },
+      {
+        label: '连接使用',
+        value: reused === true
+          ? '复用已有连接'
+          : reused === false
+            ? '新建连接'
+            : undefined,
+      },
+      {
+        label: '连接年龄',
+        value: duration(failure?.data.connectionAgeMs ?? metadata?.upstreamConnectionAgeMs),
+      },
+      {
+        label: '距最近活动',
+        value: duration(failure?.data.connectionIdleMs ?? metadata?.upstreamConnectionIdleMs),
+      },
+      {
+        label: '最后事件',
+        value: failure?.data.lastEventType === null
+          ? '尚未收到事件'
+          : text(failure?.data.lastEventType),
+      },
       { label: '连接 ID', value: connectionId },
     ].filter(field => field.value !== undefined),
   }

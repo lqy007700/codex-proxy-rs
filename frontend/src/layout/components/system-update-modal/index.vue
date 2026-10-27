@@ -92,7 +92,13 @@ const channelLabels = {
 }
 const channelOptions = computed(() => availableChannels.value.map(value => ({
   value,
-  label: { stable: 'Stable', rc: 'RC', beta: 'Beta', alpha: 'Alpha', exp: 'Exp' }[value],
+  label: {
+    stable: 'Stable',
+    rc: 'RC',
+    beta: 'Beta',
+    alpha: 'Alpha',
+    exp: 'Exp',
+  }[value],
 })))
 
 async function handleChannelChange(value: string) {
@@ -129,7 +135,9 @@ async function handleCheckUpdates(force = true) {
       ZNotification.error({ message: data.warning })
       return
     }
-    ZNotification.success({ message: data?.hasUpdate ? '发现可用更新' : '当前没有可用更新' })
+    ZNotification.success({
+      message: data?.hasUpdate ? '发现可用更新' : '当前没有可用更新',
+    })
   }
   catch {}
 }
@@ -205,7 +213,9 @@ async function handleRestart() {
     await restartNow(restartPlan.value)
   }
   catch (error: unknown) {
-    ZNotification.error({ message: errorMessage(error, '重启前检查失败') })
+    ZNotification.error({
+      message: errorMessage(error, '重启前检查失败'),
+    })
   }
   finally {
     checkingRestart.value = false
@@ -221,7 +231,9 @@ async function handleConfirmRestart() {
   }
   catch (error: unknown) {
     restartConfirmOpen.value = false
-    ZNotification.error({ message: errorMessage(error, '重启失败，请重新检查') })
+    ZNotification.error({
+      message: errorMessage(error, '重启失败，请重新检查'),
+    })
   }
 }
 

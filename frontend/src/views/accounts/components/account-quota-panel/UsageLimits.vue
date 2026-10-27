@@ -21,7 +21,9 @@ const items = computed(() => orderedPanelQuotaWindows(props.windows)
       label: window.labelDisplay,
       resetAtDisplay: window.resetAtDisplay,
       remaining,
-      remainingDisplay: remaining === null ? '待观测' : `剩余 ${remaining}%`,
+      remainingDisplay: remaining === null
+        ? '待观测'
+        : `剩余 ${remaining}%`,
       barClass: presentation.barClass,
       percentTextClass: presentation.percentTextClass,
       barStyle: { width: `${remaining ?? 0}%` },

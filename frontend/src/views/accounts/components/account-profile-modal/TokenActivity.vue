@@ -27,7 +27,11 @@ const grid = computed(() => buildProfileActivityGrid(props.calendar, mode.value)
 const rangeLabel = computed(() => grid.value.rangeLabel)
 const monthLabels = computed(() =>
   grid.value.weeks.flatMap((week, weekIndex) =>
-    week.monthLabel ? [{ label: week.monthLabel, weekIndex }] : [],
+    week.monthLabel
+      ? [
+          { label: week.monthLabel, weekIndex },
+        ]
+      : [],
   ),
 )
 </script>

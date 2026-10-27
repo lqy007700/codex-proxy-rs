@@ -96,7 +96,16 @@ export function parseProxyBatch(text: string, prefix: string, protocol: string):
       // 解析器的异常可能携带认证信息，界面只显示固定格式说明
       error = '格式不正确，请参考格式说明'
     }
-    return [{ line, raw: value, name, proxyUrl, endpoint: safeEndpoint(proxyUrl), error }]
+    return [
+      {
+        line,
+        raw: value,
+        name,
+        proxyUrl,
+        endpoint: safeEndpoint(proxyUrl),
+        error,
+      },
+    ]
   })
 }
 

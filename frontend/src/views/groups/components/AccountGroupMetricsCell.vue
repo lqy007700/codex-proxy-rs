@@ -58,14 +58,20 @@ const metrics = computed<MetricItem[]>(() => {
       {
         label: '并发',
         value: `${props.group.capacity.usedSlots ?? '—'} / ${props.group.capacity.totalSlots ?? '∞'}`,
-        tone: (props.group.capacity.usedSlots ?? 0) > 0 ? 'active' : 'primary',
+        tone: (props.group.capacity.usedSlots ?? 0) > 0
+          ? 'active'
+          : 'primary',
         icon: Grid2X2,
       },
     ]
   }
 
   return [
-    { label: '今日', value: formatUsd(props.group.usage.todayUsd), tone: 'primary' },
+    {
+      label: '今日',
+      value: formatUsd(props.group.usage.todayUsd),
+      tone: 'primary',
+    },
     {
       label: '累计',
       value: formatUsd(props.group.usage.retainedTotalUsd),

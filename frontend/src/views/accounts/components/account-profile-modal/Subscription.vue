@@ -17,7 +17,13 @@ const billingPeriod = computed(() => {
   const period = props.subscription?.billingPeriod
   if (!period)
     return null
-  const labels: Record<string, string> = { month: '按月', monthly: '按月', year: '按年', yearly: '按年', annual: '按年' }
+  const labels: Record<string, string> = {
+    month: '按月',
+    monthly: '按月',
+    year: '按年',
+    yearly: '按年',
+    annual: '按年',
+  }
   return labels[period.toLowerCase()] ?? period
 })
 const billing = computed(() => [billingPeriod.value, props.subscription?.billingCurrency].filter(Boolean).join(' · ') || '未知')

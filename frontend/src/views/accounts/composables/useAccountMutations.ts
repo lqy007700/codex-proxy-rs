@@ -134,9 +134,11 @@ export function useAccountMutations(options: {
         errorText: false,
         onError: (error) => {
           void loadAccounts().catch(() => undefined)
-          ZNotification.error({ message: deletedCount > 0
-            ? `已删除 ${deletedCount} 个账号，其余未删除：${errorMessage(error, '操作失败')}`
-            : errorMessage(error, '批量删除失败') })
+          ZNotification.error({
+            message: deletedCount > 0
+              ? `已删除 ${deletedCount} 个账号，其余未删除：${errorMessage(error, '操作失败')}`
+              : errorMessage(error, '批量删除失败'),
+          })
         },
       },
     )
@@ -208,9 +210,14 @@ export function useAccountMutations(options: {
   async function handleToggleScheduling(account: Account) {
     await togglingSchedulingAccounts.run(account.id, async () => {
       try {
-        await batchUpdateAccounts({ accountIds: [account.id], enabled: !account.enabled })
+        await batchUpdateAccounts({
+          accountIds: [account.id],
+          enabled: !account.enabled,
+        })
         await loadAccounts()
-        ZNotification.success({ message: account.enabled ? '调度已停用' : '调度已启用' })
+        ZNotification.success({
+          message: account.enabled ? '调度已停用' : '调度已启用',
+        })
       }
       catch {}
     })
@@ -240,7 +247,10 @@ export function useAccountMutations(options: {
       await options.replaceAccount(result.account)
     }
     catch (error: unknown) {
-      ZNotification.warning({ message: `额度已重置，但最新额度加载失败：${errorMessage(error, '请手动刷新额度')}`, ...({ duration: 5000 }) })
+      ZNotification.warning({
+        message: `额度已重置，但最新额度加载失败：${errorMessage(error, '请手动刷新额度')}`,
+        ...({ duration: 5000 }),
+      })
     }
   }
 

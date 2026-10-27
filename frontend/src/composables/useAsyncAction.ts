@@ -30,7 +30,10 @@ export function useAsyncAction(defaults: AsyncActionRunOptions = {}) {
     }
 
     loading.value = true
-    const options = { ...defaults, ...overrides }
+    const options = {
+      ...defaults,
+      ...overrides,
+    }
     try {
       const execute = async () => task()
       return options.minimumMs === undefined

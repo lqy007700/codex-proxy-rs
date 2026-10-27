@@ -87,15 +87,21 @@ export default antfu(
     },
     rules: {
       'template-style/single-line-simple-interpolation': 'error',
-      'vue/html-closing-bracket-newline': ['error', {
-        singleline: 'never',
-        multiline: 'always',
-      }],
-      'vue/multiline-html-element-content-newline': ['error', {
-        ignores: ['pre', 'textarea'],
-        ignoreWhenEmpty: true,
-        allowEmptyLines: false,
-      }],
+      'vue/html-closing-bracket-newline': [
+        'error',
+        {
+          singleline: 'never',
+          multiline: 'always',
+        },
+      ],
+      'vue/multiline-html-element-content-newline': [
+        'error',
+        {
+          ignores: ['pre', 'textarea'],
+          ignoreWhenEmpty: true,
+          allowEmptyLines: false,
+        },
+      ],
       'vue/mustache-interpolation-spacing': ['error', 'always'],
     },
   },

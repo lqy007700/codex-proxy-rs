@@ -26,7 +26,12 @@ export function useProxies() {
     proxyUrl: '',
     maxWebsocketConnections: '',
     customLocation: false,
-    location: { country: '', region: '', city: '', timezone: '' },
+    location: {
+      country: '',
+      region: '',
+      city: '',
+      timezone: '',
+    },
   })
   const formTestResult = shallowRef<OutboundProxyTest | null>(null)
   const saveAction = useAsyncAction()
@@ -51,11 +56,22 @@ export function useProxies() {
     editing.value = proxy
     form.name = proxy?.name ?? ''
     form.proxyUrl = ''
-    form.maxWebsocketConnections = proxy?.maxWebsocketConnections ? String(proxy.maxWebsocketConnections) : ''
+    form.maxWebsocketConnections = proxy?.maxWebsocketConnections
+      ? String(proxy.maxWebsocketConnections)
+      : ''
     formTestResult.value = null
-    const currentLocation = proxy?.autoLocation ? proxy.detectedLocation?.location ?? proxy.location : proxy?.location
+    const currentLocation = proxy?.autoLocation
+      ? proxy.detectedLocation?.location ?? proxy.location
+      : proxy?.location
     form.customLocation = currentLocation != null
-    form.location = currentLocation ? { ...currentLocation } : { country: '', region: '', city: '', timezone: '' }
+    form.location = currentLocation
+      ? { ...currentLocation }
+      : {
+          country: '',
+          region: '',
+          city: '',
+          timezone: '',
+        }
     showForm.value = true
   }
 
@@ -72,7 +88,9 @@ export function useProxies() {
           continue
         const record = result.data
         // 列表或编辑目标已换版本时，迟到的测试不能覆盖新配置
-        proxies.value = proxies.value.map(item => item.id === record.id && item.revision === target.revision ? record : item)
+        proxies.value = proxies.value.map(item => item.id === record.id && item.revision === target.revision
+          ? record
+          : item)
         if (editing.value?.id === record.id && editing.value.revision === target.revision) {
           editing.value = record
           formTestResult.value = record.lastTest
@@ -102,8 +120,11 @@ export function useProxies() {
         ZNotification.success({ message: `${result.name}：连接成功` })
     }
     catch (error) {
-      if (!(error instanceof ApiError))
-        ZNotification.error({ message: errorMessage(error, '代理测试失败') })
+      if (!(error instanceof ApiError)) {
+        ZNotification.error({
+          message: errorMessage(error, '代理测试失败'),
+        })
+      }
     }
     finally {
       await query.execute({ silent: true })
@@ -151,7 +172,9 @@ export function useProxies() {
         }
         else {
           const proxy = editing.value!
-          const updated = proxyResultData((await testProxy([{ id: proxy.id, revision: proxy.revision, detectLocation: true }]))[0])
+          const updated = proxyResultData((await testProxy([
+            { id: proxy.id, revision: proxy.revision, detectLocation: true },
+          ]))[0])
           editing.value = updated
           result = updated.lastTest
           await query.execute({ silent: true })
@@ -196,8 +219,12 @@ export function useProxies() {
       ZNotification.warning({ message: '连接上限须为 0 到 4294967295 之间的整数' })
       return
     }
-    const location = form.customLocation ? normalizeRequestLocation(form.location) : null
-    const locationError = location ? requestLocationError(location) : ''
+    const location = form.customLocation
+      ? normalizeRequestLocation(form.location)
+      : null
+    const locationError = location
+      ? requestLocationError(location)
+      : ''
     if (locationError) {
       ZNotification.warning({ message: locationError })
       return
@@ -214,13 +241,15 @@ export function useProxies() {
             proxyUrl: proxyUrl || undefined,
             location,
           })
-        : createProxy([{
-            name,
-            autoLocation: false,
-            maxWebsocketConnections,
-            proxyUrl,
-            location,
-          }]).then(results => proxyResultData(results[0])))
+        : createProxy([
+            {
+              name,
+              autoLocation: false,
+              maxWebsocketConnections,
+              proxyUrl,
+              location,
+            },
+          ]).then(results => proxyResultData(results[0])))
       showForm.value = false
       ZNotification.success({ message: '代理已保存' })
       await reloadAfterCreate()
@@ -242,9 +271,16 @@ export function useProxies() {
       return
     updating.add(proxy.id)
     try {
-      await updateProxy({ id: proxy.id, revision: proxy.revision, name: proxy.name, enabled })
+      await updateProxy({
+        id: proxy.id,
+        revision: proxy.revision,
+        name: proxy.name,
+        enabled,
+      })
       showDisable.value = false
-      ZNotification.success({ message: enabled ? '代理已启用' : '代理已禁用，关联账号已改为直连' })
+      ZNotification.success({
+        message: enabled ? '代理已启用' : '代理已禁用，关联账号已改为直连',
+      })
     }
     catch {}
     finally {

@@ -11,9 +11,18 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: '/',
-    plugins: [vue(), tailwindcss(), CodexProxyUI({ source: sourceUi ? uiRoot : undefined }), pluginBridge()],
+    plugins: [
+      vue(),
+      tailwindcss(),
+      CodexProxyUI({
+        source: sourceUi ? uiRoot : undefined,
+      }),
+      pluginBridge(),
+    ],
     resolve: {
-      alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
+      },
     },
     server: {
       port: 5173,

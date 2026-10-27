@@ -10,14 +10,26 @@ const props = defineProps<{
 }>()
 
 const insightRows = computed(() => [
-  { label: '快速模式', value: formatPercent(props.insights.fastModePercent) },
+  {
+    label: '快速模式',
+    value: formatPercent(props.insights.fastModePercent),
+  },
   {
     label: '最常用的推理强度',
     value: formatReasoning(props.insights.reasoningEffort, props.insights.reasoningEffortPercent),
   },
-  { label: '已探索的技能', value: formatNumber(props.insights.skillsExplored) },
-  { label: '使用的技能总数', value: formatNumber(props.insights.totalSkillsUsed) },
-  { label: '聊天总数', value: formatNumber(props.insights.totalThreads) },
+  {
+    label: '已探索的技能',
+    value: formatNumber(props.insights.skillsExplored),
+  },
+  {
+    label: '使用的技能总数',
+    value: formatNumber(props.insights.totalSkillsUsed),
+  },
+  {
+    label: '聊天总数',
+    value: formatNumber(props.insights.totalThreads),
+  },
 ])
 const invocations = computed(() =>
   (props.insights.invocations ?? [])
@@ -26,7 +38,9 @@ const invocations = computed(() =>
 )
 
 function formatNumber(value: number | null) {
-  return value === null ? '—' : formatInteger(value)
+  return value === null
+    ? '—'
+    : formatInteger(value)
 }
 
 function formatPercent(value: number | null) {
@@ -38,7 +52,9 @@ function formatPercent(value: number | null) {
 function formatReasoning(effort: string | null, percent: number | null) {
   if (!effort)
     return '—'
-  return percent === null ? effort : `${effort} · ${formatPercent(percent)}`
+  return percent === null
+    ? effort
+    : `${effort} · ${formatPercent(percent)}`
 }
 
 function invocationView(invocation: AccountProfileInvocation) {

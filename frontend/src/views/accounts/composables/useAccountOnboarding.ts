@@ -59,7 +59,9 @@ export function useAccountOnboarding(options: {
       if (proxyError)
         throw new Error(proxyError)
       const settings = accountImportSettings(form)
-      const outboundProxyId = form.proxyMode === 'proxy' ? form.proxyId.trim() : undefined
+      const outboundProxyId = form.proxyMode === 'proxy'
+        ? form.proxyId.trim()
+        : undefined
       const mode = form.mode
       if (mode === 'oauth')
         return
@@ -74,7 +76,14 @@ export function useAccountOnboarding(options: {
           provider: 'openai',
           settings,
           outboundProxyId,
-          data: { provider: 'openai', authentication_kind: 'api_key', name: form.apiKey.name.trim(), base_url: form.apiKey.base_url.trim(), api_key: form.apiKey.apiKey, transport: form.apiKey.transport },
+          data: {
+            provider: 'openai',
+            authentication_kind: 'api_key',
+            name: form.apiKey.name.trim(),
+            base_url: form.apiKey.base_url.trim(),
+            api_key: form.apiKey.apiKey,
+            transport: form.apiKey.transport,
+          },
         })
         await finishCreate('API Key 账号已添加')
         return
@@ -84,7 +93,12 @@ export function useAccountOnboarding(options: {
         : accountImportDocuments(requireImportProvider(provider), mode, form.importTexts[mode])
       for (const document of documents)
         requireImportProvider(document.provider)
-      const batches = accountImportBatches(documents.map(entry => ({ provider: entry.provider, data: entry.document, settings, outboundProxyId })))
+      const batches = accountImportBatches(documents.map(entry => ({
+        provider: entry.provider,
+        data: entry.document,
+        settings,
+        outboundProxyId,
+      })))
       // 同一输入重试时复用每批标识，恢复丢失响应或部分提交，不重复执行 RT 交换
       const ids = submissionIds
       for (const [index, items] of batches.entries()) {
@@ -95,7 +109,11 @@ export function useAccountOnboarding(options: {
           showCreateModal.value = false
         options.onImportTaskCreated(task, finished)
       }
-      ZNotification.success({ message: submitted > 1 ? `已创建 ${submitted} 个导入任务` : '导入任务已创建' })
+      ZNotification.success({
+        message: submitted > 1
+          ? `已创建 ${submitted} 个导入任务`
+          : '导入任务已创建',
+      })
     }, {
       onError: () => {
         if (submitted)
@@ -121,13 +139,21 @@ export function useAccountOnboarding(options: {
           provider,
           name: account?.name || account?.email || `${formatProviderLabel(provider)} 账号`,
           accountId: account?.id,
-          outboundProxyId: account ? undefined : form.proxyMode === 'proxy' ? form.proxyId.trim() : undefined,
+          outboundProxyId: account
+            ? undefined
+            : form.proxyMode === 'proxy'
+              ? form.proxyId.trim()
+              : undefined,
         },
-        settings: account ? undefined : accountImportSettings(form),
+        settings: account
+          ? undefined
+          : accountImportSettings(form),
       })
     }
     catch (cause) {
-      ZNotification.error({ message: errorMessage(cause, '启动授权失败') })
+      ZNotification.error({
+        message: errorMessage(cause, '启动授权失败'),
+      })
     }
   }
 
@@ -143,7 +169,11 @@ export function useAccountOnboarding(options: {
       return
     authorization.reset()
     reauthorizingAccount.value = account
-    createForm.value = { ...emptyAccountCreateForm(), source: { kind: 'provider', id: account.provider }, step: 'import' }
+    createForm.value = {
+      ...emptyAccountCreateForm(),
+      source: { kind: 'provider', id: account.provider },
+      step: 'import',
+    }
     showCreateModal.value = true
     void handleAuthorizeOAuth()
   }
@@ -157,7 +187,11 @@ export function useAccountOnboarding(options: {
   watch(() => accountCreateSourceKey(createForm.value), () => {
     createForm.value = {
       ...createForm.value,
-      mode: reauthorizingAccount.value ? 'oauth' : createForm.value.source?.kind === 'bundle' ? 'json' : accountImportModes(accountCreateProvider(createForm.value))[0]?.value ?? 'json',
+      mode: reauthorizingAccount.value
+        ? 'oauth'
+        : createForm.value.source?.kind === 'bundle'
+          ? 'json'
+          : accountImportModes(accountCreateProvider(createForm.value))[0]?.value ?? 'json',
       apiKey: emptyApiKeyAccountForm(),
       importTexts: { access_token: '', refresh_token: '', json: '' },
     }
@@ -168,7 +202,9 @@ export function useAccountOnboarding(options: {
     () => createForm.value.mode,
     () => createForm.value.step,
     () => createForm.value.proxyMode,
-    () => createForm.value.proxyMode === 'proxy' ? createForm.value.proxyId.trim() : '',
+    () => createForm.value.proxyMode === 'proxy'
+      ? createForm.value.proxyId.trim()
+      : '',
   ], () => {
     authorization.reset()
   }, { flush: 'sync' })

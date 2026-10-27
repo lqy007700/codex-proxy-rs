@@ -27,7 +27,9 @@ const { now, pause, resume } = useNow({
   scheduler: callback => useIntervalFn(callback, 30_000),
 })
 const options = computed(() => report.value?.forecasts.map(item => ({
-  label: item.period === 'weekly' ? '周额度' : '月额度',
+  label: item.period === 'weekly'
+    ? '周额度'
+    : '月额度',
   value: item.period,
 })) ?? [
   { label: '周额度', value: 'weekly' },

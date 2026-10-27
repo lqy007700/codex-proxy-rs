@@ -18,7 +18,9 @@ export async function errorPlugin(_context: RequestContext, next: RequestNext) {
     return response
   }
   catch (error) {
-    throw isAxiosError(error) ? normalizeApiError(error) : error
+    throw isAxiosError(error)
+      ? normalizeApiError(error)
+      : error
   }
 }
 
@@ -64,7 +66,9 @@ export function normalizeApiResponseError(response: AxiosResponse<unknown>) {
   if (!envelope || envelope.code === 200)
     return undefined
   return new ApiError(
-    envelope.message || httpFallback(response.status >= 400 ? response.status : 0),
+    envelope.message || httpFallback(response.status >= 400
+      ? response.status
+      : 0),
     response.status,
     envelope.code,
     responseHeader(response.headers, 'x-request-id'),
@@ -78,7 +82,9 @@ function adminErrorEnvelope(value: unknown): AdminErrorEnvelope | null {
   const record = value as Record<string, unknown>
   if (typeof record.code !== 'number' || !Number.isSafeInteger(record.code))
     return null
-  const message = typeof record.message === 'string' ? record.message.trim() : ''
+  const message = typeof record.message === 'string'
+    ? record.message.trim()
+    : ''
   return { code: record.code, message }
 }
 
@@ -88,8 +94,12 @@ function responseHeader(
 ) {
   if (!headers)
     return undefined
-  const value = typeof headers.get === 'function' ? headers.get(name) : headers[name]
-  return typeof value === 'string' && value ? value : undefined
+  const value = typeof headers.get === 'function'
+    ? headers.get(name)
+    : headers[name]
+  return typeof value === 'string' && value
+    ? value
+    : undefined
 }
 
 function httpFallback(status: number) {
@@ -123,7 +133,9 @@ function httpFallback(status: number) {
     case 504:
       return '上游服务响应超时'
     default:
-      return status > 0 ? `请求失败（HTTP ${status}）` : '请求失败'
+      return status > 0
+        ? `请求失败（HTTP ${status}）`
+        : '请求失败'
   }
 }
 

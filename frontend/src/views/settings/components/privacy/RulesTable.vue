@@ -8,18 +8,33 @@ import { computed, nextTick, shallowRef, useId, useTemplateRef, watch } from 'vu
 import { actions, scopes } from './presets'
 
 const props = defineProps<{ rules: PrivacyRule[], disabled: boolean }>()
+
 const emit = defineEmits<{
   edit: [rule: PrivacyRule]
   toggle: [rule: PrivacyRule, enabled: boolean]
   reorder: [rules: PrivacyRule[]]
   remove: [rule: PrivacyRule]
 }>()
+
+function scopeLabels(rule: PrivacyRule) {
+  return [
+    ...new Set(rule.steps.map(step => scopes.find(item => item.value === step.scope)?.label)),
+  ].join('、')
+}
+
+function actionLabels(rule: PrivacyRule) {
+  return [
+    ...new Set(rule.steps.map(step => actions.find(item => item.value === step.action)?.label)),
+  ].join('、')
+}
 const container = useTemplateRef<HTMLDivElement>('container')
 const tableBody = shallowRef<HTMLTableSectionElement | null>(null)
 const reorderHelpId = useId()
 const announcement = shallowRef('')
 const preferredMotion = usePreferredReducedMotion()
-const animation = computed(() => preferredMotion.value === 'reduce' ? 0 : 200)
+const animation = computed(() => preferredMotion.value === 'reduce'
+  ? 0
+  : 200)
 const sortingDisabled = computed(() => props.disabled || props.rules.length < 2)
 const sortableRules = computed({
   get: () => props.rules,
@@ -44,7 +59,10 @@ const { option: setSortableOption } = useSortable(tableBody, sortableRules, {
 })
 
 // 表格空态没有 tbody，增删规则后重新绑定排序容器
-watch([container, () => props.rules.length], () => {
+watch([
+  container,
+  () => props.rules.length,
+], () => {
   tableBody.value = container.value?.querySelector('tbody') ?? null
 }, { flush: 'post' })
 watch([tableBody, sortingDisabled, animation], async () => {
@@ -75,11 +93,38 @@ function moveWithKeyboard(id: string, direction: -1 | 1) {
 }
 
 const columns = defineTableColumns<PrivacyRule>([
-  { key: 'enabled', label: '启用', kind: 'status', size: 'sm', fixedWidth: true },
-  { key: 'name', label: '规则 / 字段', kind: 'identity', size: '3xl' },
-  { key: 'scope', label: '作用范围', kind: 'meta', size: 'lg' },
-  { key: 'action', label: '处理方式', kind: 'meta', size: 'md' },
-  { key: 'actions', label: '', kind: 'actions', size: 'lg', fixedWidth: true },
+  {
+    key: 'enabled',
+    label: '启用',
+    kind: 'status',
+    size: 'sm',
+    fixedWidth: true,
+  },
+  {
+    key: 'name',
+    label: '规则 / 字段',
+    kind: 'identity',
+    size: '3xl',
+  },
+  {
+    key: 'scope',
+    label: '作用范围',
+    kind: 'meta',
+    size: 'lg',
+  },
+  {
+    key: 'action',
+    label: '处理方式',
+    kind: 'meta',
+    size: 'md',
+  },
+  {
+    key: 'actions',
+    label: '',
+    kind: 'actions',
+    size: 'lg',
+    fixedWidth: true,
+  },
 ])
 </script>
 
@@ -104,10 +149,10 @@ const columns = defineTableColumns<PrivacyRule>([
         </div>
       </template>
       <template #scope="{ row }">
-        {{ [...new Set(row.steps.map(step => scopes.find(item => item.value === step.scope)?.label))].join('、') }}
+        {{ scopeLabels(row) }}
       </template>
       <template #action="{ row }">
-        {{ [...new Set(row.steps.map(step => actions.find(item => item.value === step.action)?.label))].join('、') }}
+        {{ actionLabels(row) }}
       </template>
       <template #actions="{ row }">
         <div class="flex items-center justify-end gap-1">

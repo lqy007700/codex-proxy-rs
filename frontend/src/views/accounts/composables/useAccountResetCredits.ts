@@ -189,7 +189,9 @@ export function useAccountResetCredits(options: {
         || (result.code === 'already_redeemed' && operation.hasTransportFailure)
       target.pendingOperation = null
       if (!confirmed) {
-        ZNotification.error({ message: resetResultMessage(result.code) })
+        ZNotification.error({
+          message: resetResultMessage(result.code),
+        })
         await loadSessionCredits(target, true)
         return false
       }
@@ -212,11 +214,16 @@ export function useAccountResetCredits(options: {
           ...operation,
           hasTransportFailure: true,
         }
-        ZNotification.warning({ message: '消费结果暂不确定，重试会复用同一个请求标识', ...({ duration: 5000 }) })
+        ZNotification.warning({
+          message: '消费结果暂不确定，重试会复用同一个请求标识',
+          ...({ duration: 5000 }),
+        })
       }
       else {
         target.pendingOperation = null
-        ZNotification.error({ message: errorMessage(error, '额度重置失败') })
+        ZNotification.error({
+          message: errorMessage(error, '额度重置失败'),
+        })
         await loadSessionCredits(target, true)
       }
       return false

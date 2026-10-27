@@ -50,7 +50,9 @@ const scopeOptions = [
 ]
 
 function switchScope(value: string) {
-  scope.value = value === 'component' ? 'component' : 'global'
+  scope.value = value === 'component'
+    ? 'component'
+    : 'global'
 }
 
 function saveTheme(event: MouseEvent) {

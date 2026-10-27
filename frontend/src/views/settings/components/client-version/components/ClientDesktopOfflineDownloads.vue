@@ -43,7 +43,9 @@ const localInstallCommand = [
 ]
 
 function packageTitle(packageItem: ClientDownloadPackage): string {
-  return packageItem.architecture === 'arm64' ? 'Windows ARM64' : 'Windows x64'
+  return packageItem.architecture === 'arm64'
+    ? 'Windows ARM64'
+    : 'Windows x64'
 }
 
 function formatFileSize(value: number | null): string {
@@ -56,7 +58,9 @@ function formatFileSize(value: number | null): string {
     size /= 1000
     unit += 1
   }
-  return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`
+  return `${size >= 10 || unit === 0
+    ? size.toFixed(0)
+    : size.toFixed(1)} ${units[unit]}`
 }
 </script>
 

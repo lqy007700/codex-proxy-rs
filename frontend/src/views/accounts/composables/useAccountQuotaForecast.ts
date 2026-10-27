@@ -77,5 +77,12 @@ export function useAccountQuotaForecast(
     disposed = true
   })
 
-  return { report, loading, refreshing, error, load, refresh }
+  return {
+    report,
+    loading,
+    refreshing,
+    error,
+    load,
+    refresh,
+  }
 }

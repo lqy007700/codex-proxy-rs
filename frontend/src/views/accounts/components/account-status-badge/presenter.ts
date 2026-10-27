@@ -169,7 +169,9 @@ export function resolveAccountStatusPresentation(
     ? errorRecoveryHints[input.errorReason]
     : definition.recoveryHint
   const hasDetail = input.status === 'error' || mode === 'rate_limited' || isBackoff
-  const retry = nextRefreshDisplay ? `，下次尝试：${nextRefreshDisplay}` : ''
+  const retry = nextRefreshDisplay
+    ? `，下次尝试：${nextRefreshDisplay}`
+    : ''
   const triggerLabel = `${title}，${definition.description}${retry}，点击或聚焦查看详情`
 
   return {

@@ -33,7 +33,12 @@ const emit = defineEmits<{
 const deleteOpen = defineModel<boolean>('deleteOpen', { required: true })
 
 const columns = defineTableColumns<BackupRecord>([
-  { key: 'id', label: 'ID', kind: 'mono', size: 'lg' },
+  {
+    key: 'id',
+    label: 'ID',
+    kind: 'mono',
+    size: 'lg',
+  },
   { key: 'status', label: '状态', kind: 'status' },
   { key: 'fileName', label: '文件名', kind: 'text' },
   { key: 'sizeBytes', label: '大小', kind: 'numeric' },
@@ -44,7 +49,9 @@ const columns = defineTableColumns<BackupRecord>([
 ])
 
 function triggerLabel(value: string): string {
-  return value === 'manual' ? '手动' : '计划'
+  return value === 'manual'
+    ? '手动'
+    : '计划'
 }
 
 function formatSize(value: unknown): string {
@@ -58,7 +65,9 @@ function formatSize(value: unknown): string {
     size /= 1024
     index += 1
   }
-  return `${size >= 100 || index === 0 ? Math.round(size) : size.toFixed(1)} ${units[index]}`
+  return `${size >= 100 || index === 0
+    ? Math.round(size)
+    : size.toFixed(1)} ${units[index]}`
 }
 
 /** 从对象 key 提取文件名（最后一段）。 */
@@ -70,8 +79,12 @@ function formatFileName(record: BackupRecord): string {
 
 /** 记录 ID 的短标识：`backup_` 前缀 + 前 8 位 hex，与对象 key 文件名一致；完整值通过 title 展示。 */
 function shortId(id: string): string {
-  const hex = id.startsWith('backup_') ? id.slice('backup_'.length) : id
-  return hex.length > 8 ? `backup_${hex.slice(0, 8)}` : id
+  const hex = id.startsWith('backup_')
+    ? id.slice('backup_'.length)
+    : id
+  return hex.length > 8
+    ? `backup_${hex.slice(0, 8)}`
+    : id
 }
 
 function canDownload(record: BackupRecord): boolean {

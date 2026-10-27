@@ -5,8 +5,22 @@ import { computed } from 'vue'
 
 const props = defineProps<{ apiKey: ApiKey }>()
 const windows = computed(() => [
-  { label: '日', heading: '日用量', used: props.apiKey.dailyUsedUsd, limit: props.apiKey.dailyLimitUsd, reset: props.apiKey.dailyResetsAt, resetDisplay: props.apiKey.dailyResetsAtDisplay },
-  { label: '周', heading: '周用量', used: props.apiKey.weeklyUsedUsd, limit: props.apiKey.weeklyLimitUsd, reset: props.apiKey.weeklyResetsAt, resetDisplay: props.apiKey.weeklyResetsAtDisplay },
+  {
+    label: '日',
+    heading: '日用量',
+    used: props.apiKey.dailyUsedUsd,
+    limit: props.apiKey.dailyLimitUsd,
+    reset: props.apiKey.dailyResetsAt,
+    resetDisplay: props.apiKey.dailyResetsAtDisplay,
+  },
+  {
+    label: '周',
+    heading: '周用量',
+    used: props.apiKey.weeklyUsedUsd,
+    limit: props.apiKey.weeklyLimitUsd,
+    reset: props.apiKey.weeklyResetsAt,
+    resetDisplay: props.apiKey.weeklyResetsAtDisplay,
+  },
 ])
 function amount(value: string) {
   // 列表最多显示两位小数，不补末尾零；明细保留原始金额的全部精度。

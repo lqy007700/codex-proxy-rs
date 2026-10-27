@@ -32,27 +32,45 @@ const open = defineModel<boolean>({ default: false })
 
 const { palette } = useChartPalette()
 
-const requestText = computed(() => props.record ? visibleRequestText(props.record) : '')
-const responseText = computed(() => props.record ? visibleResponseText(props.record) : '')
+const requestText = computed(() => props.record
+  ? visibleRequestText(props.record)
+  : '')
+const responseText = computed(() => props.record
+  ? visibleResponseText(props.record)
+  : '')
 const modelDisplay = computed(() => props.record
   ? usageModelDisplay(props.record)
   : { primary: '—', secondary: '' })
 const tokenDetails = computed(() => props.record?.tokenDetails ?? null)
 const billing = computed(() => props.record ? props.record.billing : null)
-const latencyDetails = computed(() => props.record ? usageLatencyDetails(props.record) : null)
+const latencyDetails = computed(() => props.record
+  ? usageLatencyDetails(props.record)
+  : null)
 
 const panelClass = 'min-w-0 rounded-cp-card bg-cp-fill-quaternary px-4 py-3.5'
 const panelTitleClass = 'm-0 text-cp-sm leading-none font-heavy text-cp-text-secondary'
 
-const accountDisplay = computed(() => props.record ? usageAccountText(props.record) : '—')
+const accountDisplay = computed(() => props.record
+  ? usageAccountText(props.record)
+  : '—')
 const finalAttemptIndex = computed(() => {
   const attempts = props.record?.attempts ?? []
   const last = attempts[attempts.length - 1]
   return last?.attemptIndex ?? props.record?.attemptCount
 })
 const requestItems = computed(() => [
-  { label: '请求结果', value: props.record ? attemptOutcomeText(props.record.logicalOutcome) : '—' },
-  { label: '账号', value: accountDisplay.value, mono: true, fullWidth: true },
+  {
+    label: '请求结果',
+    value: props.record
+      ? attemptOutcomeText(props.record.logicalOutcome)
+      : '—',
+  },
+  {
+    label: '账号',
+    value: accountDisplay.value,
+    mono: true,
+    fullWidth: true,
+  },
   { label: '状态码', value: props.record?.statusCode, mono: true },
   { label: '消息', value: props.record?.message },
   { label: '时间', value: props.record?.createdAtDisplay, mono: true },
@@ -60,8 +78,16 @@ const requestItems = computed(() => [
 ])
 const overviewItems = computed(() => [
   { label: '总尝试', value: props.record?.attemptCount },
-  { label: '客户端传输', value: usageTransportType(props.record?.clientTransport), mono: true },
-  { label: '上游传输', value: usageTransportType(props.record?.upstreamTransport), mono: true },
+  {
+    label: '客户端传输',
+    value: usageTransportType(props.record?.clientTransport),
+    mono: true,
+  },
+  {
+    label: '上游传输',
+    value: usageTransportType(props.record?.upstreamTransport),
+    mono: true,
+  },
   { label: '总耗时', value: props.record?.latencyMsDisplay, mono: true },
   { label: '上游耗时', value: latencyDetails.value?.upstreamDisplay ?? '—', mono: true },
   {
@@ -74,7 +100,12 @@ const overviewItems = computed(() => [
 
 const modelRouteItems = computed(() => [
   { label: '端点', value: props.record?.route, mono: true },
-  { label: '推理强度', value: props.record ? usageReasoningEffort(props.record) : '—' },
+  {
+    label: '推理强度',
+    value: props.record
+      ? usageReasoningEffort(props.record)
+      : '—',
+  },
   { label: '请求模型', value: modelDisplay.value.primary, mono: true },
   {
     label: '上游模型',
@@ -86,24 +117,58 @@ const modelRouteItems = computed(() => [
 ])
 
 const clientUpstreamItems = computed(() => [
-  { label: '客户端 IP', value: props.record ? usageClientIp(props.record) : '—', mono: true },
+  {
+    label: '客户端 IP',
+    value: props.record
+      ? usageClientIp(props.record)
+      : '—',
+    mono: true,
+  },
   { label: '服务档位', value: props.record?.serviceTier, mono: true },
   { label: '事件类型', value: props.record?.kind, mono: true },
   { label: '尝试序号', value: finalAttemptIndex.value },
   {
     label: 'User-Agent',
-    value: props.record ? usageUserAgent(props.record) : '',
+    value: props.record
+      ? usageUserAgent(props.record)
+      : '',
     mono: true,
     fullWidth: true,
   },
 ])
 
 const identifierItems = computed(() => [
-  { label: '请求 ID', value: props.record?.requestId, mono: true, wrap: true, fullWidth: true },
-  { label: '响应 ID', value: props.record?.responseId, mono: true, wrap: true },
-  { label: '上游请求 ID', value: props.record?.upstreamRequestId, mono: true, wrap: true },
-  { label: '账号 ID', value: props.record?.accountId, mono: true, wrap: true },
-  { label: '客户端 Key ID', value: props.record?.clientApiKeyId, mono: true, wrap: true },
+  {
+    label: '请求 ID',
+    value: props.record?.requestId,
+    mono: true,
+    wrap: true,
+    fullWidth: true,
+  },
+  {
+    label: '响应 ID',
+    value: props.record?.responseId,
+    mono: true,
+    wrap: true,
+  },
+  {
+    label: '上游请求 ID',
+    value: props.record?.upstreamRequestId,
+    mono: true,
+    wrap: true,
+  },
+  {
+    label: '账号 ID',
+    value: props.record?.accountId,
+    mono: true,
+    wrap: true,
+  },
+  {
+    label: '客户端 Key ID',
+    value: props.record?.clientApiKeyId,
+    mono: true,
+    wrap: true,
+  },
 ])
 
 interface AttemptRow {
@@ -121,13 +186,48 @@ interface AttemptRow {
 
 const attemptColumns = defineTableColumns<AttemptRow>([
   { key: 'attemptIndex', label: '序号', kind: 'index' },
-  { key: 'outcome', label: '结果', kind: 'status', size: 'sm' },
-  { key: 'provider', label: '平台', kind: 'meta', size: 'sm' },
-  { key: 'model', label: '模型', kind: 'mono', size: 'lg' },
-  { key: 'transport', label: '上游传输', kind: 'status', size: 'md' },
-  { key: 'statusCode', label: '状态', kind: 'status', size: 'sm' },
-  { key: 'accountLabel', label: '账号', kind: 'mono', size: '2xl' },
-  { key: 'latencyMs', label: '耗时', kind: 'numeric', size: 'sm' },
+  {
+    key: 'outcome',
+    label: '结果',
+    kind: 'status',
+    size: 'sm',
+  },
+  {
+    key: 'provider',
+    label: '平台',
+    kind: 'meta',
+    size: 'sm',
+  },
+  {
+    key: 'model',
+    label: '模型',
+    kind: 'mono',
+    size: 'lg',
+  },
+  {
+    key: 'transport',
+    label: '上游传输',
+    kind: 'status',
+    size: 'md',
+  },
+  {
+    key: 'statusCode',
+    label: '状态',
+    kind: 'status',
+    size: 'sm',
+  },
+  {
+    key: 'accountLabel',
+    label: '账号',
+    kind: 'mono',
+    size: '2xl',
+  },
+  {
+    key: 'latencyMs',
+    label: '耗时',
+    kind: 'numeric',
+    size: 'sm',
+  },
 ])
 
 const attemptRows = computed<AttemptRow[]>(() =>
@@ -148,11 +248,15 @@ const attemptRows = computed<AttemptRow[]>(() =>
 const billingItems = computed(() => {
   const value = billing.value
   if (!value) {
-    return [{
-      label: '总费用',
-      value: props.record ? usageBillingText(props.record) : '—',
-      mono: true,
-    }]
+    return [
+      {
+        label: '总费用',
+        value: props.record
+          ? usageBillingText(props.record)
+          : '—',
+        mono: true,
+      },
+    ]
   }
 
   return [
@@ -165,14 +269,38 @@ const billingItems = computed(() => {
           { label: '图像缓存单价', value: value.image.cacheReadPriceDisplay, mono: true },
         ]
       : []),
-    { label: value.image ? '文本输入' : '输入', value: value.inputAmountDisplay, mono: true },
-    { label: value.image ? '图像输出' : '输出', value: value.outputAmountDisplay, mono: true },
-    { label: value.image ? '文本缓存读取' : '缓存读取', value: value.cacheReadAmountDisplay, mono: true },
+    {
+      label: value.image ? '文本输入' : '输入',
+      value: value.inputAmountDisplay,
+      mono: true,
+    },
+    {
+      label: value.image ? '图像输出' : '输出',
+      value: value.outputAmountDisplay,
+      mono: true,
+    },
+    {
+      label: value.image ? '文本缓存读取' : '缓存读取',
+      value: value.cacheReadAmountDisplay,
+      mono: true,
+    },
     { label: '缓存写入', value: value.cacheWriteAmountDisplay, mono: true },
     { label: '标准费用', value: value.standardAmountDisplay, mono: true },
-    { label: value.image ? '文本输入单价' : '输入单价', value: value.inputPriceDisplay, mono: true },
-    { label: value.image ? '图像输出单价' : '输出单价', value: value.outputPriceDisplay, mono: true },
-    { label: value.image ? '文本缓存单价' : '缓存单价', value: value.cacheReadPriceDisplay, mono: true },
+    {
+      label: value.image ? '文本输入单价' : '输入单价',
+      value: value.inputPriceDisplay,
+      mono: true,
+    },
+    {
+      label: value.image ? '图像输出单价' : '输出单价',
+      value: value.outputPriceDisplay,
+      mono: true,
+    },
+    {
+      label: value.image ? '文本缓存单价' : '缓存单价',
+      value: value.cacheReadPriceDisplay,
+      mono: true,
+    },
     { label: '缓存写入单价', value: value.cacheWritePriceDisplay, mono: true },
     { label: '服务档位', value: value.serviceTierDisplay },
     { label: '倍率', value: value.multiplierDisplay, mono: true },
@@ -180,7 +308,9 @@ const billingItems = computed(() => {
 })
 
 function tokenCount(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null
 }
 
 function remainingTokenCount(total: number | null | undefined, ...parts: (number | null | undefined)[]): number | null {
@@ -196,7 +326,9 @@ function remainingTokenCount(total: number | null | undefined, ...parts: (number
     remainder -= knownPart
   }
   // 未上报或子项越界时不能补零，否则环图会伪造完整的占比
-  return remainder >= 0 ? remainder : null
+  return remainder >= 0
+    ? remainder
+    : null
 }
 
 const tokenChartItems = computed(() => {
@@ -207,13 +339,17 @@ const tokenChartItems = computed(() => {
     {
       label: '新增输入',
       value: freshInputTokens,
-      display: freshInputTokens === null ? '—' : formatInteger(freshInputTokens),
+      display: freshInputTokens === null
+        ? '—'
+        : formatInteger(freshInputTokens),
       color: palette.value.info,
     },
     {
       label: '非推理输出',
       value: nonReasoningOutputTokens,
-      display: nonReasoningOutputTokens === null ? '—' : formatInteger(nonReasoningOutputTokens),
+      display: nonReasoningOutputTokens === null
+        ? '—'
+        : formatInteger(nonReasoningOutputTokens),
       color: palette.value.success,
     },
     {
@@ -244,18 +380,28 @@ const tokenDetailItems = computed(() => [
 
 const tokenDonutOption = computed<EChartsOption>(() => {
   const items = tokenChartComplete.value
-    ? tokenChartItems.value.flatMap(item => item.value !== null && item.value > 0 ? [{ ...item, value: item.value }] : [])
+    ? tokenChartItems.value.flatMap(item => item.value !== null && item.value > 0
+        ? [
+            { ...item, value: item.value },
+          ]
+        : [])
     : []
 
   return {
     tooltip: {
       trigger: 'item',
-      ...chartTooltipStyle(palette.value, { padding: [9, 12] }),
+      ...chartTooltipStyle(palette.value, {
+        padding: [9, 12],
+      }),
       formatter: (params: unknown) => {
         if (typeof params !== 'object' || params === null)
           return ''
-        const name = 'name' in params && typeof params.name === 'string' ? params.name : ''
-        const marker = 'marker' in params && typeof params.marker === 'string' ? params.marker : ''
+        const name = 'name' in params && typeof params.name === 'string'
+          ? params.name
+          : ''
+        const marker = 'marker' in params && typeof params.marker === 'string'
+          ? params.marker
+          : ''
         const item = tokenChartItems.value.find(entry => entry.label === name)
         if (!item)
           return ''

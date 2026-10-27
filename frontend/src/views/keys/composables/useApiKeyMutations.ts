@@ -48,7 +48,9 @@ export function useApiKeyMutations(options: {
         await options.reload()
         ZNotification.success({ message: '删除成功' })
       },
-      { onError: () => void options.reload() },
+      {
+        onError: () => void options.reload(),
+      },
     )
   }
 
@@ -69,7 +71,9 @@ export function useApiKeyMutations(options: {
         await options.reload()
         ZNotification.success({ message: `已删除 ${deleteCount} 个 API Key` })
       },
-      { onError: () => void options.reload() },
+      {
+        onError: () => void options.reload(),
+      },
     )
   }
 
@@ -79,7 +83,9 @@ export function useApiKeyMutations(options: {
         const mutation = key.enabled ? disableApiKey : enableApiKey
         await mutation({ id: key.id })
         await options.reload()
-        ZNotification.success({ message: key.enabled ? '已禁用' : '已启用' })
+        ZNotification.success({
+          message: key.enabled ? '已禁用' : '已启用',
+        })
       }
       catch {
         void options.reload()
@@ -87,5 +93,17 @@ export function useApiKeyMutations(options: {
     })
   }
 
-  return { showDeleteModal, showSingleDeleteModal, pendingDeleteKey, deleteCount, deletingKey, batchDeleting, updatingStatusKeyIds, requestDeleteKey, handleDelete, handleBatchDelete, handleToggleStatus }
+  return {
+    showDeleteModal,
+    showSingleDeleteModal,
+    pendingDeleteKey,
+    deleteCount,
+    deletingKey,
+    batchDeleting,
+    updatingStatusKeyIds,
+    requestDeleteKey,
+    handleDelete,
+    handleBatchDelete,
+    handleToggleStatus,
+  }
 }

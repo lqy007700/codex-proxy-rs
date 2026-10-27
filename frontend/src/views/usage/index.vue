@@ -21,7 +21,13 @@ import { isErrorUsageRecord } from './utils/detail'
 
 const statsExpanded = shallowRef(true)
 const requestColumns = defineTableColumns<UsageListRecord>([
-  { key: 'logicalOutcome', label: '请求结果', kind: 'custom', size: 'lg', hideable: false },
+  {
+    key: 'logicalOutcome',
+    label: '请求结果',
+    kind: 'custom',
+    size: 'lg',
+    hideable: false,
+  },
   ...usageRecordColumns,
 ])
 const recordViewOptions = [
@@ -56,7 +62,16 @@ const {
 
 const recordColumns = computed<TableColumn<UsageListRecord>[]>(() => recordScope.value === 'error'
   ? requestColumns.flatMap(column => column.key === 'route'
-      ? [column, { key: 'errorMessage', label: '错误', kind: 'custom', size: '4xl', hideable: false }]
+      ? [
+          column,
+          {
+            key: 'errorMessage',
+            label: '错误',
+            kind: 'custom',
+            size: '4xl',
+            hideable: false,
+          },
+        ]
       : [column])
   : requestColumns)
 const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(recordColumns, 'usage-requests')

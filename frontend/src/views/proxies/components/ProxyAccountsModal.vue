@@ -23,11 +23,40 @@ const { accounts, loading, error, pagination, search, setPage, setPageSize, remo
   onRemoved: () => emit('removed'),
 })
 const columns = defineTableColumns<OutboundProxyAccount>([
-  { key: 'identity', label: '账号', kind: 'identity', size: '3xl' },
-  { key: 'provider', label: '平台/类型', kind: 'custom', size: 'md', align: 'center' },
-  { key: 'plan', label: '订阅', kind: 'custom', size: 'sm', align: 'center' },
-  { key: 'groups', label: '分组', kind: 'custom', size: 'lg', align: 'center' },
-  { key: 'actions', label: '操作', kind: 'actions', size: 'xs', align: 'center' },
+  {
+    key: 'identity',
+    label: '账号',
+    kind: 'identity',
+    size: '3xl',
+  },
+  {
+    key: 'provider',
+    label: '平台/类型',
+    kind: 'custom',
+    size: 'md',
+    align: 'center',
+  },
+  {
+    key: 'plan',
+    label: '订阅',
+    kind: 'custom',
+    size: 'sm',
+    align: 'center',
+  },
+  {
+    key: 'groups',
+    label: '分组',
+    kind: 'custom',
+    size: 'lg',
+    align: 'center',
+  },
+  {
+    key: 'actions',
+    label: '操作',
+    kind: 'actions',
+    size: 'xs',
+    align: 'center',
+  },
 ])
 const rows = computed(() => accounts.value.map(account => ({
   ...account,
@@ -41,7 +70,9 @@ const description = computed(() => props.proxy
   ? props.proxy.name
   : undefined)
 const emptyText = computed(() => error.value
-  || (search.value.trim() ? '没有找到匹配的账号，请尝试其他名称或邮箱' : '暂无关联账号'))
+  || (search.value.trim()
+    ? '没有找到匹配的账号，请尝试其他名称或邮箱'
+    : '暂无关联账号'))
 const tableHeight = computed(() => {
   // 空列表与少量账号保留最小高度，多行限制高度并在表格内滚动。
   const count = accounts.value.length || (loading.value
@@ -62,7 +93,10 @@ function requestRemove(account: OutboundProxyAccount) {
   showRemove.value = true
 }
 
-watch([open, () => props.proxy?.id], () => {
+watch([
+  open,
+  () => props.proxy?.id,
+], () => {
   showRemove.value = false
 })
 </script>

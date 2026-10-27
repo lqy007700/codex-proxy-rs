@@ -34,7 +34,9 @@ const groupOptions = computed(() => [
   { label: '全部分组', value: '' },
   { label: '未分组账号', value: 'ungrouped' },
   ...props.groups.map(group => ({
-    label: group.enabled ? group.name : `${group.name}（已禁用）`,
+    label: group.enabled
+      ? group.name
+      : `${group.name}（已禁用）`,
     value: group.id,
   })),
 ])

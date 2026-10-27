@@ -64,14 +64,18 @@ const releaseLabel = computed(() => {
   const release = profile.value?.release
   if (!release?.latestVersion)
     return '尚未检查'
-  return release.latestBuild ? `${release.latestVersion} · Build ${release.latestBuild}` : release.latestVersion
+  return release.latestBuild
+    ? `${release.latestVersion} · Build ${release.latestBuild}`
+    : release.latestVersion
 })
 
 const releaseStatus = computed(() => {
   const current = profile.value
   if (!current?.release) {
     return {
-      label: current?.attributes.some(item => item.label === '版本策略' && item.value === '固定自定义') ? '固定自定义' : '当前生效',
+      label: current?.attributes.some(item => item.label === '版本策略' && item.value === '固定自定义')
+        ? '固定自定义'
+        : '当前生效',
       title: '跟随通用设置的新请求使用此身份',
       tone: 'bg-cp-info-container text-cp-info-on-container',
       icon: ShieldCheck,
@@ -113,12 +117,16 @@ const releaseStatus = computed(() => {
 
 const verifiedLabel = computed(() => {
   const verifiedAt = profile.value?.verifiedAtDisplay
-  return verifiedAt ? `画像核验 ${verifiedAt}` : undefined
+  return verifiedAt
+    ? `画像核验 ${verifiedAt}`
+    : undefined
 })
 
 const checkedLabel = computed(() => {
   const checkedAt = profile.value?.release?.checkedAtDisplay
-  return checkedAt ? `发布检查 ${checkedAt}` : undefined
+  return checkedAt
+    ? `发布检查 ${checkedAt}`
+    : undefined
 })
 
 function toPascalCase(value: string) {
@@ -134,7 +142,9 @@ const clientIdentity = computed(() => {
   if (!current)
     return '—'
   const value = current.attributes.find(attribute => attribute.label === '客户端标识')?.value ?? '—'
-  return current.provider === 'xai' ? toPascalCase(value) : value
+  return current.provider === 'xai'
+    ? toPascalCase(value)
+    : value
 })
 
 const identityAttributes = computed(() => {
@@ -142,7 +152,9 @@ const identityAttributes = computed(() => {
   if (!current)
     return []
   return isSupportedProvider(current.provider)
-    ? [{ label: '客户端标识', value: clientIdentity.value }]
+    ? [
+        { label: '客户端标识', value: clientIdentity.value },
+      ]
     : current.attributes
 })
 

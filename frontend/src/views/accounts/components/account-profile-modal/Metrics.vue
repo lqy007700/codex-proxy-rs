@@ -34,15 +34,21 @@ const metrics = computed(() => [
 ])
 
 function formatMetric(value: number | null | undefined) {
-  return value == null ? '—' : formatCompactNumber(value)
+  return value == null
+    ? '—'
+    : formatCompactNumber(value)
 }
 
 function formatExact(value: number | null | undefined) {
-  return value == null ? undefined : `${formatInteger(value)} Tokens`
+  return value == null
+    ? undefined
+    : `${formatInteger(value)} Tokens`
 }
 
 function formatDays(value: number | null | undefined) {
-  return value == null ? '—' : `${formatInteger(value)} 天`
+  return value == null
+    ? '—'
+    : `${formatInteger(value)} 天`
 }
 
 function formatDuration(value: number | null | undefined) {
@@ -52,10 +58,16 @@ function formatDuration(value: number | null | undefined) {
   const days = Math.floor(totalMinutes / (24 * 60))
   const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
   const minutes = totalMinutes % 60
-  if (days > 0)
-    return hours > 0 ? `${days} 天 ${hours} 小时` : `${days} 天`
-  if (hours > 0)
-    return minutes > 0 ? `${hours} 小时 ${minutes} 分` : `${hours} 小时`
+  if (days > 0) {
+    return hours > 0
+      ? `${days} 天 ${hours} 小时`
+      : `${days} 天`
+  }
+  if (hours > 0) {
+    return minutes > 0
+      ? `${hours} 小时 ${minutes} 分`
+      : `${hours} 小时`
+  }
   if (totalMinutes > 0)
     return `${totalMinutes} 分`
   return `${Math.max(0, Math.floor(value / 1000))} 秒`

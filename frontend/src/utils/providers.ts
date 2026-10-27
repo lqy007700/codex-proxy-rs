@@ -18,7 +18,9 @@ export function isSupportedProvider(value: unknown): value is SupportedProvider 
 export function formatProviderLabel(value?: string | null, fallback = '—') {
   const normalized = value?.trim()
   const provider = normalized?.toLowerCase()
-  return isSupportedProvider(provider) ? PROVIDER_DISPLAY_NAMES[provider] : (normalized || fallback)
+  return isSupportedProvider(provider)
+    ? PROVIDER_DISPLAY_NAMES[provider]
+    : (normalized || fallback)
 }
 
 export function providerIcon(value: string): Component {
@@ -34,7 +36,9 @@ export function formatAuthenticationLabel(value?: string | null) {
   switch (normalized?.toLowerCase()) {
     case 'oauth': return 'OAuth'
     case 'api_key': return 'API Key'
-    default: return normalized ? `自定义认证 · ${normalized}` : '未知认证类型'
+    default: return normalized
+      ? `自定义认证 · ${normalized}`
+      : '未知认证类型'
   }
 }
 

@@ -33,8 +33,14 @@ const customLocation = defineModel<boolean>('customLocation', { required: true }
 const location = defineModel<RequestLocation>('location', { required: true })
 const mode = shallowRef('single')
 const testAfterCreate = shallowRef(true)
-const modeOptions = [{ label: '单条', value: 'single' }, { label: '批量', value: 'batch' }]
-const batch = useProxyBatchCreate({ test: (proxy, options, detectLocation) => props.testSavedProxies(proxy, options, detectLocation), reload: () => props.reloadAfterCreate() })
+const modeOptions = [
+  { label: '单条', value: 'single' },
+  { label: '批量', value: 'batch' },
+]
+const batch = useProxyBatchCreate({
+  test: (proxy, options, detectLocation) => props.testSavedProxies(proxy, options, detectLocation),
+  reload: () => props.reloadAfterCreate(),
+})
 const {
   text: batchText,
   prefix: batchPrefix,

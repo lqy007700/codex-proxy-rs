@@ -31,11 +31,31 @@ export const accountColumns = defineTableColumns<Account>([
     kind: 'meta',
     size: 'md',
     align: 'center',
-    formatter: value => formatProviderLabel(typeof value === 'string' ? value : null),
+    formatter: value => formatProviderLabel(typeof value === 'string'
+      ? value
+      : null),
   },
-  { key: 'status', label: '状态', kind: 'status', size: 'xl', align: 'left', sortable: true },
-  { key: 'planType', label: '订阅', kind: 'status', sortable: true },
-  { key: 'usage', label: '用量', kind: 'custom', size: '2xl', sortable: true },
+  {
+    key: 'status',
+    label: '状态',
+    kind: 'status',
+    size: 'xl',
+    align: 'left',
+    sortable: true,
+  },
+  {
+    key: 'planType',
+    label: '订阅',
+    kind: 'status',
+    sortable: true,
+  },
+  {
+    key: 'usage',
+    label: '用量',
+    kind: 'custom',
+    size: '2xl',
+    sortable: true,
+  },
   { key: 'groups', label: '账号分组', kind: 'status' },
   {
     key: 'lastUsedAt',
@@ -52,7 +72,13 @@ export const accountColumns = defineTableColumns<Account>([
     formatter: value => optionalAccountCell(value),
     emptyText: '',
   },
-  { key: 'actions', label: '操作', kind: 'actions', size: 'lg', hideable: false },
+  {
+    key: 'actions',
+    label: '操作',
+    kind: 'actions',
+    size: 'lg',
+    hideable: false,
+  },
 ])
 
 export const statusLabels: Record<AccountStatus, string> = {
@@ -93,7 +119,9 @@ export function visibleSummaryQuotaWindows(windows: AccountQuotaWindow[]) {
   const known = [...windows]
     .filter(window => window.group !== 'other')
     .sort(compareQuotaWindows)
-  return known.length > 0 ? known : [...windows].sort(compareQuotaWindows)
+  return known.length > 0
+    ? known
+    : [...windows].sort(compareQuotaWindows)
 }
 
 export function orderedPanelQuotaWindows(windows: AccountQuotaWindow[]) {
@@ -107,7 +135,11 @@ export function groupedAccountQuotaWindows(windows: AccountQuotaWindow[]) {
   for (const window of windows) {
     const limitLabel = quotaLimitLabel(window)
     if (!window.limitId || !limitLabel) {
-      entries.push({ key: window.key, label: null, windows: [window] })
+      entries.push({
+        key: window.key,
+        label: null,
+        windows: [window],
+      })
       continue
     }
 
@@ -189,5 +221,7 @@ function quotaLimitLabel(window: AccountQuotaWindow) {
 }
 
 function optionalAccountCell(value: unknown) {
-  return value === '—' || value === '-' ? '' : value
+  return value === '—' || value === '-'
+    ? ''
+    : value
 }
