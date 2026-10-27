@@ -41,6 +41,9 @@ const rows = computed(() => filtered.value
     const version = plugin.artifacts.find(artifact => artifact.metadata.sha256 === current?.artifactSha256)?.metadata.version ?? plugin.artifact.metadata.version
     return {
       ...plugin,
+      failureReason: plugin.configurations.filter(instance => instance.enabled).length > 1
+        ? '检测到多套启用配置，请在历史配置中停用不再使用的一套'
+        : undefined,
       versionLabel: version,
       versionTitle: `${current ? '当前版本' : '已安装版本'}：${version}`,
     }
@@ -120,8 +123,8 @@ const columns = defineTableColumns<(typeof rows.value)[number]>([
                 </div>
                 <span class="truncate text-cp-xs text-cp-text-secondary">{{ plugin.artifact.metadata.publisher }}</span>
               </div>
-              <PluginStatusNotice v-if="currentPluginInstance(plugin)" :instance="currentPluginInstance(plugin)!" />
-              <ZTag :type="pluginStatusType(pluginStatus(plugin))" size="small">
+              <PluginStatusNotice v-if="currentPluginInstance(plugin)" :instance="currentPluginInstance(plugin)!" :failure-reason="plugin.failureReason" />
+              <ZTag v-if="!['failed', 'incompatible'].includes(pluginStatus(plugin))" :type="pluginStatusType(pluginStatus(plugin))" size="small">
                 {{ PLUGIN_STATUS_LABELS[pluginStatus(plugin)] }}
               </ZTag>
             </div>
@@ -156,8 +159,8 @@ const columns = defineTableColumns<(typeof rows.value)[number]>([
       </template>
       <template #status="{ row }">
         <div class="flex items-center gap-1.5">
-          <PluginStatusNotice v-if="currentPluginInstance(row)" :instance="currentPluginInstance(row)!" />
-          <ZTag :type="pluginStatusType(pluginStatus(row))">
+          <PluginStatusNotice v-if="currentPluginInstance(row)" :instance="currentPluginInstance(row)!" :failure-reason="row.failureReason" />
+          <ZTag v-if="!['failed', 'incompatible'].includes(pluginStatus(row))" :type="pluginStatusType(pluginStatus(row))">
             {{ PLUGIN_STATUS_LABELS[pluginStatus(row)] }}
           </ZTag>
         </div>

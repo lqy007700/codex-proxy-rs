@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { ZButton, ZInput, ZSelect } from '@codex-proxy/ui'
+import { ZButton, ZInput } from '@codex-proxy/ui'
 
 import { Plus, Search, Trash2 } from '@lucide/vue'
-import { accountGroupStatusOptions } from '../constants'
 
 defineProps<{
   batchDeleting: boolean
@@ -13,14 +12,13 @@ const emit = defineEmits<{
   deleteSelected: []
 }>()
 const search = defineModel<string>('search', { required: true })
-const status = defineModel<string>('status', { required: true })
 </script>
 
 <template>
   <div class="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
     <ZInput
       v-model="search"
-      class="sm:w-80"
+      class="min-w-0 sm:w-80 sm:flex-none"
       aria-label="搜索账号分组"
       placeholder="搜索分组名称"
     >
@@ -28,13 +26,7 @@ const status = defineModel<string>('status', { required: true })
         <Search class="size-4.5 text-cp-text-tertiary" />
       </template>
     </ZInput>
-    <ZSelect
-      v-model="status"
-      :options="accountGroupStatusOptions"
-      aria-label="按分组状态筛选"
-      class="w-40"
-    />
-    <div class="flex shrink-0 items-center justify-end gap-2 sm:ml-auto">
+    <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 sm:ml-auto">
       <ZButton
         v-if="selectedCount > 0"
         type="danger" variant="plain"

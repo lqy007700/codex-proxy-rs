@@ -28,7 +28,7 @@ SDK 处于实验阶段；能力是否可用取决于宿主支持、清单声明�
 | `call::services` | 公开服务的类型化操作、输入输出及错误合同；`usage` 提供[用量维护与计价](docs/usage-data.md) |
 | `call::upstream_adapter` | 内置 OpenAI / xAI 的[受管上游适配器](docs/upstream-adapters.md)注册、执行、出站与续接合同 |
 | `call::policy` | 模型路由、账号调度与重试决策合同 |
-| `call::catalog` | 固定 Provider 的模型别名注册合同 |
+| `call::catalog` | 固定 Provider 的直接别名与适配模型注册合同，见[模型目录](docs/capabilities.md#模型目录) |
 | `call::data` | 最小账号事实与已有额度观测的只读合同 |
 | `call::observation` | 请求完成、用量、费用与实际上游 WebSocket 响应事件的统一观察合同 |
 | `call::host` | 账号、私有状态、受管 HTTP、模型、亲和、日志及调用内流的宿主回调合同 |

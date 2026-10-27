@@ -10,9 +10,10 @@ const props = defineProps<{
   request?: ConfigurePluginInstanceRequest
   metadata?: PluginArtifactMetadata
   replacements: (Pick<PluginInstance, 'id' | 'name'> & { version?: string })[]
+  compatibilityWarning?: string | null
   saving: boolean
 }>()
-defineEmits<{ confirm: [] }>()
+defineEmits<{ confirm: [], closed: [] }>()
 const open = defineModel<boolean>({ required: true })
 const parameters = computed(() => {
   const schema = props.metadata?.configurationSchema as JsonSchema | undefined
@@ -31,8 +32,19 @@ const parameters = computed(() => {
 </script>
 
 <template>
-  <ZDialog v-model="open" :title="replacements.length ? '切换启用配置' : '启用插件配置'" width="36rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
+  <ZDialog v-model="open" :title="replacements.length ? '切换启用配置' : '启用插件配置'" :type="compatibilityWarning ? 'warning' : 'default'" width="36rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving" @closed="$emit('closed')">
     <div v-if="request" class="grid gap-4">
+      <div v-if="compatibilityWarning" role="alert" class="grid gap-2 rounded-cp bg-cp-fill-alter p-4 text-cp-sm">
+        <p class="m-0 font-emphasis text-cp-warning">
+          插件版本不兼容
+        </p>
+        <p class="m-0 wrap-anywhere text-cp-text-secondary">
+          {{ compatibilityWarning }}
+        </p>
+        <p class="m-0 text-cp-text-secondary">
+          确认仅对本次启动有效，下次宿主启动时会重新检查
+        </p>
+      </div>
       <div class="grid gap-3 rounded-cp bg-cp-fill-alter p-4">
         <div class="flex min-w-0 flex-wrap items-center gap-2">
           <strong class="min-w-0 flex-1 wrap-anywhere text-cp-sm">{{ request.name }}</strong>
@@ -82,7 +94,7 @@ const parameters = computed(() => {
         取消
       </ZButton>
       <ZButton type="primary" :loading="saving" :disabled="!request" @click="$emit('confirm')">
-        {{ replacements.length ? '确认切换' : '确认启用' }}
+        {{ compatibilityWarning ? '继续启动' : replacements.length ? '确认切换' : '确认启用' }}
       </ZButton>
     </template>
   </ZDialog>

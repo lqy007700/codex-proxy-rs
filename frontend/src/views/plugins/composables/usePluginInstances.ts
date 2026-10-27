@@ -1,8 +1,8 @@
 import type { Ref } from 'vue'
 import type { PluginRefreshContext } from '../utils/actions'
-import type { ConfigurePluginInstanceRequest, PluginArtifact, PluginInstance, PluginVersionPlan } from '@/api'
+import type { ConfigurePluginInstanceRequest, PluginArtifact, PluginCompatibilityConfirmation, PluginInstance, PluginVersionPlan } from '@/api'
 import { shallowRef } from 'vue'
-import { deletePluginInstance, disablePluginInstance, getPluginArtifacts, getPluginInstances, updatePluginInstance } from '@/api'
+import { deletePluginInstance, disablePluginInstance, getPluginArtifacts, getPluginInstances, getPluginVersionPlan, updatePluginInstance } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { notification as ZNotification } from '@/utils/notification'
 import { notifyPluginError } from '../utils/actions'
@@ -27,6 +27,8 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
   const savingInstance = action.loading
   const pendingEnable = shallowRef<{
     request: ConfigurePluginInstanceRequest
+    compatibilityWarning: string | null
+    compatibilityConfirmation: PluginCompatibilityConfirmation | null
     instanceId?: string
     artifact: PluginArtifact
     replacements: (Pick<PluginInstance, 'id' | 'name' | 'revision'> & { version?: string })[]
@@ -55,7 +57,7 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
     const result = await action.run(async () => {
       if (request.enabled) {
         const pending = await prepareInstanceEnable(input, instance.id)
-        if (pending.replacements.length) {
+        if (pending.replacements.length || pending.compatibilityWarning) {
           pendingEnable.value = pending
           showEnableConfirmation.value = true
           return true
@@ -68,12 +70,17 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
       await refresh(true, true)
   }
 
-  async function prepareInstanceEnable(request: ConfigurePluginInstanceRequest, instanceId?: string) {
+  async function prepareInstanceEnable(request: ConfigurePluginInstanceRequest, instanceId: string) {
     // 启用入口共用确认快照，不自动停用确认后出现或修改的配置。
-    const [currentArtifacts, currentInstances] = await Promise.all([
+    const [currentArtifacts, currentInstances, plan] = await Promise.all([
       getPluginArtifacts({ silent: true }),
       getPluginInstances({ silent: true }),
+      getPluginVersionPlan({ id: instanceId, artifactSha256: request.artifactSha256 }, { silent: true }),
     ])
+    if (plan.instanceRevision !== request.expectedRevision || (plan.compatibilityWarning && !plan.compatibilityConfirmation))
+      throw new Error('插件设置已变更，请刷新后重试')
+    if (plan.loadError)
+      throw new Error(plan.loadError)
     const artifact = currentArtifacts.find(artifact => artifact.metadata.sha256 === request.artifactSha256)
     if (!artifact)
       throw new Error('所选版本已不存在，请重新选择')
@@ -88,6 +95,8 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
       }))
     return {
       request,
+      compatibilityWarning: plan.compatibilityWarning,
+      compatibilityConfirmation: plan.compatibilityConfirmation,
       instanceId,
       artifact,
       replacements,
@@ -99,7 +108,7 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
       ZNotification.error({ message: instance.loadError })
       return
     }
-    if ((instance.enabled && configurationStatus(instance) !== 'failed') || savingInstance.value || showEnableConfirmation.value)
+    if ((instance.enabled && !['failed', 'incompatible'].includes(configurationStatus(instance))) || savingInstance.value || showEnableConfirmation.value)
       return
     if (instance.configurationRequired) {
       openEditInstance(instance)
@@ -115,7 +124,7 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
         configuration: instance.configuration,
         bindings: instance.bindings,
       }, instance.id)
-      if (pending.replacements.length) {
+      if (pending.replacements.length || pending.compatibilityWarning) {
         pendingEnable.value = pending
         showEnableConfirmation.value = true
       }
@@ -137,6 +146,7 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
     const result = await action.run(async () => {
       await persistInstance({
         ...pending.request,
+        compatibilityConfirmation: pending.compatibilityConfirmation ?? undefined,
         replaceInstances: pending.replacements.map(instance => ({ id: instance.id, expectedRevision: instance.revision })),
       }, pending.instanceId)
       return true

@@ -549,6 +549,23 @@ let plugin = PluginBuilder::from_json(include_bytes!("../plugin.json"))?
 目标存在时，别名复用目标的可公开对象；禁用后新请求不再使用该别名，在途请求持有旧代次。
 v1 是直接别名，动态选择可组合 `model_router`；实际路由仍须通过宿主的权限和能力校验，不提供多目标虚拟模型注册合同
 
+`model_catalog` v2 使用同一 RPC 方法，返回 `ModelCatalogRegistrationV2 { aliases, models }`。
+`aliases` 沿用 v1 直接别名语义；`models` 的每条 `AdaptedModel { id, adapter_id, features, max_output_tokens, presentation }`
+声明一个受管适配器提供的公开模型，不要求内置 Provider 的原生目录存在同名条目
+
+- `adapter_id` 必须指向同实例已绑定的 `upstream_adapter`，Provider 与非空账号集合取自该适配器声明
+- 适配器及 binding 的模型范围必须覆盖 `id`；带 Key／账号组条件的适配器不能贡献静态目录，不能丢弃这些条件扩大可见范围
+- `features` 使用 `RequestFeature`，仅为生成操作声明工具、图片输入、推理或 JSON Schema 支持；没有声明的能力不能借用同名原生模型的支持事实
+- `presentation` 是独立通用画像，字段见 `call::catalog::ModelPresentation`；省略的布尔能力为 false，未声明推理档位不补猜
+- 同名条目可关联不同账号，但 Provider、能力及画像须一致，账号集合不能重叠，也不能与插件直接别名同名，以免展示与实际选择产生歧义
+- v2 仍受每实例合计 256 条、64 KiB 信封限制；目录与适配器随同一代次发布，账号最终资格取当前 Key、分组及账号模型政策的交集
+
+使用 `PluginBuilder::on(methods::MODEL_CATALOG_REGISTER_V2, handler)` 返回 `TypedReply<ModelCatalogRegistrationV2>`，
+并在清单声明 `model_catalog.version = 2`。原有 `.model_catalog(...)` 作者入口继续使用 v1 合同
+
+原生 Codex 目录成功返回后，宿主保留其中的完整对象，只追加可见且尚未出现的适配模型画像；原生读取错误仍向调用方返回错误。
+适配模型的 wire 模型名、协议编解码及摘要由插件负责，宿主只使用公开 ID、能力和账号范围参与现有选号，不生成请求正文或转换历史
+
 ### 重试决策
 
 `retry_policy` v2 固定绑定 `retry` 阶段，故障策略只能为 `delegate`。使用 `methods::RETRY_DECISION` 处理 `RetryDecisionRequest`。

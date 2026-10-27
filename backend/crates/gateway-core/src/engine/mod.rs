@@ -177,7 +177,7 @@ impl AccountAttemptContext {
         self
     }
 
-    /// 附着普通请求认证时冻结的账号范围
+    /// 附着本次尝试的冻结账号范围，包含路由候选的能力限制
     #[must_use]
     pub fn with_account_scope(
         mut self,
@@ -905,7 +905,7 @@ impl AttemptContext {
         self.account.is_diagnostic_required_account()
     }
 
-    /// 普通请求认证时冻结的账号范围；管理端诊断为 `None`
+    /// 当前路由候选的冻结账号范围；管理端诊断为 `None`
     #[must_use]
     pub const fn account_scope(&self) -> Option<&Arc<crate::account::scope::FrozenAccountScope>> {
         self.account.account_scope()

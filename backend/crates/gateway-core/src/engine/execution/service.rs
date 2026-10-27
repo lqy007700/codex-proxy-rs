@@ -1551,14 +1551,7 @@ impl ExecutionService for DefaultExecutionService {
                     .query_client_model_catalog(scope, protocol, client_version)
                     .await?
                 else {
-                    for profile in client.snapshot.public_model_profiles_for_provider(kind) {
-                        if !client.snapshot.catalog_model_allowed_for_scope(
-                            kind,
-                            profile.model(),
-                            scope,
-                        ) {
-                            continue;
-                        }
+                    for profile in client.snapshot.profiles_for_provider_scope(kind, scope) {
                         if seen.insert(profile.model().clone()) {
                             result.push(PublicModelDescriptor::Adapted(profile));
                         }
@@ -1608,6 +1601,12 @@ impl ExecutionService for DefaultExecutionService {
                     if let Some(source) = by_id.get(target.as_str()) {
                         seen.insert(model.clone());
                         result.push(source.content.for_public_model(model));
+                    }
+                }
+                // 原生完整对象优先；只补入当前授权账号实际提供的独立适配画像
+                for profile in client.snapshot.contributed_profiles_for_scope(kind, scope) {
+                    if seen.insert(profile.model().clone()) {
+                        result.push(PublicModelDescriptor::Adapted(profile));
                     }
                 }
             }

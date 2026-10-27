@@ -50,5 +50,6 @@ export const PLUGIN_STATUS_LABELS: Record<PluginCatalogStatus, string> = {
   disabled: '已停用',
   pending: '等待生效',
   failed: '异常',
+  incompatible: '不兼容，未启动',
   unknown: '运行状态未知',
 }

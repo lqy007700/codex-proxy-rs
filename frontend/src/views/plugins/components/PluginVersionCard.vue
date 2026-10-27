@@ -31,7 +31,7 @@ const detailsId = useId()
       <strong class="min-w-0 flex-1 wrap-break-word text-cp-sm">当前版本</strong>
       <ZTag>{{ artifact.metadata.version }}</ZTag>
       <PluginStatusNotice :instance="current" />
-      <ZTag :type="pluginStatusType(configurationStatus(current))">
+      <ZTag v-if="!['failed', 'incompatible'].includes(configurationStatus(current))" :type="pluginStatusType(configurationStatus(current))">
         {{ PLUGIN_STATUS_LABELS[configurationStatus(current)] }}
       </ZTag>
     </div>

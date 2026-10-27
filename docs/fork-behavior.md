@@ -7,11 +7,11 @@
 
 | 项目 | 核对范围 |
 | --- | --- |
-| 核对日期 | 2026-10-26 |
-| 本仓库源码 | `b4f9c942c03466d8c5519b6f91573ff1d1351afb`，源码版本以 [`release/version.yaml`](../release/version.yaml) 为准 |
+| 核对日期 | 2026-10-27 |
+| 本仓库源码 | 当前 `main` 源码，发行版本以 [`release/version.yaml`](../release/version.yaml) 为准 |
 | 最近完整合并的上游基线 | `v3.29.7`，`78bc57c5cf24b01a38e985cdd739bb4ae89ce11f` |
-| 差异依据 | 上述上游基线到本仓库核对提交的最终文件差异，结合调用链和现有测试 |
-| 上游主题移植 | 已采用能力与暂缓项分别记录于[上游同步清单](upstream-sync.md)，核对目标为 `v3.32.0` |
+| 差异依据 | 上述上游基线到当前源码的最终文件差异，结合调用链和现有测试 |
+| 上游主题移植 | 已采用能力与暂缓项分别记录于[上游同步清单](upstream-sync.md)，核对目标为 `v3.34.0` |
 
 源码版本、发布完成和运行实例升级是不同事实，本文不代表某个实例已部署该版本。
 这里的“二开”包含主动定制和为保留本发行线而存在的兼容适配，不表示相关基础能力都由本仓库原创
@@ -147,7 +147,7 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 
 结果列显示真实请求结果、必要的尝试次数和错误摘要，未完成错误支持悬浮或点击查看。
 尝试次数包含首次，不把“允许重试”的决策当作已经发生的重试。
-明细支持模型执行 ID 前缀和完整时间关键词，`HH:mm:ss` 使用部署时区今天，
+明细支持模型执行 ID 包含匹配和完整时间关键词，`HH:mm:ss` 使用部署时区今天，
 `YYYY-MM-DD HH:mm:ss` 使用指定日期，整秒匹配覆盖该秒内毫秒，时间关键词优先于日期选择器。
 无效或未完成时间保持普通文本搜索
 
@@ -179,7 +179,7 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 | --- | --- | --- |
 | 使用统计 | 请求明细在前，统计概览在下且默认展开、可折叠；结果筛选显示图标并保留无障碍标签 | [usage/index.vue](../frontend/src/views/usage/index.vue) |
 | 请求表格 | 请求时间靠前，收紧列宽；客户端列显示原始 User-Agent，最多两行，悬浮查看完整值 | [columns.ts](../frontend/src/components/usage/shared/columns.ts)、[UsageRecordsTable.vue](../frontend/src/components/usage/UsageRecordsTable.vue) |
-| 账号 | 账号列表在前、概览卡在后；启停调度开关紧邻状态，保留 WS 降级提示和保底标识 | [accounts/index.vue](../frontend/src/views/accounts/index.vue)、[AccountSchedulingSwitch.vue](../frontend/src/views/accounts/components/AccountSchedulingSwitch.vue)、[AccountIdentityCell.vue](../frontend/src/views/accounts/components/AccountIdentityCell.vue) |
+| 账号 | 账号列表在前、概览卡在后；批量编辑、导出和删除收纳到更多操作，启停调度开关紧邻状态，保留 WS 降级提示和保底标识 | [accounts/index.vue](../frontend/src/views/accounts/index.vue)、[AccountSchedulingSwitch.vue](../frontend/src/views/accounts/components/AccountSchedulingSwitch.vue)、[AccountIdentityCell.vue](../frontend/src/views/accounts/components/AccountIdentityCell.vue) |
 | 并发明细 | 显示当前占用与并发上限，提供手动刷新并保留每 5 秒自动刷新 | [AccountConcurrencyModal.vue](../frontend/src/views/accounts/components/AccountConcurrencyModal.vue)、[useAccountConcurrency.ts](../frontend/src/views/accounts/composables/useAccountConcurrency.ts) |
 | Dashboard | 请求健康时间线与账号概览优先于汇总统计卡 | [DashboardContent.vue](../frontend/src/views/dashboard/components/DashboardContent.vue) |
 | 列表与表单 | 账号及 API Key 排序偏好保存在当前浏览器；密钥表单按字段校验，校验失败时滚动并聚焦错误字段 | [useTableSort.ts](../frontend/src/composables/useTableSort.ts)、[ApiKeyFormModal.vue](../frontend/src/views/keys/components/ApiKeyFormModal.vue) |
@@ -205,6 +205,7 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 | `0036_account_credits_policy.sql` | `allow_credits` 与条件额度事实 |
 | `0037_account_scheduling_role.sql` | `scheduling_role`，既有账号默认常规用途 |
 | `0038_recovery_attempts.sql` | `recovery_attempts`，默认 4，数据库约束 1～31 |
+| `0039_email_alerts.sql` | 邮件告警设置与可靠投递状态 |
 
 实际文件和冻结摘要见[迁移目录](../backend/migrations/README.md#冻结规则)。
 业务备份沿用当前精简归档合同；下载已有 PostgreSQL custom 归档时保留 `.dump` 扩展，不将其误标为 `.sql.gz`。

@@ -30,6 +30,7 @@ pub(super) struct PreparedSet {
     pub(super) commands: Vec<Arc<crate::adapter::command_line::PluginCommand>>,
     pub(super) management: Vec<crate::adapter::management::ManagementEntry>,
     pub(super) model_aliases: Vec<gateway_core::routing::ContributedModelAlias>,
+    pub(super) models: Vec<gateway_core::routing::ContributedModel>,
 }
 
 #[derive(Clone, Default)]
@@ -43,6 +44,7 @@ pub(super) struct PreparedContributions {
     pub(super) authentication_entries:
         Vec<crate::adapter::frontend_authentication::FrontendAuthenticationEntry>,
     pub(super) model_aliases: Vec<gateway_core::routing::ContributedModelAlias>,
+    pub(super) models: Vec<gateway_core::routing::ContributedModel>,
 }
 
 impl PreparedContributions {
@@ -51,6 +53,7 @@ impl PreparedContributions {
         self.commands.extend(other.commands);
         self.management.extend(other.management);
         self.model_aliases.extend(other.model_aliases);
+        self.models.extend(other.models);
         self.policy_entries.extend(other.policy_entries);
         self.middleware_entries.extend(other.middleware_entries);
         self.upstream_entries.extend(other.upstream_entries);
@@ -84,6 +87,10 @@ impl ExtensionSetLease for PreparedSet {
 
     fn model_aliases(&self) -> &[gateway_core::routing::ContributedModelAlias] {
         &self.model_aliases
+    }
+
+    fn models(&self) -> &[gateway_core::routing::ContributedModel] {
+        &self.models
     }
 
     fn can_serve(&self) -> bool {

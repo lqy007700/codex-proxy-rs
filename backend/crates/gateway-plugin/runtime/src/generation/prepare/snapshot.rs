@@ -3,6 +3,7 @@
 use super::{
     PluginRuntime,
     diagnostics::{PreparationDiagnostic, runtime_failure_from_admin},
+    instance::InstancePreparationError,
     set::{PreparedContributions, PreparedSet, fingerprint, instance_fingerprint},
 };
 use crate::ValidatedPackage;
@@ -12,7 +13,10 @@ use gateway_admin::{
     model::{
         AdminError, Revision,
         plugins::{
-            instances::{PluginInstance, PluginInstanceSnapshot},
+            instances::{
+                PluginCompatibilityConfirmation, PluginInstance, PluginInstanceRuntimeFailure,
+                PluginInstanceSnapshot,
+            },
             state::PluginStateConfiguration,
         },
     },
@@ -35,13 +39,14 @@ impl PluginRuntime {
         snapshot: PluginInstanceSnapshot,
         required_revision: Option<Revision>,
         request_body_limit: Option<usize>,
+        confirmation: Option<&PluginCompatibilityConfirmation>,
     ) -> Result<ExtensionSetReference, AdminError> {
         let target_revision = snapshot.config_revision.get();
         self.record_preparation(target_revision, PreparationDiagnostic::Preparing);
         let result = tokio::select! {
             biased;
             () = self.shutting_down.cancelled() => Err(AdminError::unavailable("插件运行时正在关闭")),
-            result = self.prepare_inner(snapshot, required_revision, request_body_limit) => result,
+            result = self.prepare_inner(snapshot, required_revision, request_body_limit, confirmation) => result,
         };
         match &result {
             Ok(reference) => self.record_preparation(
@@ -63,12 +68,26 @@ impl PluginRuntime {
         snapshot: PluginInstanceSnapshot,
         required_revision: Option<Revision>,
         request_body_limit: Option<usize>,
+        confirmation: Option<&PluginCompatibilityConfirmation>,
     ) -> Result<ExtensionSetReference, AdminError> {
         if self.shutting_down.is_cancelled() {
             return Err(AdminError::unavailable("插件运行时正在关闭"));
         }
         if snapshot.instances.len() > 64 {
             return Err(AdminError::invalid("最多配置 64 个插件实例"));
+        }
+        if let Some(confirmation) = confirmation
+            && (confirmation.host_fingerprint
+                != crate::package::compatibility_host_fingerprint(&self.config.host_version)?
+                || !snapshot.instances.iter().any(|instance| {
+                    instance.enabled
+                        && instance.id == confirmation.instance_id
+                        && instance.artifact_sha256 == confirmation.artifact_sha256
+                }))
+        {
+            return Err(AdminError::conflict(
+                "宿主或插件包已变化，请重新确认启动风险",
+            ));
         }
         let fingerprint = fingerprint(&snapshot)?;
         // 准备串行化与弱索引分锁；诊断和已发布请求不会等待外部 I/O
@@ -83,6 +102,10 @@ impl PluginRuntime {
                 .get(&fingerprint)
                 .and_then(Weak::upgrade)
                 .filter(|set| set.sessions_ready())
+                .filter(|set| {
+                    confirmation
+                        .is_none_or(|confirmed| !set.failures.contains_key(&confirmed.instance_id))
+                })
         };
         if let Some(set) = existing {
             if snapshot.instances.iter().any(|instance| {
@@ -130,6 +153,7 @@ impl PluginRuntime {
                         instance.clone(),
                         snapshot.config_revision,
                         request_body_limit,
+                        confirmation.is_some_and(|confirmed| confirmed.instance_id == instance.id),
                     )
                     .await
                 };
@@ -147,8 +171,40 @@ impl PluginRuntime {
                     contributions.append(candidate.contributions.clone());
                     sessions.push(candidate);
                 }
-                Err(error) if required_revision == Some(instance.revision) => return Err(error),
-                Err(error) => {
+                Err(error)
+                    if required_revision == Some(instance.revision)
+                        || confirmation
+                            .is_some_and(|confirmed| confirmed.instance_id == instance.id) =>
+                {
+                    return Err(error.into_admin_error());
+                }
+                Err(
+                    error @ (InstancePreparationError::UnloadablePackage(_)
+                    | InstancePreparationError::IncompatiblePackage(_)),
+                ) => {
+                    let code = if matches!(&error, InstancePreparationError::IncompatiblePackage(_))
+                    {
+                        "version_incompatible"
+                    } else {
+                        "package_unloadable"
+                    };
+                    let error = error.into_admin_error();
+                    tracing::error!(
+                        event = "plugin.instance.quarantined",
+                        instance_id = instance.id,
+                        reason = error.message(),
+                        "插件未通过启动兼容检查，未挂载任何能力"
+                    );
+                    // 包无法装载时没有可执行能力，不能发布全局拒绝占位阻断宿主
+                    failures.insert(
+                        instance.id.clone(),
+                        PluginInstanceRuntimeFailure {
+                            code: code.to_owned(),
+                            message: error.message().to_owned(),
+                        },
+                    );
+                }
+                Err(InstancePreparationError::Failed(error)) => {
                     // 目录没有拒绝请求用的 binding，不能在恢复失败时悄悄撤销仍启用的别名
                     // 不复制其他候选的注册结果；让发布事务保留调用方持有的旧有效快照
                     let has_retained_catalog = self
@@ -161,6 +217,7 @@ impl PluginRuntime {
                             set.model_aliases
                                 .iter()
                                 .any(|alias| alias.owner == instance.id)
+                                || set.models.iter().any(|model| model.owner == instance.id)
                         });
                     if has_retained_catalog {
                         return Err(AdminError::unavailable(
@@ -195,7 +252,9 @@ impl PluginRuntime {
             upstream_entries,
             authentication_entries,
             model_aliases,
+            models,
         } = contributions;
+        crate::adapter::catalog::validate_models(&model_aliases, &models)?;
         let id = ExtensionSetId::new(uuid::Uuid::new_v4().to_string())
             .map_err(|_| AdminError::internal("插件集合 ID 无效"))?;
         let observers = crate::adapter::observer::PluginObserverPlan::compile(
@@ -260,6 +319,7 @@ impl PluginRuntime {
             management,
             failures,
             model_aliases,
+            models,
             shutting_down: self.shutting_down.clone(),
         });
         self.prepared
@@ -360,7 +420,17 @@ impl PluginPreparation for PluginRuntime {
         snapshot: PluginInstanceSnapshot,
     ) -> Result<ExtensionSetReference, AdminError> {
         let required_revision = snapshot.config_revision;
-        self.prepare_snapshot(snapshot, Some(required_revision), None)
+        self.prepare_snapshot(snapshot, Some(required_revision), None, None)
+            .await
+    }
+
+    async fn prepare_confirmed(
+        &self,
+        snapshot: PluginInstanceSnapshot,
+        confirmation: PluginCompatibilityConfirmation,
+    ) -> Result<ExtensionSetReference, AdminError> {
+        let required_revision = snapshot.config_revision;
+        self.prepare_snapshot(snapshot, Some(required_revision), None, Some(&confirmation))
             .await
     }
 }
@@ -397,7 +467,7 @@ impl PluginRuntime {
             if snapshot.config_revision.get() != revision.get() {
                 return Err(ExtensionPreparationError);
             }
-            self.prepare_snapshot(snapshot, None, request_body_limit)
+            self.prepare_snapshot(snapshot, None, request_body_limit, None)
                 .await
                 .map_err(|_| ExtensionPreparationError)
         })

@@ -40,9 +40,3 @@ export const accountGroupColumns = defineTableColumns<AccountGroup>([
     size: 'lg',
   },
 ])
-
-export const accountGroupStatusOptions = [
-  { label: '全部状态', value: '' },
-  { label: '已启用', value: 'enabled' },
-  { label: '已禁用', value: 'disabled' },
-]

@@ -88,24 +88,26 @@ watch(timeRange, () => {
 </script>
 
 <template>
-  <div class="w-full">
-    <ZPageHeader title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
+  <div class="@container w-full">
+    <ZPageHeader class="justify-end" title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
       <template #actions>
-        <ZDatePicker
-          v-model="timeRange"
-          type="daterange"
-          :clearable="false"
-          :editable="false"
-          :disabled-date="disabledDate"
-          single-panel
-          aria-label="统计日期范围，仅可选择最近 31 天"
-          class="w-60 max-w-full"
-        />
-        <ProviderFilter
-          v-model="providerQuery"
-          :disabled="refreshingList"
-          class="shrink-0"
-        />
+        <div class="flex w-[100cqw] max-w-[100cqw] flex-wrap items-center justify-end gap-2 @min-[21rem]:flex-nowrap @min-[28rem]:w-auto">
+          <ZDatePicker
+            v-model="timeRange"
+            type="daterange"
+            :clearable="false"
+            :editable="false"
+            :disabled-date="disabledDate"
+            single-panel
+            aria-label="统计日期范围，仅可选择最近 31 天"
+            class="min-w-0 flex-1 basis-full @min-[21rem]:basis-auto @min-[28rem]:w-60 @min-[28rem]:flex-none @max-[28rem]:[&>div]:gap-1.5 @max-[28rem]:[&>div]:px-2"
+          />
+          <ProviderFilter
+            v-model="providerQuery"
+            :disabled="refreshingList"
+            class="shrink-0"
+          />
+        </div>
       </template>
     </ZPageHeader>
 

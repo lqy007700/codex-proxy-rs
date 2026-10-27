@@ -38,7 +38,7 @@ RPC v7 的帧布局、编码与会话生命周期见[通信边界](../README.md#
 
 安装包清单校验与已安装元数据读取是两个边界：清单拒绝未知字段，并检查必需字段、类型和版本；
 数据库元数据的读取规则见[制品与发布](../../../../../docs/architecture.md#制品配置与发布)，不改变清单或 RPC 合同。
-`engines.codex-proxy-rs` 声明插件所需的宿主范围。范围或能力版本不匹配时持续提示风险，允许尝试启动；包结构、平台与 RPC 封装校验失败阻止加载。CLI 严格校验作者声明是否符合 SDK 支持的合同
+`engines.codex-proxy-rs` 声明插件所需的宿主范围。范围或已声明能力版本不匹配时不自动启动，管理员确认风险后可尝试本次启动；确认不跨宿主重启保留。包结构、清单格式、平台与 RPC 封装校验失败阻止加载，不能通过风险确认绕过。CLI 严格校验作者声明是否符合 SDK 支持的合同
 
 ## 接口弃用
 
@@ -57,7 +57,8 @@ RPC v7 的帧布局、编码与会话生命周期见[通信边界](../README.md#
 | `scheduler` | `3` |
 | `upstream_adapter` | `5` |
 | `frontend_authentication`、`model_router`、`retry_policy`、`observer`、`management` | `2` |
-| `model_catalog`、`command_line`、`maintenance` | `1` |
+| `model_catalog` | `1`、`2` |
+| `command_line`、`maintenance` | `1` |
 
 例如，仅声明管理页面、命令行和模型请求中间件：
 

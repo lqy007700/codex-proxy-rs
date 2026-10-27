@@ -155,6 +155,18 @@ impl MemoryAccountStore {
             .map(|stored| stored.account.clone())
     }
 
+    pub(crate) fn set_model_access(
+        &self,
+        id: &str,
+        access: gateway_core::account::AccountModelAccess,
+    ) {
+        let mut accounts = self.accounts.lock().unwrap();
+        let stored = accounts
+            .get_mut(&ProviderAccountId::new(id).unwrap())
+            .unwrap();
+        stored.account = stored.account.clone().with_model_access(access);
+    }
+
     pub(crate) fn set_scheduling_role(
         &self,
         id: &str,

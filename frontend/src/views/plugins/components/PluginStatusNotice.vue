@@ -1,31 +1,50 @@
 <script setup lang="ts">
 import type { PluginInstance } from '@/api'
 import { computed } from 'vue'
+import { PLUGIN_STATUS_LABELS } from '../constants'
+import { configurationStatus } from '../utils/catalog'
 import PluginHelpPopover from './PluginHelpPopover.vue'
 
-const props = defineProps<{ instance: PluginInstance }>()
-const failure = computed(() => props.instance.loadError ?? props.instance.runtime.failure?.message)
-const title = computed(() => failure.value
-  ? (props.instance.loadError ? '无法启动' : '运行失败')
-  : props.instance.compatibilityWarning ? '兼容性提醒' : '接口待升级，当前仍兼容')
+const props = defineProps<{ instance: PluginInstance, failureReason?: string }>()
+
+const status = computed(() => configurationStatus(props.instance))
+const failure = computed(() => props.failureReason ?? props.instance.loadError ?? props.instance.runtime.failure?.message)
+const incompatible = computed(() => !props.failureReason && status.value === 'incompatible')
+const tone = computed(() => (failure.value || status.value === 'failed') && !incompatible.value
+  ? 'error'
+  : 'warning')
+const title = computed(() => {
+  if (props.failureReason)
+    return PLUGIN_STATUS_LABELS.failed
+  if (incompatible.value)
+    return '未启动：版本不兼容'
+  if (failure.value || status.value === 'failed') {
+    return props.instance.loadError
+      ? '无法启动'
+      : '运行失败'
+  }
+  return props.instance.compatibilityWarning
+    ? '兼容性提醒'
+    : '接口待升级，当前仍兼容'
+})
 </script>
 
 <template>
   <PluginHelpPopover
-    v-if="failure || instance.compatibilityWarning || instance.apiDeprecations.length"
+    v-if="failure || status === 'failed' || instance.compatibilityWarning || instance.apiDeprecations.length"
     :label="`${instance.name}：${title}`"
-    :tone="failure ? 'error' : 'warning'"
+    :tone="tone"
   >
     <p class="m-0 font-emphasis text-cp-text">
       {{ title }}
     </p>
-    <p v-if="failure" class="m-0 text-cp-error-text">
+    <p v-if="failure" class="m-0" :class="tone === 'error' ? 'text-cp-error-text' : 'text-cp-warning'">
       {{ failure }}
     </p>
-    <p v-if="instance.runtime.failure" class="m-0 font-mono">
+    <p v-if="instance.runtime.failure && !incompatible" class="m-0 font-mono">
       {{ instance.runtime.failure.code }}
     </p>
-    <template v-if="instance.compatibilityWarning">
+    <template v-if="instance.compatibilityWarning && !incompatible">
       <p class="m-0 text-cp-warning">
         {{ instance.compatibilityWarning }}
       </p>
@@ -47,7 +66,7 @@ const title = computed(() => failure.value
     <p v-if="instance.loadError" class="m-0">
       配置与数据保留，请安装可加载的插件版本
     </p>
-    <p v-else-if="failure" class="m-0">
+    <p v-else-if="(failure || status === 'failed') && !instance.compatibilityWarning" class="m-0">
       启用配置保留，可在插件详情中重新启动
     </p>
     <p v-else-if="instance.apiDeprecations.length" class="m-0">

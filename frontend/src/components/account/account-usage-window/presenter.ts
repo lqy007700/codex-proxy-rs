@@ -282,9 +282,10 @@ export function quotaWindowPresentation(window: AccountQuotaWindow, minimumWidth
 function quotaWindowTone(usedPercent: number | null): QuotaWindowTone {
   if (usedPercent === null)
     return 'unknown'
-  if (usedPercent >= 95)
+  // 每个窗口按自身的已用比例分档，剩余不足 30% / 10% 时分别预警
+  if (usedPercent > 90)
     return 'danger'
-  if (usedPercent >= 80)
+  if (usedPercent > 70)
     return 'warning'
   return 'success'
 }

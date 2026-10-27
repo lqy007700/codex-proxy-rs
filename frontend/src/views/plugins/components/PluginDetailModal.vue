@@ -95,7 +95,7 @@ watch(() => props.initialSection, value => section.value = value)
             <strong class="min-w-0 flex-1 wrap-break-word text-cp-sm">当前版本</strong>
             <ZTag>{{ artifactForInstance(instance, plugin.artifacts)?.metadata.version ?? '版本不可用' }}</ZTag>
             <PluginStatusNotice :instance="instance" />
-            <ZTag :type="pluginStatusType(configurationStatus(instance))">
+            <ZTag v-if="!['failed', 'incompatible'].includes(configurationStatus(instance))" :type="pluginStatusType(configurationStatus(instance))">
               {{ PLUGIN_STATUS_LABELS[configurationStatus(instance)] }}
             </ZTag>
             <PluginHelpPopover v-if="configurationNotes(instance).length" :label="`${instance.name}配置状态说明`">
@@ -120,7 +120,7 @@ watch(() => props.initialSection, value => section.value = value)
             <ZIconButton v-if="instance.configurationRequired || (currentArtifact && hasPluginSettings(currentArtifact))" size="small" variant="solid" aria-label="设置" :disabled="busy" @click="$emit('edit', instance)">
               <Settings2 class="size-4" />
             </ZIconButton>
-            <ZIconButton v-if="configurationStatus(instance) === 'failed'" aria-label="重新启动" size="small" variant="solid" :disabled="busy || Boolean(instance.loadError)" @click="$emit('enable', instance)">
+            <ZIconButton v-if="['failed', 'incompatible'].includes(configurationStatus(instance))" aria-label="重新启动" size="small" variant="solid" :disabled="busy || Boolean(instance.loadError)" @click="$emit('enable', instance)">
               <RefreshCw class="size-4" />
             </ZIconButton>
             <ZIconButton v-if="instance.enabled" aria-label="停用" size="small" variant="solid" :disabled="busy" @click="$emit('disable', instance)">

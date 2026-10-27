@@ -58,6 +58,229 @@ impl ExecutionStore for NoopExecutionStore {
 }
 
 #[tokio::test]
+async fn contributed_model_scope_survives_affinity_and_account_rotation() {
+    use gateway_core::routing::ContributedModel;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Catalog(Vec<ContributedModel>);
+    impl ExtensionSetLease for Catalog {
+        fn is_ready(&self) -> bool {
+            true
+        }
+        fn models(&self) -> &[ContributedModel] {
+            &self.0
+        }
+    }
+
+    for (staged_recovery, fallback_in_scope) in [(false, true), (true, true), (true, false)] {
+        for native_supports_tools in [false, true] {
+            let store = Arc::new(MemoryAccountStore::default());
+            create_account(&store, "acct_provider_contract").await;
+            let server = MockServer::start().await;
+            let calls = AtomicUsize::new(0);
+            Mock::given(method("POST"))
+            .and(path("/codex/responses"))
+            .respond_with(move |_: &wiremock::Request| {
+                if calls.fetch_add(1, Ordering::SeqCst) < if staged_recovery { 2 } else { 1 } {
+                    ResponseTemplate::new(if staged_recovery { 503 } else { 429 })
+                    .insert_header("retry-after", "0")
+                    .set_body_json(json!({
+                        "error":{"type":if staged_recovery {"server_error"} else {"rate_limit_error"},"message":"fixture rejection"}
+                    }))
+                } else {
+                    ResponseTemplate::new(200)
+                        .set_body_raw(CAPTURE_COMPLETED_SSE, "text/event-stream")
+                }
+            })
+            .expect(if staged_recovery && fallback_in_scope {3} else {2})
+            .mount(&server)
+            .await;
+            let provider = provider_with_affinity_and_base_url(
+                &store,
+                Arc::new(MemorySessionAffinity::default()),
+                server.uri(),
+            );
+            let Operation::Generate(generate) = turn_request("scope-session", "scope-turn") else {
+                unreachable!()
+            };
+            let mut body = generate.protocol_payload().body().clone();
+            if native_supports_tools {
+                body.insert(
+                    "tools".into(),
+                    json!([{
+                        "type":"function", "name":"fixture", "parameters":{"type":"object"}
+                    }]),
+                );
+            }
+            let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+                ProtocolPayload::json_object("openai", body)
+                    .unwrap()
+                    .with_context(generate.protocol_payload().context().clone()),
+            ));
+            // 先冻结 A 的会话亲和，再开放 B/C；后续选号不能借亲和绕过模型能力范围
+            drop(
+                provider
+                    .clone()
+                    .execute(
+                        planned_request("openai", operation.clone()),
+                        context("req_scope_seed", CancellationToken::new()),
+                    )
+                    .await
+                    .unwrap(),
+            );
+            for account in ["acct_subagent_a", "acct_subagent_b"] {
+                create_account(&store, account).await;
+            }
+            if staged_recovery {
+                store.set_scheduling_role(
+                    "acct_subagent_b",
+                    gateway_core::account::AccountSchedulingRole::Fallback,
+                );
+            }
+            let kind = ProviderKind::new("openai").unwrap();
+            let scope = Arc::new(FrozenAccountScope::new(
+                Arc::new(RuntimeAccountDirectory::new(
+                    [
+                        "acct_provider_contract",
+                        "acct_subagent_a",
+                        "acct_subagent_b",
+                    ]
+                    .into_iter()
+                    .map(|id| {
+                        (
+                            ProviderAccountId::new(id).unwrap(),
+                            RuntimeAccount::new(kind.clone(), BTreeSet::new())
+                                .with_scheduling_role(
+                                    if staged_recovery && id == "acct_subagent_b" {
+                                        gateway_core::account::AccountSchedulingRole::Fallback
+                                    } else {
+                                        gateway_core::account::AccountSchedulingRole::Regular
+                                    },
+                                ),
+                        )
+                    })
+                    .collect(),
+                )),
+                ClientRoutingScope::all_accounts(),
+            ));
+            let capabilities =
+                ModelCapabilities::new(BTreeSet::from([OperationKind::Generate]), None);
+            let models = if native_supports_tools {
+                vec![ProviderModel::new(
+                    kind.clone(),
+                    UpstreamModelId::new("gpt-5.4").unwrap(),
+                    capabilities.clone().with_upstream_feature_validation(),
+                )]
+            } else {
+                Vec::new()
+            };
+            // 适配专属模型只属于 B/C；同名原生模型支持 tools 时，适配账号 A 不支持
+            let contributed_accounts = if native_supports_tools {
+                if fallback_in_scope {
+                    vec!["acct_provider_contract"]
+                } else {
+                    vec!["acct_provider_contract", "acct_subagent_b"]
+                }
+            } else {
+                if fallback_in_scope {
+                    vec!["acct_subagent_a", "acct_subagent_b"]
+                } else {
+                    vec!["acct_subagent_a"]
+                }
+            };
+            let snapshot = RuntimeSnapshot::new(
+                ConfigRevision::new(1).unwrap(),
+                SettingsValues::new(3, "smart", Default::default(), None, None)
+                    .with_recovery_attempts(3),
+                vec![kind.clone()],
+                models,
+                Vec::new(),
+            )
+            .unwrap()
+            .with_extensions(Some(ExtensionSetReference::new(
+                ExtensionSetId::new("scope-test".into()).unwrap(),
+                Arc::new(Catalog(vec![ContributedModel {
+                    owner: "scope-test".into(),
+                    id: PublicModelId::new("gpt-5.4").unwrap(),
+                    provider: kind,
+                    accounts: contributed_accounts
+                        .into_iter()
+                        .map(|id| ProviderAccountId::new(id).unwrap())
+                        .collect(),
+                    capabilities,
+                    presentation: Default::default(),
+                }])),
+            )));
+            let plan = snapshot
+                .plan(
+                    &PublicModelId::new("gpt-5.4").unwrap(),
+                    &operation,
+                    scope,
+                    &RoutingContext::default(),
+                )
+                .unwrap();
+            let providers = ProviderRegistry::new([
+                provider as Arc<dyn gateway_core::engine::provider::Provider>
+            ])
+            .unwrap();
+            let coordinator = AttemptCoordinator::new(GatewayEngine::new(
+                Arc::new(NoopExecutionStore),
+                providers,
+            ));
+            let mut session = coordinator
+                .start(
+                    execution_request("req_scope_rotation", &operation, Duration::from_secs(10)),
+                    operation,
+                    plan,
+                    None,
+                    None,
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            let result = session.collect_uncommitted().await;
+            if staged_recovery && !fallback_in_scope {
+                assert!(result.is_err());
+            } else {
+                result.unwrap();
+                session.commit_downstream(Some(200)).await.unwrap();
+            }
+            let requests = server.received_requests().await.unwrap();
+            if staged_recovery {
+                let accounts: Vec<_> = requests
+                    .iter()
+                    .map(|request| request.headers["authorization"].to_str().unwrap())
+                    .collect();
+                let expected = if fallback_in_scope {
+                    vec![
+                        "Bearer at-acct_subagent_a",
+                        "Bearer at-acct_subagent_a",
+                        "Bearer at-acct_subagent_b",
+                    ]
+                } else {
+                    vec!["Bearer at-acct_subagent_a", "Bearer at-acct_subagent_a"]
+                };
+                assert_eq!(
+                    accounts, expected,
+                    "native_supports_tools={native_supports_tools}"
+                );
+            } else {
+                assert_eq!(requests.len(), 2);
+                let selected: BTreeSet<_> = requests
+                    .iter()
+                    .map(|request| request.headers["authorization"].to_str().unwrap())
+                    .collect();
+                assert_eq!(
+                    selected,
+                    BTreeSet::from(["Bearer at-acct_subagent_a", "Bearer at-acct_subagent_b",]),
+                    "native_supports_tools={native_supports_tools}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn server_busy_retries_same_account_then_rotates_with_shared_budget_after_keepalive() {
     let store = Arc::new(MemoryAccountStore::default());
     for id in [
