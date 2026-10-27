@@ -1,11 +1,13 @@
 require 'json'
+require_relative '../../../../.github/scripts/release-metadata'
 
 # 只在正式发版时推进弃用窗口，不把版本号差值当作发布次数。
 module PluginApiLifecycle
   def self.advance(entries, host, version)
+    version = ReleaseMetadata.version(version)
     next_entries = entries.map(&:dup)
     stable = version.match?(/\A\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?\z/)
-    release = version.split('+').first
+    release = ReleaseMetadata.fork_revision(version) ? version : version.split('+').first
     supported = host.fetch('capabilities').to_h { |entry| [entry.fetch('capability'), entry.fetch('versions')] }
     next_entries.reject! do |entry|
       capability = entry.fetch('capability')

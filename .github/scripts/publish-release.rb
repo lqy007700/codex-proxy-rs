@@ -37,8 +37,8 @@ module ReleasePublication
     return false if ReleaseMetadata.prerelease?(version)
     current_versions.compact.all? do |current|
       raise "Latest points to a prerelease: #{current}" if ReleaseMetadata.prerelease?(current)
-      comparison = ReleaseMetadata.sort_key(version) <=> ReleaseMetadata.sort_key(current)
-      # 构建元数据不决定版本先后；同优先级只允许相同版本重试
+      comparison = ReleaseMetadata.compare(version, current)
+      # 普通构建元数据不决定先后，本仓库迭代号参与比较；相同版本允许失败重试
       comparison.positive? || (comparison.zero? && ReleaseMetadata.version(current) == version)
     end
   end

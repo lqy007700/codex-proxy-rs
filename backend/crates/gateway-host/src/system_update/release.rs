@@ -126,8 +126,8 @@ pub(crate) async fn fetch_latest(
     validate_api_base(api_base).map_err(conflict)?;
     validate_repository(repository)?;
     let base = api_base.trim_end_matches('/');
-    let current = semver::Version::parse(&normalize_version(current_version))
-        .map_err(|_| invalid("current version is invalid"))?;
+    let current = parse_release_version(current_version)
+        .ok_or_else(|| invalid("current version is invalid"))?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
@@ -135,6 +135,7 @@ pub(crate) async fn fetch_latest(
         .map_err(|error| upstream(format!("failed to create release client: {error}")))?;
 
     // 所有发行线先过滤再排序，避免更高大版本或其他实验遮住仍可安装的更新
+    let prefer_fork = fork_revision(&current).is_ok_and(|revision| revision.is_some());
     let mut latest: Option<(semver::Version, GitHubRelease)> = None;
     let mut page = 1;
     loop {
@@ -148,10 +149,15 @@ pub(crate) async fn fetch_latest(
             let Some(version) = eligible_release_version(&release, &current, channel) else {
                 continue;
             };
-            if latest
-                .as_ref()
-                .is_none_or(|(previous, _)| version.cmp_precedence(previous).is_gt())
-            {
+            if latest.as_ref().is_none_or(|(previous, _)| {
+                // 同基础版本的其他发行标识不能遮住本仓库的最高迭代
+                let comparison = compare_release_versions(&version, previous);
+                comparison.is_gt()
+                    || (comparison.is_eq()
+                        && prefer_fork
+                        && fork_revision(&version).is_ok_and(|revision| revision.is_some())
+                        && fork_revision(previous).is_ok_and(|revision| revision.is_none()))
+            }) {
                 latest = Some((version, release));
             }
         }
@@ -167,7 +173,7 @@ fn eligible_release_version(
     current: &semver::Version,
     channel: UpdateChannel,
 ) -> Option<semver::Version> {
-    let version = semver::Version::parse(&normalize_version(&release.tag_name)).ok()?;
+    let version = parse_release_version(&release.tag_name)?;
     (!release.draft
         && release.prerelease != version.pre.is_empty()
         && (version == *current || update_target_allowed(current, &version, channel)))
@@ -229,7 +235,7 @@ pub(crate) fn detail_from_release(
 pub(crate) fn confirmed_target(target: Option<String>) -> Result<String, OperationError> {
     let target = target.ok_or_else(|| conflict("target version must be confirmed"))?;
     let target = normalize_version(&target);
-    if target.is_empty() || semver::Version::parse(&target).is_err() {
+    if parse_release_version(&target).is_none() {
         return Err(invalid("target version is invalid"));
     }
     Ok(target)
@@ -347,6 +353,45 @@ fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_owned()
 }
 
+/// 仅本仓库发行元数据携带迭代号，旧格式作为第零次迭代
+fn fork_revision(version: &semver::Version) -> Result<Option<&str>, ()> {
+    let metadata = version.build.as_str();
+    if metadata == "lqy007700" {
+        return Ok(Some("0"));
+    }
+    if !metadata.starts_with("lqy007700.") {
+        return Ok(None);
+    }
+    let revision = metadata.strip_prefix("lqy007700.v").ok_or(())?;
+    if revision.is_empty()
+        || revision.starts_with('0')
+        || !revision.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(());
+    }
+    Ok(Some(revision))
+}
+
+fn parse_release_version(value: &str) -> Option<semver::Version> {
+    let version = semver::Version::parse(&normalize_version(value)).ok()?;
+    fork_revision(&version).ok()?;
+    Some(version)
+}
+
+/// 先比较 SemVer 优先级，同属二开发行时再按十进制迭代号排序
+fn compare_release_versions(left: &semver::Version, right: &semver::Version) -> std::cmp::Ordering {
+    let precedence = left.cmp_precedence(right);
+    if !precedence.is_eq() {
+        return precedence;
+    }
+    match (fork_revision(left), fork_revision(right)) {
+        (Ok(Some(left)), Ok(Some(right))) => {
+            left.len().cmp(&right.len()).then_with(|| left.cmp(right))
+        }
+        _ => std::cmp::Ordering::Equal,
+    }
+}
+
 fn channel_for_version(version: &semver::Version) -> Option<UpdateChannel> {
     if version.pre.is_empty() {
         return Some(UpdateChannel::Stable);
@@ -366,18 +411,18 @@ fn channel_for_version(version: &semver::Version) -> Option<UpdateChannel> {
 }
 
 pub(crate) fn version_channel(version: &str) -> Option<UpdateChannel> {
-    let version = semver::Version::parse(&normalize_version(version)).ok()?;
+    let version = parse_release_version(version)?;
     channel_for_version(&version)
 }
 
-/// 检查更新与执行更新共用同一规则；构建元数据不构成更新
+/// 检查更新与执行更新共用同一规则，只有本仓库迭代号扩展构建元数据排序
 fn update_target_allowed(
     current: &semver::Version,
     target: &semver::Version,
     selected: UpdateChannel,
 ) -> bool {
     use UpdateChannel::{Alpha, Beta, Experimental, Rc, Stable};
-    if current.major != target.major || !target.cmp_precedence(current).is_gt() {
+    if current.major != target.major || !compare_release_versions(target, current).is_gt() {
         return false;
     }
     let (Some(current_channel), Some(target_channel)) =
@@ -406,10 +451,9 @@ pub(crate) fn validate_update_target(
     target: &str,
     channel: UpdateChannel,
 ) -> Result<(), OperationError> {
-    let current = semver::Version::parse(&normalize_version(current))
-        .map_err(|_| conflict("当前版本格式无效"))?;
-    let target = semver::Version::parse(&normalize_version(target))
-        .map_err(|_| invalid("target version is invalid"))?;
+    let current = parse_release_version(current).ok_or_else(|| conflict("当前版本格式无效"))?;
+    let target =
+        parse_release_version(target).ok_or_else(|| invalid("target version is invalid"))?;
     if !update_target_allowed(&current, &target, channel) {
         return Err(conflict(
             "所选通道不允许此目标，或目标涉及跨实验线、跨大版本、降级",

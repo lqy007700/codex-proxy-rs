@@ -13,6 +13,7 @@ module ReleaseMetadata
   def self.version(raw)
     value = raw.delete_prefix('v')
     raise "Invalid release version: #{raw}" unless value.match?(SEMVER)
+    fork_revision(value)
     value
   end
 
@@ -20,8 +21,44 @@ module ReleaseMetadata
     version(value).split('+', 2).first.include?('-')
   end
 
-  def self.sort_key(value)
-    Gem::Version.new(version(value).split('+', 2).first)
+  def self.fork_revision(value)
+    metadata = value.split('+', 2).last if value.include?('+')
+    return '0' if metadata == 'lqy007700'
+    return nil unless metadata&.start_with?('lqy007700.')
+    revision = metadata.delete_prefix('lqy007700.v')
+    raise "Invalid fork revision: #{value}" unless revision.match?(/\A[1-9]\d*\z/)
+    revision
+  end
+
+  def self.compare(left, right)
+    left = version(left)
+    right = version(right)
+    precedence = Gem::Version.new(left.split('+', 2).first) <=> Gem::Version.new(right.split('+', 2).first)
+    return precedence unless precedence.zero?
+    left_revision = fork_revision(left)
+    right_revision = fork_revision(right)
+    return 0 unless left_revision && right_revision
+    # 只对本仓库迭代号扩展排序，按位数和数字比较以免固定整数溢出
+    [left_revision.length, left_revision] <=> [right_revision.length, right_revision]
+  end
+
+  def self.previous_tag(value, tags)
+    prefer_fork = !fork_revision(version(value)).nil?
+    tags.select do |candidate|
+      begin
+        version(candidate)
+      rescue StandardError
+        next false
+      end
+      compare(candidate, value).negative?
+    end.max do |left, right|
+      comparison = compare(left, right)
+      # 基础版本相同的其他发行标识不能遮住本仓库的最高迭代
+      if comparison.zero? && prefer_fork
+        comparison = (fork_revision(left) ? 1 : 0) <=> (fork_revision(right) ? 1 : 0)
+      end
+      comparison
+    end
   end
 
   def self.validate_notes(value)
@@ -68,11 +105,7 @@ module ReleaseMetadata
     validate_notes(value)
     entries = platforms
     docker, native = entries.partition { |entry| entry['docker'] == true }
-    previous = git('tag', '--list', 'v*', '--merged', 'HEAD').lines.map(&:strip).filter_map do |candidate|
-      next unless candidate.delete_prefix('v').match?(SEMVER)
-      key = sort_key(candidate)
-      [key, candidate] if key < sort_key(value)
-    end.max_by(&:first)&.last
+    previous = previous_tag(value, git('tag', '--list', 'v*', '--merged', 'HEAD').lines.map(&:strip))
     {
       'tag' => tag,
       'version' => value,

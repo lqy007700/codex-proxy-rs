@@ -1,0 +1,146 @@
+{
+  "comparisons": [
+    {
+      "current": "3.30.24+lqy007700",
+      "target": "3.33.0+lqy007700.v1",
+      "order": 1,
+      "update": true,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+lqy007700",
+      "target": "3.33.0+lqy007700.v1",
+      "order": 1,
+      "update": true,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+lqy007700.v1",
+      "target": "3.33.0+lqy007700.v2",
+      "order": 1,
+      "update": true,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+lqy007700.v2",
+      "target": "3.33.0+lqy007700.v10",
+      "order": 1,
+      "update": true,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+lqy007700.v99",
+      "target": "3.34.0+lqy007700.v1",
+      "order": 1,
+      "update": true,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+lqy007700.v2",
+      "target": "3.33.0+lqy007700.v2",
+      "order": 0,
+      "update": false,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+lqy007700.v2",
+      "target": "3.33.0+lqy007700.v1",
+      "order": -1,
+      "update": false,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+lqy007700.v2",
+      "target": "3.32.0+lqy007700.v99",
+      "order": -1,
+      "update": false,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0",
+      "target": "3.33.0+new-build",
+      "order": 0,
+      "update": false,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+aaa",
+      "target": "3.33.0+zzz",
+      "order": 0,
+      "update": false,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+other",
+      "target": "3.33.0+lqy007700.v2",
+      "order": 0,
+      "update": false,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+lqy007700.v1",
+      "target": "3.33.0+lqy007700.v99999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "order": 1,
+      "update": true,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0-beta.1+lqy007700.v99",
+      "target": "3.33.0-beta.2+lqy007700.v1",
+      "order": 1,
+      "update": true,
+      "channel": "beta"
+    },
+    {
+      "current": "3.33.0-beta.1+lqy007700.v1",
+      "target": "3.33.0-beta.1+lqy007700.v2",
+      "order": 1,
+      "update": true,
+      "channel": "beta"
+    },
+    {
+      "current": "3.33.0-rc.1+lqy007700.v99",
+      "target": "3.33.0+lqy007700.v1",
+      "order": 1,
+      "update": true,
+      "channel": "rc"
+    },
+    {
+      "current": "3.33.0+lqy007700.v1",
+      "target": "3.34.0-beta.1+lqy007700.v1",
+      "order": 1,
+      "update": false,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0+lqy007700.v1",
+      "target": "4.0.0+lqy007700.v1",
+      "order": 1,
+      "update": false,
+      "channel": "stable"
+    },
+    {
+      "current": "3.33.0-exp.1+lqy007700.v1",
+      "target": "3.33.0-exp.1+lqy007700.v2",
+      "order": 1,
+      "update": true,
+      "channel": "exp"
+    },
+    {
+      "current": "3.33.0-exp.1+lqy007700.v1",
+      "target": "3.34.0-exp.1+lqy007700.v1",
+      "order": 1,
+      "update": false,
+      "channel": "exp"
+    }
+  ],
+  "invalid": [
+    "3.33.0+lqy007700.v0",
+    "3.33.0+lqy007700.v01",
+    "3.33.0+lqy007700.v-1",
+    "3.33.0+lqy007700.vabc",
+    "3.33.0+lqy007700.v1.extra",
+    "3.33.0+lqy007700.other",
+    "3.33.0+lqy007700.v"
+  ]
+}

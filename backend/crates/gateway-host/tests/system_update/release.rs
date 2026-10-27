@@ -1,6 +1,113 @@
 //! 发行查询、缓存、版本通道与目标策略测试
 
 use super::*;
+use gateway_admin::model::system::SystemUpdateChannel;
+
+#[tokio::test]
+async fn fork_iteration_update_installs_the_confirmed_same_baseline_release() {
+    let server = MockServer::start().await;
+    let fixture = Fixture::new();
+    let target = "3.33.0+lqy007700.v2";
+    fixture
+        .mount_release(&server, target, ArchiveKind::Safe, ChecksumKind::Valid)
+        .await;
+    let mut config = fixture.config(&format!("{}/repos", server.uri()));
+    config.version = "3.33.0+lqy007700.v1".to_owned();
+    let service = ProcessSystemOperations::new(CancellationToken::new(), config);
+    let status = complete_update(&service, target).await;
+    assert_eq!(status.operation.status, SystemOperationStatus::Succeeded);
+    assert_eq!(status.operation.target_version.as_deref(), Some(target));
+    assert_eq!(
+        fs::read(fixture.executable()).expect("binary"),
+        b"new-binary"
+    );
+    assert_eq!(
+        fs::read(fixture.web().join("index.html")).expect("web"),
+        b"new-web"
+    );
+}
+
+#[tokio::test]
+async fn fork_revisions_follow_the_shared_release_policy() {
+    let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../release/tests/fixtures/fork-versions.json"
+    ))
+    .expect("version fixtures");
+    for case in fixtures["comparisons"].as_array().expect("comparisons") {
+        let current = case["current"].as_str().expect("current");
+        let target = case["target"].as_str().expect("target");
+        let channel = match case["channel"].as_str().expect("channel") {
+            "beta" => SystemUpdateChannel::Beta,
+            "rc" => SystemUpdateChannel::Rc,
+            "exp" => SystemUpdateChannel::Experimental,
+            "stable" => SystemUpdateChannel::Stable,
+            other => panic!("unknown fixture channel {other}"),
+        };
+        let server = MockServer::start().await;
+        let fixture = Fixture::new();
+        fixture.mount_release_once(&server, target).await;
+        let mut config = fixture.config(&format!("{}/repos", server.uri()));
+        config.version = current.to_owned();
+        let service = ProcessSystemOperations::new(CancellationToken::new(), config);
+        let detail = service
+            .update_detail(true, Some(channel))
+            .await
+            .expect("detail");
+        let expected = case["update"].as_bool().expect("update");
+        assert_eq!(detail.has_update, expected, "{current} -> {target}");
+        assert_eq!(
+            detail.latest_version,
+            if expected { target } else { current }
+        );
+    }
+    for target in fixtures["invalid"].as_array().expect("invalid") {
+        let target = target.as_str().expect("version");
+        let server = MockServer::start().await;
+        let fixture = Fixture::new();
+        fixture.mount_release_once(&server, target).await;
+        let mut config = fixture.config(&format!("{}/repos", server.uri()));
+        config.version = "3.33.0+lqy007700.v1".to_owned();
+        let service = ProcessSystemOperations::new(CancellationToken::new(), config);
+        let detail = service.update_detail(true, None).await.expect("detail");
+        assert!(!detail.has_update, "invalid target {target}");
+        assert!(detail.warning.is_none());
+    }
+}
+
+#[tokio::test]
+async fn fork_revisions_choose_the_highest_candidate_across_pages() {
+    let server = MockServer::start().await;
+    let fixture = Fixture::new();
+    let release = |revision| {
+        serde_json::json!({
+            "tag_name": format!("v3.33.0+lqy007700.v{revision}"),
+            "prerelease": false,
+            "assets": [],
+        })
+    };
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repository/releases"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json({
+            let mut releases = vec![release(2); 100];
+            releases[0]["tag_name"] = serde_json::json!("v3.33.0+other");
+            releases
+        }))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repository/releases"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(vec![release(10), release(3)]))
+        .mount(&server)
+        .await;
+    let mut config = fixture.config(&format!("{}/repos", server.uri()));
+    config.version = "3.32.0+lqy007700.v1".to_owned();
+    let service = ProcessSystemOperations::new(CancellationToken::new(), config);
+    let detail = service.update_detail(true, None).await.expect("detail");
+    assert!(detail.has_update);
+    assert_eq!(detail.latest_version, "3.33.0+lqy007700.v10");
+}
 
 #[tokio::test]
 async fn update_detail_should_report_refresh_failure_and_clear_previous_update() {
