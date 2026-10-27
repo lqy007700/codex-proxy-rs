@@ -113,7 +113,10 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
       return
     busyInstanceId.value = instance.id
     try {
-      await rollbackPluginInstance({ id: instance.id, target: { artifactSha256, expectedRevision: plan.instanceRevision } }, { silent: true })
+      await rollbackPluginInstance({
+        id: instance.id,
+        target: { artifactSha256, expectedRevision: plan.instanceRevision },
+      }, { silent: true })
       showRollback.value = false
       ZNotification.success({ message: `已回退至 ${target.version}，并恢复对应设置` })
       await refresh(true)
@@ -135,5 +138,17 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
 
   onScopeDispose(() => rollbackController?.abort())
 
-  return { showRollback, rollbackInstance, rollbackPlan, loadingRollback, pendingVersionSwitch, showVersionSwitch, requestVersionSwitch, confirmVersionSwitch, applyVersionSwitch, openRollback, confirmRollback }
+  return {
+    showRollback,
+    rollbackInstance,
+    rollbackPlan,
+    loadingRollback,
+    pendingVersionSwitch,
+    showVersionSwitch,
+    requestVersionSwitch,
+    confirmVersionSwitch,
+    applyVersionSwitch,
+    openRollback,
+    confirmRollback,
+  }
 }

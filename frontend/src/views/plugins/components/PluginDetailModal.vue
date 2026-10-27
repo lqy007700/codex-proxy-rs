@@ -13,6 +13,7 @@ import { artifactForInstance } from '../utils/model'
 import PluginConfigurationSummary from './PluginConfigurationSummary.vue'
 import PluginHelpPopover from './PluginHelpPopover.vue'
 import PluginLegacyConfigurations from './PluginLegacyConfigurations.vue'
+import PluginRuntimeLoad from './PluginRuntimeLoad.vue'
 import PluginStatusNotice from './PluginStatusNotice.vue'
 import PluginVersionsPanel from './PluginVersionsPanel.vue'
 
@@ -32,7 +33,10 @@ defineEmits<{
 }>()
 const open = defineModel<boolean>({ required: true })
 const section = shallowRef('configurations')
-const sections = [{ label: '概览', value: 'configurations', icon: Settings2 }, { label: '版本', value: 'versions', icon: Layers }]
+const sections = [
+  { label: '概览', value: 'configurations', icon: Settings2 },
+  { label: '版本', value: 'versions', icon: Layers },
+]
 const current = computed(() => props.plugin && currentPluginInstance(props.plugin))
 const legacy = computed(() => props.plugin?.configurations.filter(instance => instance.id !== current.value?.id) ?? [])
 const currentArtifact = computed(() => current.value && artifactForInstance(current.value, props.plugin?.artifacts ?? []))
@@ -48,6 +52,8 @@ function configurationNotes(instance: PluginInstance) {
     notes.push('配置已保存，等待生效，状态会自动刷新')
   if (configurationStatus(instance) === 'unconfigured')
     notes.push('补充必填配置后即可启用')
+  if (configurationStatus(instance) === 'unknown')
+    notes.push('暂时无法读取运行状态，启用配置保持不变')
   if (instance.runtime.drainingRevisions.length)
     notes.push('旧版本仍有进行中的调用，完成前暂不能删除')
   return notes
@@ -103,6 +109,7 @@ watch(() => props.initialSection, value => section.value = value)
             :metadata="artifactForInstance(instance, plugin.artifacts)?.metadata"
             :show-command="configurationStatus(instance) === 'enabled' && Boolean(capabilities(instance).command_line)"
           />
+          <PluginRuntimeLoad v-if="instance.runtime.load" :load="instance.runtime.load" :revision="instance.runtime.actualRevision" />
           <div class="flex flex-wrap items-center gap-2">
             <div v-if="configurationStatus(instance) === 'enabled'" class="mr-auto flex min-w-0 flex-wrap items-center gap-2">
               <RouterLink v-for="page in viewByInstance.get(instance.id)?.pages ?? []" :key="page.id" :to="pluginPageLocation(viewByInstance.get(instance.id)!, page)" class="inline-flex h-cp-control-sm min-w-0 items-center gap-1.5 rounded-cp bg-cp-primary-container px-2.5 text-cp-sm leading-none text-cp-primary-on-container no-underline outline-none transition-colors hover:bg-cp-primary-container-hover focus-visible:ring-2 focus-visible:ring-cp-control-outline motion-reduce:transition-none" @click="open = false">

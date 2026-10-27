@@ -34,5 +34,11 @@ export function usePluginArtifactActions({ refresh }: PluginRefreshContext) {
     }
   }
 
-  return { showArtifactDelete, pendingArtifact, busyDigest, requestArtifactDelete, confirmArtifactDelete }
+  return {
+    showArtifactDelete,
+    pendingArtifact,
+    busyDigest,
+    requestArtifactDelete,
+    confirmArtifactDelete,
+  }
 }

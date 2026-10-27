@@ -91,7 +91,9 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
       updateSource.value = source
       onSourceSaved(source)
       return true
-    }, { onError: error => notifyPluginError('安装来源保存失败', error) })
+    }, {
+      onError: error => notifyPluginError('安装来源保存失败', error),
+    })
     return result === true
   }
 
@@ -149,7 +151,11 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
     if (!result)
       return
     showInstall.value = false
-    ZNotification.success({ message: result.configurationRequired ? '插件已安装，请补充必要配置' : result.defaultInstanceId ? '插件已安装，正在准备' : '插件版本已安装' })
+    ZNotification.success({
+      message: result.configurationRequired
+        ? '插件已安装，请补充必要配置'
+        : result.defaultInstanceId ? '插件已安装，正在准备' : '插件版本已安装',
+    })
     await onInstalled(result)
   }
 
@@ -172,7 +178,9 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
       // 使用检查时的实例 revision，避免下载期间的设置变更被升级覆盖。
       await onInstalled(result, instance)
       return true
-    }, { onError: error => notifyPluginError('插件升级失败', error) })
+    }, {
+      onError: error => notifyPluginError('插件升级失败', error),
+    })
     return completed === true
   }
 
@@ -185,7 +193,11 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
     if (!result)
       return
     showInstall.value = false
-    ZNotification.success({ message: result.configurationRequired ? '插件已安装，请补充必要配置' : result.defaultInstanceId ? '插件已安装，正在准备' : '插件版本已安装' })
+    ZNotification.success({
+      message: result.configurationRequired
+        ? '插件已安装，请补充必要配置'
+        : result.defaultInstanceId ? '插件已安装，正在准备' : '插件版本已安装',
+    })
     await onInstalled(result)
   }
 
@@ -208,8 +220,12 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
         : await verifyRemotePlugin(request, options)
       if (updateSource.value && artifact.metadata.pluginId !== updateSource.value.pluginId)
         throw new Error('插件包与当前插件不符，请重新选择')
-      if (verificationController === controller)
-        verifiedArtifact.value = { requestKey: pluginInstallSelectionKey(request), artifact }
+      if (verificationController === controller) {
+        verifiedArtifact.value = {
+          requestKey: pluginInstallSelectionKey(request),
+          artifact,
+        }
+      }
     }
     catch (error) {
       if (verificationController === controller)

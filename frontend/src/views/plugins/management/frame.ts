@@ -139,7 +139,9 @@ export function readPluginFrameTheme(): PluginFrameTheme {
   if (fontCode)
     tokens['--cp-font-family-code'] = fontCode
   return {
-    name: root.dataset.theme === 'dark' ? 'dark' : 'light',
+    name: root.dataset.theme === 'dark'
+      ? 'dark'
+      : 'light',
     tokens,
   }
 }
@@ -161,7 +163,9 @@ async function loadResources(view: PluginManagementView, signal: AbortSignal) {
   let cursor = 0
   let total = 0
   const workers = Array.from(
-    { length: Math.min(RESOURCE_CONCURRENCY, view.resources.length) },
+    {
+      length: Math.min(RESOURCE_CONCURRENCY, view.resources.length),
+    },
     async () => {
       while (cursor < view.resources.length) {
         const descriptor = view.resources[cursor++]
@@ -194,8 +198,11 @@ function rewriteDocument(
   const unsupported = document.querySelector('base, iframe, frame, frameset, object, embed, portal, template')
   if (unsupported)
     throw new Error(`插件页面使用了不受支持的 <${unsupported.tagName.toLowerCase()}> 元素`)
-  if ([...document.querySelectorAll('meta[http-equiv]')].some(meta => meta.getAttribute('http-equiv')?.toLowerCase() === 'refresh'))
+  if ([
+    ...document.querySelectorAll('meta[http-equiv]'),
+  ].some(meta => meta.getAttribute('http-equiv')?.toLowerCase() === 'refresh')) {
     throw new Error('插件页面不能使用自动跳转')
+  }
 
   for (const script of document.querySelectorAll('script')) {
     if (script.getAttribute('type')?.trim().toLowerCase() === 'module')
@@ -222,7 +229,14 @@ function rewriteDocument(
     link.setAttribute('href', ensureResourceUrl(path))
   }
 
-  const supportedSourceElements = new Set(['AUDIO', 'IMG', 'SCRIPT', 'SOURCE', 'TRACK', 'VIDEO'])
+  const supportedSourceElements = new Set([
+    'AUDIO',
+    'IMG',
+    'SCRIPT',
+    'SOURCE',
+    'TRACK',
+    'VIDEO',
+  ])
   for (const element of document.querySelectorAll<HTMLElement>('[src]')) {
     if (element.tagName === 'SCRIPT')
       continue
@@ -247,7 +261,10 @@ function rewriteDocument(
       if (!reference)
         throw new Error('插件 srcset 资源引用为空')
       const path = resolveResourceReference(entryPath, reference, resources)
-      return [ensureResourceUrl(path), ...descriptor].join(' ')
+      return [
+        ensureResourceUrl(path),
+        ...descriptor,
+      ].join(' ')
     }).join(', ')
     element.setAttribute('srcset', rewritten)
   }
@@ -267,8 +284,14 @@ function rewriteDocument(
           continue
         throw new Error('插件页面不能导航到外部或未注册地址')
       }
-      if (['action', 'formaction', 'ping', 'background'].includes(name) && attribute.value)
+      if ([
+        'action',
+        'formaction',
+        'ping',
+        'background',
+      ].includes(name) && attribute.value) {
         throw new Error(`插件页面不支持 ${name} 地址`)
+      }
       if (
         name !== 'style'
         && /\burl\s*\(/iu.test(attribute.value)
@@ -330,7 +353,9 @@ function rewriteCss(
     if (node.type === 'Atrule' && node.name.toLowerCase() === 'import') {
       if (!allowImports)
         throw new Error('内联 style 属性不能导入样式表')
-      const reference = node.prelude?.type === 'AtrulePrelude' ? node.prelude.children.first : null
+      const reference = node.prelude?.type === 'AtrulePrelude'
+        ? node.prelude.children.first
+        : null
       if (node.block || !reference || (reference.type !== 'String' && reference.type !== 'Url'))
         throw new Error(`插件 @import 语法不受支持：${ownerPath}`)
       const path = resolveResourceReference(ownerPath, reference.value, resources)

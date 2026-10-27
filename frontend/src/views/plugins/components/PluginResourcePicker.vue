@@ -11,12 +11,17 @@ const selected = defineModel<string[]>({ required: true })
 const options = shallowRef<{ id: string, label: string, disabled: boolean }[]>([])
 const loading = shallowRef(false)
 const error = shallowRef('')
-const label = computed(() => props.kind === 'keys' ? '客户端 Key' : '账号分组')
+const label = computed(() => props.kind === 'keys'
+  ? '客户端 Key'
+  : '账号分组')
 let controller: AbortController | undefined
 const choices = computed(() => {
   const known = new Set(options.value.map(option => option.id))
   const unavailable = selected.value.filter(id => !known.has(id)).map(id => ({ id, label: `不可用 · ${id}`, disabled: true }))
-  return [...unavailable, ...options.value].map(option => ({
+  return [
+    ...unavailable,
+    ...options.value,
+  ].map(option => ({
     value: option.id,
     label: option.label,
     description: option.disabled ? '不可用' : undefined,
@@ -66,7 +71,10 @@ async function load() {
       loading.value = false
   }
 }
-watch([() => props.kind, () => props.active], ([, active]) => {
+watch([
+  () => props.kind,
+  () => props.active,
+], ([, active]) => {
   controller?.abort()
   controller = undefined
   if (active)

@@ -21,7 +21,9 @@ const status = computed(() => {
     return '当前已使用此版本'
   if (newer.value)
     return '发现新版本，插件包已校验'
-  return current.value?.version === candidate.value.version ? '版本号相同，插件包内容不同' : '未发现更高版本'
+  return current.value?.version === candidate.value.version
+    ? '版本号相同，插件包内容不同'
+    : '未发现更高版本'
 })
 </script>
 

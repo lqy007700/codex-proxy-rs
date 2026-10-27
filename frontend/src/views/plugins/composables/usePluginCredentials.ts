@@ -53,5 +53,13 @@ export function usePluginCredentials({ credentials, refresh }: CredentialContext
     }
   }
 
-  return { savingCredential, showCredentialDelete, pendingCredential, busyCredentialId, saveCredential, requestCredentialDelete, confirmCredentialDelete }
+  return {
+    savingCredential,
+    showCredentialDelete,
+    pendingCredential,
+    busyCredentialId,
+    saveCredential,
+    requestCredentialDelete,
+    confirmCredentialDelete,
+  }
 }

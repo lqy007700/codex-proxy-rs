@@ -13,7 +13,9 @@ export type PluginInstallMode = 'upload' | 'url' | 'github'
 export type PluginInstallSelection = File | VerifyRemotePluginRequest
 
 export function pluginInstallSelectionKey(selection: PluginInstallSelection) {
-  return selection instanceof File ? selection : JSON.stringify(selection)
+  return selection instanceof File
+    ? selection
+    : JSON.stringify(selection)
 }
 
 export interface JsonSchema {
@@ -41,8 +43,17 @@ export function pluginRequestBindingEntries(metadata: PluginArtifactMetadata) {
         return []
       const events: { event?: PluginObserverEvent, label: string }[] = capability === 'observer'
         ? Object.entries(PLUGIN_OBSERVER_EVENT_LABELS).map(([event, label]) => ({ event: event as PluginObserverEvent, label }))
-        : [{ label: description.label }]
-      return events.map(({ event, label }) => ({ ...description, capability, contribution: contribution.id, stage, event, label }))
+        : [
+            { label: description.label },
+          ]
+      return events.map(({ event, label }) => ({
+        ...description,
+        capability,
+        contribution: contribution.id,
+        stage,
+        event,
+        label,
+      }))
     }),
   )
 }
@@ -89,18 +100,24 @@ export function sourceLabel(source: PluginSource | PluginUpdateSource) {
 export function sourceDetail(source: PluginSource | PluginUpdateSource) {
   switch (source.kind) {
     case 'builtin':
-      return 'release' in source ? source.release : '发行清单'
+      return 'release' in source
+        ? source.release
+        : '发行清单'
     case 'upload':
       return '无远程更新来源'
     case 'url':
       return source.url
     case 'github':
-      return 'tag' in source ? `${source.repository}@${source.tag}` : source.repository
+      return 'tag' in source
+        ? `${source.repository}@${source.tag}`
+        : source.repository
   }
 }
 
 export function shortDigest(digest: string) {
-  return digest.length > 15 ? `${digest.slice(0, 8)}…${digest.slice(-6)}` : digest
+  return digest.length > 15
+    ? `${digest.slice(0, 8)}…${digest.slice(-6)}`
+    : digest
 }
 
 export function artifactForInstance(instance: PluginInstance, artifacts: PluginArtifact[]) {

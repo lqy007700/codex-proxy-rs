@@ -18,7 +18,14 @@ const options = computed(() => [
   })),
   // 目录加载失败或代理已被删除时保留已选 ID，不能静默改为直连。
   ...(proxyId.value && !proxies.value.some(proxy => proxy.id === proxyId.value)
-    ? [{ label: '已选代理（目录暂不可用）', value: proxyId.value, description: proxyId.value, disabled: true }]
+    ? [
+        {
+          label: '已选代理（目录暂不可用）',
+          value: proxyId.value,
+          description: proxyId.value,
+          disabled: true,
+        },
+      ]
     : []),
 ])
 </script>

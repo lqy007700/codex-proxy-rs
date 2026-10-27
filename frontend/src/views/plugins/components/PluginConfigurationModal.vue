@@ -36,16 +36,31 @@ const authenticationBinding = computed({
   get: () => bindings.value.find(binding => binding.contribution === authenticationContribution.value?.id) ?? null,
   set: (binding) => {
     const others = bindings.value.filter(value => value.contribution !== authenticationContribution.value?.id)
-    bindings.value = binding ? [...others, cloneDeep(binding)] : others
+    bindings.value = binding
+      ? [
+          ...others,
+          cloneDeep(binding),
+        ]
+      : others
   },
 })
 const hasRequestBindings = computed(() => props.artifact && pluginRequestBindingEntries(props.artifact.metadata).length > 0)
 const sections = computed(() => [
   { label: '插件参数', value: 'general', icon: Settings2 },
-  ...(hasRequestBindings.value ? [{ label: '高级设置', value: 'requests', icon: Blocks }] : []),
-  ...(authenticationContribution.value ? [{ label: '客户端认证', value: 'authentication', icon: ShieldCheck }] : []),
+  ...(hasRequestBindings.value
+    ? [
+        { label: '高级设置', value: 'requests', icon: Blocks },
+      ]
+    : []),
+  ...(authenticationContribution.value
+    ? [
+        { label: '客户端认证', value: 'authentication', icon: ShieldCheck },
+      ]
+    : []),
 ])
-const primaryLabel = computed(() => versionChanged.value ? '应用并切换' : props.instance?.configurationRequired ? '保存并启用' : '保存设置')
+const primaryLabel = computed(() => versionChanged.value
+  ? '应用并切换'
+  : props.instance?.configurationRequired ? '保存并启用' : '保存设置')
 
 async function focusConfigurationInvalid() {
   section.value = 'general'
@@ -80,8 +95,11 @@ async function submit() {
     configuration: cloneDeep(configuration.value),
     bindings: cloneDeep(bindings.value),
   }
-  if (secretMode.value !== 'preserve')
-    input.secrets = secretMode.value === 'clear' ? {} : cloneDeep(secretValues.value)
+  if (secretMode.value !== 'preserve') {
+    input.secrets = secretMode.value === 'clear'
+      ? {}
+      : cloneDeep(secretValues.value)
+  }
   emit('save', input)
 }
 

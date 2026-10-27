@@ -19,7 +19,14 @@ const selected = defineModel<string[]>({ required: true })
 const pending = defineModel<boolean>('pending', { required: true })
 const draft = defineModel<CreatePluginSourceCredentialRequest | null>('draft', { required: true })
 const mode = shallowRef(selected.value.length ? 'saved' : 'public')
-const form = reactive({ kind: 'bearer', token: '', username: '', password: '', headerName: '', headerValue: '' })
+const form = reactive({
+  kind: 'bearer',
+  token: '',
+  username: '',
+  password: '',
+  headerName: '',
+  headerValue: '',
+})
 const authOptions = [
   { label: '访问令牌', value: 'bearer' },
   { label: '用户名与密码', value: 'basic' },
@@ -27,8 +34,17 @@ const authOptions = [
 ]
 const modeOptions = computed(() => [
   { label: '无需认证', value: 'public' },
-  { label: props.kind === 'github' ? '填写 GitHub 令牌' : '填写认证信息', value: 'new' },
-  ...(props.credentials.length ? [{ label: '使用已保存凭据', value: 'saved' }] : []),
+  {
+    label: props.kind === 'github'
+      ? '填写 GitHub 令牌'
+      : '填写认证信息',
+    value: 'new',
+  },
+  ...(props.credentials.length
+    ? [
+        { label: '使用已保存凭据', value: 'saved' },
+      ]
+    : []),
 ])
 const scope = computed(() => {
   if (props.kind === 'github') {
@@ -49,17 +65,48 @@ const scope = computed(() => {
   }
 })
 const authentication = computed<PluginSourceAuthentication | null>(() => {
-  if (props.kind === 'github')
-    return form.token.trim() ? { kind: 'github', token: form.token.trim() } : null
-  if (form.kind === 'basic')
-    return form.username.trim() && form.password ? { kind: 'basic', username: form.username.trim(), password: form.password } : null
-  if (form.kind === 'header')
-    return form.headerName.trim() && form.headerValue ? { kind: 'header', name: form.headerName.trim(), value: form.headerValue } : null
-  return form.token.trim() ? { kind: 'bearer', token: form.token.trim() } : null
+  if (props.kind === 'github') {
+    return form.token.trim()
+      ? {
+          kind: 'github',
+          token: form.token.trim(),
+        }
+      : null
+  }
+  if (form.kind === 'basic') {
+    return form.username.trim() && form.password
+      ? {
+          kind: 'basic',
+          username: form.username.trim(),
+          password: form.password,
+        }
+      : null
+  }
+  if (form.kind === 'header') {
+    return form.headerName.trim() && form.headerValue
+      ? {
+          kind: 'header',
+          name: form.headerName.trim(),
+          value: form.headerValue,
+        }
+      : null
+  }
+  return form.token.trim()
+    ? {
+        kind: 'bearer',
+        token: form.token.trim(),
+      }
+    : null
 })
 
 function clearSecrets() {
-  Object.assign(form, { token: '', username: '', password: '', headerName: '', headerValue: '' })
+  Object.assign(form, {
+    token: '',
+    username: '',
+    password: '',
+    headerName: '',
+    headerValue: '',
+  })
 }
 
 function changeMode(value: string | undefined) {
@@ -94,7 +141,9 @@ watch([mode, scope, authentication], () => {
     ? {
         ...scope.value,
         name: scope.value.name.slice(0, 128),
-        purposes: props.kind === 'github' ? ['metadata', 'artifact'] : ['artifact'],
+        purposes: props.kind === 'github'
+          ? ['metadata', 'artifact']
+          : ['artifact'],
         authentication: authentication.value,
       }
     : null

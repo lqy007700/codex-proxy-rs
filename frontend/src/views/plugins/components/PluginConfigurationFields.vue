@@ -152,7 +152,9 @@ async function focusInvalid() {
 
   await nextTick()
   const missingName = missingSecretFields.value[0]?.name
-  const container = [...(secretFieldsRoot.value?.querySelectorAll<HTMLElement>('[data-secret-field]') ?? [])]
+  const container = [
+    ...(secretFieldsRoot.value?.querySelectorAll<HTMLElement>('[data-secret-field]') ?? []),
+  ]
     .find(element => element.dataset.secretField === missingName)
   container?.querySelector<HTMLElement>('input:not([type="hidden"]), textarea, button, [tabindex]:not([tabindex="-1"])')?.focus()
   return 'secret' as const

@@ -16,12 +16,23 @@ const status = shallowRef('all')
 const display = shallowRef('cards')
 const page = shallowRef(1)
 const pageSize = shallowRef(20)
-const statusOptions = [{ label: '全部状态', value: 'all' }, ...Object.entries(PLUGIN_STATUS_LABELS).map(([value, label]) => ({ value, label }))]
-const displayOptions = [{ label: '卡片视图', value: 'cards', icon: LayoutGrid }, { label: '列表视图', value: 'list', icon: List }]
+const statusOptions = [
+  { label: '全部状态', value: 'all' },
+  ...Object.entries(PLUGIN_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+]
+const displayOptions = [
+  { label: '卡片视图', value: 'cards', icon: LayoutGrid },
+  { label: '列表视图', value: 'list', icon: List },
+]
 const filtered = computed(() => props.plugins.filter((plugin) => {
   const metadata = plugin.artifact.metadata
   return (status.value === 'all' || pluginStatus(plugin) === status.value)
-    && [metadata.displayName, metadata.pluginId, metadata.publisher, metadata.description].some(value => value.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()))
+    && [
+      metadata.displayName,
+      metadata.pluginId,
+      metadata.publisher,
+      metadata.description,
+    ].some(value => value.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()))
 }))
 const rows = computed(() => filtered.value
   .slice((page.value - 1) * pageSize.value, page.value * pageSize.value)
@@ -42,11 +53,36 @@ watch(() => filtered.value.length, (total) => {
   page.value = Math.min(page.value, Math.max(1, Math.ceil(total / pageSize.value)))
 })
 const columns = defineTableColumns<(typeof rows.value)[number]>([
-  { key: 'plugin', label: '插件', kind: 'identity', size: '3xl' },
-  { key: 'status', label: '状态', kind: 'custom', size: 'lg' },
-  { key: 'capabilities', label: '提供功能', kind: 'custom', size: 'xl' },
-  { key: 'configurations', label: '已安装版本', kind: 'custom', size: 'lg' },
-  { key: 'actions', label: '操作', kind: 'actions', size: 'sm' },
+  {
+    key: 'plugin',
+    label: '插件',
+    kind: 'identity',
+    size: '3xl',
+  },
+  {
+    key: 'status',
+    label: '状态',
+    kind: 'custom',
+    size: 'lg',
+  },
+  {
+    key: 'capabilities',
+    label: '提供功能',
+    kind: 'custom',
+    size: 'xl',
+  },
+  {
+    key: 'configurations',
+    label: '已安装版本',
+    kind: 'custom',
+    size: 'lg',
+  },
+  {
+    key: 'actions',
+    label: '操作',
+    kind: 'actions',
+    size: 'sm',
+  },
 ])
 </script>
 

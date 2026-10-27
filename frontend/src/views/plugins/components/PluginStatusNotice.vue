@@ -5,7 +5,9 @@ import PluginHelpPopover from './PluginHelpPopover.vue'
 
 const props = defineProps<{ instance: PluginInstance }>()
 const failure = computed(() => props.instance.loadError ?? props.instance.runtime.failure?.message)
-const title = computed(() => failure.value ? (props.instance.loadError ? '无法启动' : '运行失败') : props.instance.compatibilityWarning ? '兼容性提醒' : '接口待升级，当前仍兼容')
+const title = computed(() => failure.value
+  ? (props.instance.loadError ? '无法启动' : '运行失败')
+  : props.instance.compatibilityWarning ? '兼容性提醒' : '接口待升级，当前仍兼容')
 </script>
 
 <template>

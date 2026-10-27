@@ -115,7 +115,9 @@ function enableAuthentication(enabled: boolean) {
         models: [],
         clientKeyIds: [],
         accountGroupIds: [],
-        identityBindings: [{ principal: '', clientKeyId: '' }],
+        identityBindings: [
+          { principal: '', clientKeyId: '' },
+        ],
       }
     : null
 }
@@ -144,7 +146,12 @@ function updateIdentity(index: number, update: Partial<PluginFrontendIdentityBin
   binding.value = {
     ...binding.value,
     identityBindings: binding.value.identityBindings.map((identity, identityIndex) =>
-      identityIndex === index ? { ...identity, ...update } : identity,
+      identityIndex === index
+        ? {
+            ...identity,
+            ...update,
+          }
+        : identity,
     ),
   }
 }
@@ -183,7 +190,9 @@ async function loadClientKeys() {
   catch (error: unknown) {
     if (!controller.signal.aborted) {
       keysFailed.value = true
-      ZNotification.error({ message: errorMessage(error, '加载客户端 Key 失败') })
+      ZNotification.error({
+        message: errorMessage(error, '加载客户端 Key 失败'),
+      })
     }
   }
   finally {

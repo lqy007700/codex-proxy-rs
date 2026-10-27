@@ -13,7 +13,11 @@ export function usePluginUninstall(refresh: () => Promise<void>) {
 
   function request(plugin: InstalledPlugin) {
     // 固定确认范围，重试不扩大到此后新建的配置或版本。
-    pending.value = { ...plugin, artifacts: [...plugin.artifacts], configurations: [...plugin.configurations] }
+    pending.value = {
+      ...plugin,
+      artifacts: [...plugin.artifacts],
+      configurations: [...plugin.configurations],
+    }
     acknowledged.value = false
     progress.value = ''
     open.value = true
@@ -66,5 +70,13 @@ export function usePluginUninstall(refresh: () => Promise<void>) {
         progress.value = ''
     }
   }
-  return { open, pending, acknowledged, busy, progress, request, confirm }
+  return {
+    open,
+    pending,
+    acknowledged,
+    busy,
+    progress,
+    request,
+    confirm,
+  }
 }
