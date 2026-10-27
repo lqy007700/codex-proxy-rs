@@ -1379,39 +1379,42 @@ async fn streaming_error_after_initial_keepalive_should_be_a_terminal_sse_failur
 
 #[tokio::test(start_paused = true)]
 async fn streaming_late_upstream_error_should_preserve_extended_error_fields() {
-    let mut error = json!({
-        "type": "invalid_request_error", "code": "misalignment_policy_violation",
-        "message": "synthetic policy error", "misalignment": {"category": "synthetic"},
-        "extension": {"opaque": true}
-    });
-    let failure = ProviderError::new(ProviderErrorKind::InvalidRequest, UpstreamSendState::Sent)
-        .with_client_visible_upstream_response(
-            ClientVisibleUpstreamResponse::new(
-                400,
-                Some(b"application/json".to_vec()),
-                Bytes::from(json!({"error": error}).to_string()),
-            )
-            .with_headers(headers(&[("retry-after", "7")])),
+    for code in ["misalignment_policy_violation", "invalid_encrypted_content"] {
+        let mut error = json!({
+            "type": "invalid_request_error", "code": code,
+            "message": "synthetic policy error", "misalignment": {"category": "synthetic"},
+            "extension": {"opaque": true}
+        });
+        let failure =
+            ProviderError::new(ProviderErrorKind::InvalidRequest, UpstreamSendState::Sent)
+                .with_client_visible_upstream_response(
+                    ClientVisibleUpstreamResponse::new(
+                        400,
+                        Some(b"application/json".to_vec()),
+                        Bytes::from(json!({"error": error}).to_string()),
+                    )
+                    .with_headers(headers(&[("retry-after", "7")])),
+                );
+        error["headers"] = json!({"retry-after": "7"});
+        let session = FakeSession::streaming(
+            Arc::new(Trace::default()),
+            vec![NextStep::DelayedError(
+                Duration::from_secs(30),
+                EngineError::Provider(failure),
+            )],
         );
-    error["headers"] = json!({"retry-after": "7"});
-    let session = FakeSession::streaming(
-        Arc::new(Trace::default()),
-        vec![NextStep::DelayedError(
-            Duration::from_secs(30),
-            EngineError::Provider(failure),
-        )],
-    );
-    let response = stream_execution_response(Box::new(session), None).await;
-    assert_eq!(response.status(), StatusCode::OK);
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let events = parse_sse_events(std::str::from_utf8(&bytes).unwrap()).unwrap();
-    let failed = events
-        .iter()
-        .find(|event| event.event.as_deref() == Some("response.failed"))
-        .unwrap();
-    let payload: Value = serde_json::from_str(&failed.data).unwrap();
-    assert_eq!(payload["response"]["error"], error);
-    assert!(bytes.ends_with(b"data: [DONE]\n\n"));
+        let response = stream_execution_response(Box::new(session), None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let events = parse_sse_events(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        let failed = events
+            .iter()
+            .find(|event| event.event.as_deref() == Some("response.failed"))
+            .unwrap();
+        let payload: Value = serde_json::from_str(&failed.data).unwrap();
+        assert_eq!(payload["response"]["error"], error);
+        assert!(bytes.ends_with(b"data: [DONE]\n\n"));
+    }
 }
 
 #[tokio::test]
@@ -1752,6 +1755,43 @@ async fn streaming_failure_before_first_frame_should_return_safe_observed_header
     );
     assert!(response.headers().get("authorization").is_none());
     assert_eq!(trace.client_statuses(), vec![502]);
+}
+
+#[tokio::test]
+async fn encrypted_history_conflict_before_http_commit_returns_409_for_json_and_sse() {
+    let raw = Bytes::from_static(br#"{ "error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"Encrypted content item_id did not match the target item id","future":{"keep":true}} }"#);
+    for streaming in [false, true] {
+        let trace = Arc::new(Trace::default());
+        let error = EngineError::Provider(
+            ProviderError::new(
+                ProviderErrorKind::ContinuationRecoveryRequired,
+                UpstreamSendState::Sent,
+            )
+            .with_status(400)
+            .with_client_visible_upstream_response(
+                ClientVisibleUpstreamResponse::new(
+                    400,
+                    Some(b"application/json".to_vec()),
+                    raw.clone(),
+                )
+                .with_headers(headers(&[("x-request-id", "req_encrypted_conflict")])),
+            ),
+        );
+        let response = if streaming {
+            let session = FakeSession::streaming(Arc::clone(&trace), vec![NextStep::Error(error)]);
+            stream_execution_response(Box::new(session), None).await
+        } else {
+            let session =
+                FakeSession::buffered(Arc::clone(&trace), Vec::new()).with_collect_error(error);
+            collect_execution_response(Box::new(session)).await
+        };
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
+        assert_eq!(response.headers()["x-request-id"], "req_encrypted_conflict");
+        assert_eq!(to_bytes(response.into_body(), 4096).await.unwrap(), raw);
+        assert_eq!(trace.client_statuses(), vec![409]);
+        assert!(!trace.is_cancelled());
+    }
 }
 
 #[tokio::test]

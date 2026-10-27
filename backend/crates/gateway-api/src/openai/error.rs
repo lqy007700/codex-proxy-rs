@@ -24,12 +24,21 @@ pub fn openai_error_response(
     error_type: &str,
     code: &str,
 ) -> (StatusCode, Json<Value>) {
+    let status = client_http_error_status(status, Some(code));
     let body = json!({
         "error": {"message": message, "type": error_type, "code": code}
     });
     match capacity_error_for_client(&body) {
         Some(body) => (StatusCode::SERVICE_UNAVAILABLE, Json(body)),
         None => (status, Json(body)),
+    }
+}
+
+// 加密历史冲突独立于请求语法错误，供下游按冲突状态处理；不修改上游诊断事实
+fn client_http_error_status(status: StatusCode, code: Option<&str>) -> StatusCode {
+    match code {
+        Some("invalid_encrypted_content") => StatusCode::CONFLICT,
+        _ => status,
     }
 }
 
@@ -184,9 +193,19 @@ pub fn engine_error_response(error: &EngineError) -> Response {
         && let Some(upstream) = error.client_visible_upstream_response()
         && let Ok(status) = StatusCode::from_u16(upstream.status())
     {
-        let projected = serde_json::from_slice::<Value>(upstream.body())
-            .ok()
-            .and_then(|body| capacity_error_for_client(&body));
+        let body = serde_json::from_slice::<Value>(upstream.body()).ok();
+        let status = client_http_error_status(
+            status,
+            body.as_ref()
+                .and_then(|body| body.pointer("/error/code"))
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    error
+                        .client_visible_upstream_error()
+                        .and_then(|error| error.code())
+                }),
+        );
+        let projected = body.as_ref().and_then(capacity_error_for_client);
         let mut response = match projected {
             Some(body) => {
                 let mut response = Response::new(Body::from(body.to_string()));

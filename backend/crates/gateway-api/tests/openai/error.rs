@@ -48,6 +48,71 @@ async fn ordinary_upstream_rejections_preserve_status_body_and_client_retry_advi
 }
 
 #[tokio::test]
+async fn encrypted_history_conflict_returns_409_without_changing_error_or_upstream_facts() {
+    use bytes::Bytes;
+    use gateway_core::error::ClientVisibleUpstreamResponse;
+    use gateway_core::event::ProviderResponseHeader;
+    use gateway_core::upstream::OpaqueUpstreamValue;
+    use serde_json::{Value, json};
+
+    let message = "Encrypted content item_id did not match the target item id";
+    let code = "invalid_encrypted_content";
+    let raw = Bytes::from_static(br#"{ "error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"Encrypted content item_id did not match the target item id","future":9007199254740993} }"#);
+    for representation in ["raw", "structured", "both"] {
+        let mut provider = ProviderError::new(
+            ProviderErrorKind::ContinuationRecoveryRequired,
+            UpstreamSendState::Sent,
+        )
+        .with_status(400)
+        .with_upstream_code(OpaqueUpstreamValue::new(code.to_owned()));
+        if representation != "raw" {
+            provider =
+                provider.with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
+                    message,
+                    Some(code.to_owned()),
+                    Some("invalid_request_error".to_owned()),
+                ));
+        }
+        if representation != "structured" {
+            provider = provider.with_client_visible_upstream_response(
+                ClientVisibleUpstreamResponse::new(
+                    400,
+                    Some(b"application/problem+json".to_vec()),
+                    raw.clone(),
+                )
+                .with_headers(vec![ProviderResponseHeader::new(
+                    "x-request-id",
+                    Bytes::from_static(b"req_encrypted_conflict"),
+                )]),
+            );
+        }
+        let error = EngineError::Provider(provider);
+        let response = engine_error_response(&error);
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        if representation == "structured" {
+            assert_eq!(
+                serde_json::from_slice::<Value>(&body).unwrap(),
+                json!({
+                    "error": {"code": code, "type": "invalid_request_error", "message": message}
+                })
+            );
+        } else {
+            assert_eq!(body, raw);
+        }
+        let EngineError::Provider(provider) = error else {
+            unreachable!()
+        };
+        assert_eq!(provider.upstream_status(), Some(400));
+        assert_eq!(provider.upstream_code().unwrap().as_str(), code);
+        if let Some(upstream) = provider.client_visible_upstream_response() {
+            assert_eq!(upstream.status(), 400);
+            assert_eq!(upstream.body(), &raw);
+        }
+    }
+}
+
+#[tokio::test]
 async fn capacity_errors_offer_client_retry_without_changing_upstream_facts() {
     use bytes::Bytes;
     use gateway_core::error::ClientVisibleUpstreamResponse;
