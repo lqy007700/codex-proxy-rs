@@ -13,14 +13,6 @@ export function useAccountsQuery() {
   const statusQuery = shallowRef('')
   const groupQuery = shallowRef('')
   const sort = useTableSort(accountColumns, 'accounts')
-  const accountSummary = shallowRef({
-    total: 0,
-    normal: 0,
-    quotaExhausted: 0,
-    rateLimited: 0,
-    disabled: 0,
-    error: 0,
-  })
 
   const query = usePagedQuery({
     initialPageSize: 20,
@@ -35,9 +27,6 @@ export function useAccountsQuery() {
         sortBy: sort.value?.key,
         sortDirection: sort.value?.direction,
       }, options),
-    onSuccess: (result) => {
-      accountSummary.value = result.summary
-    },
   })
 
   const accountPagination = computed(() => ({
@@ -100,7 +89,6 @@ export function useAccountsQuery() {
     statusQuery,
     groupQuery,
     sort,
-    accountSummary,
     accountPagination,
     replaceAccount,
     handlePageChange,

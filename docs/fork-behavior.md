@@ -179,7 +179,7 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 | --- | --- | --- |
 | 使用统计 | 请求明细在前，统计概览在下且默认展开、可折叠；结果筛选显示图标并保留无障碍标签 | [usage/index.vue](../frontend/src/views/usage/index.vue) |
 | 请求表格 | 请求时间靠前，收紧列宽；客户端列显示原始 User-Agent，最多两行，悬浮查看完整值 | [columns.ts](../frontend/src/components/usage/shared/columns.ts)、[UsageRecordsTable.vue](../frontend/src/components/usage/UsageRecordsTable.vue) |
-| 账号 | 账号列表在前、概览卡在后；批量编辑、导出和删除收纳到更多操作，启停调度开关紧邻状态，保留 WS 降级提示和保底标识 | [accounts/index.vue](../frontend/src/views/accounts/index.vue)、[AccountSchedulingSwitch.vue](../frontend/src/views/accounts/components/AccountSchedulingSwitch.vue)、[AccountIdentityCell.vue](../frontend/src/views/accounts/components/AccountIdentityCell.vue) |
+| 账号 | 桌面账号列表占据页面剩余高度，批量编辑、导出和删除收纳到更多操作，启停调度开关紧邻状态，保留 WS 降级提示和保底标识 | [accounts/index.vue](../frontend/src/views/accounts/index.vue)、[AccountSchedulingSwitch.vue](../frontend/src/views/accounts/components/AccountSchedulingSwitch.vue)、[AccountIdentityCell.vue](../frontend/src/views/accounts/components/AccountIdentityCell.vue) |
 | 并发明细 | 显示当前占用与并发上限，提供手动刷新并保留每 5 秒自动刷新 | [AccountConcurrencyModal.vue](../frontend/src/views/accounts/components/AccountConcurrencyModal.vue)、[useAccountConcurrency.ts](../frontend/src/views/accounts/composables/useAccountConcurrency.ts) |
 | Dashboard | 请求健康时间线与账号概览优先于汇总统计卡 | [DashboardContent.vue](../frontend/src/views/dashboard/components/DashboardContent.vue) |
 | 列表与表单 | 账号及 API Key 排序偏好保存在当前浏览器；密钥表单按字段校验，校验失败时滚动并聚焦错误字段 | [useTableSort.ts](../frontend/src/composables/useTableSort.ts)、[ApiKeyFormModal.vue](../frontend/src/views/keys/components/ApiKeyFormModal.vue) |

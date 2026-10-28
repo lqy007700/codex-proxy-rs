@@ -20,7 +20,6 @@ import AccountConnectionTestModal from './components/AccountConnectionTestModal.
 import AccountEditModal from './components/AccountEditModal.vue'
 import AccountFilters from './components/AccountFilters.vue'
 import AccountIdentityCell from './components/AccountIdentityCell.vue'
-import AccountOverviewCards from './components/AccountOverviewCards.vue'
 import AccountSchedulingSwitch from './components/AccountSchedulingSwitch.vue'
 import AccountTableActions from './components/AccountTableActions.vue'
 import AccountUsagePanel from './components/AccountUsagePanel.vue'
@@ -53,7 +52,6 @@ const {
   statusQuery,
   groupQuery,
   sort,
-  accountSummary,
   accountPagination,
   replaceAccount,
   handlePageChange,
@@ -212,7 +210,7 @@ const {
 </script>
 
 <template>
-  <div class="flex min-h-0 w-full flex-col xl:h-full xl:overflow-hidden">
+  <div class="flex min-h-0 w-full flex-col xl:h-[calc(100dvh-3rem)] xl:flex-none xl:overflow-hidden">
     <ZPageHeader
       class="h-17"
       title="账号管理"
@@ -220,7 +218,7 @@ const {
     />
 
     <ZCard
-      class="mt-4 flex flex-col xl:h-[calc(100dvh-250px)] xl:min-h-125"
+      class="mt-4 flex flex-col xl:min-h-0 xl:flex-1"
     >
       <template #header>
         <AccountFilters
@@ -390,8 +388,6 @@ const {
         </div>
       </template>
     </ZCard>
-
-    <AccountOverviewCards :summary="accountSummary" />
 
     <AccountConcurrencyModal v-model="showConcurrency" :account="concurrencyAccount" />
 
