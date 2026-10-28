@@ -29,7 +29,8 @@ pub struct AlertSettingsView {
 }
 
 impl AlertSettingsView {
-    fn new(settings: AlertSettings, time: TimePresenter) -> Self {
+    fn new(mut settings: AlertSettings, time: TimePresenter) -> Self {
+        settings.values.quota_warning = Some(settings.values.quota_warning());
         Self {
             revision: settings.revision,
             values: settings.values,
@@ -118,6 +119,7 @@ pub struct AlertDeliveryView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AlertStatusView {
+    pub quota_warning: QuotaWarningStatusView,
     pub runtime: AlertRuntimeView,
     pub events: Vec<AlertEventView>,
     pub deliveries: Vec<AlertDeliveryView>,
@@ -127,6 +129,7 @@ impl AlertStatusView {
     fn new(status: AlertStatus, time: TimePresenter) -> Self {
         let runtime = status.runtime;
         Self {
+            quota_warning: QuotaWarningStatusView::new(status.quota_warning, time),
             runtime: AlertRuntimeView {
                 phase: runtime.phase,
                 evaluation_status: runtime.evaluation_status,
@@ -184,6 +187,10 @@ where
         .route("/api/admin/settings/alerts/status", get(status::<S>))
         .route("/api/admin/settings/alerts/preview", get(preview::<S>))
         .route("/api/admin/settings/alerts/test", post(test::<S>))
+        .route(
+            "/api/admin/settings/alerts/quota-preview",
+            get(quota_preview::<S>),
+        )
 }
 
 async fn settings<S>(
@@ -300,5 +307,100 @@ where
     Ok(AdminResponse::new(
         StatusCode::ACCEPTED,
         AdminEnvelope::ok("测试邮件已排队，请查看投递结果"),
+    ))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaWarningStatusView {
+    #[serde(flatten)]
+    pub status: QuotaWarningStatus,
+    pub checked_at_display: Option<String>,
+    pub stale: bool,
+}
+
+impl QuotaWarningStatusView {
+    fn new(status: QuotaWarningStatus, time: TimePresenter) -> Self {
+        Self {
+            checked_at_display: status.checked_at.as_ref().map(|at| time.datetime(at)),
+            stale: status.checked_at.is_some_and(|at| {
+                Utc::now().signed_duration_since(at).num_seconds()
+                    > QUOTA_EVALUATION_INTERVAL_SECONDS + 130
+            }),
+            status,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaWarningPreviewView {
+    pub checked_at_display: Option<String>,
+    pub status: QuotaWarningStatus,
+    pub items: Vec<QuotaWarningItemView>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaWarningItemView {
+    pub window_key: String,
+    pub account_id: String,
+    pub account_label: String,
+    pub plan_type: Option<String>,
+    pub period: QuotaWarningPeriod,
+    pub used_percent: Option<f64>,
+    pub threshold: u32,
+    pub reset_at_display: Option<String>,
+    pub observed_at_display: Option<String>,
+}
+
+async fn quota_preview<S>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let services = state.admin_services();
+    let evaluation = services
+        .alerts()
+        .quota_preview()
+        .await
+        .map_err(map_admin_service_error)?;
+    let time = TimePresenter::new(services.timezone());
+    let items = evaluation
+        .items
+        .into_iter()
+        .map(|item| QuotaWarningItemView {
+            account_label: item
+                .account
+                .email
+                .filter(|email| !email.is_empty())
+                .unwrap_or_else(|| format!("{} ({})", item.account.name, item.account.id)),
+            account_id: item.account.id,
+            window_key: item.window.key,
+            plan_type: item.account.plan_type,
+            period: item.window.period,
+            used_percent: item.window.used_percent,
+            threshold: item.threshold,
+            reset_at_display: item.window.reset_at.as_ref().map(|at| time.datetime(at)),
+            observed_at_display: item
+                .account
+                .observed_at
+                .as_ref()
+                .map(|at| time.datetime(at)),
+        })
+        .collect();
+    Ok(AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(QuotaWarningPreviewView {
+            checked_at_display: evaluation
+                .status
+                .checked_at
+                .as_ref()
+                .map(|at| time.datetime(at)),
+            status: evaluation.status,
+            items,
+        }),
     ))
 }

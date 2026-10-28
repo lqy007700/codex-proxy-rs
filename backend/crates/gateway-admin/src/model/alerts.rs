@@ -10,6 +10,7 @@ pub const MAX_RECIPIENTS: usize = 10;
 pub const MAX_PENDING_DELIVERIES: i64 = 100;
 pub const MAX_DELIVERY_ATTEMPTS: u32 = 3;
 pub const EVALUATION_INTERVAL_SECONDS: i64 = 60;
+pub const QUOTA_EVALUATION_INTERVAL_SECONDS: i64 = 600;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +24,8 @@ pub enum SmtpSecurity {
 #[serde(rename_all = "camelCase")]
 pub struct AlertSettingsValues {
     pub enabled: bool,
+    #[serde(default)]
+    pub quota_warning: Option<QuotaWarningSettings>,
     pub window_minutes: u32,
     pub minimum_requests: u32,
     pub failure_threshold_percent: u32,
@@ -43,6 +46,7 @@ impl Default for AlertSettingsValues {
     fn default() -> Self {
         Self {
             enabled: false,
+            quota_warning: Some(QuotaWarningSettings::default()),
             window_minutes: 5,
             minimum_requests: 20,
             failure_threshold_percent: 20,
@@ -62,7 +66,18 @@ impl Default for AlertSettingsValues {
 }
 
 impl AlertSettingsValues {
+    #[must_use]
+    pub fn quota_warning(&self) -> QuotaWarningSettings {
+        self.quota_warning.clone().unwrap_or_default()
+    }
+
     pub fn validate(&self) -> Result<(), AdminError> {
+        let quota = self.quota_warning();
+        if !(1..=100).contains(&quota.short_term_threshold_percent)
+            || !(1..=100).contains(&quota.weekly_threshold_percent)
+        {
+            return Err(AdminError::invalid("额度预警阈值应为 1 至 100 的整数"));
+        }
         if !(1..=60).contains(&self.window_minutes)
             || !(1..=1_000_000).contains(&self.minimum_requests)
             || !(1..=100).contains(&self.failure_threshold_percent)
@@ -213,6 +228,7 @@ pub enum AlertNotificationKind {
     Reminder,
     Recovered,
     Test,
+    QuotaWarning,
 }
 
 impl AlertNotificationKind {
@@ -223,6 +239,7 @@ impl AlertNotificationKind {
             Self::Reminder => "reminder",
             Self::Recovered => "recovered",
             Self::Test => "test",
+            Self::QuotaWarning => "quota_warning",
         }
     }
 }
@@ -261,6 +278,7 @@ pub struct AlertDeliveryRecord {
 
 #[derive(Debug, Clone)]
 pub struct AlertStatus {
+    pub quota_warning: QuotaWarningStatus,
     pub runtime: AlertRuntime,
     pub events: Vec<AlertEvent>,
     pub deliveries: Vec<AlertDeliveryRecord>,
@@ -280,3 +298,86 @@ pub struct AlertDelivery {
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("邮件投递失败")]
 pub struct EmailSendError;
+
+/// 两个窗口独立设置阈值，SMTP 与失败率规则共用
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct QuotaWarningSettings {
+    pub enabled: bool,
+    pub short_term_threshold_percent: u32,
+    pub weekly_threshold_percent: u32,
+}
+
+impl Default for QuotaWarningSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            short_term_threshold_percent: 80,
+            weekly_threshold_percent: 80,
+        }
+    }
+}
+
+/// 只搬运额度文档，Provider 独占私有字段的解释
+#[derive(Debug, Clone)]
+pub struct QuotaWarningAccount {
+    pub id: String,
+    pub name: String,
+    pub email: Option<String>,
+    pub plan_type: Option<String>,
+    pub observed_at: Option<DateTime<Utc>>,
+    pub credential_revision: u64,
+    pub document: Option<crate::model::provider_credentials::ProviderDocument>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuotaWarningPeriod {
+    ShortTerm,
+    Weekly,
+}
+
+/// Provider 仅投影账号通用的 5 小时和周额度，不合并独立窗口
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaWarningWindow {
+    pub key: String,
+    pub period: QuotaWarningPeriod,
+    pub used_percent: Option<f64>,
+    pub reset_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaWarningState {
+    pub account_id: String,
+    pub window_key: String,
+    pub cycle_reset_at: DateTime<Utc>,
+    pub notified: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct QuotaWarningStatus {
+    pub checked_at: Option<DateTime<Utc>>,
+    pub accounts: u64,
+    pub notified_windows: u64,
+    pub pending_windows: u64,
+    pub unavailable_accounts: u64,
+    pub unavailable_windows: u64,
+    pub error: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct QuotaWarningItem {
+    pub account: QuotaWarningAccount,
+    pub window: QuotaWarningWindow,
+    pub threshold: u32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct QuotaWarningEvaluation {
+    pub status: QuotaWarningStatus,
+    pub states: Vec<QuotaWarningState>,
+    pub items: Vec<QuotaWarningItem>,
+}

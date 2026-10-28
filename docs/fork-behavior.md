@@ -206,6 +206,7 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 | `0037_account_scheduling_role.sql` | `scheduling_role`，既有账号默认常规用途 |
 | `0038_recovery_attempts.sql` | `recovery_attempts`，默认 4，数据库约束 1～31 |
 | `0039_email_alerts.sql` | 邮件告警设置与可靠投递状态 |
+| `0040_quota_alerts.sql` | OAuth 额度预警检查进度与周期去重 |
 
 实际文件和冻结摘要见[迁移目录](../backend/migrations/README.md#冻结规则)。
 业务备份沿用当前精简归档合同；下载已有 PostgreSQL custom 归档时保留 `.dump` 扩展，不将其误标为 `.sql.gz`。

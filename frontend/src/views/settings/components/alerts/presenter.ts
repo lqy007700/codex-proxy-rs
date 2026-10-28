@@ -35,6 +35,7 @@ export const notificationLabels = {
   reminder: '持续提醒',
   recovered: '恢复通知',
   test: '测试邮件',
+  quota_warning: '额度预警',
 } as const
 
 export const deliveryLabels = {

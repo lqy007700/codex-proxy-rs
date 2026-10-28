@@ -244,3 +244,24 @@ async fn smtp_failure_is_recorded_without_changing_evaluation_state() {
     assert_eq!(repository.completed.load(Ordering::SeqCst), 1);
     assert_eq!(repository.runtime.lock().unwrap().phase, AlertPhase::Normal);
 }
+
+#[test]
+fn quota_evaluation_has_its_own_ten_minute_schedule() {
+    let repository = Arc::new(MemoryRepository::new(false));
+    let sender = Arc::new(Sender {
+        started: Notify::new(),
+        fail: false,
+    });
+    let providers = gateway_admin::ports::provider::ProviderAdminRegistry::new([]).unwrap();
+    let service = Arc::new(DefaultAlertService::new(repository, sender).with_providers(providers));
+    let mut intervals = Vec::new();
+    for contribution in service.workers().unwrap() {
+        if let WorkerContribution::Registration(registration) = contribution
+            && let WorkerRunnable::Scheduled { schedule, .. } = registration.runnable
+        {
+            intervals.push(schedule.interval().as_secs());
+        }
+    }
+    intervals.sort_unstable();
+    assert_eq!(intervals, vec![5, 60, 600]);
+}

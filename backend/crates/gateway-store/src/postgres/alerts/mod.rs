@@ -16,6 +16,8 @@ use secrecy::{ExposeSecret as _, SecretString};
 use sqlx::{Acquire as _, PgPool, Postgres, Row as _, Transaction, postgres::PgRow};
 use tokio::sync::Semaphore;
 
+mod quota;
+
 use super::{ObservabilityQueryBudget, append_admin_audit_event_in_transaction};
 use crate::{
     ConflictKind, StoreBackend, StoreError, StoreResult, admin_store_error, mutation_audit,
@@ -80,6 +82,39 @@ impl PgAlertRepository {
 
 #[async_trait]
 impl AlertRepository for PgAlertRepository {
+    async fn quota_accounts(
+        &self,
+        after: Option<String>,
+    ) -> AdminStoreResult<Vec<QuotaWarningAccount>> {
+        self.load_quota_accounts(after).await
+    }
+    async fn quota_states(&self) -> AdminStoreResult<Vec<QuotaWarningState>> {
+        self.load_quota_states().await
+    }
+    async fn quota_failed(
+        &self,
+        revision: u64,
+        previous_check: Option<DateTime<Utc>>,
+    ) -> AdminStoreResult<()> {
+        self.transaction("mark quota warning failure", move |tx| Box::pin(async move {
+            sqlx::query("update alert_settings set quota_runtime_json=jsonb_set(quota_runtime_json,'{error}','true'::jsonb) where id=1 and revision=$1 and coalesce(quota_runtime_json->'checkedAt','null'::jsonb)=$2")
+                .bind(signed(revision)?).bind(sqlx::types::Json(previous_check)).execute(&mut **tx).await.map_err(db_error)?;
+            Ok(())
+        })).await
+    }
+    async fn quota_status(&self) -> AdminStoreResult<QuotaWarningStatus> {
+        self.load_quota_status().await
+    }
+    async fn commit_quota_evaluation(
+        &self,
+        revision: u64,
+        previous_check: Option<DateTime<Utc>>,
+        evaluation: QuotaWarningEvaluation,
+    ) -> AdminStoreResult<bool> {
+        self.save_quota_evaluation(revision, previous_check, evaluation)
+            .await
+    }
+
     async fn settings(&self) -> AdminStoreResult<AlertSettings> {
         self.transaction("load alert settings", |tx| {
             Box::pin(async move { load_settings(tx, false).await })
@@ -100,16 +135,28 @@ impl AlertRepository for PgAlertRepository {
             if current.values == command.values
                 && current.password.as_ref().map(|value| value.expose_secret()) == password.as_ref().map(|value| value.expose_secret())
             { return Ok(current); }
+            let failure_changed = failure_rule(&current.values) != failure_rule(&command.values);
+            let mail_changed = mail_config(&current.values) != mail_config(&command.values)
+                || current.password.as_ref().map(|v| v.expose_secret()) != password.as_ref().map(|v| v.expose_secret());
+            let quota_changed = current.values.quota_warning() != command.values.quota_warning();
             let previous = load_runtime(tx).await?;
-            let runtime = AlertRuntime {
+            let runtime = if failure_changed || mail_changed { AlertRuntime {
                 generation: previous.generation.saturating_add(1),
                 evaluation_status: if command.values.enabled { AlertEvaluationStatus::Waiting } else { AlertEvaluationStatus::Disabled },
                 ..AlertRuntime::default()
-            };
+            } } else { previous };
+            if failure_changed || mail_changed {
             sqlx::query("update alert_events set status='cancelled',closed_at=now() where status='firing'")
                 .execute(&mut **tx).await.map_err(db_error)?;
-            sqlx::query("update alert_notifications set status='cancelled',claimed_until=null where status in ('pending','sending')")
-                .execute(&mut **tx).await.map_err(db_error)?;
+            }
+            sqlx::query("update alert_notifications set status='cancelled',claimed_until=null where status in ('pending','sending') and ($1 or (kind in ('triggered','reminder','recovered') and $2) or (kind='quota_warning' and $3))")
+                .bind(mail_changed).bind(failure_changed).bind(quota_changed).execute(&mut **tx).await.map_err(db_error)?;
+            // 无关规则变更不取消另一规则已入队的邮件，仅推进它们的配置版本
+            sqlx::query("update alert_notifications set settings_revision=$1 where status in ('pending','sending')")
+                .bind(signed(current.revision+1)?).execute(&mut **tx).await.map_err(db_error)?;
+            if quota_changed {
+                sqlx::query("update alert_settings set quota_runtime_json='{}'::jsonb where id=1").execute(&mut **tx).await.map_err(db_error)?;
+            }
             sqlx::query("update alert_settings set revision=revision+1,values_json=$1,smtp_password=$2,runtime_json=$3,updated_at=now() where id=1")
                 .bind(sqlx::types::Json(&command.values))
                 .bind(password.as_ref().map(|value| value.expose_secret()))
@@ -150,7 +197,7 @@ impl AlertRepository for PgAlertRepository {
             let rows = sqlx::query("select id,kind,recipient,status,attempts,created_at,sent_at,next_attempt_at,error_message from alert_notifications order by created_at desc,id desc limit 10")
                 .fetch_all(&mut **tx).await.map_err(db_error)?;
             let deliveries = rows.iter().map(delivery_record).collect::<StoreResult<_>>()?;
-            Ok(AlertStatus { runtime, events, deliveries })
+            Ok(AlertStatus { runtime, events, deliveries, quota_warning: quota::quota_status(tx).await? })
         })).await
     }
 
@@ -256,13 +303,13 @@ impl AlertRepository for PgAlertRepository {
             let row = sqlx::query(
                 "with candidate as (
                    select id from alert_notifications
-                   where settings_revision=$1 and (kind='test' or $2)
+                   where settings_revision=$1 and (kind='test' or (kind='quota_warning' and $3) or (kind in ('triggered','reminder','recovered') and $2))
                      and attempts<3 and next_attempt_at<=now()
                      and (status='pending' or (status='sending' and claimed_until<=now()))
                    order by created_at,id for update skip locked limit 1
                  ) update alert_notifications n set status='sending',attempts=attempts+1,claimed_until=now()+interval '60 seconds'
                    from candidate c where n.id=c.id returning n.id,n.attempts,n.recipient,n.subject,n.body"
-            ).bind(signed(settings.revision)?).bind(settings.values.enabled)
+            ).bind(signed(settings.revision)?).bind(settings.values.enabled).bind(settings.values.quota_warning().enabled)
                 .fetch_optional(&mut **tx).await.map_err(db_error)?;
             row.map(|row| Ok(AlertDelivery {
                 id: row.try_get("id").map_err(db_error)?,
@@ -388,6 +435,7 @@ fn delivery_record(row: &PgRow) -> StoreResult<AlertDeliveryRecord> {
         "reminder" => AlertNotificationKind::Reminder,
         "recovered" => AlertNotificationKind::Recovered,
         "test" => AlertNotificationKind::Test,
+        "quota_warning" => AlertNotificationKind::QuotaWarning,
         _ => return Err(invalid("invalid notification kind")),
     };
     Ok(AlertDeliveryRecord {
@@ -430,4 +478,33 @@ fn conflict() -> StoreError {
         kind: ConflictKind::StaleRevision,
         source: None,
     }
+}
+
+fn failure_rule(
+    values: &AlertSettingsValues,
+) -> (bool, u32, u32, u32, u32, u32, Option<u32>, bool) {
+    (
+        values.enabled,
+        values.window_minutes,
+        values.minimum_requests,
+        values.failure_threshold_percent,
+        values.consecutive_evaluations,
+        values.recovery_threshold_percent,
+        values.reminder_minutes,
+        values.recovery_notification,
+    )
+}
+
+fn mail_config(
+    values: &AlertSettingsValues,
+) -> (&str, u16, SmtpSecurity, &str, &str, &str, &[String]) {
+    (
+        &values.smtp_host,
+        values.smtp_port,
+        values.smtp_security,
+        &values.smtp_username,
+        &values.sender_address,
+        &values.sender_name,
+        &values.recipients,
+    )
 }

@@ -491,10 +491,10 @@ async fn initialize_inner(
     public_services.register_settings(&settings)?;
     public_services.register_accounts(&accounts)?;
     public_services.register_usage_data(&usage_data)?;
-    let alerts = Arc::new(alerts::DefaultAlertService::new(
-        store.alerts(),
-        email_sender,
-    ));
+    let alerts = Arc::new(
+        alerts::DefaultAlertService::new(store.alerts(), email_sender)
+            .with_providers(registry.clone()),
+    );
     let alert_workers = alerts
         .workers()
         .map_err(|_| AdminError::internal("告警任务注册失败"))?;

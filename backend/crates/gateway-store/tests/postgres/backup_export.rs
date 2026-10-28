@@ -37,6 +37,8 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
          enabled,concurrency_limit,weight,allow_credits,credential_observed_at,created_at,updated_at)
         values ('backup_credits','openai','credits backup','oauth','{}',false,true,2,1,true,now(),now(),now())")
         .execute(&database.pool).await.unwrap();
+    sqlx::query("update alert_settings set values_json=jsonb_set(values_json,'{quotaWarning}','{\"enabled\":true,\"shortTermThresholdPercent\":85,\"weeklyThresholdPercent\":90}'::jsonb),quota_runtime_json='{\"accounts\":1}'::jsonb").execute(&database.pool).await.unwrap();
+    sqlx::query("insert into quota_alert_windows values('backup_credits','codex:18000s',now()+interval '5 hours',true)").execute(&database.pool).await.unwrap();
     let migrations: Vec<(i64, Vec<u8>)> =
         sqlx::query_as("select version,checksum from _sqlx_migrations order by version")
             .fetch_all(&database.pool)
@@ -163,6 +165,24 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
         .await
         .unwrap();
         assert!(allow_credits);
+        let quota_settings: serde_json::Value =
+            sqlx::query_scalar("select values_json->'quotaWarning' from alert_settings")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+        assert_eq!(quota_settings["enabled"], false);
+        assert_eq!(quota_settings["shortTermThresholdPercent"], 85);
+        let cycle_count: i64 = sqlx::query_scalar("select count(*) from quota_alert_windows")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+        assert_eq!(cycle_count, 0);
+        let runtime: serde_json::Value =
+            sqlx::query_scalar("select quota_runtime_json from alert_settings")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+        assert_eq!(runtime, serde_json::json!({}));
         let restored_migrations: Vec<(i64, Vec<u8>)> =
             sqlx::query_as("select version,checksum from _sqlx_migrations order by version")
                 .fetch_all(&database.pool)

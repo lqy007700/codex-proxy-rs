@@ -15,6 +15,7 @@ const EXCLUDED_DATA: &[&str] = &[
     "admin_audit_events",
     "alert_events",
     "alert_notifications",
+    "quota_alert_windows",
     "client_api_key_charge_events",
     "request_analytics_facts",
     "request_analytics_15m",
@@ -141,7 +142,7 @@ impl BusinessSnapshot {
             serde_json::to_string(&gateway_admin::model::alerts::AlertRuntime::default())
                 .map_err(|_| pg_dump_failed("无法生成告警恢复状态"))?;
         let footer = format!(
-            "\\.\nINSERT INTO {schema}.request_analytics_build_state (singleton) VALUES (true);\nUPDATE {schema}.alert_settings SET values_json=jsonb_set(values_json,'{{enabled}}','false'::jsonb),runtime_json='{runtime}'::jsonb,revision=revision+1,last_test_at=null;\n",
+            "\\.\nINSERT INTO {schema}.request_analytics_build_state (singleton) VALUES (true);\nUPDATE {schema}.alert_settings SET values_json=jsonb_set(jsonb_set(values_json,'{{enabled}}','false'::jsonb),'{{quotaWarning,enabled}}','false'::jsonb),quota_runtime_json='{{}}'::jsonb,runtime_json='{runtime}'::jsonb,revision=revision+1,last_test_at=null;\n",
             schema = self.schema,
             runtime = alert_runtime.replace('\'', "''"),
         );

@@ -8,6 +8,7 @@ mod cookie;
 mod oauth;
 mod profile_statistics;
 mod quota;
+pub(crate) use quota::snapshot::parse_account_quota_snapshot;
 mod recovery_log;
 mod refresh;
 mod repository;

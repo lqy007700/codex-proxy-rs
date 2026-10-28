@@ -69,11 +69,18 @@ impl AlertRepository for MemoryAlerts {
         }
         Ok(settings.clone())
     }
+    async fn quota_accounts(
+        &self,
+        _: Option<String>,
+    ) -> AdminStoreResult<Vec<QuotaWarningAccount>> {
+        Ok(Vec::new())
+    }
     async fn runtime(&self) -> AdminStoreResult<AlertRuntime> {
         Ok(AlertRuntime::default())
     }
     async fn status(&self) -> AdminStoreResult<AlertStatus> {
         Ok(AlertStatus {
+            quota_warning: QuotaWarningStatus::default(),
             runtime: AlertRuntime::default(),
             events: Vec::new(),
             deliveries: Vec::new(),
@@ -169,6 +176,7 @@ async fn all_alert_routes_require_admin_authentication() {
         (Method::GET, "", None),
         (Method::GET, "/status", None),
         (Method::GET, "/preview", None),
+        (Method::GET, "/quota-preview", None),
         (Method::POST, "/update", Some(update_body())),
         (Method::POST, "/test", Some(json!({"revision":1}))),
     ] {
@@ -282,4 +290,57 @@ fn update_contract_rejects_unknown_fields_without_exposing_secrets() {
         serde_json::from_value::<gateway_api::admin::alerts::UpdateAlertSettingsRequest>(body)
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn quota_warning_configuration_can_enable_without_failure_alerts_and_legacy_updates_preserve_it()
+ {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let mut body = update_body();
+    body["quotaWarning"] =
+        json!({"enabled":true,"shortTermThresholdPercent":85,"weeklyThresholdPercent":80});
+    let response = app(&fixture)
+        .oneshot(request(Method::POST, "/update", Some(body)))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved = json_body(response).await;
+    assert_eq!(saved["data"]["enabled"], false);
+    assert_eq!(saved["data"]["quotaWarning"]["enabled"], true);
+    let mut legacy = update_body();
+    legacy["revision"] = json!(2);
+    legacy.as_object_mut().unwrap().remove("quotaWarning");
+    let response = app(&fixture)
+        .oneshot(request(Method::POST, "/update", Some(legacy)))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved = json_body(response).await;
+    assert_eq!(
+        saved["data"]["quotaWarning"]["shortTermThresholdPercent"],
+        85
+    );
+    assert_eq!(saved["data"]["quotaWarning"]["enabled"], true);
+}
+
+#[tokio::test]
+async fn quota_preview_returns_a_read_only_summary_without_enabling_rules_or_sending_mail() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let response = app(&fixture)
+        .oneshot(request(Method::GET, "/quota-preview", None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["data"]["status"]["accounts"], 0);
+    assert_eq!(body["data"]["items"], json!([]));
+    let response = app(&fixture)
+        .oneshot(request(Method::GET, "", None))
+        .await
+        .unwrap();
+    let settings = json_body(response).await;
+    assert_eq!(settings["data"]["revision"], 1);
+    assert_eq!(settings["data"]["quotaWarning"]["enabled"], false);
 }

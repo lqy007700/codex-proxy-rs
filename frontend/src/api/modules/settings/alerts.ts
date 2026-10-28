@@ -3,6 +3,7 @@ import request from '../../request'
 
 export interface AlertSettingsValues {
   enabled: boolean
+  quotaWarning?: QuotaWarningSettings
   windowMinutes: number
   minimumRequests: number
   failureThresholdPercent: number
@@ -44,9 +45,10 @@ export interface AlertSample {
 
 export type AlertPhase = 'normal' | 'pending' | 'firing'
 export type AlertEvaluationStatus = 'disabled' | 'waiting' | 'ready' | 'insufficient_samples' | 'unavailable'
-export type AlertNotificationKind = 'triggered' | 'reminder' | 'recovered' | 'test'
+export type AlertNotificationKind = 'triggered' | 'reminder' | 'recovered' | 'test' | 'quota_warning'
 
 export interface AlertStatus {
+  quotaWarning: QuotaWarningStatus
   runtime: {
     phase: AlertPhase
     evaluationStatus: AlertEvaluationStatus
@@ -113,5 +115,46 @@ export function sendAlertTestEmail(revision: number) {
     url: '/api/admin/settings/alerts/test',
     method: 'POST',
     data: { revision },
+  })
+}
+
+export interface QuotaWarningSettings {
+  enabled: boolean
+  shortTermThresholdPercent: number
+  weeklyThresholdPercent: number
+}
+
+export interface QuotaWarningStatus {
+  checkedAtDisplay: string | null
+  stale: boolean
+  accounts: number
+  notifiedWindows: number
+  pendingWindows: number
+  unavailableAccounts: number
+  unavailableWindows: number
+  error: boolean
+}
+
+export interface QuotaWarningPreview {
+  checkedAtDisplay: string | null
+  status: Omit<QuotaWarningStatus, 'checkedAtDisplay' | 'stale'>
+  items: {
+    accountId: string
+    windowKey: string
+    accountLabel: string
+    planType: string | null
+    period: 'short_term' | 'weekly'
+    usedPercent: number | null
+    threshold: number
+    resetAtDisplay: string | null
+    observedAtDisplay: string | null
+  }[]
+}
+
+export function previewQuotaWarnings(options: RequestOptions = {}) {
+  return request<QuotaWarningPreview>({
+    url: '/api/admin/settings/alerts/quota-preview',
+    method: 'GET',
+    ...options,
   })
 }

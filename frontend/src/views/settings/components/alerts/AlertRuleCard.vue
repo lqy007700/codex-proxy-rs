@@ -26,7 +26,7 @@ const form = defineModel<AlertSettingsForm>({ required: true })
       </ZPopover>
     </template>
     <ZForm class="max-w-6xl sm:grid-cols-2">
-      <ZSwitch v-model="form.enabled" label="启用邮件告警" :disabled="disabled" class="col-span-full justify-self-start" />
+      <ZSwitch v-model="form.enabled" label="启用失败率告警" :disabled="disabled" class="col-span-full justify-self-start" />
       <ZFormItem label="统计周期" description="每分钟检查最近一段时间的请求">
         <ZInput v-model="form.windowMinutes" aria-label="统计周期" type="number" min="1" max="60" :disabled="disabled">
           <template #suffix>

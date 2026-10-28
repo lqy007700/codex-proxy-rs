@@ -1,14 +1,17 @@
-import type { AlertSample, AlertSettingsView, AlertStatus, UpdateAlertSettingsPayload } from '@/api'
+import type { AlertSample, AlertSettingsView, AlertStatus, QuotaWarningPreview, UpdateAlertSettingsPayload } from '@/api'
 
 import { isEqual } from 'es-toolkit'
 import { computed, onScopeDispose, ref, shallowRef } from 'vue'
-import { getAlertSettings, getAlertStatus, previewAlertWindow, sendAlertTestEmail, updateAlertSettings } from '@/api'
+import { getAlertSettings, getAlertStatus, previewAlertWindow, previewQuotaWarnings, sendAlertTestEmail, updateAlertSettings } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
 import { notification } from '@/utils/notification'
 
 export interface AlertSettingsForm {
   enabled: boolean
+  quotaWarningEnabled: boolean
+  shortTermThresholdPercent: string
+  weeklyThresholdPercent: string
   windowMinutes: string
   minimumRequests: string
   failureThresholdPercent: string
@@ -31,6 +34,9 @@ export interface AlertSettingsForm {
 function toForm(data: AlertSettingsView): AlertSettingsForm {
   return {
     enabled: data.enabled,
+    quotaWarningEnabled: data.quotaWarning?.enabled ?? false,
+    shortTermThresholdPercent: String(data.quotaWarning?.shortTermThresholdPercent ?? 80),
+    weeklyThresholdPercent: String(data.quotaWarning?.weeklyThresholdPercent ?? 80),
     windowMinutes: String(data.windowMinutes),
     minimumRequests: String(data.minimumRequests),
     failureThresholdPercent: String(data.failureThresholdPercent),
@@ -57,6 +63,7 @@ export function useAlertSettings() {
   const savedForm = shallowRef<AlertSettingsForm | null>(null)
   const status = shallowRef<AlertStatus | null>(null)
   const preview = shallowRef<AlertSample | null>(null)
+  const quotaPreview = shallowRef<QuotaWarningPreview | null>(null)
   const settingsRequest = useRequestState()
   const statusRequest = useRequestState()
   const previewRequest = useRequestState()
@@ -73,6 +80,7 @@ export function useAlertSettings() {
     form.value = toForm(data)
     savedForm.value = toForm(data)
     preview.value = null
+    quotaPreview.value = null
   }
 
   async function load() {
@@ -125,6 +133,11 @@ export function useAlertSettings() {
     return {
       revision: current.revision,
       enabled: draft.enabled,
+      quotaWarning: {
+        enabled: draft.quotaWarningEnabled,
+        shortTermThresholdPercent: integer(draft.shortTermThresholdPercent, '5 小时额度使用阈值', 1, 100),
+        weeklyThresholdPercent: integer(draft.weeklyThresholdPercent, '周额度使用阈值', 1, 100),
+      },
       windowMinutes: integer(draft.windowMinutes, '统计周期', 1, 60),
       minimumRequests: integer(draft.minimumRequests, '最小请求数', 1, 1000000),
       failureThresholdPercent: trigger,
@@ -189,6 +202,18 @@ export function useAlertSettings() {
     previewRequest.finish(id)
   }
 
+  async function previewQuota() {
+    if (busy.value || hasChanges.value || !saved.value)
+      return
+    const id = previewRequest.start()
+    await previewAction.run(async () => {
+      const result = await previewQuotaWarnings({ retry: false, signal: previewRequest.signal })
+      if (previewRequest.isCurrent(id))
+        quotaPreview.value = result
+    })
+    previewRequest.finish(id)
+  }
+
   function stop() {
     active = false
     clearTimeout(timer)
@@ -229,6 +254,7 @@ export function useAlertSettings() {
     saved,
     status,
     preview,
+    quotaPreview,
     hasChanges,
     busy,
     loading: settingsRequest.loading,
@@ -246,5 +272,6 @@ export function useAlertSettings() {
     refreshStatus,
     testEmail,
     previewWindow,
+    previewQuota,
   }
 }

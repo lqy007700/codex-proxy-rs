@@ -295,6 +295,14 @@ pub trait ProviderAdmin: Send + Sync {
         Ok(None)
     }
 
+    /// 仅解析已落库的额度文档，不访问网络或更新调度投影
+    fn quota_warning_windows(
+        &self,
+        _account: &crate::model::alerts::QuotaWarningAccount,
+    ) -> Result<Vec<crate::model::alerts::QuotaWarningWindow>, ProviderAdminError> {
+        Ok(Vec::new())
+    }
+
     async fn quota(
         &self,
         request: ProviderQuotaRequest,

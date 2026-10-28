@@ -10,6 +10,7 @@ use super::DefaultAlertService;
 pub(super) enum AlertTaskKind {
     Evaluate,
     Deliver,
+    Quota,
 }
 
 pub(super) struct AlertTask {
@@ -25,6 +26,7 @@ impl ScheduledTask for AlertTask {
                 _ = context.cancellation().cancelled() => Ok(()),
                 result = async {
                     match self.kind {
+                        AlertTaskKind::Quota => self.service.evaluate_quota_cycle().await,
                         AlertTaskKind::Evaluate => self.service.evaluate_cycle().await,
                         AlertTaskKind::Deliver => self.service.deliver_cycle().await,
                     }

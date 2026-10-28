@@ -17,6 +17,7 @@ use crate::{
 };
 
 pub mod policy;
+pub mod quota;
 mod task;
 
 #[async_trait]
@@ -29,6 +30,7 @@ pub trait AlertService: Send + Sync {
     ) -> Result<AlertSettings, AdminError>;
     async fn status(&self) -> Result<AlertStatus, AdminError>;
     async fn preview(&self) -> Result<AlertSample, AdminError>;
+    async fn quota_preview(&self) -> Result<QuotaWarningEvaluation, AdminError>;
     async fn test_email(
         &self,
         expected_revision: u64,
@@ -39,50 +41,152 @@ pub trait AlertService: Send + Sync {
 pub struct DefaultAlertService {
     repository: Arc<dyn AlertRepository>,
     sender: Arc<dyn EmailSender>,
+    providers: Option<crate::ports::provider::ProviderAdminRegistry>,
 }
 
 impl DefaultAlertService {
     #[must_use]
     pub fn new(repository: Arc<dyn AlertRepository>, sender: Arc<dyn EmailSender>) -> Self {
-        Self { repository, sender }
+        Self {
+            repository,
+            sender,
+            providers: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_providers(
+        mut self,
+        providers: crate::ports::provider::ProviderAdminRegistry,
+    ) -> Self {
+        self.providers = Some(providers);
+        self
     }
 
     pub fn workers(self: &Arc<Self>) -> Result<Vec<WorkerContribution>, WorkerDefinitionError> {
-        [
+        let mut tasks = vec![
             (
                 WorkerKind::AlertEvaluation,
                 60,
                 task::AlertTaskKind::Evaluate,
+                "email-alerts",
             ),
-            (WorkerKind::AlertDelivery, 5, task::AlertTaskKind::Deliver),
-        ]
-        .into_iter()
-        .map(|(kind, interval, task_kind)| {
-            let id = WorkerId::try_new(kind, "email-alerts")?;
-            let schedule = WorkerSchedule::try_new(
-                Duration::from_secs(interval),
-                Duration::from_secs(5),
-                Duration::from_secs(60),
-                Duration::from_secs(90),
-                Duration::from_secs(30),
-            )?;
-            Ok(WorkerContribution::Registration(
-                WorkerRegistration::try_new(
-                    id,
-                    WorkerRunnable::Scheduled {
-                        schedule,
-                        // 单副本任务由 Host 串行驱动，数据库版本与 outbox claim 保证恢复安全
-                        // 不增加 Redis 故障对告警的依赖，也不持有业务请求使用的租约
-                        lease: None,
-                        task: Box::new(task::AlertTask {
-                            service: self.clone(),
-                            kind: task_kind,
-                        }),
-                    },
-                )?,
-            ))
-        })
-        .collect()
+            (
+                WorkerKind::AlertDelivery,
+                5,
+                task::AlertTaskKind::Deliver,
+                "email-alerts",
+            ),
+        ];
+        if self.providers.is_some() {
+            tasks.push((
+                WorkerKind::AlertEvaluation,
+                600,
+                task::AlertTaskKind::Quota,
+                "quota-warnings",
+            ));
+        }
+        tasks
+            .into_iter()
+            .map(|(kind, interval, task_kind, name)| {
+                let id = WorkerId::try_new(kind, name)?;
+                let schedule = WorkerSchedule::try_new(
+                    Duration::from_secs(interval),
+                    Duration::from_secs(5),
+                    Duration::from_secs(60),
+                    Duration::from_secs(90),
+                    Duration::from_secs(30),
+                )?;
+                Ok(WorkerContribution::Registration(
+                    WorkerRegistration::try_new(
+                        id,
+                        WorkerRunnable::Scheduled {
+                            schedule,
+                            // 单副本任务由 Host 串行驱动，数据库版本与 outbox claim 保证恢复安全
+                            // 不增加 Redis 故障对告警的依赖，也不持有业务请求使用的租约
+                            lease: None,
+                            task: Box::new(task::AlertTask {
+                                service: self.clone(),
+                                kind: task_kind,
+                            }),
+                        },
+                    )?,
+                ))
+            })
+            .collect()
+    }
+
+    async fn evaluate_quota_cycle(&self) -> Result<(), AdminError> {
+        let settings = self.settings().await?;
+        if !settings.values.quota_warning().enabled {
+            return Ok(());
+        }
+        let previous = self.repository.quota_status().await.map_err(store_error)?;
+        let now = Utc::now();
+        if previous.checked_at.is_some_and(|last| {
+            now >= last
+                && now.signed_duration_since(last).num_seconds() < QUOTA_EVALUATION_INTERVAL_SECONDS
+        }) {
+            return Ok(());
+        }
+        let result = async {
+            let evaluation = self.quota_preview_at(&settings, now).await?;
+            self.repository
+                .commit_quota_evaluation(settings.revision, previous.checked_at, evaluation)
+                .await
+                .map_err(store_error)?;
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            let _ = self
+                .repository
+                .quota_failed(settings.revision, previous.checked_at)
+                .await;
+        }
+        result
+    }
+
+    async fn quota_preview_at(
+        &self,
+        settings: &AlertSettings,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<QuotaWarningEvaluation, AdminError> {
+        let providers = self
+            .providers
+            .as_ref()
+            .ok_or_else(|| AdminError::unavailable("额度预警 Provider 未注册"))?;
+        let kind = gateway_core::routing::ProviderKind::new("openai")
+            .map_err(|_| AdminError::internal("Provider 标识无效"))?;
+        let provider = providers
+            .require(&kind)
+            .map_err(|_| AdminError::unavailable("额度预警 Provider 未注册"))?;
+        let states = self.repository.quota_states().await.map_err(store_error)?;
+        let mut accounts = Vec::new();
+        let mut after = None;
+        loop {
+            let page = self
+                .repository
+                .quota_accounts(after)
+                .await
+                .map_err(store_error)?;
+            let count = page.len();
+            after = page.last().map(|account| account.id.clone());
+            for mut account in page {
+                let windows = provider.quota_warning_windows(&account).ok();
+                account.document = None;
+                accounts.push((account, windows));
+            }
+            if count < 200 {
+                break;
+            }
+        }
+        Ok(quota::evaluate(
+            &settings.values.quota_warning(),
+            accounts,
+            &states,
+            now,
+        ))
     }
 
     async fn evaluate_cycle(&self) -> Result<(), AdminError> {
@@ -160,6 +264,9 @@ impl AlertService for DefaultAlertService {
         mut command: UpdateAlertSettings,
         context: &MutationContext,
     ) -> Result<AlertSettings, AdminError> {
+        if command.values.quota_warning.is_none() {
+            command.values.quota_warning = Some(self.settings().await?.values.quota_warning());
+        }
         command.values.normalize();
         command.values.validate()?;
         self.sender.validate_addresses(&command.values)?;
@@ -172,7 +279,7 @@ impl AlertService for DefaultAlertService {
         }) {
             return Err(AdminError::invalid("SMTP 密码长度不符合要求"));
         }
-        if command.values.enabled {
+        if command.values.enabled || command.values.quota_warning().enabled {
             let current = self.settings().await?;
             let configured = command.password.is_some()
                 || (!command.clear_password && current.password.is_some());
@@ -198,6 +305,11 @@ impl AlertService for DefaultAlertService {
             )
             .await
             .map_err(store_error)
+    }
+
+    async fn quota_preview(&self) -> Result<QuotaWarningEvaluation, AdminError> {
+        let settings = self.settings().await?;
+        self.quota_preview_at(&settings, Utc::now()).await
     }
 
     async fn test_email(

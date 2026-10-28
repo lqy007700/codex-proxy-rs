@@ -1959,10 +1959,11 @@ User-Agent 使用 `grok-shell/<版本> (<系统>; <架构>)`，其中 `arm64` �
 | `GET /api/admin/settings/alerts` | 读取规则和非秘密邮件配置 |
 | `POST /api/admin/settings/alerts/update` | 使用 `revision` 替换告警配置 |
 | `GET /api/admin/settings/alerts/status` | 当前评估状态、最近 10 条事件和最近 10 条收件人投递结果 |
-| `GET /api/admin/settings/alerts/preview` | 按已保存规则只读预览当前窗口，不改变告警状态 |
+| `GET /api/admin/settings/alerts/preview` | 按已保存规则只读预览当前失败率窗口，不改变告警状态 |
+| `GET /api/admin/settings/alerts/quota-preview` | 按已保存阈值预览待提醒额度窗口，不发送邮件或消耗次数 |
 | `POST /api/admin/settings/alerts/test` | 提交 `{ "revision": N }`，按已保存邮件配置排队发送测试邮件 |
 
-规则默认关闭，`windowMinutes` 为 1～60（默认 5），`minimumRequests` 为 1～1,000,000（默认 20），
+失败率规则 `enabled` 默认关闭，`windowMinutes` 为 1～60（默认 5），`minimumRequests` 为 1～1,000,000（默认 20），
 `failureThresholdPercent` 为 2～100（默认 20），`consecutiveEvaluations` 为 1～10（默认 2）。
 `recoveryThresholdPercent` 默认 10，必须至少为 1 且小于触发阈值。`reminderMinutes` 为 `null` 或 5～1,440，
 默认 30，`null` 关闭持续提醒；`recoveryNotification` 默认开启
@@ -1975,10 +1976,28 @@ User-Agent 使用 `grok-shell/<版本> (<系统>; <架构>)`，其中 `arm64` �
 连续满足触发阈值后创建一个告警事件，持续异常沿同一事件按提醒间隔通知，连续两次低于恢复阈值后恢复。
 无请求、样本不足、查询失败或相邻检查间隔过长会中断连续计数，不据此关闭已有故障。
 `evaluationStatus` 区分 `disabled`、`waiting`、`ready`、`insufficient_samples`、`unavailable`，
-`stale` 表示最近检查已超过时效。修改配置结束当前事件并取消旧版本待发送通知，不发送业务恢复邮件
+`stale` 表示最近检查已超过时效。修改失败率规则或邮件配置结束当前失败率事件并取消相应旧通知，不发送业务恢复邮件；仅修改额度规则不结束失败率事件
+
+额度预警由 `quotaWarning` 独立控制，字段为 `enabled`、`shortTermThresholdPercent` 和 `weeklyThresholdPercent`。
+默认关闭，两个阈值默认 80，允许 1～100 的整数；使用比例达到阈值即触发。旧配置缺少该对象时使用默认值，
+旧更新请求省略该对象时保留已保存的额度规则，读取始终返回完整对象
+
+额度任务每 10 分钟只读已有快照，覆盖已启用的 OpenAI OAuth 普通及保底账号，排除 API Key、关闭账号和模型专属额度桶。
+窗口按 Provider 返回的实际时长识别 5 小时和周额度，不按 primary／secondary 槽位猜测。缺失比例、观测时间、
+重置时间或重置已过期的窗口跳过，不发起额度刷新，也不保证发现网关外用量变化
+
+每个账号每个窗口每周期仅生成一次通知，同轮所有待提醒项合并一封邮件，逐收件人投递；首次开启纳入已超阈值窗口。
+周期去重记录跨重启、阈值调整和开关保留；只有越过上次周期边界的新观测且重置时间向后推进才重新计数，
+比例波动或重置时间修正不单独产生新周期。额度预警没有持续或恢复通知，投递类型为 `quota_warning`。
+入队失败不消耗次数，SMTP 重试沿同一投递记录进行；取消或投递最终失败不会自动重新生成本周期业务提醒
+
+状态响应的 `quotaWarning` 包含 `checkedAtDisplay`、`stale`、`error`、`accounts`、`notifiedWindows`、
+`pendingWindows`、`unavailableAccounts` 和 `unavailableWindows`；`pendingWindows` 是最近一轮入队的窗口数，
+`notifiedWindows` 是该轮检查到的本周期已提醒窗口数。预览响应返回统计与待提醒项，包含账号标识、窗口标识、
+使用比例、阈值、预计重置及观测时间，不返回原始额度文档或凭据
 
 邮件配置包括 `smtpHost`、`smtpPort`、`smtpSecurity`（`tls` 或 `start_tls`）、`smtpUsername`、
-`senderAddress`、`senderName` 和最多 10 个 `recipients`。启用时必须具有完整投递配置。
+`senderAddress`、`senderName` 和最多 10 个 `recipients`，两类规则共用。任一规则启用时必须具有完整投递配置。
 读取只返回 `passwordConfigured`；更新中 `smtpPassword` 缺省表示保留，非空值表示替换，
 `clearPassword: true` 表示清除，不能同时提交替换与清除。SMTP 密码不进入普通响应、Debug 或审计
 

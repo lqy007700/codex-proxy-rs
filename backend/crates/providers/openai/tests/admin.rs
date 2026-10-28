@@ -2995,3 +2995,41 @@ async fn usage_quote_reuses_native_override_and_reports_incomplete_input() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn quota_warning_projection_uses_stored_documents_and_actual_account_wide_window_durations() {
+    use gateway_admin::model::alerts::{QuotaWarningAccount, QuotaWarningPeriod};
+    let config = valid_config();
+    let bundle = provider_openai::initialize(config.config.clone(), provider_ports())
+        .await
+        .unwrap();
+    let now = Utc::now();
+    let reset = (now + chrono::TimeDelta::hours(5)).timestamp();
+    let document = json!({"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":82.0,"limit_window_seconds":604800,"reset_at":reset},"secondary_window":{"used_percent":91.0,"limit_window_seconds":18000,"reset_at":reset}},"additional_rate_limits":[{"limit_id":"image","metered_feature":"images","rate_limit":{"primary_window":{"used_percent":99.0,"limit_window_seconds":18000,"reset_at":reset}}}]});
+    let account = QuotaWarningAccount {
+        id: "acct_quota_alert_fixture".to_owned(),
+        name: "示例".to_owned(),
+        email: None,
+        plan_type: Some("plus".to_owned()),
+        observed_at: Some(now),
+        credential_revision: 1,
+        document: Some(ProviderDocument::new(OpaqueProviderData::new(
+            document.as_object().unwrap().clone(),
+        ))),
+    };
+    let windows = bundle
+        .admin_provider()
+        .quota_warning_windows(&account)
+        .unwrap();
+    assert_eq!(windows.len(), 2);
+    assert!(
+        windows
+            .iter()
+            .any(|w| w.period == QuotaWarningPeriod::ShortTerm && w.used_percent == Some(91.0))
+    );
+    assert!(
+        windows
+            .iter()
+            .any(|w| w.period == QuotaWarningPeriod::Weekly && w.used_percent == Some(82.0))
+    );
+}

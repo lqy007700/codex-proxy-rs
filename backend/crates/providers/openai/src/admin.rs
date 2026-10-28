@@ -712,6 +712,46 @@ impl ProviderAdmin for OpenAiAdminProvider {
         )))
     }
 
+    fn quota_warning_windows(
+        &self,
+        account: &gateway_admin::model::alerts::QuotaWarningAccount,
+    ) -> Result<Vec<gateway_admin::model::alerts::QuotaWarningWindow>, ProviderAdminError> {
+        use gateway_admin::model::alerts::{QuotaWarningPeriod, QuotaWarningWindow};
+        let (Some(observed), Some(document)) = (account.observed_at, account.document.as_ref())
+        else {
+            return Ok(Vec::new());
+        };
+        let snapshot = crate::credential::parse_account_quota_snapshot(
+            ProviderAccountId::new(&account.id)
+                .map_err(|_| ProviderAdminError::new(ProviderAdminErrorKind::Invalid))?,
+            CredentialRevision::new(account.credential_revision)
+                .map_err(|_| ProviderAdminError::new(ProviderAdminErrorKind::Invalid))?,
+            observed.into(),
+            &Value::Object(document.expose_to_provider().expose_to_provider().clone()),
+        )
+        .map_err(|_| ProviderAdminError::new(ProviderAdminErrorKind::Invalid))?;
+        Ok(snapshot
+            .windows()
+            .iter()
+            .filter_map(|window| {
+                if !window.is_account_wide() {
+                    return None;
+                }
+                let period = match window.kind() {
+                    CodexQuotaWindowKind::ShortTerm => QuotaWarningPeriod::ShortTerm,
+                    CodexQuotaWindowKind::Weekly => QuotaWarningPeriod::Weekly,
+                    _ => return None,
+                };
+                Some(QuotaWarningWindow {
+                    key: window.key().to_owned(),
+                    period,
+                    used_percent: window.used_percent(),
+                    reset_at: window.reset_at(),
+                })
+            })
+            .collect())
+    }
+
     async fn quota(
         &self,
         request: ProviderQuotaRequest,

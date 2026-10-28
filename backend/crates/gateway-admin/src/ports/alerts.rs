@@ -8,6 +8,43 @@ use crate::model::{AdminError, MutationContext, alerts::*};
 
 #[async_trait]
 pub trait AlertRepository: Send + Sync {
+    async fn quota_accounts(
+        &self,
+        after: Option<String>,
+    ) -> AdminStoreResult<Vec<QuotaWarningAccount>> {
+        let _ = after;
+        Err(super::store::AdminStoreError::new(
+            super::store::AdminStoreErrorKind::Unavailable,
+            "quota alerts",
+            "quota observations unavailable",
+        ))
+    }
+    async fn quota_states(&self) -> AdminStoreResult<Vec<QuotaWarningState>> {
+        Ok(Vec::new())
+    }
+    async fn quota_failed(
+        &self,
+        _revision: u64,
+        _previous_check: Option<DateTime<Utc>>,
+    ) -> AdminStoreResult<()> {
+        Ok(())
+    }
+    async fn quota_status(&self) -> AdminStoreResult<QuotaWarningStatus> {
+        Ok(QuotaWarningStatus::default())
+    }
+    async fn commit_quota_evaluation(
+        &self,
+        revision: u64,
+        previous_check: Option<DateTime<Utc>>,
+        evaluation: QuotaWarningEvaluation,
+    ) -> AdminStoreResult<bool> {
+        let _ = (revision, previous_check, evaluation);
+        Err(super::store::AdminStoreError::new(
+            super::store::AdminStoreErrorKind::Unavailable,
+            "quota alerts",
+            "quota persistence unavailable",
+        ))
+    }
     async fn settings(&self) -> AdminStoreResult<AlertSettings>;
     async fn update_settings(
         &self,

@@ -1,5 +1,7 @@
 //! 告警独立版本、完成时间采样、事件原子性和收件人级 outbox 恢复测试
 
+mod quota;
+
 use chrono::{DateTime, TimeDelta, Utc};
 use gateway_admin::{
     alerts::policy::{evaluate, notification_text},

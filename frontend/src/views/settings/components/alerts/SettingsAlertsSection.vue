@@ -7,6 +7,7 @@ import { useAlertSettings } from '../../composables/useAlertSettings'
 import AlertMailCard from './AlertMailCard.vue'
 import AlertRuleCard from './AlertRuleCard.vue'
 import AlertStatusCards from './AlertStatusCards.vue'
+import QuotaWarningCard from './QuotaWarningCard.vue'
 
 const props = defineProps<{ active: boolean }>()
 const {
@@ -14,6 +15,7 @@ const {
   saved,
   status,
   preview,
+  quotaPreview,
   hasChanges,
   busy,
   loading,
@@ -30,6 +32,7 @@ const {
   refreshStatus,
   testEmail,
   previewWindow,
+  previewQuota,
 } = useAlertSettings()
 
 defineExpose({ hasChanges })
@@ -69,6 +72,11 @@ watch(() => props.active, (active, _previous, onCleanup) => {
     </p>
     <template v-else>
       <AlertRuleCard v-model="form" :disabled="busy" />
+      <QuotaWarningCard
+        v-model="form" :disabled="busy" :status="status?.quotaWarning ?? null"
+        :enabled="saved?.quotaWarning?.enabled ?? false" :preview="quotaPreview"
+        :previewing="previewing" :preview-disabled="busy || hasChanges" @preview="previewQuota"
+      />
       <AlertMailCard v-model="form" :disabled="busy" :has-changes="hasChanges" :testing="testing" :password-configured="saved?.passwordConfigured ?? false" @test="testEmail" />
       <AlertStatusCards
         :status="status" :preview="preview" :loading="statusLoading" :error="statusError"
