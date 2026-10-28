@@ -120,8 +120,8 @@ pub fn notification_text(
     });
     let body = format!(
         "全站模型请求失败率{label}\n\n统计窗口（UTC）: {} 至 {}\n有效请求: {}\n失败请求: {}\n失败率: {:.1}%\n触发阈值: {}%\n恢复阈值: {}%\n异常持续: {} 秒\n\n请登录管理端，在系统设置 → 告警通知中查看状态\n本指标基于异步记录的模型请求终态，不覆盖所有入口拒绝\n",
-        sample.window_start.to_rfc3339(),
-        sample.window_end.to_rfc3339(),
+        sample.window_start.format("%Y-%m-%d %H:%M:%S"),
+        sample.window_end.format("%Y-%m-%d %H:%M:%S"),
         sample.requests,
         sample.failures,
         rate,
