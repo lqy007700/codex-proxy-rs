@@ -45,6 +45,7 @@ use super::{
 pub(in crate::openai) async fn chat_completions(
     State(state): State<ApiState>,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
+    ingress_id: Option<Extension<tower_http::request_id::RequestId>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -169,7 +170,9 @@ pub(in crate::openai) async fn chat_completions(
                     let _ = terminal_id.set(started.request_id.clone());
                     started.session.trace().headers(
                         "client.request",
-                        serde_json::json!({}),
+                        serde_json::json!({
+                            "ingressRequestId": ingress_id.as_ref().and_then(|Extension(id)| id.header_value().to_str().ok()),
+                        }),
                         headers
                             .iter()
                             .map(|(name, value)| (name.as_str(), value.as_bytes())),

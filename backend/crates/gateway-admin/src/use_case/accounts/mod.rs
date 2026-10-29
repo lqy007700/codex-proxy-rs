@@ -87,13 +87,6 @@ pub trait AccountsService: Send + Sync {
         command: UpdateAccount,
     ) -> Result<AccountUpdateResult, AdminError>;
 
-    async fn lower_concurrency_limit(
-        &self,
-        context: &MutationContext,
-        account_id: ProviderAccountId,
-        limit: gateway_core::account::AccountConcurrencyLimit,
-    ) -> Result<Option<AccountUpdateResult>, AdminError>;
-
     async fn batch_update(
         &self,
         context: &MutationContext,
@@ -401,6 +394,7 @@ impl DefaultAccountsService {
                     .and_then(|(window, _)| window.local_usage.clone())
             });
         Ok(AccountDirectoryItem {
+            protection_rules: stored.protection_rules,
             capacity: stored.capacity,
             capabilities: provider
                 .account_capabilities(account_id, &stored.account.authentication_kind),
@@ -552,6 +546,7 @@ impl AccountsService for DefaultAccountsService {
                         .and_then(|(window, _)| window.local_usage.clone())
                 });
                 Ok(AccountDirectoryItem {
+                    protection_rules: item.protection_rules,
                     capacity: crate::model::accounts::AccountCapacity {
                         used_slots: in_flight
                             .as_ref()
@@ -736,27 +731,6 @@ impl AccountsService for DefaultAccountsService {
             .account_facts_changed(std::slice::from_ref(&account_id))
             .await;
         publish_committed(self.snapshot.as_ref(), result.config_revision).await?;
-        Ok(result)
-    }
-
-    async fn lower_concurrency_limit(
-        &self,
-        context: &MutationContext,
-        account_id: ProviderAccountId,
-        limit: gateway_core::account::AccountConcurrencyLimit,
-    ) -> Result<Option<AccountUpdateResult>, AdminError> {
-        let (_, provider) = self.provider_for_account(&account_id).await?;
-        let result = self
-            .accounts
-            .lower_concurrency_limit(&account_id, limit, context)
-            .await
-            .map_err(|error| map_store_error(error, "provider account"))?;
-        if let Some(result) = &result {
-            provider
-                .account_facts_changed(std::slice::from_ref(&account_id))
-                .await;
-            publish_committed(self.snapshot.as_ref(), result.config_revision).await?;
-        }
         Ok(result)
     }
 

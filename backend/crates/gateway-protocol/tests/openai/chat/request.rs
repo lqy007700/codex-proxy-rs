@@ -74,8 +74,6 @@ fn preserves_non_strict_tools_and_maps_named_choice_and_json_schema() {
 #[test]
 fn refuses_parameters_that_cannot_be_honored_instead_of_silently_dropping_them() {
     for (field, value) in [
-        ("temperature", json!(0.2)),
-        ("max_tokens", json!(10)),
         ("n", json!(2)),
         ("stop", json!(["END"])),
         ("logprobs", json!(true)),
@@ -94,15 +92,95 @@ fn refuses_parameters_that_cannot_be_honored_instead_of_silently_dropping_them()
 
 #[test]
 fn maps_completion_token_budget_to_responses_output_budget() {
-    for stream in [false, true] {
-        let result = convert(
-            json!({"model":"model-a","messages":[{"role":"user","content":"hello"}],"stream":stream,"max_completion_tokens":1024}),
-        );
-        assert_eq!(result["max_output_tokens"], 1024);
-        assert!(result.get("max_completion_tokens").is_none());
+    for field in ["max_tokens", "max_completion_tokens"] {
+        for stream in [false, true] {
+            let mut request = json!({"model":"model-a","messages":[{"role":"user","content":"hello"}],"stream":stream});
+            request[field] = json!(1024);
+            let result = convert(request);
+            assert_eq!(result["max_output_tokens"], 1024);
+            assert!(result.get(field).is_none());
+        }
     }
 }
 
+#[test]
+fn newer_token_budget_overrides_legacy_budget_and_null_keeps_legacy_value() {
+    let mut request = json!({"model":"model-a","messages":[{"role":"user","content":"hello"}],"max_tokens":128,"max_completion_tokens":256});
+    assert_eq!(convert(request.clone())["max_output_tokens"], 256);
+    request["max_completion_tokens"] = Value::Null;
+    assert_eq!(convert(request)["max_output_tokens"], 128);
+}
+
+#[test]
+fn preserves_known_sampling_cache_and_moderation_parameters_with_text_format() {
+    let request = json!({
+        "model":"model-a","messages":[{"role":"user","content":"hello"}],
+        "temperature":0.2,"top_p":0.8,"verbosity":"low",
+        "response_format":{"type":"json_object"},
+        "prompt_cache_key":"cache","prompt_cache_retention":"24h",
+        "prompt_cache_options":{"enabled":true},"moderation":{"enabled":true},
+        "user":"synthetic-user","metadata":{"purpose":"test"},"safety_identifier":"synthetic-id"
+    });
+    let result = convert(request.clone());
+    assert_eq!(
+        result["text"],
+        json!({"verbosity":"low","format":{"type":"json_object"}})
+    );
+    for field in [
+        "temperature",
+        "top_p",
+        "prompt_cache_key",
+        "prompt_cache_retention",
+        "prompt_cache_options",
+        "moderation",
+        "user",
+        "metadata",
+        "safety_identifier",
+    ] {
+        assert_eq!(result[field], request[field], "{field}");
+    }
+    assert_eq!(
+        convert(
+            json!({"model":"model-a","messages":[{"role":"user","content":"hello"}],"verbosity":"high"})
+        )["text"],
+        json!({"verbosity":"high"})
+    );
+}
+
+#[test]
+fn rejects_malformed_known_parameters_before_execution() {
+    for (field, value) in [
+        ("max_tokens", json!(0)),
+        ("max_tokens", json!("100")),
+        ("max_tokens", json!(1.5)),
+        ("temperature", json!(-0.1)),
+        ("temperature", json!(2.1)),
+        ("temperature", json!("1")),
+        ("top_p", json!(1.1)),
+        ("top_p", json!(-0.1)),
+        ("top_p", json!(true)),
+        ("verbosity", json!(1)),
+        ("user", json!({})),
+        ("prompt_cache_retention", json!(false)),
+        ("prompt_cache_options", json!([])),
+        ("moderation", json!("enabled")),
+        ("metadata", json!([])),
+    ] {
+        let mut request = json!({"model":"model-a","messages":[{"role":"user","content":"hello"}]});
+        request[field] = value;
+        let error = decode_chat_request(request.to_string().as_bytes())
+            .err()
+            .expect("invalid shape or range");
+        assert_eq!(error.param, field);
+    }
+    for (temperature, top_p) in [(0, 0), (2, 1)] {
+        let result = convert(
+            json!({"model":"model-a","messages":[{"role":"user","content":"hello"}],"temperature":temperature,"top_p":top_p}),
+        );
+        assert_eq!(result["temperature"], temperature);
+        assert_eq!(result["top_p"], top_p);
+    }
+}
 #[test]
 fn null_completion_token_budget_keeps_the_provider_default() {
     let result = convert(

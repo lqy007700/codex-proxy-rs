@@ -376,10 +376,12 @@ model = "gpt-5.6-terra"
 review_model = "gpt-5.6-terra"
 model_reasoning_effort = "max"
 service_tier = "default"
+experimental_realtime_ws_base_url = "http://127.0.0.1:8080/v1"
 
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "http://127.0.0.1:8080/v1"
+model_catalog_url = "http://127.0.0.1:8080/v1/models"
 wire_api = "responses"
 supports_websockets = false
 requires_openai_auth = false

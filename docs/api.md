@@ -263,11 +263,11 @@ Codex 的 review 等子代理请求仍使用 `/v1/responses`，并通过 `x-open
 | 工具历史 | `assistant.tool_calls[].id` 与 `tool.tool_call_id` 成对回填；流式工具使用稳定的 `index` 和客户端 `call_id` |
 | 输出格式 | 支持 `response_format.type=text/json_object/json_schema`，转换为 Responses `text.format` |
 | 推理 | `reasoning_effort` 转为 `reasoning.effort`；推理内容和加密推理项不混入 assistant 正文 |
-| 输出预算 | `max_completion_tokens` 的正整数值映射为 Responses `max_output_tokens`，`null` 沿用上游默认值；是否执行上限取决于 Provider，Codex 路径会移除该字段，不能依赖它限制生成量或费用 |
+| 输出预算 | `max_tokens` 和 `max_completion_tokens` 的正整数值映射为 Responses `max_output_tokens`，同时提供时 `max_completion_tokens` 优先；`null` 不覆盖另一字段，是否执行上限取决于 Provider，不能依赖它限制费用 |
 | 用量 | JSON 返回 `usage`；`stream_options.include_usage=true` 在结束标记前返回 `choices: []` 的用量块，其他块 `usage=null` |
-| 其他参数 | 支持 `metadata`、`service_tier`、`prompt_cache_key`、`safety_identifier`；`n` 仅支持 `1`，`store` 仅支持 `false` |
+| 其他参数 | 支持 `metadata`、`service_tier`、`temperature`、`top_p`、`verbosity`、`prompt_cache_key`、`prompt_cache_retention`、`prompt_cache_options`、`moderation`、`user`、`safety_identifier`；`n` 仅支持 `1`，`store` 仅支持 `false` |
 
-`temperature`、`top_p`、`max_tokens`、`stop`、`logprobs`、
+`stop`、`logprobs`、
 `n>1`、旧版 `functions/function_call`、消息 `name`、音频及未知非空参数返回 `400`，
 错误的 `param` 指明字段。
 不提供 Chat 对象存储与查询，也不把 Chat 响应 ID 用作 Responses 原生续接状态
@@ -580,7 +580,7 @@ OpenAI 明确返回 `server_is_overloaded`、`slow_down` 或模型容量不足�
 上游 `Retry-After` 优先于本地指数退避，不截断、不叠加随机等待；未提供时采用 500ms 起、最高 2s 的退避并附加随机等待。
 等待受请求截止时间和取消约束，重试受请求总尝试次数约束。
 已发送的容量失败计入[智能调度健康分](architecture.md#智能调度)，可用账号的会话亲和优先。
-容量不足不触发 Provider 全局熔断，也不作为账号额度耗尽；启用账号自动冻结且达到阈值时写入临时冷却。
+容量不足不触发 Provider 全局熔断，也不作为账号额度耗尽；启用账号错误保护且规则达到阈值时写入临时冷却。
 客户端错误兼容由 API 编码出口统一处理：最终交付的 `server_is_overloaded`、`slow_down` 错误码
 投影为 `server_error`，HTTP 错误状态及 WS 包装错误的数字状态投影为 `503`，让客户端执行自己的
 有界重试。Provider 已确认容量不足的初始失败，即使没有这两个错误码，也返回 `503`。
@@ -840,9 +840,9 @@ Provider 固定返回 `false`。调用账号恢复接口会清除目标账号的
 Codex 的 `model_catalog_json` 配置。账号设置保存不等待上游模型目录刷新完成
 
 账号限流详情在 `quota` 中返回：`rateLimitReason` 为 `upstream_rate_limit`（上游临时限流）、
-`capacity_freeze`（容量错误触发自动冻结）或 `null`。`recoveryProbeRequired` 表示解除冻结是否需要成功探测；
+`error_protection`（匹配规则触发错误保护）或 `null`。`recoveryProbeRequired` 表示解除冻结是否需要成功探测；
 此时 `rateLimitedUntil` 是最早探测时间，到期后仍保持 `rate_limited`，直到探测成功或手动恢复。
-未要求探测时，该字段表示冷却结束时间。所有此类情况统一显示“限流中”，仅详情原因和恢复条件不同
+未要求探测时，该字段表示冷却结束时间。错误保护显示“错误保护”并提供命中规则摘要，上游临时限流显示“限流中”
 
 `quota.credits` 返回上游点数余额，未提供点数信息时为 `null`。对象包含 `hasCredits`、`unlimited` 和
 `balance`，余额为保留上游精度的十进制字符串，未提供余额时为 `null`，明确的零余额为 `"0"`。
@@ -1603,7 +1603,7 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 | [请求解压](#请求解压上限) | `responsesMaxDecompressedBodyBytes` |
 | [客户端门禁](#1-鉴权与公共约定) | `minCodexDesktopVersion`、`minCodexCliVersion` |
 | [历史保留](#历史保留) | `usageRetentionDays`、`opsEventRetentionDays`、`auditRetentionDays` |
-| [账号自动冻结](#账号自动冻结) | `accountAutoFreezeEnabled`、`accountAutoFreezeThreshold`、`accountAutoFreezeWindowSeconds`、`accountAutoFreezeDurationSeconds`、`accountAutoFreezeProbeEnabled`、`accountAutoFreezeProbeModel`、`accountAutoFreezeAdaptiveConcurrency` |
+| [账号错误保护](#账号错误保护) | `accountErrorProtection` |
 | [账号预热](#账号预热) | `accountWarmupEnabled`、`accountWarmupScheduleTime`、`accountWarmupModel` |
 | [主动额度重置卡](#主动额度重置卡) | `resetCreditLeadMinutes`、`resetCreditMaxWeeklyRemainingPercent` |
 
@@ -1935,19 +1935,11 @@ User-Agent 使用 `grok-shell/<版本> (<系统>; <架构>)`，其中 `arm64` �
 固定版本不受后台更新影响。预览返回配置、来源、最终身份字段、`userAgent`、`versionSource`、`verifiedAt`、
 `checkedAt` 和 `error`；固定版本不附带官方核验时间。Dashboard 展示已保存的通用身份
 
-### 账号自动冻结
+### 账号错误保护
 
-账号自动冻结（`accountAutoFreezeEnabled`）默认关闭。启用后，在统计窗口内按尝试累计明确的上游容量拒绝
-（`server_is_overloaded`、`slow_down` 或结构化错误中的明确过载提示），普通 5xx、`invalid_prompt` 和未识别的上游错误不计入。
-达到阈值后把该账号冻结为带恢复倒计时的 `rate_limited` 状态。`accountAutoFreezeThreshold`
-取值 2～1,000（默认 12，按普通请求的 attempt 计数，含请求内同账号重试，不含诊断探测与本地连接保护错误）；`accountAutoFreezeWindowSeconds`
-取值 60～3,600（默认 600，随每次失败滑动顺延）；`accountAutoFreezeDurationSeconds` 取值 300～604,800
-（默认 7,200，即 2 小时，探测失败后按该时长顺延）。`accountAutoFreezeProbeEnabled` 开启时恢复 worker
-在到期后执行真实探测调用，成功才解冻；探测过程中和服务重启后继续阻止普通请求。关闭自动冻结或探测后，
-已有冻结等待当前冷却结束再恢复调度。`accountAutoFreezeProbeModel` 为 `string | null`，留空时自动
-选择账号可用的第一个模型。`accountAutoFreezeAdaptiveConcurrency` 开启时冻结期间把账号并发上限下调到
-观测在途峰值的 80%（下限 2，只降不升）。这会持久修改账号并发设置；跟随全局默认的账号也会设为独立上限，
-解冻后不自动恢复，管理员可手动改回
+账号错误保护（`accountErrorProtection`）默认关闭。启用后，账号级规则按上游错误的 Provider、状态码、错误码、错误类型和错误信息匹配；一条规则内的条件必须全部满足，单个条件可匹配多个候选值。规则命中失败按滑动窗口累计，达到阈值后把账号置为带冷却时间的 `rate_limited` 状态，并可在冷却结束后执行恢复探测。普通请求成功会清除窗口计数，探测失败会按冷却时长顺延，过期探测结果不会覆盖更新的冻结或管理员操作。
+
+`accountErrorProtection.enabled` 默认 `false`，`rules` 默认空数组；`threshold` 取值 2～1,000，默认 12；`windowSeconds` 取值 60～3,600，默认 600；`durationSeconds` 取值 300～604,800，默认 7,200。`probeEnabled` 控制是否需要探测成功后恢复，`probeModel` 为空时选择账号可用的首个模型。最多 32 条规则，每条最多 8 个条件、每个条件最多 16 个候选值，规则文本与探测模型合计不超过 64 KiB UTF-8。旧版容量冻结配置不会转换，已有冷却时间和保存的账号并发上限保持不变
 
 ### 邮件告警
 

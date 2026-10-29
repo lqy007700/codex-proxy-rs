@@ -2,14 +2,17 @@ import type { ApiKey } from '@/api'
 import { shallowRef } from 'vue'
 import { revealApiKey } from '@/api'
 import { useCopyText } from '@/composables/useCopyText'
-import { useIdSet } from '@/composables/useIdSet'
+import { useRequestState } from '@/composables/useRequestState'
 import { buildCodexCcSwitchImportDeeplink, resolveServiceRootUrl } from '@/utils/client'
 import { notification as ZNotification } from '@/utils/notification'
 
-// 明文读取、复制、展示与导入共用生命周期，列表数据不保存明文。
+type KeyRevealAction = 'copy' | 'use' | 'import'
+
+// 明文读取、复制、展示与导入共用生命周期，列表数据不保存明文
 export function useApiKeyUse() {
   const copyText = useCopyText()
-  const revealingKeys = useIdSet<string>()
+  const revealingKeys = shallowRef(new Map<string, KeyRevealAction>())
+  const revealRequest = useRequestState()
   const showUseKeyModal = shallowRef(false)
   const selectedUseKey = shallowRef<(ApiKey & { key: string }) | null>(null)
   const showCreatedKeyModal = shallowRef(false)
@@ -35,22 +38,20 @@ export function useApiKeyUse() {
     })
   }
 
-  async function openUseKeyModal(apiKey: ApiKey) {
-    const key = await revealPlaintextKey(apiKey)
-    if (!key)
-      return
-    selectedUseKey.value = { ...apiKey, key }
-    showUseKeyModal.value = true
+  function openUseKeyModal(apiKey: ApiKey) {
+    return withPlaintextKey(apiKey, 'use', (key) => {
+      selectedUseKey.value = { ...apiKey, key }
+      showUseKeyModal.value = true
+    })
   }
 
-  async function importToCcs(apiKey: ApiKey) {
-    const key = await revealPlaintextKey(apiKey)
-    if (!key)
-      return
-    window.location.href = buildCodexCcSwitchImportDeeplink({
-      apiKey: key,
-      baseUrl: openAiBaseUrl,
-      providerName: apiKey.name || apiKey.prefix || 'codex-proxy-rs',
+  function importToCcs(apiKey: ApiKey) {
+    return withPlaintextKey(apiKey, 'import', (key) => {
+      window.location.href = buildCodexCcSwitchImportDeeplink({
+        apiKey: key,
+        baseUrl: openAiBaseUrl,
+        providerName: apiKey.name || apiKey.prefix || 'codex-proxy-rs',
+      })
     })
   }
 
@@ -58,26 +59,35 @@ export function useApiKeyUse() {
     await copyText(text, { successText: '已复制到剪贴板', emptyErrorText: '复制失败' })
   }
 
-  async function revealPlaintextKey(apiKey: ApiKey) {
+  async function withPlaintextKey(apiKey: ApiKey, action: KeyRevealAction, use: (key: string) => void | Promise<void>) {
+    if (revealingKeys.value.has(apiKey.id))
+      return
+    // 页面离开或新的操作意图使旧结果失效，避免迟到结果弹出旧密钥
+    const requestId = revealRequest.start()
+    revealingKeys.value = new Map(revealingKeys.value).set(apiKey.id, action)
     try {
-      const result = await revealingKeys.run(apiKey.id, () => revealApiKey({ id: apiKey.id }))
-      if (!result)
-        return undefined
+      const result = await revealApiKey({ id: apiKey.id }, { signal: revealRequest.signal })
+      if (!revealRequest.isCurrent(requestId))
+        return
       if (!result.plaintextKey) {
         ZNotification.error({ message: '完整 API Key 不可用' })
-        return undefined
+        return
       }
-      return result.plaintextKey
+      await use(result.plaintextKey)
     }
-    catch {
-      return undefined
+    catch (error) {
+      revealRequest.fail(requestId, error)
+    }
+    finally {
+      const pending = new Map(revealingKeys.value)
+      pending.delete(apiKey.id)
+      revealingKeys.value = pending
+      revealRequest.finish(requestId)
     }
   }
 
-  async function copyApiKey(apiKey: ApiKey) {
-    const key = await revealPlaintextKey(apiKey)
-    if (key)
-      await copyToClipboard(key)
+  function copyApiKey(apiKey: ApiKey) {
+    return withPlaintextKey(apiKey, 'copy', copyToClipboard)
   }
 
   function clearCreatedKey() {
@@ -90,7 +100,7 @@ export function useApiKeyUse() {
     selectedUseKey,
     showCreatedKeyModal,
     createdKey,
-    revealingKeyIds: revealingKeys.ids,
+    revealingKeys,
     openAiBaseUrl,
     showCreatedKey,
     clearCreatedKey,

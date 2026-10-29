@@ -10,6 +10,7 @@ defineProps<{
   deleting: boolean
   updatingStatus: boolean
   revealing: boolean
+  configuring: boolean
 }>()
 
 const emit = defineEmits<{
@@ -34,7 +35,7 @@ const emit = defineEmits<{
     <ZIconButton
       size="small"
       aria-label="使用密钥"
-      :loading="revealing"
+      :loading="configuring"
       :disabled="revealing"
       @click.stop="emit('use', apiKey)"
     >

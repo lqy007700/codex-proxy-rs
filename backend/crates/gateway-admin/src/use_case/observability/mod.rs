@@ -20,9 +20,10 @@ use crate::{
             HealthTimeline, HealthTimelinePoint, OpsErrorPage, OpsErrorQuery, ProviderBillingInput,
             RequestMetricPoint, RequestMetrics, TimeRange, Trend, TrendKind, TrendPoint,
             TrendSummary, UsageBilling, UsageBillingProjection, UsageCalculatedBillingFact,
-            UsageDetail, UsageFilter, UsageInsights, UsageInsightsCost, UsageInsightsCostPoint,
-            UsageInsightsHealth, UsageInsightsHealthPoint, UsageInsightsPerformance,
-            UsageInsightsPerformancePoint, UsageOverview, UsagePage, UsageQuery, UsageSummary,
+            UsageConcurrencyPoint, UsageDetail, UsageFilter, UsageInsights, UsageInsightsCost,
+            UsageInsightsCostPoint, UsageInsightsHealth, UsageInsightsHealthPoint,
+            UsageInsightsLoad, UsageInsightsPerformance, UsageInsightsPerformancePoint,
+            UsageOverview, UsagePage, UsageQuery, UsageSummary,
         },
         provider_credentials::ProviderQuotaRequest,
     },
@@ -304,7 +305,7 @@ impl ObservabilityService for DefaultObservabilityService {
         }
         let overview = observation.overview;
         let trend = observation.trend;
-        build_usage_insights(overview, trend, standard_costs)
+        build_usage_insights(overview, trend, standard_costs, observation.concurrency)
     }
 
     async fn diagnostics(
@@ -385,6 +386,7 @@ fn build_usage_insights(
     overview: UsageOverview,
     trend: Vec<RequestMetricPoint>,
     standard_costs: UsageCostScenarios,
+    concurrency: Vec<UsageConcurrencyPoint>,
 ) -> Result<UsageInsights, AdminError> {
     let granularity = trend.first().map_or(
         crate::model::observability::Granularity::FifteenMinutes,
@@ -432,6 +434,32 @@ fn build_usage_insights(
             })
             .collect(),
     };
+    let concurrency_by_bucket = concurrency
+        .iter()
+        .map(|point| (point.bucket_start, point))
+        .collect::<BTreeMap<_, _>>();
+    let mut weighted_concurrency_micros = 0.0;
+    let mut effective_micros = 0_i64;
+    for (index, point) in concurrency.iter().enumerate() {
+        let start = point.bucket_start.max(overview.range.start);
+        let end = concurrency
+            .get(index + 1)
+            .map_or(overview.range.end, |next| next.bucket_start)
+            .min(overview.range.end);
+        let micros = (end - start).num_microseconds().unwrap_or(0).max(0);
+        effective_micros = effective_micros.saturating_add(micros);
+        weighted_concurrency_micros += point.average_concurrency * micros as f64;
+    }
+    let average_concurrency = if effective_micros > 0 {
+        weighted_concurrency_micros / effective_micros as f64
+    } else {
+        0.0
+    };
+    let peak_concurrency = concurrency
+        .iter()
+        .map(|point| point.peak_concurrency)
+        .max()
+        .unwrap_or(0);
     let performance = UsageInsightsPerformance {
         latency_percentiles: requests.latency_percentiles,
         first_token_latency_percentiles: requests.first_token_latency_percentiles,
@@ -456,9 +484,28 @@ fn build_usage_insights(
         capacity_utilization_avg_basis_points: requests.capacity_utilization_avg_basis_points,
         capacity_utilization_p95_basis_points: requests.capacity_utilization_p95_basis_points,
         capacity_coverage: rate_or_zero(requests.capacity_sample_count, requests.request_count),
+        load: UsageInsightsLoad {
+            average_concurrency,
+            peak_concurrency,
+            admission_decision_p95_ms: requests.admission_decision_percentiles.p95_ms,
+            account_selection_wait_p95_ms: requests.account_selection_wait_percentiles.p95_ms,
+        },
         points: trend
             .iter()
             .map(|point| UsageInsightsPerformancePoint {
+                load: UsageInsightsLoad {
+                    average_concurrency: concurrency_by_bucket
+                        .get(&point.bucket_start)
+                        .map_or(0.0, |point| point.average_concurrency),
+                    peak_concurrency: concurrency_by_bucket
+                        .get(&point.bucket_start)
+                        .map_or(0, |point| point.peak_concurrency),
+                    admission_decision_p95_ms: point.metrics.admission_decision_percentiles.p95_ms,
+                    account_selection_wait_p95_ms: point
+                        .metrics
+                        .account_selection_wait_percentiles
+                        .p95_ms,
+                },
                 bucket_start: point.bucket_start,
                 latency_percentiles: point.metrics.latency_percentiles,
                 first_token_latency_percentiles: point.metrics.first_token_latency_percentiles,

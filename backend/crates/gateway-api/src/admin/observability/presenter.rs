@@ -964,6 +964,7 @@ pub(crate) fn dashboard_view(
                 .email
                 .clone()
                 .unwrap_or_else(|| credential.name.clone()),
+            notes: credential.notes,
             plan_type: credential.plan_type.clone(),
             plan_type_display: credential
                 .plan_type_display
@@ -1077,6 +1078,17 @@ pub(crate) fn usage_summary_view(
     }
 }
 
+fn overview_load_view(load: &domain::UsageInsightsLoad) -> OverviewLoadView {
+    OverviewLoadView {
+        average_concurrency: load.average_concurrency,
+        peak_concurrency: load.peak_concurrency,
+        admission_decision_p95_ms: load.admission_decision_p95_ms.map(|value| value.as_f64()),
+        account_selection_wait_p95_ms: load
+            .account_selection_wait_p95_ms
+            .map(|value| value.as_f64()),
+    }
+}
+
 pub(crate) fn usage_insights_view(
     insights: domain::UsageInsights,
     time: crate::time::TimePresenter,
@@ -1102,6 +1114,7 @@ pub(crate) fn usage_insights_view(
         .points
         .iter()
         .map(|point| OverviewPerformancePointView {
+            load: overview_load_view(&point.load),
             bucket: point.bucket_start,
             label: time.label(point.bucket_start, "%m-%d %H:%M"),
             latency_p50_ms: point.latency_percentiles.p50_ms.map(|value| value.as_f64()),
@@ -1182,6 +1195,7 @@ pub(crate) fn usage_insights_view(
             points: health_points,
         },
         performance: OverviewPerformanceView {
+            load: overview_load_view(&insights.performance.load),
             latency_p50_ms: insights
                 .performance
                 .latency_percentiles

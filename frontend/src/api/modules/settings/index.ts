@@ -2,12 +2,14 @@ import type { RequestOptions } from '../../request'
 import type { ProxyLocationDetection } from '../proxies'
 import type { CodexPrivacyPolicy } from './privacy'
 import type { ClientProfileSelection, ProviderRequestProfiles, ProviderRequestProfileUpdates, XaiClientProfileSelection } from './profiles'
+import type { AccountErrorProtection } from './protection'
 import request from '../../request'
 
 export * from './alerts'
 export * from './backups'
 export * from './pricing'
 export * from './privacy'
+export * from './protection'
 export * from './system'
 
 export interface RequestLocation {
@@ -69,13 +71,7 @@ export interface RuntimeSettings {
   usageRetentionDays: number
   opsEventRetentionDays: number
   auditRetentionDays: number
-  accountAutoFreezeEnabled: boolean
-  accountAutoFreezeThreshold: number
-  accountAutoFreezeWindowSeconds: number
-  accountAutoFreezeDurationSeconds: number
-  accountAutoFreezeProbeEnabled: boolean
-  accountAutoFreezeProbeModel: string | null
-  accountAutoFreezeAdaptiveConcurrency: boolean
+  accountErrorProtection: AccountErrorProtection
   accountWarmupEnabled: boolean
   accountWarmupScheduleTime: string
   accountWarmupModel: string | null

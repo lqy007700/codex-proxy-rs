@@ -317,29 +317,31 @@ async fn streaming_delivers_chat_chunks_usage_and_one_done_after_finalization() 
 
 #[tokio::test]
 async fn completion_token_budget_reaches_execution_for_json_and_sse_requests() {
-    for stream in [false, true] {
-        let trace = Arc::new(Trace::default());
-        let mut body = request(stream);
-        body["max_completion_tokens"] = json!(1024);
-        let response = app(session(trace.clone(), stream, events()), None)
-            .await
-            .oneshot(http_request(body))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let response_body = text(response).await;
-        if stream {
-            assert!(response_body.contains("data: [DONE]"));
-        } else {
-            let value: Value = serde_json::from_str(&response_body).unwrap();
-            assert_eq!(value["choices"][0]["message"]["content"], "hello");
+    for field in ["max_tokens", "max_completion_tokens"] {
+        for stream in [false, true] {
+            let trace = Arc::new(Trace::default());
+            let mut body = request(stream);
+            body[field] = json!(1024);
+            let response = app(session(trace.clone(), stream, events()), None)
+                .await
+                .oneshot(http_request(body))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let response_body = text(response).await;
+            if stream {
+                assert!(response_body.contains("data: [DONE]"));
+            } else {
+                let value: Value = serde_json::from_str(&response_body).unwrap();
+                assert_eq!(value["choices"][0]["message"]["content"], "hello");
+            }
+            let observed = trace.observed.lock().unwrap();
+            let (_, body) = observed.as_ref().unwrap();
+            assert_eq!(body["max_output_tokens"], 1024);
+            assert!(body.get(field).is_none());
+            assert_eq!(trace.commits.load(Ordering::SeqCst), 1);
+            assert!(trace.finalized.load(Ordering::SeqCst));
         }
-        let observed = trace.observed.lock().unwrap();
-        let (_, body) = observed.as_ref().unwrap();
-        assert_eq!(body["max_output_tokens"], 1024);
-        assert!(body.get("max_completion_tokens").is_none());
-        assert_eq!(trace.commits.load(Ordering::SeqCst), 1);
-        assert!(trace.finalized.load(Ordering::SeqCst));
     }
 }
 
@@ -364,11 +366,11 @@ async fn unsupported_parameters_and_authentication_fail_before_execution() {
     let trace = Arc::new(Trace::default());
     let app = app(session(trace.clone(), false, events()), None).await;
     let mut body = request(false);
-    body["temperature"] = json!(0.7);
+    body["stop"] = json!(["END"]);
     let response = app.clone().oneshot(http_request(body)).await.unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let value: Value = serde_json::from_str(&text(response).await).unwrap();
-    assert_eq!(value["error"]["param"], "temperature");
+    assert_eq!(value["error"]["param"], "stop");
     let response = app
         .oneshot(
             Request::post(PATH)

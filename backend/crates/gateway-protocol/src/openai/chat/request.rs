@@ -44,12 +44,20 @@ pub fn decode_chat_request(body: &[u8]) -> Result<ChatRequest, ChatRequestError>
             | "tools"
             | "tool_choice"
             | "parallel_tool_calls"
+            | "max_tokens"
             | "max_completion_tokens"
+            | "temperature"
+            | "top_p"
+            | "verbosity"
             | "reasoning_effort"
             | "response_format"
             | "metadata"
             | "service_tier"
             | "prompt_cache_key"
+            | "prompt_cache_retention"
+            | "prompt_cache_options"
+            | "moderation"
+            | "user"
             | "safety_identifier" => {}
             "n" if value.as_u64() == Some(1) => {}
             "store" if value.as_bool() == Some(false) => {}
@@ -102,23 +110,52 @@ pub fn decode_chat_request(body: &[u8]) -> Result<ChatRequest, ChatRequestError>
     responses.insert("input".into(), Value::Array(input));
     responses.insert("stream".into(), json!(stream));
     responses.insert("store".into(), json!(false));
-    if let Some(value) = object.get("max_completion_tokens").filter(|v| !v.is_null()) {
-        let tokens = value.as_u64().filter(|tokens| *tokens > 0).ok_or_else(|| {
-            invalid(
-                "max_completion_tokens",
-                "max_completion_tokens must be a positive integer.",
-            )
-        })?;
-        // 两个字段均包含可见输出与推理 Token；上游差异仍由 Provider 处理
-        responses.insert("max_output_tokens".into(), json!(tokens));
+    for field in ["max_tokens", "max_completion_tokens"] {
+        if let Some(value) = object.get(field).filter(|v| !v.is_null()) {
+            let tokens = value.as_u64().filter(|tokens| *tokens > 0).ok_or_else(|| {
+                invalid(
+                    field,
+                    if field == "max_tokens" {
+                        "max_tokens must be a positive integer."
+                    } else {
+                        "max_completion_tokens must be a positive integer."
+                    },
+                )
+            })?;
+            // 新字段优先，具体上游是否接受长度控制仍由 Provider 决定
+            responses.insert("max_output_tokens".into(), json!(tokens));
+        }
+    }
+    for (field, maximum) in [("temperature", 2.0), ("top_p", 1.0)] {
+        if let Some(value) = object.get(field).filter(|v| !v.is_null()) {
+            if !value
+                .as_f64()
+                .is_some_and(|number| (0.0..=maximum).contains(&number))
+            {
+                return Err(invalid(field, "The sampling parameter is out of range."));
+            }
+            responses.insert(field.into(), value.clone());
+        }
     }
     for field in [
-        "metadata",
+        "user",
         "service_tier",
         "prompt_cache_key",
+        "prompt_cache_retention",
         "safety_identifier",
     ] {
         if let Some(value) = object.get(field).filter(|v| !v.is_null()) {
+            if !value.is_string() {
+                return Err(invalid(field, "This parameter must be a string."));
+            }
+            responses.insert(field.into(), value.clone());
+        }
+    }
+    for field in ["metadata", "prompt_cache_options", "moderation"] {
+        if let Some(value) = object.get(field).filter(|v| !v.is_null()) {
+            if !value.is_object() {
+                return Err(invalid(field, "This parameter must be an object."));
+            }
             responses.insert(field.into(), value.clone());
         }
     }
@@ -180,6 +217,10 @@ pub fn decode_chat_request(body: &[u8]) -> Result<ChatRequest, ChatRequestError>
             _ => return Err(invalid("response_format", "Unsupported response_format.")),
         };
         responses.insert("text".into(), json!({"format": format}));
+    }
+    if let Some(verbosity) = object.get("verbosity").filter(|value| !value.is_null()) {
+        required_string(Some(verbosity), "verbosity")?;
+        responses.entry("text").or_insert_with(|| json!({}))["verbosity"] = verbosity.clone();
     }
     Ok(ChatRequest {
         responses,

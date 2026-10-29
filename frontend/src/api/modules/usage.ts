@@ -375,6 +375,13 @@ export interface UsageOverviewHealth {
   points: UsageOverviewHealthPoint[]
 }
 
+export interface UsageOverviewLoad {
+  averageConcurrency: number
+  peakConcurrency: number
+  admissionDecisionP95Ms: number | null
+  accountSelectionWaitP95Ms: number | null
+}
+
 export interface UsageOverviewPerformancePoint {
   bucket: string
   label: string
@@ -393,6 +400,7 @@ export interface UsageOverviewPerformancePoint {
   outputThroughputP90: number | null
   capacityUtilization: number | null
   capacityUtilizationP95: number | null
+  load: UsageOverviewLoad
 }
 
 export interface UsageOverviewPerformance {
@@ -416,6 +424,7 @@ export interface UsageOverviewPerformance {
   admissionDecisionCoverage: number
   accountSelectionWaitCoverage: number
   capacityCoverage: number
+  load: UsageOverviewLoad
   points: UsageOverviewPerformancePoint[]
 }
 

@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import type { AccountErrorReason, AccountStatus } from '@/api'
+import type { AccountErrorReason, AccountProtectionRule, AccountStatus } from '@/api'
 import { AlertTriangle, CircleCheck, Gauge, Power, Timer } from '@lucide/vue'
 
 import { errorReasonLabels, statusLabels, statusTones } from '../../constants'
@@ -37,6 +37,7 @@ interface AccountStatusPresentation {
   nextRefreshDisplay: string | null
   rateLimitRecovery: string | null
   recoveryTimeLabel: string
+  protectionRules: AccountProtectionRule[]
   triggerLabel: string
 }
 
@@ -45,7 +46,8 @@ interface AccountStatusPresentationInput {
   errorReason: AccountErrorReason | null
   errorMessage: string | null
   rateLimitRecoveryDisplay: string | null
-  rateLimitReason: 'upstream_rate_limit' | 'capacity_freeze' | null
+  rateLimitReason: 'upstream_rate_limit' | 'error_protection' | null
+  protectionRules: AccountProtectionRule[]
   recoveryProbeRequired: boolean
   nextRefreshAt: string | null
   nextRefreshAtDisplay: string | null
@@ -146,12 +148,13 @@ export function resolveAccountStatusPresentation(
     && input.nextRefreshAt !== null
     && Date.parse(input.nextRefreshAt) > input.now
   const mode: AccountStatusDisplayMode = isBackoff ? 'refresh_backoff' : input.status
-  const isFreeze = mode === 'rate_limited' && input.rateLimitReason === 'capacity_freeze'
-  const waitsForProbe = isFreeze && input.recoveryProbeRequired
-  const definition = isFreeze
+  const isProtected = mode === 'rate_limited' && input.rateLimitReason === 'error_protection'
+  const waitsForProbe = isProtected && input.recoveryProbeRequired
+  const definition = isProtected
     ? {
         ...displayDefinitions.rate_limited,
-        description: '容量类请求失败累计达到阈值，系统已暂停该账号的调度',
+        label: '错误保护',
+        description: '匹配规则的失败累计达到阈值，系统已暂停该账号的调度',
         recoveryHint: waitsForProbe
           ? '冷却结束后进行恢复探测，成功后恢复调度，也可手动恢复账号'
           : '冷却结束后自动恢复调度，也可手动恢复账号',
@@ -187,6 +190,9 @@ export function resolveAccountStatusPresentation(
     nextRefreshDisplay,
     rateLimitRecovery,
     recoveryTimeLabel: waitsForProbe ? '恢复探测' : '预计恢复',
+    protectionRules: isProtected
+      ? input.protectionRules
+      : [],
     triggerLabel,
   }
 }

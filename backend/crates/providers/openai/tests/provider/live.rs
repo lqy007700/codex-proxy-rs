@@ -99,7 +99,7 @@ fn live_request() -> ProviderRequest {
     live_request_with_headers(Vec::new())
 }
 
-fn live_request_with_headers(
+pub(super) fn live_request_with_headers(
     headers: Vec<gateway_core::operation::ProviderHttpHeader>,
 ) -> ProviderRequest {
     let provider = ProviderKind::new("openai").unwrap();

@@ -6,6 +6,7 @@ import { Copy } from '@lucide/vue'
 defineProps<{
   prefix: string
   revealing: boolean
+  copying: boolean
 }>()
 
 const emit = defineEmits<{
@@ -21,7 +22,7 @@ const emit = defineEmits<{
     <ZIconButton
       size="small"
       aria-label="复制完整密钥"
-      :loading="revealing"
+      :loading="copying"
       :disabled="revealing"
       @click="emit('copy')"
     >

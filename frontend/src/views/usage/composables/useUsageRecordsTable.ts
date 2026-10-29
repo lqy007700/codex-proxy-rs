@@ -305,6 +305,12 @@ function emptyOverview() {
       admissionDecisionCoverage: 0,
       accountSelectionWaitCoverage: 0,
       capacityCoverage: 0,
+      load: {
+        averageConcurrency: 0,
+        peakConcurrency: 0,
+        admissionDecisionP95Ms: null,
+        accountSelectionWaitP95Ms: null,
+      },
       points: [],
     },
     cost: {

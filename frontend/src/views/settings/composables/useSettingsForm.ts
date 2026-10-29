@@ -1,3 +1,4 @@
+import type { ProtectionDraft } from '../components/error-protection/form'
 import type { rotationOptions } from '../constants'
 import type { AccountAffinity, CodexPrivacyPolicy, SmartSchedulingConfig } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
@@ -10,6 +11,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { normalizeRequestLocation, requestLocationError } from '@/utils/location'
 import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
+import { protectionSettingsError, trimProtectionText } from '../components/error-protection/form'
 
 type RotationStrategy = (typeof rotationOptions)[number]['value']
 
@@ -58,13 +60,15 @@ export function useSettingsForm() {
     opsEventRetentionDays: 30,
     auditRetentionDays: 90,
 
-    accountAutoFreezeEnabled: false,
-    accountAutoFreezeThreshold: null as number | null,
-    accountAutoFreezeWindowSeconds: null as number | null,
-    accountAutoFreezeDurationSeconds: null as number | null,
-    accountAutoFreezeProbeEnabled: true,
-    accountAutoFreezeProbeModel: '',
-    accountAutoFreezeAdaptiveConcurrency: true,
+    accountErrorProtection: {
+      enabled: false,
+      rules: [],
+      threshold: 12,
+      windowSeconds: 600,
+      durationSeconds: 7200,
+      probeEnabled: true,
+      probeModel: '',
+    } as ProtectionDraft,
     accountWarmupEnabled: false,
     accountWarmupScheduleTime: '08:00',
     accountWarmupModel: '',
@@ -88,7 +92,7 @@ export function useSettingsForm() {
     mappings.value = initial.mappings
   }
 
-  function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'recoveryAttempts' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays' | 'accountAutoFreezeThreshold' | 'accountAutoFreezeWindowSeconds' | 'accountAutoFreezeDurationSeconds') {
+  function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'recoveryAttempts' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays') {
     return computed({
       get: () => (form[key] === null
         ? ''
@@ -120,9 +124,6 @@ export function useSettingsForm() {
   const resetCreditMaxWeeklyRemainingPercentValue = numericModel('resetCreditMaxWeeklyRemainingPercent')
   const usageRetentionDaysValue = numericModel('usageRetentionDays')
   const concurrencyWaitTimeoutSecondsValue = numericModel('concurrencyWaitTimeoutSeconds')
-  const accountAutoFreezeThresholdValue = numericModel('accountAutoFreezeThreshold')
-  const accountAutoFreezeWindowSecondsValue = numericModel('accountAutoFreezeWindowSeconds')
-  const accountAutoFreezeDurationSecondsValue = numericModel('accountAutoFreezeDurationSeconds')
 
   const minCodexDesktopVersionError = computed(() => versionError(form.minCodexDesktopVersion))
   const minCodexCliVersionError = computed(() => versionError(form.minCodexCliVersion))
@@ -161,13 +162,10 @@ export function useSettingsForm() {
     form.usageRetentionDays = data.usageRetentionDays
     form.opsEventRetentionDays = data.opsEventRetentionDays
     form.auditRetentionDays = data.auditRetentionDays
-    form.accountAutoFreezeEnabled = data.accountAutoFreezeEnabled
-    form.accountAutoFreezeThreshold = data.accountAutoFreezeThreshold
-    form.accountAutoFreezeWindowSeconds = data.accountAutoFreezeWindowSeconds
-    form.accountAutoFreezeDurationSeconds = data.accountAutoFreezeDurationSeconds
-    form.accountAutoFreezeProbeEnabled = data.accountAutoFreezeProbeEnabled
-    form.accountAutoFreezeProbeModel = data.accountAutoFreezeProbeModel ?? ''
-    form.accountAutoFreezeAdaptiveConcurrency = data.accountAutoFreezeAdaptiveConcurrency
+    form.accountErrorProtection = {
+      ...cloneDeep(data.accountErrorProtection),
+      probeModel: data.accountErrorProtection.probeModel ?? '',
+    }
     form.accountWarmupEnabled = data.accountWarmupEnabled
     form.accountWarmupScheduleTime = data.accountWarmupScheduleTime ?? '08:00'
     form.accountWarmupModel = data.accountWarmupModel ?? ''
@@ -265,7 +263,7 @@ export function useSettingsForm() {
     const savedSettings = saved.value
     if (saving.value || loading.value || detectingLocation.value || !savedSettings)
       return
-    const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, recoveryAttempts, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, responsesMaxDecompressedBodyMiB, accountAutoFreezeThreshold, accountAutoFreezeWindowSeconds, accountAutoFreezeDurationSeconds } = form
+    const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, recoveryAttempts, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, responsesMaxDecompressedBodyMiB } = form
     if (!openaiAccountAffinity || maxAccountRotations === null || openaiSessionAffinityTtlHours === null || refreshMarginSeconds === null || refreshConcurrency === null || maxConcurrentPerAccount === null || openaiGuardianReservedConcurrency === null || !rotationStrategy || maxWaitingPerKey === null || maxWaitingPerAccount === null || concurrencyWaitTimeoutSeconds === null) {
       ZNotification.warning({ message: '请完整填写并发、队列、凭据刷新参数和调度策略' })
       return
@@ -328,19 +326,9 @@ export function useSettingsForm() {
       ZNotification.warning({ message: locationError })
       return
     }
-    if (accountAutoFreezeThreshold === null || accountAutoFreezeWindowSeconds === null || accountAutoFreezeDurationSeconds === null) {
-      ZNotification.warning({ message: '请完整填写过载保护参数' })
-      return
-    }
-    if (!Number.isInteger(accountAutoFreezeThreshold) || accountAutoFreezeThreshold < 2 || accountAutoFreezeThreshold > 1000
-      || !Number.isInteger(accountAutoFreezeWindowSeconds) || accountAutoFreezeWindowSeconds < 60 || accountAutoFreezeWindowSeconds > 3600
-      || !Number.isInteger(accountAutoFreezeDurationSeconds) || accountAutoFreezeDurationSeconds < 300 || accountAutoFreezeDurationSeconds > 604800) {
-      ZNotification.warning({ message: '失败次数阈值应为 2～1000，统计窗口为 60～3600 秒，冷却时长为 300～604800 秒' })
-      return
-    }
-    const probeModel = form.accountAutoFreezeProbeModel.trim()
-    if (probeModel.length > 128) {
-      ZNotification.warning({ message: '探测模型名称不能超过 128 个字符' })
+    const protectionError = protectionSettingsError(form.accountErrorProtection)
+    if (protectionError) {
+      ZNotification.warning({ message: protectionError })
       return
     }
     const scheduleTime = form.accountWarmupScheduleTime.trim()
@@ -388,13 +376,13 @@ export function useSettingsForm() {
         usageRetentionDays,
         opsEventRetentionDays: form.opsEventRetentionDays,
         auditRetentionDays: form.auditRetentionDays,
-        accountAutoFreezeEnabled: form.accountAutoFreezeEnabled,
-        accountAutoFreezeThreshold,
-        accountAutoFreezeWindowSeconds,
-        accountAutoFreezeDurationSeconds,
-        accountAutoFreezeProbeEnabled: form.accountAutoFreezeProbeEnabled,
-        accountAutoFreezeProbeModel: probeModel || null,
-        accountAutoFreezeAdaptiveConcurrency: form.accountAutoFreezeAdaptiveConcurrency,
+        accountErrorProtection: {
+          ...cloneDeep(form.accountErrorProtection),
+          threshold: form.accountErrorProtection.threshold!,
+          windowSeconds: form.accountErrorProtection.windowSeconds!,
+          durationSeconds: form.accountErrorProtection.durationSeconds!,
+          probeModel: trimProtectionText(form.accountErrorProtection.probeModel) || null,
+        },
         accountWarmupEnabled: form.accountWarmupEnabled,
         accountWarmupScheduleTime: scheduleTime,
         accountWarmupModel: warmupModel || null,
@@ -439,9 +427,6 @@ export function useSettingsForm() {
     usageRetentionDaysValue,
     resetCreditLeadMinutesValue,
     resetCreditMaxWeeklyRemainingPercentValue,
-    accountAutoFreezeThresholdValue,
-    accountAutoFreezeWindowSecondsValue,
-    accountAutoFreezeDurationSecondsValue,
     minCodexDesktopVersionError,
     minCodexCliVersionError,
     saveSettings,

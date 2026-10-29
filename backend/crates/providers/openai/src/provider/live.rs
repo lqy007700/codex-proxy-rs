@@ -252,10 +252,7 @@ impl CodexProvider {
                 request_url: &self.live_calls_url,
                 attempt: &context,
                 session_affinity: session_affinity.as_ref(),
-                model: CodexSelectionModel::Requested(upstream_model.as_str()),
-                // realtime calls 端点绑定 ChatGPT OAuth 身份；在候选阶段就排除
-                // API Key 账号，避免混合账号池选中不支持语音的账号后必然失败。
-                requires_oauth: true,
+                model: CodexSelectionModel::Live(upstream_model.as_str()),
             })
             .await
             .map_err(map_selection_error)?;
@@ -346,6 +343,7 @@ impl CodexProvider {
                 provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
             })?,
         )
+        .with_credential_revision(lease.account().revision())
         .with_account_snapshot(Some(
             gateway_core::account::AccountHistorySnapshot::from_account(lease.account()),
         ))
@@ -425,7 +423,6 @@ fn cold_live_call_stream(request: ColdLiveCall) -> EventStream {
             response_origin: &request.response_origin,
             cyber_policy_scope: None,
             allows_account_state_mutation,
-            allows_capacity_feedback: !request.context.is_diagnostic_required_account(),
         };
         let active_account = request.lease.account().clone();
         let authorization = request

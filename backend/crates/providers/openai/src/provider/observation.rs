@@ -459,7 +459,7 @@ pub(super) fn openai_response_request_summary(
     let body = request.body();
     let input = body.get("input");
     let tools = body.get("tools");
-    let semantics = request.semantics();
+    let semantics = request.semantics(None);
     json!({
         "model": request.model(),
         "stream": request.stream(),
@@ -705,6 +705,7 @@ pub(super) fn codex_request_context<'a>(
     account_selection: CodexAccountSelectionTelemetry<'a>,
 ) -> CodexRequestContext<'a> {
     CodexRequestContext {
+        response_control: None,
         trace: None,
         authorization: authorization.expose_secret(),
         account_id: account.upstream_account_id(),

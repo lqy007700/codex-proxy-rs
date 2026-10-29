@@ -502,7 +502,12 @@ impl Provider for CodexProvider {
         let Ok(encoded) = encode_generate_request(request, "observability", None) else {
             return ProviderRequestObservation::default();
         };
-        let semantics = encoded.semantics();
+        let previous_session = decode_openai_session_state(request);
+        let semantics = encoded.semantics(
+            previous_session
+                .as_ref()
+                .and_then(|state| state.reasoning_effort_override.as_deref()),
+        );
         let reasoning_effort = semantics.reasoning_effort.clone();
         let previous_response_id = encoded.previous_response_id();
         let continuation = ContinuationRequestObservation {
@@ -1070,6 +1075,7 @@ impl CodexProvider {
                 provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
             })?,
         )
+        .with_credential_revision(lease.account().revision())
         .with_account_snapshot(Some(
             gateway_core::account::AccountHistorySnapshot::from_account(lease.account()),
         ))
@@ -1089,6 +1095,13 @@ impl CodexProvider {
                 conversation_id: upstream_request.local_conversation_id.clone(),
                 turn_state: upstream_request.turn_state.clone(),
                 client_turn_id: upstream_request.client_turn_id.clone(),
+                reasoning_effort_override: upstream_request
+                    .semantics(
+                        previous_session
+                            .as_ref()
+                            .and_then(|state| state.reasoning_effort_override.as_deref()),
+                    )
+                    .reasoning_effort_override,
                 response_store,
                 continuation_scope: None,
             });
@@ -1107,7 +1120,6 @@ impl CodexProvider {
                 .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
                 .with_responses_api_base_url(lease.authentication().responses_api_base_url())
                 .with_connection_budget(context.connection_budget().clone())
-                .with_response_control(context.response_control().cloned())
                 .with_middleware_headers(middleware_headers)
                 .with_outbound_middleware(outbound_middleware)
                 .with_privacy(context.privacy(), context.cancellation().clone()),

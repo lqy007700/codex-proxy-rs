@@ -7,11 +7,11 @@
 
 | 项目 | 核对范围 |
 | --- | --- |
-| 核对日期 | 2026-10-27 |
+| 核对日期 | 2026-10-29 |
 | 本仓库源码 | 当前 `main` 源码，发行版本以 [`release/version.yaml`](../release/version.yaml) 为准 |
 | 最近完整合并的上游基线 | `v3.29.7`，`78bc57c5cf24b01a38e985cdd739bb4ae89ce11f` |
 | 差异依据 | 上述上游基线到当前源码的最终文件差异，结合调用链和现有测试 |
-| 上游主题移植 | 已采用能力与暂缓项分别记录于[上游同步清单](upstream-sync.md)，核对目标为 `v3.34.0` |
+| 上游主题移植 | 已采用能力与暂缓项分别记录于[上游同步清单](upstream-sync.md)，核对目标为 `v3.35.0` |
 
 源码版本、发布完成和运行实例升级是不同事实，本文不代表某个实例已部署该版本。
 这里的“二开”包含主动定制和为保留本发行线而存在的兼容适配，不表示相关基础能力都由本仓库原创
@@ -117,7 +117,7 @@ OpenAI 临时传输恢复状态按“账号 + 逻辑会话”隔离，同一个�
 请求中间件看到 Chat 合同，Provider 和 attempt 中间件仍使用 Responses 合同
 
 消息、图片、函数工具、拒答、JSON 输出和推理参数的范围见 [Chat Completions](api.md#chat-completions)。
-`max_completion_tokens` 映射为 `max_output_tokens`，Codex 路径按自身合同移除该字段，不能把它当成费用上限。
+`max_tokens` 和 `max_completion_tokens` 映射为 `max_output_tokens`，同时提供时后者优先，Codex 路径按自身合同移除该字段，不能把它当成费用上限。
 不支持的非空参数按字段返回 `400`；Chat 响应 ID 不用于 Responses 原生续接。
 SSE 等待复用注释心跳，流开始后的错误保留 Chat 错误表达，不补造成功终态
 
@@ -207,6 +207,7 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 | `0038_recovery_attempts.sql` | `recovery_attempts`，默认 4，数据库约束 1～31 |
 | `0039_email_alerts.sql` | 邮件告警设置与可靠投递状态 |
 | `0040_quota_alerts.sql` | OAuth 额度预警检查进度与周期去重 |
+| `0041_account_error_protection.sql` | 账号错误保护设置、规则和保护 revision；移除旧容量冻结设置列 |
 
 实际文件和冻结摘要见[迁移目录](../backend/migrations/README.md#冻结规则)。
 业务备份沿用当前精简归档合同；下载已有 PostgreSQL custom 归档时保留 `.dump` 扩展，不将其误标为 `.sql.gz`。
