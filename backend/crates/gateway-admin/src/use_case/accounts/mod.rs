@@ -115,14 +115,14 @@ pub trait AccountsService: Send + Sync {
         &self,
         _account_id: &ProviderAccountId,
     ) -> Result<AccountPersonalInfo, AdminError> {
-        Err(AdminError::invalid("当前 Provider 不支持个人信息"))
+        Err(AdminError::invalid("该服务商不支持个人信息查询"))
     }
 
     async fn profile_avatar(
         &self,
         _account_id: &ProviderAccountId,
     ) -> Result<ProviderProfileAvatar, AdminError> {
-        Err(AdminError::invalid("当前 Provider 不支持账号头像"))
+        Err(AdminError::invalid("该服务商不支持账号头像"))
     }
 
     async fn reset_credit_automation_status(
@@ -153,7 +153,7 @@ pub trait AccountsService: Send + Sync {
         _context: &MutationContext,
         _account_id: ProviderAccountId,
     ) -> Result<ProviderResetCredits, AdminError> {
-        Err(AdminError::invalid("当前 Provider 不支持重置额度"))
+        Err(AdminError::invalid("该服务商不支持额度重置"))
     }
 
     async fn consume_reset_credit(
@@ -161,7 +161,7 @@ pub trait AccountsService: Send + Sync {
         _context: &MutationContext,
         _command: ConsumeProviderResetCredit,
     ) -> Result<ProviderResetCreditResult, AdminError> {
-        Err(AdminError::invalid("当前 Provider 不支持重置额度"))
+        Err(AdminError::invalid("该服务商不支持额度重置"))
     }
 
     async fn models(
@@ -242,7 +242,7 @@ impl DefaultAccountsService {
             .load_account(account_id.as_str(), runtime)
             .await
             .map_err(|error| map_store_error(error, "provider account"))?
-            .ok_or_else(|| AdminError::not_found("Provider 账号不存在"))
+            .ok_or_else(|| AdminError::not_found("服务商账号不存在"))
     }
 
     async fn provider_for_account(
@@ -530,7 +530,7 @@ impl AccountsService for DefaultAccountsService {
             .zip(quotas)
             .map(|(mut item, quota)| {
                 let id = ProviderAccountId::new(item.account.id.clone())
-                    .map_err(|_| AdminError::invalid("Provider 账号 ID 不合法"))?;
+                    .map_err(|_| AdminError::invalid("服务商账号 ID 不合法"))?;
                 let (capabilities, runtime) = providers
                     .require(&item.account.provider_kind)
                     .map(|provider| {
@@ -716,7 +716,7 @@ impl AccountsService for DefaultAccountsService {
         command: UpdateAccount,
     ) -> Result<AccountUpdateResult, AdminError> {
         let account_id = ProviderAccountId::new(command.account_id.clone())
-            .map_err(|_| AdminError::invalid("Provider 账号 ID 不合法"))?;
+            .map_err(|_| AdminError::invalid("服务商账号 ID 不合法"))?;
         let (_, provider) = self.provider_for_account(&account_id).await?;
         let enabled = command.enabled;
         let result = self
@@ -744,7 +744,7 @@ impl AccountsService for DefaultAccountsService {
             .iter()
             .map(|id| {
                 ProviderAccountId::new(id.clone())
-                    .map_err(|_| AdminError::invalid("Provider 账号 ID 不合法"))
+                    .map_err(|_| AdminError::invalid("服务商账号 ID 不合法"))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mut providers = BTreeMap::<

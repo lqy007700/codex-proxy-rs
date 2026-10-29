@@ -446,7 +446,7 @@ async fn models_should_reject_recognized_cli_below_configured_min() {
         .await
         .expect("list models response");
 
-    assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("read version rejection body");
@@ -470,7 +470,7 @@ async fn models_should_reject_recognized_cli_with_invalid_version() {
         .await
         .expect("list models response");
 
-    assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("read version rejection body");
@@ -495,7 +495,7 @@ async fn models_should_reject_desktop_below_its_configured_min() {
         .await
         .expect("list models response");
 
-    assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("read version rejection body");

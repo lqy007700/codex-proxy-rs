@@ -3096,7 +3096,7 @@ async fn accounts_refresh_should_not_expose_the_provider_failure_message() {
         .expect_err("Provider preparation must fail");
 
     assert_eq!(error.kind(), gateway_admin::model::AdminErrorKind::Conflict);
-    assert_eq!(error.to_string(), "Provider 资源状态冲突，请刷新后重试");
+    assert_eq!(error.to_string(), "服务商资源状态冲突，请刷新后重试");
     assert!(!error.to_string().contains(upstream_message));
     assert_eq!(
         recorded(&events),

@@ -161,6 +161,7 @@ impl HostBundle {
         lease: Arc<dyn WorkerLeaderLeasePort>,
         diagnostics: Arc<dyn gateway_core::diagnostics::OperationalDiagnostics>,
     ) -> Result<(), HostError> {
+        self.system.set_diagnostics(Arc::clone(&diagnostics));
         self.workers.start(plan, lease, diagnostics)?;
         Ok(())
     }

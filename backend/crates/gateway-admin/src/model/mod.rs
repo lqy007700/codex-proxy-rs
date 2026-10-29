@@ -69,6 +69,7 @@ pub struct AdminError {
     kind: AdminErrorKind,
     message: String,
     source: Option<gateway_core::error::ErrorSource>,
+    sensitive_context_redacted: bool,
 }
 
 impl AdminError {
@@ -78,6 +79,7 @@ impl AdminError {
             kind,
             message: message.into(),
             source: None,
+            sensitive_context_redacted: false,
         }
     }
 
@@ -88,8 +90,18 @@ impl AdminError {
     }
 
     #[must_use]
+    pub fn redact_sensitive_context(mut self) -> Self {
+        self.sensitive_context_redacted = true;
+        self
+    }
+
+    #[must_use]
     pub fn error_details(&self) -> Option<gateway_core::error::ErrorDetails> {
-        gateway_core::error::ErrorDetails::capture(self.source.as_ref(), None, false)
+        gateway_core::error::ErrorDetails::capture(
+            self.source.as_ref(),
+            None,
+            self.sensitive_context_redacted,
+        )
     }
 
     #[must_use]

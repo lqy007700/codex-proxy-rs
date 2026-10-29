@@ -145,7 +145,7 @@ async fn account_client_preparation_keeps_ca_read_cause_without_exposing_path() 
     assert!(diagnostic.as_str().contains("OS cause:"));
     assert!(!diagnostic.as_str().contains("PRIVATE_"));
     let gateway = gateway_core::error::GatewayError::from_provider(&snapshot);
-    assert_eq!(gateway.safe_message(), "upstream service is unavailable");
+    assert_eq!(gateway.safe_message(), "Upstream service is unavailable.");
     assert_eq!(gateway.diagnostic(), Some(diagnostic));
 }
 

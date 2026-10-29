@@ -51,7 +51,7 @@ async fn stream_failure(response: Response) -> Body {
                 raw_message.unwrap_or_else(|| {
                     status
                         .canonical_reason()
-                        .unwrap_or("Response stream failed")
+                        .unwrap_or("Response stream failed.")
                 }),
             )
         });

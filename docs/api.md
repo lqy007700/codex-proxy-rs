@@ -43,7 +43,7 @@ Client Key 通过账号分组限定路由范围：未绑定分组时可使用全
 
 运行设置可以分别配置 `minCodexDesktopVersion` 与 `minCodexCliVersion`。两者只接受 SemVer，`null`
 表示不限制。API 在 Client Key 鉴权成功后识别官方 Desktop/CLI 请求头；适用门禁的客户端没有合法版本，或版本
-低于对应门槛时，除只读 `/v1/usage` 外的 `/v1/*` HTTP 请求和新 WebSocket 握手在访问上游前返回 `426 Upgrade Required`。
+低于对应门槛时，除只读 `/v1/usage` 外的 `/v1/*` HTTP 请求和新 WebSocket 握手在访问上游前返回 `400 Bad Request`，按不可重试的请求错误处理。
 未知客户端保持兼容，不应用版本门禁
 
 Desktop 应用版本优先取 `version` 头，未提供时取 User-Agent 中的 `(Codex Desktop; <版本>)`。
@@ -58,7 +58,7 @@ ChatGPT 远程控制使用 `(codex_chatgpt_<平台>_remote; <版本>)` 形式的
 ```json
 {
   "error": {
-    "message": "Codex CLI 0.151.0 is below the minimum required version 0.152.0. Upgrade Codex CLI and retry.",
+    "message": "Codex CLI 0.151.0 is outdated. Upgrade to 0.152.0 or later.",
     "type": "invalid_request_error",
     "code": "client_version_too_old",
     "client": "codex_cli",
@@ -68,7 +68,8 @@ ChatGPT 远程控制使用 `(codex_chatgpt_<平台>_remote; <版本>)` 形式的
 }
 ```
 
-因缺失或非法版本被门禁拒绝时，`code` 为 `client_version_unavailable`，`current_version` 为 `null`
+因缺失或非法版本被门禁拒绝时，`code` 为 `client_version_unavailable`，`current_version` 为 `null`，
+提示检查客户端版本及反向代理是否保留 `User-Agent` 和 `version` 头
 
 ### 管理接口
 
@@ -386,6 +387,9 @@ turn metadata 的 `workspaces` 也会保留仓库绝对路径、Git 远端地址
 Responses WebSocket 接受文本消息，`response.create` 在同一连接串行执行。当前响应期间收到的后续创建请求
 留在有界接收队列中，待当前响应完成终结和写出后再逐条校验、准入与执行，不因请求提前到达而断开。
 接收队列容量为 32 个事件，超载仍关闭连接；Ping/Pong、客户端关闭和服务关闭不等待队列中的请求执行
+
+下游探活包含消息接收中的字节进度，完整消息收齐后才进入中间件与请求处理。
+持续上传可刷新链路活动，停传且不响应心跳的连接仍会超时回收；心跳参数见[部署说明](../deploy/README.md#公网访问)
 
 其余文本消息发送到当前执行绑定的上游 WebSocket，未知类型、模式和扩展字段由上游校验。
 `response.interrupt` 的 `discard_partial_items` 模式若指向当前逻辑请求已交付的响应 ID，
@@ -1690,7 +1694,8 @@ UA、平台参数及自动 Git 上下文版本由 [OpenAI 上游客户端身份]
 执行检查点响应请求取消，步数超限报告「规则执行步数超限」，不以固定墙钟时长判定规则失败
 
 执行失败时，`skip_rule` 撤销本条规则所有步骤在所有副本上的修改并继续，意味着本条脱敏未完成；
-`reject_request` 阻止发送并返回本地请求错误，不因该错误自动重试或换号。设置保存时校验所有规则，包含未启用的规则
+`reject_request` 阻止发送并返回 `400` / `privacy_policy_rejected`，提示隐私规则处理失败，
+不因该错误自动重试或换号。设置保存时校验所有规则，包含未启用的规则
 
 预览请求为 `{ policy, body, headers, turnMetadata }`，其中 `headers` 为头名称到字符串数组的映射，
 `turnMetadata` 为编码后的 JSON 字符串或 `null`。正文最多 256 KiB，请求头与独立 metadata 合计最多 256 KiB。

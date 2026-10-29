@@ -45,7 +45,9 @@ const CLOUDFLARE_CHALLENGE_BACKOFF: [Duration; 4] = [
     Duration::from_secs(120),
 ];
 const CLOUDFLARE_PATH_BLOCK_THRESHOLD: u32 = 3;
-const SESSION_AFFINITY_TIMEOUT: Duration = Duration::from_millis(100);
+// 绑定失败会阻止发送，预算容纳短暂调度抖动；可丢失的策略排除记录保持独立预算
+const SESSION_AFFINITY_TIMEOUT: Duration = Duration::from_millis(500);
+const CYBER_POLICY_TIMEOUT: Duration = Duration::from_millis(100);
 const CYBER_POLICY_SESSION_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_ACCOUNT_SNAPSHOT_RETRIES: u32 = 3;
 
@@ -1150,7 +1152,7 @@ impl CodexCredentialSelector {
     ) -> Option<CodexCyberPolicyScope> {
         let key = key?.clone();
         let state = match tokio::time::timeout(
-            SESSION_AFFINITY_TIMEOUT,
+            CYBER_POLICY_TIMEOUT,
             self.session_exclusions.load(&self.provider_kind, &key),
         )
         .await
@@ -1162,7 +1164,7 @@ impl CodexCredentialSelector {
             }
             Err(_) => {
                 tracing::warn!(
-                    timeout_ms = SESSION_AFFINITY_TIMEOUT.as_millis(),
+                    timeout_ms = CYBER_POLICY_TIMEOUT.as_millis(),
                     "OpenAI cyber policy state read timed out"
                 );
                 None
@@ -1180,7 +1182,7 @@ impl CodexCredentialSelector {
             return;
         };
         match tokio::time::timeout(
-            SESSION_AFFINITY_TIMEOUT,
+            CYBER_POLICY_TIMEOUT,
             self.session_exclusions.record_failure(
                 &self.provider_kind,
                 &scope.key,
@@ -1201,7 +1203,7 @@ impl CodexCredentialSelector {
             Err(_) => {
                 tracing::warn!(
                     account_id = %account.id(),
-                    timeout_ms = SESSION_AFFINITY_TIMEOUT.as_millis(),
+                    timeout_ms = CYBER_POLICY_TIMEOUT.as_millis(),
                     "OpenAI cyber policy exclusion write timed out"
                 );
             }
@@ -1216,7 +1218,7 @@ impl CodexCredentialSelector {
             return;
         };
         match tokio::time::timeout(
-            SESSION_AFFINITY_TIMEOUT,
+            CYBER_POLICY_TIMEOUT,
             self.session_exclusions
                 .clear(&self.provider_kind, &scope.key, state.revision()),
         )
@@ -1228,7 +1230,7 @@ impl CodexCredentialSelector {
             }
             Err(_) => {
                 tracing::warn!(
-                    timeout_ms = SESSION_AFFINITY_TIMEOUT.as_millis(),
+                    timeout_ms = CYBER_POLICY_TIMEOUT.as_millis(),
                     "OpenAI cyber policy exclusion clear timed out"
                 );
             }

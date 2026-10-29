@@ -147,7 +147,7 @@ pub trait ProviderAdmin: Send + Sync {
     > {
         Err(gateway_core::settings::privacy::PrivacyError {
             rule_index: 0,
-            reason: "Provider 不支持隐私策略",
+            reason: "该服务商不支持隐私策略",
         })
     }
 
@@ -160,7 +160,7 @@ pub trait ProviderAdmin: Send + Sync {
     > {
         Err(gateway_core::settings::privacy::PrivacyError {
             rule_index: 0,
-            reason: "Provider 不支持隐私策略",
+            reason: "该服务商不支持隐私策略",
         })
     }
 
