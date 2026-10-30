@@ -15,6 +15,7 @@ pub struct ProviderStorePorts {
     leases: Arc<dyn ProviderLeasePort>,
     session_affinity: Arc<dyn ProviderSessionAffinityPort>,
     session_exclusions: Arc<dyn ProviderSessionExclusionPort>,
+    history_exclusions: Arc<dyn super::ProviderHistoryExclusionPort>,
     account_feedback: Arc<AccountFeedbackStats>,
     catalog_cache: Arc<dyn ProviderCatalogCachePort>,
     artifact_profiles: Arc<dyn ProviderArtifactProfileCachePort>,
@@ -47,6 +48,7 @@ impl ProviderStorePorts {
             leases,
             session_affinity,
             session_exclusions,
+            history_exclusions: Arc::new(super::NoopProviderHistoryExclusions),
             account_feedback: Arc::new(AccountFeedbackStats::default()),
             catalog_cache,
             artifact_profiles,
@@ -81,6 +83,20 @@ impl ProviderStorePorts {
     #[must_use]
     pub fn session_exclusions(&self) -> Arc<dyn ProviderSessionExclusionPort> {
         Arc::clone(&self.session_exclusions)
+    }
+
+    #[must_use]
+    pub fn with_history_exclusions(
+        mut self,
+        port: Arc<dyn super::ProviderHistoryExclusionPort>,
+    ) -> Self {
+        self.history_exclusions = port;
+        self
+    }
+
+    #[must_use]
+    pub fn history_exclusions(&self) -> Arc<dyn super::ProviderHistoryExclusionPort> {
+        Arc::clone(&self.history_exclusions)
     }
 
     #[must_use]

@@ -189,6 +189,7 @@ pub async fn initialize(
             config.stream_max_retries(),
         )
         .map_err(OpenAiInitializeError::Provider)?
+        .with_history_exclusions(ports.history_exclusions())
         .with_session_transport_recovery(session_transport_recovery.clone())
         .with_session_identity(session_identity)
         .with_timezone(config.timezone)

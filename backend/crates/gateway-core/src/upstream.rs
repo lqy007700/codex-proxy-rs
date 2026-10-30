@@ -4,6 +4,28 @@ use std::{fmt, num::NonZeroU32};
 
 use crate::validation::{IdentifierError, validate_text};
 
+/// 仅在当前逻辑请求内搬运的 Provider 私有恢复数据，不进入诊断快照或持久化
+#[derive(Clone)]
+pub struct RequestRecoveryData(std::sync::Arc<dyn std::any::Any + Send + Sync>);
+
+impl RequestRecoveryData {
+    #[must_use]
+    pub fn new<T: Send + Sync + 'static>(data: T) -> Self {
+        Self(std::sync::Arc::new(data))
+    }
+
+    #[must_use]
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        self.0.downcast_ref()
+    }
+}
+
+impl fmt::Debug for RequestRecoveryData {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("RequestRecoveryData(<provider-owned>)")
+    }
+}
+
 /// 上游是否可能已经收到业务 payload
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UpstreamSendState {

@@ -609,7 +609,7 @@ pub(super) fn continuation_replay_required_error(reason: &'static str) -> Provid
 /// 额度拒绝使当前账号无法继续原生历史，由客户端携带完整输入创建新链
 /// 只投影客户端响应；真实上游分类、发送状态和错误正文继续用于隔离与记账
 pub(super) fn quota_continuation_replay_error(
-    mut error: ProviderError,
+    error: ProviderError,
     request: &CodexResponsesRequest,
     replay_boundary: ReplayBoundary,
 ) -> ProviderError {
@@ -622,6 +622,14 @@ pub(super) fn quota_continuation_replay_error(
         return error;
     }
 
+    project_continuation_replay_error(error, "quota_exhausted")
+}
+
+/// 只投影客户端完整重放信号，保留上游错误及发送事实
+pub(super) fn project_continuation_replay_error(
+    mut error: ProviderError,
+    reason: &'static str,
+) -> ProviderError {
     let mut headers: Vec<ProviderResponseHeader> = error
         .client_visible_upstream_response()
         .map(|response| {
@@ -659,7 +667,7 @@ pub(super) fn quota_continuation_replay_error(
         .with_continuation_recovery_disposition(
             ContinuationRecoveryDisposition::ClientReplayRequired,
         )
-        .with_continuation_unavailable_reason("quota_exhausted")
+        .with_continuation_unavailable_reason(reason)
         .with_client_visible_upstream_error(detail)
         .with_client_visible_upstream_response(
             ClientVisibleUpstreamResponse::new(

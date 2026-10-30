@@ -8007,3 +8007,132 @@ fn error_protection_tracks_real_retry_attempts_and_skips_diagnostic_runs() {
         );
     }
 }
+
+#[test]
+fn request_recovery_has_one_independent_attempt_and_keeps_original_send_facts() {
+    use gateway_core::upstream::RequestRecoveryData;
+    for fail_again in [false, true] {
+        let operation = generate_operation();
+        let route_plan = plan(&operation);
+        let max = route_plan.max_attempts();
+        let mut scripts: Vec<_> = (1..max.get())
+            .map(|_| Script::Stream {
+                account_id: "acct_first",
+                items: vec![Err(transient_rejection().with_transient_retry(
+                    max,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    TransientRetryPolicy::RetryThenRotateAccount,
+                ))],
+            })
+            .collect();
+        scripts.push(Script::Stream {
+            account_id: "acct_first",
+            items: vec![Err(ProviderError::new(
+                ProviderErrorKind::InvalidRequest,
+                UpstreamSendState::Sent,
+            )
+            .with_request_recovery(RequestRecoveryData::new(17_u32)))],
+        });
+        scripts.push(Script::Stream {
+            account_id: "acct_first",
+            items: if fail_again {
+                vec![Err(ProviderError::new(
+                    ProviderErrorKind::InvalidRequest,
+                    UpstreamSendState::Sent,
+                )
+                .with_request_recovery(RequestRecoveryData::new(18_u32)))]
+            } else {
+                complete_stream(Some(2))
+            },
+        });
+        let (coordinator, store, provider) = coordinator(scripts);
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        let result = block_on(session.collect_uncommitted());
+        assert_eq!(result.is_ok(), !fail_again);
+        let contexts = provider.contexts.lock().unwrap();
+        assert_eq!(contexts.len(), max.get() as usize + 1);
+        assert_eq!(
+            contexts
+                .last()
+                .unwrap()
+                .required_account()
+                .unwrap()
+                .as_str(),
+            "acct_first"
+        );
+        assert_eq!(
+            contexts
+                .last()
+                .unwrap()
+                .request_recovery()
+                .unwrap()
+                .downcast_ref::<u32>(),
+            Some(&17)
+        );
+        assert!(
+            contexts[..max.get() as usize]
+                .iter()
+                .all(|context| context.request_recovery().is_none())
+        );
+        drop(contexts);
+        if !fail_again {
+            block_on(session.commit_downstream(Some(200))).unwrap();
+        }
+        let state = store.state.lock().unwrap();
+        assert_eq!(state.finalizations[0].attempt_count, max.get() + 1);
+        assert_eq!(state.finalizations[0].send_state, UpstreamSendState::Sent);
+    }
+}
+
+#[test]
+fn request_recovery_cannot_override_ambiguous_send_or_committed_output() {
+    use gateway_core::upstream::RequestRecoveryData;
+    for (send, with_output) in [
+        (UpstreamSendState::Ambiguous, false),
+        (UpstreamSendState::Sent, true),
+    ] {
+        let operation = generate_operation();
+        let mut items = if with_output {
+            vec![Ok(GatewayEvent::Started(ResponseMeta::new(
+                "response-1",
+                "gpt-5",
+            )))]
+        } else {
+            Vec::new()
+        };
+        items.push(Err(ProviderError::new(
+            ProviderErrorKind::InvalidRequest,
+            send,
+        )
+        .with_request_recovery(RequestRecoveryData::new(17_u32))));
+        let (coordinator, _, provider) = coordinator(vec![Script::Stream {
+            account_id: "acct_first",
+            items,
+        }]);
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation.clone(),
+            plan(&operation),
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        if with_output {
+            assert!(block_on(session.next_event()).unwrap().is_some());
+            block_on(session.commit_downstream(Some(200))).unwrap();
+        }
+        assert!(block_on(session.collect_uncommitted()).is_err());
+        assert_eq!(provider.contexts.lock().unwrap().len(), 1);
+    }
+}

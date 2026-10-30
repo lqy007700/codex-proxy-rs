@@ -78,6 +78,7 @@ fn provider(error: &ProviderError) -> PluginFault {
             ContinuationRecoveryDisposition::ProviderReplayAllowed => "provider_replay_allowed",
         }),
         "pre_delivery_retry": error.pre_delivery_retry().map(|value| match value {
+            PreDeliveryRetry::SameAccountRequestRecovery => json!({"kind":"same_account_request_recovery"}),
             PreDeliveryRetry::AccountRotation => json!({"kind":"account_rotation"}),
             PreDeliveryRetry::SameAccountTransportFallback => json!({"kind":"same_account_transport_fallback"}),
             PreDeliveryRetry::SameAccountConnectionRetry {transport} => json!({"kind":"same_account_connection_retry","transport": match transport {

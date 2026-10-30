@@ -382,3 +382,24 @@ fn cleanup_failure_keeps_the_primary_cause_and_separate_bounded_details() {
     assert_eq!(value["causes"]["cleanup"][0]["truncated"], true);
     assert!(details.as_str().len() < 66_000);
 }
+
+#[test]
+fn request_recovery_data_is_request_local_and_redacted() {
+    use gateway_core::upstream::RequestRecoveryData;
+    let data = RequestRecoveryData::new("PRIVATE_RECOVERY_DATA".to_owned());
+    let error = ProviderError::new(ProviderErrorKind::InvalidRequest, UpstreamSendState::Sent)
+        .with_request_recovery(data);
+    assert_eq!(
+        error
+            .request_recovery()
+            .unwrap()
+            .downcast_ref::<String>()
+            .unwrap(),
+        "PRIVATE_RECOVERY_DATA"
+    );
+    let snapshot = error.stable_snapshot();
+    assert!(snapshot.request_recovery().is_none());
+    assert!(!format!("{error:?} {snapshot:?}").contains("PRIVATE_RECOVERY_DATA"));
+    assert!(!error.replay_is_safe());
+    assert_eq!(error.send_state(), UpstreamSendState::Sent);
+}

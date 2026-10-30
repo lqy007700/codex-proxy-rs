@@ -11,7 +11,7 @@ use gateway_core::engine::{
 use gateway_core::error::StoreError;
 use gateway_core::routing::AccountRoutingSnapshot;
 
-struct NoopExecutionStore;
+pub(super) struct NoopExecutionStore;
 
 #[async_trait]
 impl ExecutionStore for NoopExecutionStore {
@@ -763,7 +763,11 @@ fn execution_plan(operation: &Operation) -> gateway_core::routing::RoutingPlan {
         .unwrap()
 }
 
-fn execution_request(id: &str, operation: &Operation, timeout: Duration) -> NewModelRequest {
+pub(super) fn execution_request(
+    id: &str,
+    operation: &Operation,
+    timeout: Duration,
+) -> NewModelRequest {
     NewModelRequest {
         admission_decision_ms: None,
         id: ModelRequestId::new(id).unwrap(),

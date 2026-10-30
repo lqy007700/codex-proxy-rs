@@ -107,7 +107,7 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
             @update:model-value="updateForm('portableHistory', $event)"
           />
           <p class="text-sm text-cp-text-secondary">
-            保留聊天与工具记录，不继承历史推理状态，需要完整可读历史
+            正常保留推理状态，仅在推理密文错误时尝试恢复，恢复需要完整可读历史
           </p>
         </div>
       </ZFormItem>

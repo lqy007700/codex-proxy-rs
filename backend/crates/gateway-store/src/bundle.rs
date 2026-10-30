@@ -294,7 +294,13 @@ async fn connect(
         runtime_policy,
         oauth_pending,
         diagnostics.clone(),
-    );
+    )
+    .with_history_exclusions(Arc::new(
+        redis::RedisProviderHistoryExclusionRepository::new(
+            redis_connection.clone(),
+            REDIS_NAMESPACE,
+        )?,
+    ));
     let worker_leader_lease = Arc::new(redis::worker_lease::RedisWorkerLeaderLeasePort::new(
         credential_leases,
     ));

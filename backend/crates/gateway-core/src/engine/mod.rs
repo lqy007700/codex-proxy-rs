@@ -567,6 +567,7 @@ pub struct AttemptContext {
     continuation: Option<ContinuationBinding>,
     continuation_attempt: ContinuationAttempt,
     transport: AttemptTransport,
+    request_recovery: Option<crate::upstream::RequestRecoveryData>,
     cancellation: CancellationToken,
 }
 
@@ -717,6 +718,7 @@ impl AttemptContext {
             continuation,
             continuation_attempt,
             transport: AttemptTransport::Default,
+            request_recovery: None,
             cancellation,
         }
     }
@@ -736,6 +738,21 @@ impl AttemptContext {
     pub const fn with_transport(mut self, transport: AttemptTransport) -> Self {
         self.transport = transport;
         self
+    }
+
+    /// 已获批准的转换数据贯穿本请求的后续 attempt，由所属 Provider 复核目标作用域
+    #[must_use]
+    pub fn with_request_recovery(
+        mut self,
+        data: Option<crate::upstream::RequestRecoveryData>,
+    ) -> Self {
+        self.request_recovery = data;
+        self
+    }
+
+    #[must_use]
+    pub fn request_recovery(&self) -> Option<&crate::upstream::RequestRecoveryData> {
+        self.request_recovery.as_ref()
     }
 
     #[must_use]

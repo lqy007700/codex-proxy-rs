@@ -144,6 +144,8 @@ pub enum TransientRetryPolicy {
 /// Provider 在下游尚未提交事件时请求的隐藏恢复方式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PreDeliveryRetry {
+    /// Provider 已准备可自包含重放的新请求，只允许一次同账号恢复，不扩大普通重放资格
+    SameAccountRequestRecovery,
     /// 排除本次账号，按普通调度策略重新选号
     AccountRotation,
     /// 上游明确拒绝后的同账号退避；耗尽动作由 Provider 显式选择
@@ -489,7 +491,7 @@ pub struct ProviderError {
     failure_observation: Option<Box<ProviderErrorFailureObservation>>,
     replay_safe: bool,
     retry_prohibited: bool,
-    pre_delivery_retry: Option<Box<PreDeliveryRetry>>,
+    pre_delivery_retry: Option<Box<ProviderRetryRequest>>,
     credential_recovery_required: bool,
     retry_same_account: bool,
     sensitive_context_redacted: bool,
@@ -499,6 +501,18 @@ pub struct ProviderError {
     client_visible_upstream_error: Option<Box<ClientVisibleUpstreamError>>,
     client_visible_upstream_response: Option<Box<ClientVisibleUpstreamResponse>>,
     atomic_client_events: Option<Box<AtomicClientEvents>>,
+}
+
+#[derive(Debug)]
+struct ProviderRetryRequest {
+    intent: PreDeliveryRetry,
+    data: Option<crate::upstream::RequestRecoveryData>,
+}
+
+impl From<PreDeliveryRetry> for ProviderRetryRequest {
+    fn from(intent: PreDeliveryRetry) -> Self {
+        Self { intent, data: None }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -658,6 +672,21 @@ impl ProviderError {
         self.retry_prohibited
     }
 
+    /// 请求协调器批准一次同账号请求转换，保持原始发送和错误事实
+    #[must_use]
+    pub fn with_request_recovery(mut self, data: crate::upstream::RequestRecoveryData) -> Self {
+        self.pre_delivery_retry = Some(Box::new(ProviderRetryRequest {
+            intent: PreDeliveryRetry::SameAccountRequestRecovery,
+            data: Some(data),
+        }));
+        self
+    }
+
+    #[must_use]
+    pub fn request_recovery(&self) -> Option<&crate::upstream::RequestRecoveryData> {
+        self.pre_delivery_retry.as_ref()?.data.as_ref()
+    }
+
     /// 允许 Core 仅在客户端尚未收到任何事件时执行一次受预算约束的换号恢复
     ///
     /// 该标记不证明上游未执行，也不等价于 [`Self::with_replay_safe`]；它只表达
@@ -666,7 +695,7 @@ impl ProviderError {
     /// 指定账号或下游已经进入提交状态时必须忽略它
     #[must_use]
     pub fn with_pre_delivery_retry(mut self) -> Self {
-        self.pre_delivery_retry = Some(Box::new(PreDeliveryRetry::AccountRotation));
+        self.pre_delivery_retry = Some(Box::new(PreDeliveryRetry::AccountRotation.into()));
         self
     }
 
@@ -682,7 +711,9 @@ impl ProviderError {
 
     /// 原地设置同账号备用传输恢复，保留当前错误携带的原客户端响应
     pub fn set_pre_delivery_transport_fallback(&mut self) {
-        self.pre_delivery_retry = Some(Box::new(PreDeliveryRetry::SameAccountTransportFallback));
+        self.pre_delivery_retry = Some(Box::new(
+            PreDeliveryRetry::SameAccountTransportFallback.into(),
+        ));
     }
 
     /// 允许 Core 在首个客户端事件前固定原账号并重试当前 Provider 传输
@@ -702,17 +733,16 @@ impl ProviderError {
 
     /// 原地设置同账号当前传输重试，保留当前错误携带的原客户端响应
     pub fn set_pre_delivery_transport_retry(&mut self, retry_index: NonZeroU32, delay: Duration) {
-        self.pre_delivery_retry = Some(Box::new(PreDeliveryRetry::SameAccountTransportRetry {
-            retry_index,
-            delay,
-        }));
+        self.pre_delivery_retry = Some(Box::new(
+            PreDeliveryRetry::SameAccountTransportRetry { retry_index, delay }.into(),
+        ));
     }
 
     #[must_use]
     pub fn with_connection_retry(mut self, transport: crate::upstream::AttemptTransport) -> Self {
-        self.pre_delivery_retry = Some(Box::new(PreDeliveryRetry::SameAccountConnectionRetry {
-            transport,
-        }));
+        self.pre_delivery_retry = Some(Box::new(
+            PreDeliveryRetry::SameAccountConnectionRetry { transport }.into(),
+        ));
         self
     }
 
@@ -733,13 +763,16 @@ impl ProviderError {
         jitter: Duration,
         policy: TransientRetryPolicy,
     ) -> Self {
-        self.pre_delivery_retry = Some(Box::new(PreDeliveryRetry::SameAccountTransientRetry {
-            max_retries,
-            initial_delay,
-            max_delay,
-            jitter,
-            policy,
-        }));
+        self.pre_delivery_retry = Some(Box::new(
+            PreDeliveryRetry::SameAccountTransientRetry {
+                max_retries,
+                initial_delay,
+                max_delay,
+                jitter,
+                policy,
+            }
+            .into(),
+        ));
         self
     }
 
@@ -884,7 +917,7 @@ impl ProviderError {
     #[must_use]
     pub const fn pre_delivery_retry(&self) -> Option<PreDeliveryRetry> {
         match self.pre_delivery_retry.as_ref() {
-            Some(retry) => Some(**retry),
+            Some(retry) => Some(retry.intent),
             None => None,
         }
     }
@@ -981,7 +1014,10 @@ impl ProviderError {
             failure_observation: self.failure_observation.clone(),
             replay_safe: self.replay_safe,
             retry_prohibited: self.retry_prohibited,
-            pre_delivery_retry: self.pre_delivery_retry.clone(),
+            pre_delivery_retry: self
+                .pre_delivery_retry
+                .as_ref()
+                .map(|retry| Box::new(retry.intent.into())),
             credential_recovery_required: self.credential_recovery_required,
             retry_same_account: self.retry_same_account,
             sensitive_context_redacted: self.sensitive_context_redacted,

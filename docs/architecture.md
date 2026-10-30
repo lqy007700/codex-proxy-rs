@@ -428,7 +428,7 @@ Client Key 鉴权完成后，API adapter 从有界请求头识别客户端，Cor
 
 - 一个客户端请求对应一条 `model_requests`；attempt 是请求内事实，不建立第二张权威表
 - Provider 的一次 `execute` 只选择一个 credential 并返回一个冷流；换号、重试和 fallback 由 Core 决定
-- OpenAI 的自动恢复限于明确识别的账号、容量、普通显式 `500/503`、无状态码且 `error.code` 为 `server_error` 或 `server_busy`、续接和传输场景；
+- OpenAI 的自动恢复限于明确识别的账号、容量、普通显式 `500/503`、无状态码且 `error.code` 为 `server_error` 或 `server_busy`、续接、密文兼容和传输场景；
   其他上游拒绝保留响应与重试提示，交由客户端决策。WS opening 尚未发送业务 payload 也不扩大该恢复范围，明确的 `426` 仍允许 HTTP 回退
 - `not_sent`、`sent`、`ambiguous` 是单调的上游发送边界；结果不明确时不能假定上游未收到请求
 - HTTP 明确未发送的瞬时建连失败（含 TLS 握手 EOF）共享最多 4 次 opening、30 秒的请求内预算；
@@ -467,7 +467,7 @@ Client Key 鉴权完成后，API adapter 从有界请求头识别客户端，Cor
   取消、deadline、已观测外部副作用及下游交付边界
 - 换号预算从运行设置冻结到请求计划，选中账号与上一 attempt 不同时计数；首次选号、同账号重试和
   选号阶段过滤候选不消耗预算。跨 Provider 候选推进与 continuation 排除重放同样受限，预算耗尽后
-  以最后一个原始上游错误终态；上述固定业务恢复链使用独立阶段上限，总路由尝试仍最多 32 次
+  以最后一个原始上游错误终态；上述固定业务恢复链使用独立阶段上限，总路由尝试仍最多 32 次；明确密文拒绝后的同账号兼容恢复最多另加一次，不重置普通预算
 - Provider 显式标记的终止拒绝禁止自动重试与传输回退，优先于未发送状态和安全重放证明
 - 跨 Provider 只在账号范围和能力都允许，且请求尚未到达上游或已被证明可安全重放时发生
 - 可恢复观测写入失败不能替换已经确定的客户端协议结果
@@ -742,8 +742,10 @@ Core 定义、校验并统一拥有评分规则，内置选号与诊断复用同
 
 ### 原生续接与会话亲和
 
-Key 的可移植历史策略随账号范围冻结，由 OpenAI Provider 在选号前验证不可迁移状态、发送前转换完整输入
-Core 只传递策略，不解释 reasoning 或密文；HTTP 与 WebSocket 共用转换入口，配置及失败合同见 [Client Key](api.md#7-client-key)
+Key 的可移植历史策略随账号范围冻结，OpenAI Provider 正常保留推理与原生续接，仅在明确密文输入拒绝后准备自包含的新链请求
+Core 在交付、副作用、发送和取消边界内批准一次同账号恢复，使用独立的一次预算；不透明转换数据贯穿同一请求的后续 attempt，由 Provider 复核目标作用域
+Provider 通过历史排除端口在 Redis 原子记录成功恢复排除的项指纹，不保存 transcript；缓存故障不影响原响应或请求内恢复
+Core 和 Store 不解释 reasoning 或密文；HTTP 与 WebSocket 共用转换入口，配置及失败合同见 [Client Key](api.md#7-client-key)
 
 Continuation 受原请求的 Client Key、账号范围、Provider 和发送/交付边界约束：
 

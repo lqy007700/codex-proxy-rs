@@ -38,3 +38,7 @@ pub use oauth::{
 };
 mod bundle;
 pub use bundle::ProviderStorePorts;
+mod history;
+pub use history::{
+    MAX_HISTORY_EXCLUSIONS, NoopProviderHistoryExclusions, ProviderHistoryExclusionPort,
+};

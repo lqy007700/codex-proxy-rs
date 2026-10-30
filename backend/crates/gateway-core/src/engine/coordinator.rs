@@ -373,6 +373,7 @@ where
             credential_recovery_attempted_accounts: BTreeSet::new(),
             recovery_account: None,
             pending_retry: None,
+            request_recovery: None,
             transient_retry_counts: BTreeMap::new(),
             bounded_transient_retries: 0,
             account_recovery,
@@ -467,6 +468,7 @@ struct PendingAttemptRetry {
     transport: AttemptTransport,
     delay: Duration,
     transport_recovery: bool,
+    request_recovery: bool,
     reserve_connection_rotation: bool,
 }
 
@@ -537,6 +539,11 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     recovery_account: Option<crate::account::ProviderAccountId>,
     /// 提交前同账号退避/传输恢复共用的等待与钉选状态；业务重试消耗路由预算
     pending_retry: Option<PendingAttemptRetry>,
+    /// 一次批准即耗尽新增恢复预算，数据继续传给同 Provider 的后续 attempt
+    request_recovery: Option<(
+        crate::identity::ProviderKind,
+        crate::upstream::RequestRecoveryData,
+    )>,
     /// 请求内按账号累计的瞬时拒绝重试次数，不能跨请求污染账号健康状态
     transient_retry_counts: BTreeMap<crate::account::ProviderAccountId, u32>,
     /// 分阶段业务恢复共享请求总预算，切换账号或错误码不重新获得同账号重试阶段
@@ -1014,13 +1021,19 @@ where
         let is_transport_recovery = pending_retry
             .as_ref()
             .is_some_and(|retry| retry.transport_recovery);
-        let is_transient_account_retry = pending_retry
+        let is_request_recovery = pending_retry
             .as_ref()
-            .is_some_and(|retry| !retry.transport_recovery && retry.account.is_some());
+            .is_some_and(|retry| retry.request_recovery);
+        let is_transient_account_retry = pending_retry.as_ref().is_some_and(|retry| {
+            !retry.transport_recovery && !retry.request_recovery && retry.account.is_some()
+        });
         let connection_rotation_reserved = pending_retry
             .as_ref()
             .is_some_and(|retry| retry.reserve_connection_rotation);
-        if !is_transport_recovery && self.routing_attempts >= self.plan.max_attempts().get() {
+        if !is_transport_recovery
+            && !is_request_recovery
+            && self.routing_attempts >= self.plan.max_attempts().get()
+        {
             return Err(EngineError::EmptyRoutingPlan);
         }
         if let Some(recovery) = pending_retry.as_ref()
@@ -1185,7 +1198,13 @@ where
             self.cancellation.clone(),
         )
         .with_continuation_attempt(self.continuation_attempt)
-        .with_transport(attempt_transport);
+        .with_transport(attempt_transport)
+        .with_request_recovery(
+            self.request_recovery
+                .as_ref()
+                .filter(|(provider, _)| provider == candidate.provider())
+                .map(|(_, data)| data.clone()),
+        );
         let trigger = if self.attempts == 0 {
             AttemptTrigger::Initial
         } else {
@@ -1556,7 +1575,7 @@ where
         };
         // 合法冷流在可取消的观测写入前归会话所有，首写等待中断也不能退回零次或重新选号
         self.attempts = next_attempt.get();
-        if !is_transport_recovery {
+        if !is_transport_recovery && !is_request_recovery {
             self.routing_attempts = self.routing_attempts.saturating_add(1);
         }
         self.current = Some(CurrentAttempt {
@@ -1728,6 +1747,24 @@ where
             .await;
         }
         let provider_proved_replay_safe = provider_proved_replay_safe(&error);
+        let request_recovery = error
+            .request_recovery()
+            .filter(|_| {
+                self.request_recovery.is_none()
+                    && matches!(
+                        error.pre_delivery_retry(),
+                        Some(crate::error::PreDeliveryRetry::SameAccountRequestRecovery)
+                    )
+                    && !error.retry_is_prohibited()
+                    && !execution_effect_observed
+                    && !self.replay_barrier_reached
+                    && !self.delivery_pending
+                    && attempt_send_state != UpstreamSendState::Ambiguous
+                    && self.continuation_attempt == ContinuationAttempt::None
+                    && !self.cancellation.is_cancelled()
+                    && !self.deadline.is_elapsed()
+            })
+            .cloned();
         let continuation_retry = !execution_effect_observed
             && self.prepare_continuation_retry(
                 &current,
@@ -1968,14 +2005,15 @@ where
                 self.account_rotations
                     < self.plan.account_selection_policy().max_account_rotations()
             });
-        let retryable = !error.retry_is_prohibited()
-            && !(self.account_recovery.is_fallback() && rotation_delay.is_none())
-            && (continuation_retry
-                || same_account_retry
-                || transient_retry.is_some()
-                || transport_recovery.is_some()
-                || connection_rotation.is_some()
-                || rotation_retry);
+        let retryable = request_recovery.is_some()
+            || (!error.retry_is_prohibited()
+                && !(self.account_recovery.is_fallback() && rotation_delay.is_none())
+                && (continuation_retry
+                    || same_account_retry
+                    || transient_retry.is_some()
+                    || transport_recovery.is_some()
+                    || connection_rotation.is_some()
+                    || rotation_retry));
 
         let retry_allowed_before_policy = retryable;
         let retryable = match self
@@ -2012,6 +2050,7 @@ where
             "retryable": retryable, "continuationRetry": continuation_retry,
             "sameAccountRetry": same_account_retry, "accountRotationRetry": account_rotation_retry,
             "ordinaryRetry": ordinary_retry, "transportRecovery": transport_recovery.is_some(),
+            "requestRecovery": request_recovery.is_some(),
             "recoveryStage": self.account_recovery.stage().as_str(),
             "ordinaryRetryBlockers": ordinary_retry_blockers,
             "providerReplaySafe": error.replay_is_safe(),
@@ -2060,7 +2099,23 @@ where
             // 原始 wire/HTTP response 由 request-local 所有权保留到下一次 attempt
             // 成功，或最终空选路时返回客户端；持久化只取得稳定事实快照
             let persistence_error = self.request_persisted.then(|| error.stable_snapshot());
-            if same_account_retry {
+            if let Some(data) = request_recovery {
+                self.request_recovery = Some((current.metadata.provider().clone(), data));
+                self.pending_retry = Some(PendingAttemptRetry {
+                    account: Some(current.metadata.provider_account_id().clone()),
+                    transport: if current.metadata.transport().as_str() == "http_sse"
+                        || current.metadata.transport().as_str() == "http_json"
+                    {
+                        AttemptTransport::Fallback
+                    } else {
+                        current.transport
+                    },
+                    delay: Duration::ZERO,
+                    transport_recovery: false,
+                    request_recovery: true,
+                    reserve_connection_rotation: false,
+                });
+            } else if same_account_retry {
                 let account = current.metadata.provider_account_id().clone();
                 self.credential_recovery_attempted_accounts
                     .insert(account.clone());
@@ -2072,6 +2127,7 @@ where
                     account: Some(current.metadata.provider_account_id().clone()),
                     transport: current.transport,
                     delay,
+                    request_recovery: false,
                     transport_recovery: false,
                     reserve_connection_rotation: false,
                 });
@@ -2080,6 +2136,7 @@ where
                     account: Some(current.metadata.provider_account_id().clone()),
                     transport,
                     delay,
+                    request_recovery: false,
                     transport_recovery: true,
                     reserve_connection_rotation,
                 });
@@ -2090,6 +2147,7 @@ where
                     account: Some(account),
                     transport,
                     delay,
+                    request_recovery: false,
                     transport_recovery: true,
                     reserve_connection_rotation: false,
                 });
@@ -2107,6 +2165,7 @@ where
                         account: None,
                         transport: AttemptTransport::Default,
                         delay,
+                        request_recovery: false,
                         transport_recovery: false,
                         reserve_connection_rotation: false,
                     });

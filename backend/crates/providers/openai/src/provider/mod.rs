@@ -159,6 +159,7 @@ pub struct CodexProvider {
     session_identity: Option<CodexSessionIdentity>,
     session_transport_recovery: CodexSessionTransportRecovery,
     stream_max_retries: u32,
+    history_exclusions: Arc<dyn gateway_core::provider_ports::ProviderHistoryExclusionPort>,
     live_registry: Arc<CodexLiveRegistry>,
     live_gateway: Option<Arc<CodexLiveGateway>>,
 }
@@ -176,7 +177,6 @@ impl PreparedGenerateRequest {
         &self,
         context: &AttemptContext,
     ) -> Result<PreviousResponseScope, ProviderError> {
-        portable_history::validate(&self.upstream, context)?;
         let pin = context.continuation().and_then(ContinuationBinding::pinned);
         let scope = match self
             .previous_session
@@ -351,6 +351,9 @@ impl CodexProvider {
         let client =
             CodexBackendClient::new(http, base_url, profile).with_websocket_pool(websocket_pool);
         Ok(Self {
+            history_exclusions: Arc::new(
+                gateway_core::provider_ports::NoopProviderHistoryExclusions,
+            ),
             selector,
             catalog,
             quota,
@@ -367,6 +370,15 @@ impl CodexProvider {
             live_registry: Arc::new(CodexLiveRegistry::default()),
             live_gateway: None,
         })
+    }
+
+    #[must_use]
+    pub fn with_history_exclusions(
+        mut self,
+        cache: Arc<dyn gateway_core::provider_ports::ProviderHistoryExclusionPort>,
+    ) -> Self {
+        self.history_exclusions = cache;
+        self
     }
 
     #[must_use]
@@ -835,7 +847,6 @@ impl CodexProvider {
         );
         let mut upstream = encode_generate_request(&generate, upstream_model.as_str(), None)
             .map_err(map_request_error)?;
-        portable_history::validate(&upstream, &context)?;
         upstream.client_account_follow_only = crate::request_identity::follows_session_with_headers(
             generate.protocol_payload().body(),
             generate.protocol_payload().context(),
@@ -987,7 +998,20 @@ impl CodexProvider {
         {
             align_structured_location_fields(upstream_request.body_mut(), location);
         }
-        portable_history::apply(&mut upstream_request, &context)?;
+        let history_thread = crate::request_identity::account_thread_with_headers(
+            generate.protocol_payload().body(),
+            generate.protocol_payload().context(),
+            &middleware_headers,
+        );
+        let history_attempt = portable_history::HistoryAttempt::prepare(
+            &mut upstream_request,
+            &context,
+            &lease,
+            &self.responses_url,
+            self.history_exclusions.as_ref(),
+            history_thread.as_deref(),
+        )
+        .await?;
         let requirement = transport_requirement(&upstream_request);
         let http_only = lease.transport() == crate::credential::ResponsesTransport::Http;
         if http_only && requirement.requires_websocket() {
@@ -1117,6 +1141,7 @@ impl CodexProvider {
             AttemptTransport::Retry(retry_index) => retry_index.get(),
             AttemptTransport::Default | AttemptTransport::Fallback => 0,
         };
+        let history_context = context.clone();
         let events = cold_response_stream(ColdResponse {
             client: self
                 .client_for_request(&context)?
@@ -1143,6 +1168,14 @@ impl CodexProvider {
             stream_max_retries: self.stream_max_retries,
             session_capture,
         });
+        let events = match history_attempt {
+            Some(history) => history.wrap(
+                events,
+                history_context,
+                Arc::clone(&self.history_exclusions),
+            ),
+            None => events,
+        };
         let stream = ProviderStream::new(metadata, events, lease);
         Ok(if allows_account_state_mutation {
             stream.with_filtered_account_feedback(
