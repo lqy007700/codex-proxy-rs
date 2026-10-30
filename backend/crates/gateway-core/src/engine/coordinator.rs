@@ -1282,8 +1282,10 @@ where
                         && error.send_state() == UpstreamSendState::NotSent
                         && self.last_retryable_failure.as_ref().is_none_or(|failure|
                             failure.send_state() == UpstreamSendState::NotSent || provider_proved_replay_safe(failure))
+                        // 等待预算耗尽不阻止后续普通候选或保底账号尝试即时准入
                         && matches!(error.kind(), ProviderErrorKind::NoEligibleAccount
-                            | ProviderErrorKind::AccountCapacityUnavailable | ProviderErrorKind::QuotaExhausted)
+                            | ProviderErrorKind::AccountCapacityUnavailable | ProviderErrorKind::QuotaExhausted
+                            | ProviderErrorKind::ConcurrencyQueueTimeout)
                         && if self.account_recovery.is_fallback() {
                             self.advance_provider_candidate()
                         } else if pinned_account.is_some() && !self.account_recovery.is_reselecting()

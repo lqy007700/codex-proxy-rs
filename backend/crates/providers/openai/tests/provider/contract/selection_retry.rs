@@ -914,6 +914,179 @@ async fn repeated_stream_not_found_errors_do_not_invalidate_accounts_or_retry() 
 }
 
 #[tokio::test]
+async fn account_queue_timeout_tries_eligible_fallback_without_restarting_wait_budget() {
+    use gateway_core::account::{
+        AccountModelAccess, AccountModelAccessMode, AccountSchedulingRole,
+    };
+
+    for scenario in [
+        "available",
+        "busy",
+        "model_denied",
+        "outside_scope",
+        "disabled",
+        "absent",
+        "upstream_failure",
+    ] {
+        let store = Arc::new(MemoryAccountStore::default());
+        create_account(&store, "acct_a").await;
+        store.set_oauth_transport(
+            "acct_a",
+            provider_openai::credential::ResponsesTransport::Http,
+        );
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(if scenario == "upstream_failure" {
+                ResponseTemplate::new(503).set_body_json(json!({
+                    "error":{"code":"server_error","message":"fallback failure"}
+                }))
+            } else {
+                ResponseTemplate::new(200).set_body_raw(CAPTURE_COMPLETED_SSE, "text/event-stream")
+            })
+            .mount(&server)
+            .await;
+        let kind = ProviderKind::new("openai").unwrap();
+        let regular = ProviderAccountId::new("acct_a").unwrap();
+        let fallback = ProviderAccountId::new("acct_d").unwrap();
+        let mut directory = BTreeMap::from([(
+            regular.clone(),
+            RuntimeAccount::new(kind.clone(), BTreeSet::new()),
+        )]);
+        if scenario != "absent" {
+            store
+                .seed_api_key(
+                    "acct_d",
+                    format!("{}/v1", server.uri()),
+                    provider_openai::credential::ResponsesTransport::Http,
+                )
+                .await;
+            store.set_scheduling_role("acct_d", AccountSchedulingRole::Fallback);
+            if scenario == "disabled" {
+                store.set_enabled(&fallback, false).await.unwrap();
+            }
+            if scenario != "outside_scope" {
+                directory.insert(
+                    fallback.clone(),
+                    RuntimeAccount::new(kind.clone(), BTreeSet::new())
+                        .with_scheduling_role(AccountSchedulingRole::Fallback)
+                        .with_model_access(if scenario == "model_denied" {
+                            AccountModelAccess::new(
+                                AccountModelAccessMode::Denylist,
+                                vec!["gpt-5.4".into()],
+                            )
+                            .unwrap()
+                        } else {
+                            Default::default()
+                        }),
+                );
+            }
+        }
+        let scope = Arc::new(FrozenAccountScope::new(
+            Arc::new(RuntimeAccountDirectory::new(directory)),
+            ClientRoutingScope::all_accounts(),
+        ));
+        let leases = Arc::new(TestLeaseCoordinator::default());
+        leases.busy_accounts.lock().unwrap().insert(regular.clone());
+        if scenario == "busy" {
+            leases
+                .busy_accounts
+                .lock()
+                .unwrap()
+                .insert(fallback.clone());
+        }
+        let affinity = Arc::new(MemorySessionAffinity::default());
+        let provider = provider_with_affinity_and_base_url_and_leases(
+            &store,
+            affinity.clone(),
+            server.uri(),
+            leases.clone(),
+        );
+        let providers =
+            ProviderRegistry::new([provider as Arc<dyn gateway_core::engine::provider::Provider>])
+                .unwrap();
+        let coordinator =
+            AttemptCoordinator::new(GatewayEngine::new(Arc::new(NoopExecutionStore), providers));
+        let operation = Operation::Generate(generate_with_session_context(
+            "queue-timeout-root",
+            Some("queue-timeout-root"),
+            None,
+        ));
+        let snapshot = RuntimeSnapshot::new(
+            ConfigRevision::new(1).unwrap(),
+            SettingsValues::new(1, "sticky", Default::default(), None, None)
+                .with_concurrency_queues(0, 1, 1),
+            vec![kind.clone()],
+            vec![ProviderModel::new(
+                kind,
+                UpstreamModelId::new("gpt-5.4").unwrap(),
+                ModelCapabilities::new(BTreeSet::from([operation.kind()]), None)
+                    .with_upstream_feature_validation(),
+            )],
+            Vec::new(),
+        )
+        .unwrap();
+        let plan = snapshot
+            .plan(
+                &PublicModelId::new("gpt-5.4").unwrap(),
+                &operation,
+                scope,
+                &RoutingContext::default(),
+            )
+            .unwrap();
+        let mut session = coordinator
+            .start(
+                execution_request("req_queue_fallback", &operation, Duration::from_secs(10)),
+                operation,
+                plan,
+                None,
+                None,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(5), session.collect_uncommitted())
+            .await
+            .expect("capacity recovery must remain bounded");
+        assert_eq!(
+            result.is_ok(),
+            scenario == "available",
+            "{scenario}: {result:?}"
+        );
+        if result.is_ok() {
+            session.commit_downstream(Some(200)).await.unwrap();
+        }
+        let requests = server.received_requests().await.unwrap();
+        let sent = matches!(scenario, "available" | "upstream_failure");
+        assert_eq!(requests.len(), usize::from(sent), "{scenario}");
+        if let Some(request) = requests.first() {
+            assert_eq!(request.url.path(), "/v1/responses", "{scenario}");
+        }
+        let attempts = leases.requests.lock().unwrap();
+        assert!(attempts.iter().any(|r| r.account_id() == &regular));
+        assert_eq!(
+            attempts
+                .iter()
+                .filter(|r| r.account_id() == &fallback)
+                .count(),
+            usize::from(sent || scenario == "busy"),
+            "{scenario}: a busy fallback must not receive a fresh queue budget or retry"
+        );
+        assert_eq!(
+            affinity.binding_count(),
+            0,
+            "fallback cannot bind the root session"
+        );
+        if scenario == "busy" {
+            let Err(EngineError::Provider(error)) = result else {
+                panic!("expected queue timeout")
+            };
+            assert_eq!(error.kind(), ProviderErrorKind::ConcurrencyQueueTimeout);
+            assert_eq!(error.send_state(), UpstreamSendState::NotSent);
+        }
+    }
+}
+
+#[tokio::test]
 async fn recovery_round_robin_uses_api_key_fallback_once_and_preserves_session_binding() {
     use gateway_core::account::AccountSchedulingRole;
     use std::sync::atomic::{AtomicUsize, Ordering};

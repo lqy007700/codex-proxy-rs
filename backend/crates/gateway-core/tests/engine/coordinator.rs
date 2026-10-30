@@ -7518,6 +7518,8 @@ fn prepare_failure_can_forbid_provider_fallback_without_affecting_ordinary_empty
     for (kind, prohibited, fallback) in [
         (ProviderErrorKind::NoEligibleAccount, false, true),
         (ProviderErrorKind::NoEligibleAccount, true, false),
+        (ProviderErrorKind::ConcurrencyQueueTimeout, false, true),
+        (ProviderErrorKind::ConcurrencyQueueTimeout, true, false),
         (ProviderErrorKind::SessionPolicyRestricted, false, false),
         (ProviderErrorKind::SessionPolicyRestricted, true, false),
     ] {
@@ -7881,47 +7883,49 @@ fn lease_cancellation_is_preserved_in_the_single_request_terminal() {
 }
 
 #[test]
-fn empty_regular_provider_does_not_skip_later_regular_candidates_for_fallback() {
-    let operation = generate_operation();
-    let route_plan = dual_provider_plan_with_fallback(&operation, true);
-    let openai = Arc::new(ScriptedProvider::new(vec![Script::Error(
-        ProviderError::new(
-            ProviderErrorKind::NoEligibleAccount,
-            UpstreamSendState::NotSent,
-        ),
-    )]));
-    let xai = Arc::new(ScriptedProvider::named(
-        "xai",
-        vec![Script::Stream {
-            account_id: "acct_xai_first",
-            items: complete_stream(None),
-        }],
-    ));
-    let mut registry = ProviderRegistry::builder();
-    registry.register(openai.clone()).unwrap();
-    registry.register(xai.clone()).unwrap();
-    let coordinator = AttemptCoordinator::new(GatewayEngine::new(
-        Arc::new(FakeStore::default()),
-        registry.build(),
-    ));
-    let mut session = block_on(coordinator.start(
-        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
-        operation,
-        route_plan,
-        None,
-        None,
-        CancellationToken::new(),
-    ))
-    .unwrap();
-    block_on(session.collect_uncommitted()).unwrap();
-    block_on(session.commit_downstream(Some(200))).unwrap();
-    assert_eq!(openai.contexts.lock().unwrap().len(), 1);
-    let contexts = xai.contexts.lock().unwrap();
-    assert_eq!(contexts.len(), 1);
-    assert_eq!(
-        contexts[0].recovery_stage(),
-        &gateway_core::engine::recovery::AccountRecoveryStage::Initial
-    );
+fn empty_or_timed_out_regular_provider_does_not_skip_later_regular_candidates_for_fallback() {
+    for kind in [
+        ProviderErrorKind::NoEligibleAccount,
+        ProviderErrorKind::ConcurrencyQueueTimeout,
+    ] {
+        let operation = generate_operation();
+        let route_plan = dual_provider_plan_with_fallback(&operation, true);
+        let openai = Arc::new(ScriptedProvider::new(vec![Script::Error(
+            ProviderError::new(kind, UpstreamSendState::NotSent),
+        )]));
+        let xai = Arc::new(ScriptedProvider::named(
+            "xai",
+            vec![Script::Stream {
+                account_id: "acct_xai_first",
+                items: complete_stream(None),
+            }],
+        ));
+        let mut registry = ProviderRegistry::builder();
+        registry.register(openai.clone()).unwrap();
+        registry.register(xai.clone()).unwrap();
+        let coordinator = AttemptCoordinator::new(GatewayEngine::new(
+            Arc::new(FakeStore::default()),
+            registry.build(),
+        ));
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        block_on(session.collect_uncommitted()).unwrap();
+        block_on(session.commit_downstream(Some(200))).unwrap();
+        assert_eq!(openai.contexts.lock().unwrap().len(), 1);
+        let contexts = xai.contexts.lock().unwrap();
+        assert_eq!(contexts.len(), 1);
+        assert_eq!(
+            contexts[0].recovery_stage(),
+            &gateway_core::engine::recovery::AccountRecoveryStage::Initial
+        );
+    }
 }
 
 #[test]
