@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { AccountGroupRef, AccountModelAccess, AccountSchedulingRole } from '@/api'
 
-import { ZButton, ZDialog } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZFormItem, ZSegmented } from '@codex-proxy/ui'
+
+import { computed } from 'vue'
 import AccountSettingsFields from './AccountSettingsFields.vue'
 
 defineProps<{
@@ -17,7 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const open = defineModel<boolean>({ required: true })
-const enabled = defineModel<boolean>('enabled', { required: true })
+const enabled = defineModel<boolean | undefined>('enabled', { required: true })
 const concurrencyLimit = defineModel<string>('concurrencyLimit', { required: true })
 const modelAccess = defineModel<AccountModelAccess | undefined>('modelAccess', { required: true })
 const weight = defineModel<string>('weight', { required: true })
@@ -25,6 +27,17 @@ const schedulingRole = defineModel<AccountSchedulingRole | 'preserve'>('scheduli
 const proxyMode = defineModel<string>('proxyMode', { required: true })
 const proxyId = defineModel<string>('proxyId', { required: true })
 const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: true })
+const schedulingMode = computed({
+  get: () => enabled.value === undefined ? 'preserve' : enabled.value ? 'enabled' : 'disabled',
+  set: (value: string) => {
+    enabled.value = value === 'preserve' ? undefined : value === 'enabled'
+  },
+})
+const schedulingOptions = [
+  { label: '保持原值', value: 'preserve' },
+  { label: '启用', value: 'enabled' },
+  { label: '停用', value: 'disabled' },
+]
 </script>
 
 <template>
@@ -36,8 +49,10 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
     :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving"
   >
     <div class="grid gap-5">
+      <ZFormItem label="调度">
+        <ZSegmented v-model="schedulingMode" :options="schedulingOptions" aria-label="调度" :disabled="saving" />
+      </ZFormItem>
       <AccountSettingsFields
-        v-model:enabled="enabled"
         v-model:concurrency-limit="concurrencyLimit"
         v-model:weight="weight"
         v-model:scheduling-role="schedulingRole"
@@ -52,6 +67,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         :groups="groups"
         :groups-loading="groupsLoading"
         :disabled="saving"
+        :show-scheduling="false"
       />
     </div>
 
