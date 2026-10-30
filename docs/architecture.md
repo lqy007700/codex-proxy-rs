@@ -331,7 +331,8 @@ Provider 可为模型提供来源账号集合；Core 在公开目录查询时结
 不解析上游字段；API 负责协议输出，不直接依赖具体 Provider。原生目录失败不会退回通用画像，只有不提供
 该协议原生目录的 Provider（如 xAI 的 Codex 适配）才走画像转换。目录读取不创建计量请求或推理 attempt。
 OpenAI 的账号/凭据 revision/客户端版本隔离、并发合并、TTL、容量与失效均归属 credential catalog
-service；客户端原生对象保存在有界进程缓存中，与套餐 Redis 模型 ID 缓存分开管理
+service；客户端原生对象保存在有界进程缓存中，与套餐 Redis 模型 ID 缓存分开管理。
+该缓存最多保留 32 项，原生正文总预算为 32 MiB；单次结果超过预算时仍正常交付，但不驻留缓存
 
 全局请求位置及开关由运行设置持久化；快照仅在开关开启时生成全局覆盖，并随
 `RuntimeSnapshot → RoutingPlan → AttemptContext` 冻结传递，关闭时保留客户端原有字段；
@@ -488,6 +489,11 @@ API 在请求中间件之后把 Chat 转为现有 Responses `Generate`，复用�
 在响应返回请求中间件前完成 Chat 编码，并在最终交付前复核响应身份与终态。
 Core 保留原入口观测但不解析 Chat 正文，Provider 和 attempt 中间件继续使用 Responses 合同，
 不新增一套账号调度、历史缓存或计量来源
+
+OpenAI Provider 按 Client Key、所选 OAuth 账号和父响应 ID 关联 WS 握手的路由 Cookie 快照，
+只供 Guardian 使用，不参与选号或写入账号凭据。进程内最多保存 4096 个父响应，保留 30 分钟；
+缺失或失效时按普通上游路由执行。transport 负责 Cookie 有效期和同 origin、同端点路径约束，
+连接池按快照身份隔离审查连接；复用父连接不会重新计算 Cookie 有效期，Cookie 到期不强制关闭已建立的审查连接
 
 OpenAI 的 OAuth 与 API Key 共用现有账号和事务。API Key 的 Base URL、密钥和传输策略属于 Provider 凭据 JSON，
 随 credential revision 更新；普通详情只投影非敏感连接设置。API Key 客户端目录按账号、凭据版本和客户端版本隔离，

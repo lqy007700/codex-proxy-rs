@@ -21,6 +21,7 @@ pub mod protocol;
 pub mod request;
 pub mod reset_credits;
 mod response_meta;
+pub(crate) mod routing_affinity;
 pub(crate) mod session;
 pub mod subscription;
 pub(crate) use downstream::normalize_selected_codex_downstream_body;
@@ -34,7 +35,7 @@ pub use self::{
     catalog::{
         CodexCatalogCapabilities, CodexCatalogCapabilityEvidence, CodexCatalogLimits,
         CodexCatalogMetadata, CodexCatalogModel, CodexCatalogVisibility, CodexModelCatalogError,
-        CodexModelCatalogSnapshot, MAX_CODEX_MODEL_CATALOG_BYTES, parse_codex_model_catalog,
+        CodexModelCatalogSnapshot, parse_codex_model_catalog,
     },
     client::{
         CodexAccountSelectionTelemetry, CodexBackendClient, CodexBackendJsonResponse,

@@ -379,6 +379,10 @@ turn metadata 的 `workspaces` 也会保留仓库绝对路径、Git 远端地址
 切号或归属未知时移除。`x-codex-guardian`、`guardian_credits_requested` 和序列化
 `x-codex-turn-metadata` 内普通扩展的同名 `parent_response_id` 保持原样
 
+同一 Client Key、同一 OAuth 账号的 Guardian 请求可利用网关记录的父响应 WS 握手信息，
+尽力复用父请求的上游路由。路由 Cookie 仅在网关与上游之间使用，不传给客户端；
+网关重启、记录淘汰或 Cookie 到期后仍可按普通路由请求，不保证上游路由亲和
+
 #### WebSocket 与上游传输
 
 公开 HTTP 请求在路由匹配前经过已绑定的 `http` 中间件；插件可以改写握手路径和请求参数。
