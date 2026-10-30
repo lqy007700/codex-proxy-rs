@@ -2129,6 +2129,7 @@ async fn codex_backend_client_stream_should_wait_for_terminal_after_active_webso
 async fn codex_backend_client_stream_should_timeout_when_active_websocket_stalls() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let (pong_tx, mut pong_rx) = tokio::sync::mpsc::channel(1);
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut websocket = accept_codex_test_websocket(stream).await;
@@ -2144,7 +2145,16 @@ async fn codex_backend_client_stream_should_timeout_when_active_websocket_stalls
             ))
             .await
             .unwrap();
-        futures::future::pending::<()>().await;
+        while let Some(Ok(message)) = websocket.next().await {
+            match message {
+                Message::Ping(_) => {
+                    websocket.flush().await.unwrap();
+                    pong_tx.send(()).await.unwrap();
+                }
+                Message::Close(_) => break,
+                other => panic!("unexpected frame during stalled response: {other:?}"),
+            }
+        }
     });
     let mut request = codex_request("gpt-5.5", "be brief", Vec::new());
     request.set_previous_response_id(Some("resp_previous".to_string()));
@@ -2170,8 +2180,18 @@ async fn codex_backend_client_stream_should_timeout_when_active_websocket_stalls
         .expect("stream should yield partial frame")
         .expect("partial frame should be valid");
     assert!(std::str::from_utf8(&first).unwrap().contains("partial"));
+    for _ in 0..11 {
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(25)).await;
+        tokio::time::resume();
+        timeout(Duration::from_secs(2), pong_rx.recv())
+            .await
+            .expect("gateway should send keepalive Ping")
+            .expect("upstream should reply with Pong");
+    }
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(5 * 60)).await;
+    tokio::time::advance(Duration::from_secs(25)).await;
+    tokio::time::resume();
     tokio::task::yield_now().await;
     let error = response
         .body

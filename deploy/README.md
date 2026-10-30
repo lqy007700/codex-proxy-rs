@@ -329,9 +329,9 @@ Responses 流式请求完成准入后，每 15 秒无输出会发送一次 SSE �
 `api.request_timeout_seconds` 默认 `null`，只控制 HTTP 路由返回响应前的等待，不是流式正文或 WebSocket 每轮执行的总时限。
 排队、插件显式执行期限与客户端断开的边界见 [请求期限](../docs/api.md#请求期限)
 
-OpenAI 上游池化 WebSocket 默认每 25 秒发送一次 Ping，发出后允许等待 30 秒；
-收到 Pong 或其他入站帧即解除本次心跳截止，持续无响应则以 `pong_timeout` 关闭连接。
-此策略也覆盖正在生成的请求，与等待下一条上游消息的 `stream_idle_timeout_ms` 分别计时
+OpenAI 上游池化 WebSocket 默认每 25 秒发送一次 Ping，并回应上游 Ping；Ping/Pong 写入最多等待 5 秒，
+不因等待 Pong 超时主动断开。该保活覆盖正在生成的请求，但不改变等待下一条业务消息的
+`stream_idle_timeout_ms`
 
 下游 Responses WebSocket 每 25 秒发送 Ping，第一条未响应的 Ping 发出后 30 秒没有入站活动即断开；
 接收中的消息字节、Pong 和其他有效入站消息均算活动，慢速上传不必等完整消息收齐才刷新探活状态。

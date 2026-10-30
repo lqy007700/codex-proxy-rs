@@ -554,7 +554,7 @@ Responses 的 HTTP/SSE 与 WebSocket 按顺序即时交付正常事件，不暂�
 中间件链不启用可替换前导例外；错误事件先按既有重试规则处理，无法重试时交付错误
 
 等待沿用[请求期限](#请求期限)与传输超时配置。
-WebSocket 独立 Ping 保活；Responses HTTP 流式请求完成准入后，执行仍在等待且连续 15 秒无输出时提交 `200`
+WebSocket 独立 Ping 保活；上游 WS 每 25 秒发送 Ping 并回复 Pong，Ping/Pong 不跨段转发，也不转换为 SSE 事件；Responses HTTP 流式请求完成准入后，执行仍在等待且连续 15 秒无输出时提交 `200`
 和 SSE 注释心跳，此后的等待继续每 15 秒保活，包括请求中间件等待和上游尚未返回事件。
 首次心跳前仍保留最终 HTTP 状态与响应头；心跳发出后发生的失败使用 `response.failed` 和 `[DONE]`，
 后续取得的上游或插件响应头无法再补发，`Retry-After` 转入流内错误的 `response.error.headers`。
