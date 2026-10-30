@@ -18,6 +18,7 @@ const props = withDefaults(defineProps<{
 const model = defineModel<AccountModelAccess | undefined>({ required: true })
 // 未取得目录时不能判断缺失，成功返回空目录则可以
 const catalog = ref<Array<{ id: string, label: string }>>()
+const catalogObservedAtDisplay = ref<string>()
 const search = ref('')
 const inputError = ref('')
 const request = useRequestState()
@@ -128,8 +129,10 @@ async function load(refresh = false) {
       { accountId },
       { signal: request.signal, silent: true },
     )
-    if (request.isCurrent(requestId))
+    if (request.isCurrent(requestId)) {
       catalog.value = result.models
+      catalogObservedAtDisplay.value = result.observedAt ? result.observedAtDisplay : undefined
+    }
   }
   catch (cause) {
     request.fail(requestId, cause)
@@ -145,6 +148,7 @@ watch([
 ], () => {
   request.invalidate()
   catalog.value = undefined
+  catalogObservedAtDisplay.value = undefined
   search.value = ''
   inputError.value = ''
   error.value = ''
@@ -158,7 +162,15 @@ watch(search, () => {
 
 <template>
   <div class="grid gap-3">
-    <ZFormItem label="模型限制">
+    <ZFormItem>
+      <template #label>
+        <span class="inline-flex flex-wrap items-end gap-x-2 gap-y-1">
+          <span>模型限制</span>
+          <span v-if="restricted && catalogObservedAtDisplay" class="text-cp-xs leading-none font-normal text-cp-text-tertiary tabular-nums">
+            {{ catalogObservedAtDisplay }}
+          </span>
+        </span>
+      </template>
       <div class="flex min-w-0 items-center justify-between gap-2">
         <ZSegmented v-model="mode" class="w-80 min-w-0 max-w-full" aria-label="模型限制模式" :options="modes" :disabled="disabled" />
         <ZIconButton v-if="restricted && accountId" aria-label="刷新模型" variant="plain" :loading="loading" :disabled="disabled" @click="load(true)">

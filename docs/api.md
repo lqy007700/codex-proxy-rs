@@ -809,9 +809,9 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 | `POST` | `/api/admin/accounts/reset-credits` | `{ accountId, creditId?, redeemRequestId }` | 使用 UUIDv4 幂等键消费一张 Provider 重置卡 |
 | `GET` | `/api/admin/accounts/reset-credits/automation` | `accountId` | 读取自动使用开关与本地计划，不查询上游 |
 | `POST` | `/api/admin/accounts/reset-credits/automation` | `{ accountId, enabled }` | 设置账号自动使用开关，默认关闭 |
-| `GET` | `/api/admin/accounts/models` | `accountId` | 优先读取该 Provider + 套餐的模型 cache，缺失时有限实时拉取 |
+| `GET` | `/api/admin/accounts/models` | `accountId` | 优先读取 Provider 模型目录缓存，缺失时有限实时拉取；返回 `{ models, observedAt, observedAtDisplay }` |
 | `GET` | `/api/admin/accounts/models/catalog` | `accountId` | 读取指定账号的完整 Codex 原生模型目录，返回 `{ modelCount, observedAt, catalog }` |
-| `POST` | `/api/admin/accounts/models/refresh` | `{ accountId }` | 强制拉取最新模型并覆盖 cache |
+| `POST` | `/api/admin/accounts/models/refresh` | `{ accountId }` | 强制拉取最新模型并覆盖缓存，响应结构与模型目录查询相同 |
 | `GET` | `/api/admin/accounts/connection-test` | `accountId`、`modelId` | 通过 SSE 返回实时连接测试事件，不作为业务 Responses 用量记录 |
 | `POST` | `/api/admin/accounts/oauth/start` | `{ provider, name, accountId?, outboundProxyId?, outboundProxyUrl? }` | 为支持登录的 Provider 创建 flow；`accountId` 表示重新授权 |
 | `POST` | `/api/admin/accounts/oauth/complete` | `{ provider, flowId, callbackUrl, settings? }` | 消费 OAuth callback；首次授权可附带账号设置，重新授权保留原设置 |
@@ -848,6 +848,11 @@ Provider 固定返回 `false`。调用账号恢复接口会清除目标账号的
 模型目录导出保留上游原生模型对象和能力字段，不包含账号凭据；不支持 Codex 原生目录的账号不能导出。
 管理端下载文件名为 `cpr-model-catalog-<套餐>-<账号名称>.json`，文件正文为 `catalog`，可用于
 Codex 的 `model_catalog_json` 配置。账号设置保存不等待上游模型目录刷新完成
+
+模型目录查询和刷新响应中的 `observedAt` 表示 Provider 最近一次成功获取目录的时间，`observedAtDisplay` 按部署时区格式化；Provider 未提供观察时间时分别返回 `null` 和 `—`
+
+`models` 只表示上游目录返回了这些模型 ID，不表示 Responses、Chat Completions、Embeddings 等所有端点均已验证可用。
+连接测试仅验证所选模型在 Provider 测试路径上的请求，其他端点需通过对应请求确认；目录观察时间不改变路由或账号能力判断
 
 账号限流详情在 `quota` 中返回：`rateLimitReason` 为 `upstream_rate_limit`（上游临时限流）、
 `error_protection`（匹配规则触发错误保护）或 `null`。`recoveryProbeRequired` 表示解除冻结是否需要成功探测；
