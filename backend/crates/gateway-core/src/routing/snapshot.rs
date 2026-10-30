@@ -29,6 +29,7 @@ type ModelCatalogAccounts = BTreeMap<ProviderKind, BTreeMap<String, BTreeSet<Pro
 /// Store 读取到的一个启用 Client API Key 策略事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotClientPolicyFacts {
+    portable_history: bool,
     name_snapshot: Option<String>,
     request_profiles: BTreeMap<ProviderKind, crate::account::OpaqueProviderData>,
     key_id: ClientApiKeyId,
@@ -38,6 +39,12 @@ pub struct SnapshotClientPolicyFacts {
 }
 
 impl SnapshotClientPolicyFacts {
+    #[must_use]
+    pub const fn with_portable_history(mut self, enabled: bool) -> Self {
+        self.portable_history = enabled;
+        self
+    }
+
     #[must_use]
     pub fn with_name_snapshot(mut self, name: Option<String>) -> Self {
         self.name_snapshot = name;
@@ -62,6 +69,7 @@ impl SnapshotClientPolicyFacts {
     ) -> Self {
         Self {
             key_id,
+            portable_history: false,
             name_snapshot: None,
             request_profiles: BTreeMap::new(),
             plaintext_key,
@@ -570,6 +578,7 @@ async fn compile_runtime_snapshot(
                 policy.plaintext_key,
                 Arc::new(
                     account_scope
+                        .with_portable_history(policy.portable_history)
                         .with_image_generation(allow_image_generation)
                         .with_fast_mode(fast_mode)
                         .with_request_profiles(policy.request_profiles),

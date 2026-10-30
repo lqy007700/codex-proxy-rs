@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ApiKeyFormValue } from '../composables/useApiKeyEditor'
 import type { AccountGroupRef } from '@/api'
-import { ZButton, ZDialog, ZForm, ZFormItem, ZInput } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZForm, ZFormItem, ZInput, ZSwitch } from '@codex-proxy/ui'
 
 import { DollarSign, KeyRound } from '@lucide/vue'
 import { computed, useTemplateRef, watch } from 'vue'
@@ -96,6 +96,20 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
           :disabled="saving"
           @update:model-value="updateForm('groupIds', $event)"
         />
+      </ZFormItem>
+
+      <ZFormItem label="跨渠道聊天兼容">
+        <div class="grid gap-2">
+          <ZSwitch
+            :model-value="form.portableHistory"
+            aria-label="跨渠道聊天兼容"
+            :disabled="saving"
+            @update:model-value="updateForm('portableHistory', $event)"
+          />
+          <p class="text-sm text-cp-text-secondary">
+            保留聊天与工具记录，不继承历史推理状态，需要完整可读历史
+          </p>
+        </div>
       </ZFormItem>
 
       <ZFormItem label="上游身份">

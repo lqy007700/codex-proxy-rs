@@ -146,6 +146,7 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                         key.group_ids,
                         key.limits,
                     )
+                    .with_portable_history(key.portable_history)
                     .with_name_snapshot(key.name_snapshot)
                     .with_request_profiles(key.request_profiles)
                 })
@@ -314,12 +315,13 @@ async fn load_client_keys(
             i64,
             sqlx::types::Json<BTreeMap<String, serde_json::Map<String, serde_json::Value>>>,
             String,
+            bool,
         ),
     >(
         "select k.id, k.key,
                 coalesce(array_agg(kg.account_group_id order by kg.account_group_id)
                   filter (where kg.account_group_id is not null), '{}') as group_ids,
-                k.max_concurrency, k.requests_per_minute, k.provider_request_profiles_json, k.name
+                k.max_concurrency, k.requests_per_minute, k.provider_request_profiles_json, k.name, k.portable_history
          from client_api_keys k
          left join client_api_key_groups kg on kg.client_api_key_id = k.id
          where k.enabled
@@ -332,6 +334,7 @@ async fn load_client_keys(
     rows.into_iter()
         .map(|row| {
             let mut key = ClientApiKeySnapshot::from_persisted(row.0, row.1, row.2, row.3, row.4)?;
+            key.portable_history = row.7;
             key.request_profiles = decode_request_profiles(row.5.0)?;
             key.name_snapshot = Some(row.6);
             Ok(key)

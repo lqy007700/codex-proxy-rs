@@ -7,6 +7,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { notification as ZNotification } from '@/utils/notification'
 
 export interface ApiKeyFormValue {
+  portableHistory: boolean
   providerRequestProfileOverrides: ProviderRequestProfiles
   customKey: string
   name: string
@@ -39,6 +40,7 @@ export function useApiKeyEditor(options: {
     editingKey.value = key
     form.value = {
       providerRequestProfileOverrides: cloneDeep(key.providerRequestProfileOverrides),
+      portableHistory: key.portableHistory,
       customKey: '',
       name: key.name,
       label: key.label ?? '',
@@ -73,6 +75,7 @@ export function useApiKeyEditor(options: {
     await savingKeyAction.run(
       async () => {
         const payload = {
+          portableHistory: form.value.portableHistory,
           name: form.value.name.trim(),
           label: form.value.label.trim() || null,
           groupIds: [
@@ -140,6 +143,7 @@ export function useApiKeyEditor(options: {
 
 function emptyForm(): ApiKeyFormValue {
   return {
+    portableHistory: false,
     providerRequestProfileOverrides: {},
     customKey: '',
     name: '',

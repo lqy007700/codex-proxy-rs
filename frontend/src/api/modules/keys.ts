@@ -7,6 +7,7 @@ export type ApiKeyRoutingScope = 'all' | 'groups'
 export type ApiKeyBudgetPeriod = 'daily' | 'weekly' | 'all'
 
 export interface ApiKey {
+  portableHistory: boolean
   providerRequestProfileOverrides: ProviderRequestProfiles
   openaiClientProfileOverride: ClientProfileSelection | null
   xaiClientProfileOverride: XaiClientProfileSelection | null
@@ -69,6 +70,7 @@ interface ApiKeyListParams {
 }
 
 export interface ApiKeyWriteParam {
+  portableHistory?: boolean
   name: string
   label: string | null
   groupIds: string[]

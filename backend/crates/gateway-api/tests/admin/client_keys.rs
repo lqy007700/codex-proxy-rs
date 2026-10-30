@@ -13,6 +13,35 @@ use serde_json::json;
 use super::{AdminTestFixture, AdminTestState};
 
 #[test]
+fn portable_history_defaults_to_native_and_update_omission_is_not_a_reset() {
+    let payload =
+        json!({"name":"portable", "groupIds":[], "maxConcurrency":0, "requestsPerMinute":0});
+    let create = |body| {
+        serde_json::from_value::<CreateClientKeyRequest>(body)
+            .unwrap()
+            .into_command()
+            .unwrap()
+    };
+    assert!(!create(payload.clone()).portable_history);
+    let mut portable = payload.clone();
+    portable["portableHistory"] = json!(true);
+    assert!(create(portable.clone()).portable_history);
+    let update = |mut body: serde_json::Value| {
+        body["id"] = json!("key_portable");
+        serde_json::from_value::<UpdateClientKeyRequest>(body)
+            .unwrap()
+            .into_command()
+            .unwrap()
+    };
+    assert_eq!(update(payload).portable_history, None);
+    assert_eq!(update(portable.clone()).portable_history, Some(true));
+    portable["portableHistory"] = json!(false);
+    assert_eq!(update(portable.clone()).portable_history, Some(false));
+    portable["portableHistory"] = json!("true");
+    assert!(serde_json::from_value::<CreateClientKeyRequest>(portable).is_err());
+}
+
+#[test]
 fn reset_budget_requires_an_explicit_supported_period_and_valid_key() {
     use gateway_api::admin::client_keys::ResetClientKeyBudgetRequest;
     for period in ["daily", "weekly", "all"] {
@@ -434,6 +463,7 @@ fn client_key_responses_should_keep_shape_and_redact_creation_debug() {
         .expect("valid time");
     let view = ClientKeyView::from((
         gateway_admin::model::client_keys::ClientKeyRecord {
+            portable_history: false,
             request_profile_overrides: Default::default(),
             budget: Default::default(),
             id: gateway_core::policy::ClientApiKeyId::new("key_visible").expect("Client Key ID"),

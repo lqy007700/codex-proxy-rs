@@ -83,6 +83,7 @@ impl PluginResourceAccess for DefaultPluginResourceAccess {
                     resource_key,
                     groups,
                     NewClientKey {
+                        portable_history: false,
                         id,
                         name: command.name,
                         label: None,

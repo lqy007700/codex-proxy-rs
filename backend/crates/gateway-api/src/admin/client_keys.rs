@@ -153,6 +153,8 @@ impl ClientKeySort {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateClientKeyRequest {
     #[serde(default)]
+    portable_history: bool,
+    #[serde(default)]
     provider_request_profile_overrides: ProviderRequestProfileOverrides,
     openai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
     xai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
@@ -190,6 +192,7 @@ impl CreateClientKeyRequest {
             self.xai_client_profile_override,
         )?;
         Ok(CreateClientKey {
+            portable_history: self.portable_history,
             request_profile_overrides,
             custom_key: self
                 .custom_key
@@ -217,6 +220,8 @@ impl CreateClientKeyRequest {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateClientKeyRequest {
+    #[serde(default)]
+    portable_history: Option<bool>,
     #[serde(default)]
     provider_request_profile_overrides: ProviderRequestProfileOverrideUpdates,
     #[serde(default, deserialize_with = "deserialize_profile_override")]
@@ -248,6 +253,7 @@ impl UpdateClientKeyRequest {
             self.xai_client_profile_override,
         )?;
         Ok(UpdateClientKey {
+            portable_history: self.portable_history,
             request_profile_override_updates,
             id: client_key_id(self.id, "clientKeyMutationNotFound")?,
             name: self.name,
@@ -334,6 +340,7 @@ impl ClientKeyMutationRequest {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientKeyView {
+    portable_history: bool,
     provider_request_profile_overrides: ProviderRequestProfileOverrides,
     /// 固定兼容字段；值始终从 provider_request_profile_overrides 派生
     openai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
@@ -384,6 +391,7 @@ impl From<(ClientKeyRecord, crate::time::TimePresenter)> for ClientKeyView {
                 .cloned(),
             xai_client_profile_override: provider_request_profile_overrides.get("xai").cloned(),
             provider_request_profile_overrides,
+            portable_history: record.portable_history,
             id: record.id.to_string(),
             name: record.name,
             label: record.label,

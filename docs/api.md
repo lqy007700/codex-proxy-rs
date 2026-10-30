@@ -367,6 +367,7 @@ Codex/OAuth 上游的历史回填按字段形状兼容，不以 User-Agent 品�
 的 `input` 项移除顶层 `status`；该项具有非空字符串 `encrypted_content` 时，还会移除非空数组
 `content`。其他字段及顺序保持不变，缺少非空加密载荷的明文历史由上游判定。
 普通消息、工具项及未知类型不受此规则影响，API Key 上游不应用此规则
+Key 开启 `portableHistory` 时另按[跨渠道历史合同](#7-client-key)处理，不能据此假定加密推理始终透传
 
 请求头过滤不提供客户端匿名化；系统提示词、工具定义、工具结果、工作目录及其他业务 metadata
 保持原有语义，可能包含客户端环境信息。
@@ -1475,11 +1476,19 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 | `POST` | `/api/admin/client-keys/delete` | `{ id }` | 删除 |
 
 创建字段为 `name`、可选 `label`、`groupIds`、`maxConcurrency`、`requestsPerMinute`、可选
-`dailyLimitUsd`、`weeklyLimitUsd`、`customKey` 和 `providerRequestProfileOverrides`。更新请求携带 `id`，不接受 `customKey`。
+`dailyLimitUsd`、`weeklyLimitUsd`、`customKey`、`portableHistory` 和 `providerRequestProfileOverrides`。更新请求携带 `id`，不接受 `customKey`。
 `groupIds` 必须显式提交：空数组派生 `routingScope: "all"`，非空数组派生
 `routingScope: "groups"`。响应同时返回分组引用 `groups`，以及从当前有效账号池派生、仅供展示的
 `providerKinds`。创建和 reveal 响应会返回完整明文 Key，调用方
 必须立即安全保存
+
+`portableHistory` 控制 OpenAI Provider 的跨渠道聊天兼容，创建时默认 `false`，更新时省略或 `null` 保留原值，列表与详情返回当前布尔值
+开启后每次发送前移除完整输入中的所有 `reasoning` 历史项并清除轮次续接状态，保留可见消息、消息阶段、工具调用及结果的顺序和 ID
+该设置同时作用于 OAuth 与 API Key 上游的 HTTP/SSE 和 WebSocket，不继承历史内部推理状态，不依赖是否检测到换号
+
+兼容模式不把增量请求当作完整历史：携带 `previous_response_id` 的请求返回 `previous_response_not_found`，由客户端完整重放
+输入包含 conversation 引用、item 引用、compaction 密文或加密工具内容时返回 `400 portable_history_unavailable`，请求不会发送上游
+需要客户端恢复可读消息及工具结果，或使用可读摘要开始新会话；网关不解密或丢弃这些业务状态，也不保存整份聊天记录
 
 `providerRequestProfileOverrides` 按 Provider ID 保存身份选择，列表返回同名对象。创建时各项为完整配置对象，
 未提供的 Provider 跟随通用设置；更新时省略某项保留原值，设为 `null` 清除该项覆盖。最多 256 项，每项最多 64 KiB。

@@ -26,6 +26,82 @@ use gateway_store::postgres::{
 use super::TestDatabase;
 
 #[tokio::test]
+async fn portable_history_persists_into_snapshots_and_omitted_updates_preserve_it() {
+    use gateway_admin::model::{
+        MutationActor, MutationContext,
+        client_keys::{NewClientKey, UpdateClientKey},
+    };
+    use gateway_core::policy::RateLimits;
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create("portable_history").await else {
+        return;
+    };
+    let store = PgAdminClientKeyStore::new(database.pool.clone());
+    let context = MutationContext {
+        actor: MutationActor::System,
+        request_id: "portable-history-test".into(),
+    };
+    let id = ClientApiKeyId::new("key_portable_history").unwrap();
+    let (_, created) = store
+        .create_client_key(
+            NewClientKey {
+                portable_history: true,
+                request_profile_overrides: Default::default(),
+                id: id.clone(),
+                name: "portable".into(),
+                label: None,
+                group_ids: vec![],
+                limits: RateLimits::unlimited(),
+                budget: Default::default(),
+                plaintext: "synthetic-portable-history-key".into(),
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    assert!(created.portable_history);
+    let repository = PgRuntimeSnapshotRepository::new(database.pool.clone());
+    assert!(
+        repository
+            .load_runtime_snapshot()
+            .await
+            .unwrap()
+            .client_api_keys[0]
+            .portable_history
+    );
+    for (value, expected) in [(None, true), (Some(false), false), (Some(true), true)] {
+        let (_, updated) = store
+            .update_client_key(
+                UpdateClientKey {
+                    portable_history: value,
+                    request_profile_override_updates: Default::default(),
+                    id: id.clone(),
+                    name: "portable".into(),
+                    label: None,
+                    group_ids: vec![],
+                    limits: RateLimits::unlimited(),
+                    daily_limit_usd: None,
+                    weekly_limit_usd: None,
+                },
+                &context,
+            )
+            .await
+            .unwrap();
+        assert_eq!(updated.portable_history, expected);
+        assert_eq!(
+            repository
+                .load_runtime_snapshot()
+                .await
+                .unwrap()
+                .client_api_keys[0]
+                .portable_history,
+            expected
+        );
+    }
+    database.close().await;
+}
+
+#[tokio::test]
 async fn migrated_keys_persist_exactly_and_keep_short_keys_masked() {
     use gateway_admin::model::{MutationActor, MutationContext, client_keys::NewClientKey};
     use gateway_core::policy::RateLimits;
@@ -53,6 +129,7 @@ async fn migrated_keys_persist_exactly_and_keep_short_keys_masked() {
         let (_, record) = store
             .create_client_key(
                 NewClientKey {
+                    portable_history: false,
                     request_profile_overrides: Default::default(),
                     id: id.clone(),
                     name: format!("Migrated {index}"),
@@ -108,6 +185,7 @@ async fn duplicate_migrated_keys_conflict_atomically_without_extra_audits() {
     };
     let key = "legacy-key-case-sensitive!";
     let command = |id: &str| NewClientKey {
+        portable_history: false,
         request_profile_overrides: Default::default(),
         id: ClientApiKeyId::new(id).unwrap(),
         name: id.to_owned(),
@@ -144,6 +222,7 @@ async fn duplicate_migrated_keys_conflict_atomically_without_extra_audits() {
 #[test]
 fn generated_client_key_format_remains_valid() {
     let key = NewClientApiKey {
+        portable_history: false,
         request_profile_overrides: Default::default(),
         budget: Default::default(),
         id: "key-1".to_owned(),
@@ -177,6 +256,7 @@ async fn client_key_names_are_checked_atomically_on_create_and_rename() {
         request_id: "duplicate-name-test".to_owned(),
     };
     let create = |id: &str, name: &str| NewClientKey {
+        portable_history: false,
         request_profile_overrides: Default::default(),
         id: ClientApiKeyId::new(id).unwrap(),
         name: name.to_owned(),
@@ -187,6 +267,7 @@ async fn client_key_names_are_checked_atomically_on_create_and_rename() {
         plaintext: format!("synthetic-credential-{id}"),
     };
     let update = |id: ClientApiKeyId, name: &str| UpdateClientKey {
+        portable_history: None,
         request_profile_override_updates: Default::default(),
         id,
         name: name.to_owned(),
@@ -650,6 +731,7 @@ async fn dedicated_reveal_returns_plaintext_without_debug_exposure() {
 fn client_key_debug_redacts_plaintext() {
     let secret = format!("sk_{}", "s".repeat(43));
     let key = NewClientApiKey {
+        portable_history: false,
         request_profile_overrides: Default::default(),
         budget: Default::default(),
         id: "key-1".to_owned(),
@@ -723,6 +805,7 @@ async fn key_profile_override_roundtrips_and_explicit_clear_restores_inheritance
     let (_, record) = store
         .create_client_key(
             NewClientKey {
+                portable_history: false,
                 id: id.clone(),
                 name: "profile".to_owned(),
                 label: None,
@@ -745,6 +828,7 @@ async fn key_profile_override_roundtrips_and_explicit_clear_restores_inheritance
     );
     assert_eq!(record.request_profile_overrides.get(&xai), Some(&profile));
     let update = |override_value: Option<Option<OpaqueProviderData>>| UpdateClientKey {
+        portable_history: None,
         id: id.clone(),
         name: "profile".to_owned(),
         label: None,

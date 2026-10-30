@@ -1058,6 +1058,7 @@ impl ClientKeyStore for MemoryClientKeyStore {
         let now = Utc::now();
         Ok(Some(ClientKeySecret::new(
             ClientKeyRecord {
+                portable_history: false,
                 request_profile_overrides: Default::default(),
                 budget: Default::default(),
                 id: id.clone(),

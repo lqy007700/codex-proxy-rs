@@ -176,6 +176,7 @@ impl ClientKeyService for DefaultClientKeyService {
             .store
             .create_client_key(
                 NewClientKey {
+                    portable_history: command.portable_history,
                     request_profile_overrides: command.request_profile_overrides,
                     id,
                     name: command.name,

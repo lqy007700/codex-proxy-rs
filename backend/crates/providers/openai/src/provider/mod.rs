@@ -107,6 +107,7 @@ mod execution;
 mod failure;
 mod live;
 mod observation;
+mod portable_history;
 mod upstream_adapter;
 mod workers;
 pub(crate) use live::{CodexLiveGateway, CodexLiveRegistry};
@@ -175,6 +176,7 @@ impl PreparedGenerateRequest {
         &self,
         context: &AttemptContext,
     ) -> Result<PreviousResponseScope, ProviderError> {
+        portable_history::validate(&self.upstream, context)?;
         let pin = context.continuation().and_then(ContinuationBinding::pinned);
         let scope = match self
             .previous_session
@@ -833,6 +835,7 @@ impl CodexProvider {
         );
         let mut upstream = encode_generate_request(&generate, upstream_model.as_str(), None)
             .map_err(map_request_error)?;
+        portable_history::validate(&upstream, &context)?;
         upstream.client_account_follow_only = crate::request_identity::follows_session_with_headers(
             generate.protocol_payload().body(),
             generate.protocol_payload().context(),
@@ -984,6 +987,7 @@ impl CodexProvider {
         {
             align_structured_location_fields(upstream_request.body_mut(), location);
         }
+        portable_history::apply(&mut upstream_request, &context)?;
         let requirement = transport_requirement(&upstream_request);
         let http_only = lease.transport() == crate::credential::ResponsesTransport::Http;
         if http_only && requirement.requires_websocket() {

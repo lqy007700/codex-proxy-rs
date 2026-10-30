@@ -53,6 +53,7 @@ const CLIENT_API_KEY_LAST_USED_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientApiKeySnapshot {
+    pub portable_history: bool,
     pub name_snapshot: Option<String>,
     pub request_profiles: std::collections::BTreeMap<
         gateway_core::routing::ProviderKind,
@@ -73,6 +74,7 @@ impl ClientApiKeySnapshot {
         requests_per_minute: i64,
     ) -> StoreResult<Self> {
         Ok(Self {
+            portable_history: false,
             name_snapshot: None,
             request_profiles: std::collections::BTreeMap::new(),
             id: ClientApiKeyId::new(id)
@@ -118,6 +120,7 @@ impl fmt::Debug for ClientApiKeySecret {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientApiKeyRecord {
+    pub portable_history: bool,
     pub request_profile_overrides: BTreeMap<ProviderKind, OpaqueProviderData>,
     pub id: String,
     pub name: String,
@@ -279,6 +282,7 @@ pub struct ClientApiKeyPage {
 
 #[derive(Clone)]
 pub struct NewClientApiKey {
+    pub portable_history: bool,
     pub request_profile_overrides: BTreeMap<ProviderKind, OpaqueProviderData>,
     pub id: String,
     pub name: String,
@@ -313,6 +317,7 @@ impl NewClientApiKey {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateClientApiKeyDetails {
+    pub portable_history: Option<bool>,
     pub request_profile_override_updates: BTreeMap<ProviderKind, Option<OpaqueProviderData>>,
     pub id: String,
     pub name: String,
@@ -378,7 +383,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
         query.validate()?;
         let total = count_client_api_keys(&self.pool, query.search.as_deref()).await?;
         let mut statement = QueryBuilder::<Postgres>::new(
-            "select k.id, k.name, k.label, k.provider_request_profiles_json as request_profile_overrides,
+            "select k.id, k.name, k.label, k.portable_history, k.provider_request_profiles_json as request_profile_overrides,
                     left(k.key, least(10, length(k.key) / 2)) as prefix, k.enabled,
                     k.max_concurrency, k.requests_per_minute, k.last_used_at, k.created_at,
                     k.updated_at, '[]'::jsonb as groups, '{}'::text[] as provider_kinds
@@ -438,7 +443,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
     async fn get_client_api_key(&self, id: &str) -> StoreResult<Option<ClientApiKeyRecord>> {
         require_nonempty(ENTITY, "id", id)?;
         let record = sqlx::query(
-            "select k.id, k.name, k.label, k.provider_request_profiles_json as request_profile_overrides,
+            "select k.id, k.name, k.label, k.portable_history, k.provider_request_profiles_json as request_profile_overrides,
                     left(k.key, least(10, length(k.key) / 2)) as prefix, k.enabled,
                     k.max_concurrency, k.requests_per_minute, k.last_used_at, k.created_at,
                     k.updated_at, coalesce(groups.groups, '[]'::jsonb) as groups,
@@ -889,6 +894,7 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             .control_plane
             .create_client_api_key(
                 NewClientApiKey {
+                    portable_history: command.portable_history,
                     request_profile_overrides: command.request_profile_overrides,
                     id: id.as_str().to_owned(),
                     name: command.name,
@@ -918,6 +924,7 @@ impl ClientKeyStore for PgAdminClientKeyStore {
                         "daily_limit_usd",
                         "weekly_limit_usd",
                         "provider_request_profiles_json",
+                        "portable_history",
                     ]
                     .into_iter()
                     .map(str::to_owned)
@@ -939,6 +946,7 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             .control_plane
             .update_client_api_key(
                 UpdateClientApiKeyDetails {
+                    portable_history: command.portable_history,
                     request_profile_override_updates: command.request_profile_override_updates,
                     id: id.as_str().to_owned(),
                     name: command.name,
@@ -966,6 +974,7 @@ impl ClientKeyStore for PgAdminClientKeyStore {
                         "daily_limit_usd",
                         "weekly_limit_usd",
                         "provider_request_profiles_json",
+                        "portable_history",
                     ]
                     .into_iter()
                     .map(str::to_owned)
@@ -1096,6 +1105,7 @@ fn admin_client_key_cursor(cursor: ClientApiKeyCursor) -> AdminStoreResult<Admin
 
 fn admin_client_key_record(record: ClientApiKeyRecord) -> AdminStoreResult<AdminClientKeyRecord> {
     Ok(AdminClientKeyRecord {
+        portable_history: record.portable_history,
         request_profile_overrides: record.request_profile_overrides,
         id: ClientApiKeyId::new(record.id)
             .map_err(|_| admin_store_error(ENTITY, invalid("invalid client key id")))?,
@@ -1148,8 +1158,8 @@ pub(crate) async fn insert_client_api_key_in_transaction(
     sqlx::query(
         "insert into client_api_keys (
            id, name, label, key, enabled, max_concurrency, requests_per_minute,
-           last_used_at, created_at, updated_at, daily_limit_usd, weekly_limit_usd, provider_request_profiles_json
-         ) values ($1, $2, $3, $4, true, $5, $6, null, now(), now(), $7::text::numeric, $8::text::numeric, $9::jsonb)",
+           last_used_at, created_at, updated_at, daily_limit_usd, weekly_limit_usd, provider_request_profiles_json, portable_history
+         ) values ($1, $2, $3, $4, true, $5, $6, null, now(), now(), $7::text::numeric, $8::text::numeric, $9::jsonb, $10)",
     )
     .bind(&key.id)
     .bind(key.name.trim())
@@ -1160,6 +1170,7 @@ pub(crate) async fn insert_client_api_key_in_transaction(
     .bind(key.budget.daily_usd.canonical())
     .bind(key.budget.weekly_usd.canonical())
     .bind(sqlx::types::Json(request_profile_overrides))
+    .bind(key.portable_history)
     .execute(&mut **transaction)
     .await
     .map_err(|error| {
@@ -1211,7 +1222,8 @@ pub(crate) async fn update_client_api_key_in_transaction(
              daily_limit_usd = coalesce($6::text::numeric, daily_limit_usd),
              weekly_limit_usd = coalesce($7::text::numeric, weekly_limit_usd),
              provider_request_profiles_json = (provider_request_profiles_json - $8::text[])
-                 || $9::jsonb
+                 || $9::jsonb,
+             portable_history = coalesce($10, portable_history)
          where id = $1",
     )
     .bind(&key.id)
@@ -1223,6 +1235,7 @@ pub(crate) async fn update_client_api_key_in_transaction(
     .bind(key.weekly_limit_usd.map(|amount| amount.canonical()))
     .bind(removed_profiles)
     .bind(sqlx::types::Json(replacement_profiles))
+    .bind(key.portable_history)
     .execute(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("update client API key in transaction", source))?;
@@ -1420,6 +1433,9 @@ fn client_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<ClientApiK
         .map_err(|source| invalid("invalid groups").with_source(source))?;
     Ok(
         ClientApiKeyRecord {
+            portable_history: row
+                .try_get("portable_history")
+                .map_err(|source| invalid("invalid portable history policy").with_source(source))?,
             request_profile_overrides:
                 decode_request_profiles(
                     row.try_get::<sqlx::types::Json<

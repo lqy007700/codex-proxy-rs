@@ -263,6 +263,7 @@ impl ClientRoutingScope {
 /// 一次认证随 RuntimeSnapshot 冻结的账号目录与 Key 权限
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrozenAccountScope {
+    portable_history: bool,
     allow_image_generation: bool,
     fast_mode: FastMode,
     request_profiles: BTreeMap<ProviderKind, super::OpaqueProviderData>,
@@ -274,6 +275,18 @@ pub struct FrozenAccountScope {
 }
 
 impl FrozenAccountScope {
+    /// Key 显式选择的可移植历史策略，具体协议转换由 Provider 负责
+    #[must_use]
+    pub const fn with_portable_history(mut self, enabled: bool) -> Self {
+        self.portable_history = enabled;
+        self
+    }
+
+    #[must_use]
+    pub const fn portable_history(&self) -> bool {
+        self.portable_history
+    }
+
     #[must_use]
     pub fn scheduling_role(
         &self,
@@ -351,6 +364,7 @@ impl FrozenAccountScope {
             ClientRoutingScope::Restricted { provider_kinds, .. } => Arc::clone(provider_kinds),
         };
         Self {
+            portable_history: false,
             allow_image_generation: true,
             fast_mode: FastMode::Default,
             request_profiles: BTreeMap::new(),

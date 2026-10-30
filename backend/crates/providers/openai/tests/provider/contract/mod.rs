@@ -11,6 +11,7 @@ mod model_account_eligibility;
 mod outbound;
 pub(super) use outbound::outbound_context;
 mod passthrough;
+mod portable_history;
 mod precommit;
 mod privacy;
 mod recovery;
@@ -961,6 +962,17 @@ async fn capture_downstream_request(
     websocket: bool,
     lite: bool,
 ) -> Value {
+    capture_downstream_request_with_portable_history(original, api_key, websocket, lite, false)
+        .await
+}
+
+async fn capture_downstream_request_with_portable_history(
+    original: Value,
+    api_key: bool,
+    websocket: bool,
+    lite: bool,
+    portable_history: bool,
+) -> Value {
     let http = MockServer::start().await;
     let (base_url, websocket_server) = if websocket {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1026,10 +1038,16 @@ async fn capture_downstream_request(
     let mut stream = provider
         .execute(
             planned_request("openai", operation),
-            context_with_state_owner_and_location(
+            context_with_state_owner_location_and_scope(
                 "req_replay_compatibility",
                 "acct_provider_contract",
                 None,
+                Arc::new(
+                    contract_account_scope()
+                        .as_ref()
+                        .clone()
+                        .with_portable_history(portable_history),
+                ),
             ),
         )
         .await
@@ -1732,6 +1750,20 @@ fn context_with_state_owner_and_location(
     owner_account_id: &str,
     location: Option<gateway_core::account::RequestLocation>,
 ) -> AttemptContext {
+    context_with_state_owner_location_and_scope(
+        request_id,
+        owner_account_id,
+        location,
+        contract_account_scope(),
+    )
+}
+
+fn context_with_state_owner_location_and_scope(
+    request_id: &str,
+    owner_account_id: &str,
+    location: Option<gateway_core::account::RequestLocation>,
+    scope: Arc<FrozenAccountScope>,
+) -> AttemptContext {
     let owner = ProviderAccountStateOwner::new(
         ProviderKind::new("openai").expect("provider"),
         ProviderAccountId::new(owner_account_id).expect("owner account id"),
@@ -1745,8 +1777,7 @@ fn context_with_state_owner_and_location(
         NonZeroU32::new(1).expect("attempt"),
         SystemTime::now() + Duration::from_secs(30),
         account_policy(),
-        AccountAttemptContext::new(BTreeSet::new(), None, Some(owner))
-            .with_account_scope(contract_account_scope()),
+        AccountAttemptContext::new(BTreeSet::new(), None, Some(owner)).with_account_scope(scope),
         None,
         CancellationToken::new(),
     )

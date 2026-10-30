@@ -742,6 +742,9 @@ Core 定义、校验并统一拥有评分规则，内置选号与诊断复用同
 
 ### 原生续接与会话亲和
 
+Key 的可移植历史策略随账号范围冻结，由 OpenAI Provider 在选号前验证不可迁移状态、发送前转换完整输入
+Core 只传递策略，不解释 reasoning 或密文；HTTP 与 WebSocket 共用转换入口，配置及失败合同见 [Client Key](api.md#7-client-key)
+
 Continuation 受原请求的 Client Key、账号范围、Provider 和发送/交付边界约束：
 
 - native continuation 固定创建它的 Provider 与账号
