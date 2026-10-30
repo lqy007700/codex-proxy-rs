@@ -8,7 +8,8 @@ use super::*;
 
 // 基线来自官方 Codex 823ea830c0 的客户端源码，各路径重复采样五次
 // HTTP 另与本机 Core 0.160.0 的采样核对，源码客户端与本项目还通过真实 models 请求验证
-// HTTP/native-tls 的扩展顺序固定；WebSocket/rustls 会随机化扩展顺序和临时密钥
+// Linux HTTP/native-tls 使用 OpenSSL 基线，其他平台对照同平台的 native-tls
+// WebSocket/rustls 会随机化扩展顺序和临时密钥
 #[derive(Debug, PartialEq, Eq)]
 struct ClientHello {
     legacy_version: u16,
@@ -33,31 +34,24 @@ fn http_client_hellos_should_match_official_tls_transports() {
             .enable_all()
             .build()
             .unwrap();
-        let hello = runtime.block_on(async {
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let url = format!(
-                "https://localhost:{}/",
-                listener.local_addr().unwrap().port()
-            );
-            let client = provider_openai::transport::build_reqwest_client().unwrap();
-            let (hello, response) = timeout(Duration::from_secs(10), async {
-                tokio::join!(read_client_hello(listener), client.get(url).send())
-            })
-            .await
-            .expect("HTTP ClientHello within timeout");
-            assert!(
-                response.is_err(),
-                "capture endpoint rejects TLS after ClientHello"
-            );
-            hello
+        runtime.block_on(async {
+            let hello = capture_http_client_hello(
+                provider_openai::transport::build_reqwest_client().unwrap(),
+            )
+            .await;
+            if case == "custom-ca" {
+                let mut normalized = hello;
+                normalized.extensions.sort_unstable();
+                assert_eq!(normalized, official_http_rustls_hello());
+            } else if cfg!(target_os = "linux") {
+                assert_eq!(hello, official_http_hello());
+            } else {
+                // 官方 823ea830c0 的 http-client/src/client_builder.rs 默认使用
+                // reqwest/native-tls；macOS 和 Windows 由系统 TLS 实现，不能套用 OpenSSL 画像
+                let reference = reqwest::Client::builder().no_proxy().build().unwrap();
+                assert_eq!(hello, capture_http_client_hello(reference).await);
+            }
         });
-        if case == "custom-ca" {
-            let mut normalized = hello;
-            normalized.extensions.sort_unstable();
-            assert_eq!(normalized, official_http_rustls_hello());
-        } else {
-            assert_eq!(hello, official_http_hello());
-        }
         println!("\n{CASE_COMPLETED}");
         return;
     }
@@ -97,6 +91,24 @@ fn http_client_hellos_should_match_official_tls_transports() {
             "isolated {case} TLS ClientHello case did not complete exactly once\nstdout:\n{stdout}"
         );
     }
+}
+
+async fn capture_http_client_hello(client: reqwest::Client) -> ClientHello {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!(
+        "https://localhost:{}/",
+        listener.local_addr().unwrap().port()
+    );
+    let (hello, response) = timeout(Duration::from_secs(10), async {
+        tokio::join!(read_client_hello(listener), client.get(url).send())
+    })
+    .await
+    .expect("HTTP ClientHello within timeout");
+    assert!(
+        response.is_err(),
+        "capture endpoint rejects TLS after ClientHello"
+    );
+    hello
 }
 
 #[tokio::test]
@@ -184,7 +196,10 @@ async fn read_client_hello(listener: TcpListener) -> ClientHello {
     stream.read_exact(&mut record).await.unwrap();
     stream.write_all(&[21, 3, 3, 0, 2, 2, 40]).await.unwrap();
 
-    let mut hello = Bytes::from(record);
+    parse_client_hello(Bytes::from(record))
+}
+
+fn parse_client_hello(mut hello: Bytes) -> ClientHello {
     assert_eq!(hello.get_u8(), 1, "ClientHello message");
     hello.advance(3); // 消息长度
     let legacy_version = hello.get_u16();
@@ -203,16 +218,23 @@ async fn read_client_hello(listener: TcpListener) -> ClientHello {
         assert!(values.insert(kind, take_vector(&mut extensions)).is_none());
     }
 
-    let mut groups = values[&10].clone();
-    let groups = u16_values(take_vector(&mut groups));
-    let mut signatures = values[&13].clone();
-    let signature_algorithms = u16_values(take_vector(&mut signatures));
-    let mut shares = values[&51].clone();
-    let mut shares = take_vector(&mut shares);
+    let groups = values
+        .get(&10)
+        .cloned()
+        .map(|mut groups| u16_values(take_vector(&mut groups)))
+        .unwrap_or_default();
+    let signature_algorithms = values
+        .get(&13)
+        .cloned()
+        .map(|mut signatures| u16_values(take_vector(&mut signatures)))
+        .unwrap_or_default();
     let mut key_shares = Vec::new();
-    while shares.has_remaining() {
-        let group = shares.get_u16();
-        key_shares.push((group, take_vector(&mut shares).len()));
+    if let Some(mut shares) = values.get(&51).cloned() {
+        let mut shares = take_vector(&mut shares);
+        while shares.has_remaining() {
+            let group = shares.get_u16();
+            key_shares.push((group, take_vector(&mut shares).len()));
+        }
     }
     let mut alpn = Vec::new();
     if let Some(protocols) = values.get(&16) {
@@ -225,9 +247,19 @@ async fn read_client_hello(listener: TcpListener) -> ClientHello {
     }
     ClientHello {
         legacy_version,
-        supported_versions: u16_values(values[&43].slice(1..)),
-        point_formats: values[&11].slice(1..).to_vec(),
-        psk_modes: values[&45].slice(1..).to_vec(),
+        // TLS 1.2 可不携带 TLS 1.3 扩展；缺失项应参与画像比较，而不是让采集器崩溃
+        supported_versions: values.get(&43).map_or_else(
+            || vec![legacy_version],
+            |versions| u16_values(versions.slice(1..)),
+        ),
+        point_formats: values
+            .get(&11)
+            .map(|formats| formats.slice(1..).to_vec())
+            .unwrap_or_default(),
+        psk_modes: values
+            .get(&45)
+            .map(|modes| modes.slice(1..).to_vec())
+            .unwrap_or_default(),
         cipher_suites,
         extensions: extension_order,
         groups,
@@ -235,6 +267,28 @@ async fn read_client_hello(listener: TcpListener) -> ClientHello {
         key_shares,
         alpn,
     }
+}
+
+#[test]
+fn client_hello_parser_accepts_tls12_without_optional_extensions() {
+    let mut hello = vec![1, 0, 0, 43, 3, 3];
+    hello.extend_from_slice(&[0; 32]);
+    hello.extend_from_slice(&[0, 0, 2, 0, 47, 1, 0, 0, 0]);
+    assert_eq!(
+        parse_client_hello(Bytes::from(hello)),
+        ClientHello {
+            legacy_version: 771,
+            supported_versions: vec![771],
+            point_formats: Vec::new(),
+            psk_modes: Vec::new(),
+            cipher_suites: vec![47],
+            extensions: Vec::new(),
+            groups: Vec::new(),
+            signature_algorithms: Vec::new(),
+            key_shares: Vec::new(),
+            alpn: Vec::new(),
+        }
+    );
 }
 
 fn take_vector(bytes: &mut Bytes) -> Bytes {

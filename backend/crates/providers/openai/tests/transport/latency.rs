@@ -443,8 +443,10 @@ async fn account_eviction_should_cancel_a_background_websocket_opening() {
     pool.shutdown().await;
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn pool_shutdown_should_cancel_and_join_a_background_websocket_opening() {
+    // 真实 TCP 的 EOF 需要系统交付，虚拟时钟自动快进会抢先触发关闭超时
+    let (shutdown_started, shutdown_observed) = tokio::sync::oneshot::channel();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -457,6 +459,7 @@ async fn pool_shutdown_should_cancel_and_join_a_background_websocket_opening() {
         assert!(request.starts_with("POST /codex/responses HTTP/1.1"));
         write_completed_sse_response(&mut http).await;
 
+        shutdown_observed.await.unwrap();
         let mut byte = [0_u8; 1];
         let read = timeout(Duration::from_secs(1), stalled_websocket.read(&mut byte))
             .await
@@ -479,6 +482,7 @@ async fn pool_shutdown_should_cancel_and_join_a_background_websocket_opening() {
         )
         .await
         .expect("foreground request should use HTTP after the opening budget");
+    shutdown_started.send(()).unwrap();
     timeout(Duration::from_secs(1), pool.shutdown())
         .await
         .expect("shutdown should join the cancelled opening task");

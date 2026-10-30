@@ -566,7 +566,7 @@ async fn codex_backend_client_stream_should_keep_reused_socket_after_structural_
         )
         .await
         .expect("seed response should populate pool");
-    tokio::time::pause();
+    // 真实 socket 与服务端延迟共用真实时钟，避免 idle 定时器在数据交付前自动快进
     let response = backend
         .create_response_stream(
             &request,
