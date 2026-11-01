@@ -51,6 +51,32 @@ fn primary_used_percent_values(headers: &[(String, String)]) -> Vec<&str> {
         .collect()
 }
 
+async fn wait_for_delayed_websocket_response<S>(
+    websocket: &mut tokio_tungstenite::WebSocketStream<S>,
+) where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    // 延迟期间仍需处理网关新增的 Ping 保活帧，模拟真实上游的控制帧行为
+    let delay = tokio::time::sleep(Duration::from_secs(30));
+    tokio::pin!(delay);
+    loop {
+        tokio::select! {
+            _ = &mut delay => break,
+            message = websocket.next() => {
+                match message {
+                    Some(Ok(Message::Ping(payload))) => {
+                        websocket.send(Message::Pong(payload)).await.unwrap();
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(Message::Close(_))) | None => return,
+                    Some(Ok(other)) => panic!("unexpected client frame during delayed response: {other:?}"),
+                    Some(Err(error)) => panic!("unexpected websocket control error: {error}"),
+                }
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn websocket_audit_artifact_should_require_explicit_directory() {
     let dir = tempfile::tempdir().expect("temp dir");
@@ -1538,7 +1564,7 @@ async fn websocket_stream_should_allow_silence_below_idle_timeout() {
             .await
             .unwrap();
         created_tx.send(()).unwrap();
-        tokio::time::sleep(Duration::from_secs(30)).await;
+        wait_for_delayed_websocket_response(&mut websocket).await;
         websocket
             .send(Message::Text(
                 completed_websocket_response("resp_structural", 3, 1).into(),
@@ -1731,7 +1757,7 @@ async fn codex_backend_client_stream_should_keep_socket_after_structural_activit
             .await
             .unwrap();
 
-        tokio::time::sleep(Duration::from_secs(30)).await;
+        wait_for_delayed_websocket_response(&mut first_websocket).await;
         first_websocket
             .send(Message::Text(
                 json!({
@@ -2074,7 +2100,7 @@ async fn codex_backend_client_stream_should_wait_for_terminal_after_active_webso
             ))
             .await
             .unwrap();
-        tokio::time::sleep(Duration::from_secs(30)).await;
+        wait_for_delayed_websocket_response(&mut websocket).await;
         websocket
             .send(Message::Text(
                 completed_websocket_response("resp_after_active_gap", 3, 1).into(),
