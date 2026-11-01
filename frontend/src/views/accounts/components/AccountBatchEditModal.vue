@@ -28,9 +28,15 @@ const proxyMode = defineModel<string>('proxyMode', { required: true })
 const proxyId = defineModel<string>('proxyId', { required: true })
 const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: true })
 const schedulingMode = computed({
-  get: () => enabled.value === undefined ? 'preserve' : enabled.value ? 'enabled' : 'disabled',
+  get: () => enabled.value === undefined
+    ? 'preserve'
+    : enabled.value
+      ? 'enabled'
+      : 'disabled',
   set: (value: string) => {
-    enabled.value = value === 'preserve' ? undefined : value === 'enabled'
+    enabled.value = value === 'preserve'
+      ? undefined
+      : value === 'enabled'
   },
 })
 const schedulingOptions = [
@@ -60,6 +66,7 @@ const schedulingOptions = [
         v-model:selected-group-ids="selectedGroupIds"
         v-model:proxy-mode="proxyMode"
         v-model:proxy-id="proxyId"
+        :enabled="enabled ?? false"
         show-scheduling-role
         preserve-scheduling-role
         preserve-model-access
