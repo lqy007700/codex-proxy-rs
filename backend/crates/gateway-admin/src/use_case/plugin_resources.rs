@@ -84,6 +84,7 @@ impl PluginResourceAccess for DefaultPluginResourceAccess {
                     groups,
                     NewClientKey {
                         portable_history: false,
+                        peer_sharing: Default::default(),
                         id,
                         name: command.name,
                         label: None,

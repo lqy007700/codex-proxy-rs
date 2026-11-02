@@ -313,6 +313,7 @@ impl CodexCredentialQuotaService {
         let outcome = self
             .store
             .compare_and_swap_quota(QuotaObservation {
+                expected_connection: None,
                 plan_type: observed_account_plan(account.plan_type(), snapshot.plan_type()),
                 account_id: account.id().clone(),
                 expected_revision: account.revision(),
@@ -412,9 +413,17 @@ impl CodexCredentialQuotaService {
         else {
             return Ok(None);
         };
-        if observation.account_id != *account_id
-            || observation.expected_revision != account.revision()
-        {
+        self.project_observation(account_id, account.revision(), &observation)
+    }
+
+    /// 复用单账号额度解释，批量读取只改变持久层往返而不改变额度策略
+    pub(crate) fn project_observation(
+        &self,
+        account_id: &ProviderAccountId,
+        revision: CredentialRevision,
+        observation: &QuotaObservation,
+    ) -> Result<Option<CodexAccountQuotaSnapshot>, CodexCredentialQuotaError> {
+        if observation.account_id != *account_id || observation.expected_revision != revision {
             return Err(CodexCredentialQuotaError::RevisionConflict);
         }
         if observation.quota.expose_to_provider().is_empty() {
@@ -423,7 +432,7 @@ impl CodexCredentialQuotaService {
         let observed_at = observation.observed_at;
         let snapshot = parse_account_quota_snapshot(
             account_id.clone(),
-            account.revision(),
+            revision,
             observed_at,
             &Value::Object(observation.quota.expose_to_provider().clone()),
         )?
@@ -556,6 +565,7 @@ impl CodexCredentialQuotaService {
         if self
             .store
             .compare_and_swap_quota(QuotaObservation {
+                expected_connection: None,
                 plan_type: observed_account_plan(account.plan_type(), snapshot.plan_type()),
                 account_id: account.id().clone(),
                 expected_revision: account.revision(),

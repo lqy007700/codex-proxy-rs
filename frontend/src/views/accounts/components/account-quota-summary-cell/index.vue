@@ -29,11 +29,26 @@ const currentUsageTextClass = computed(() => currentUsageWindow.value
   ? quotaWindowPresentation(currentUsageWindow.value, '2px').percentTextClass
   : 'text-cp-text-quaternary')
 const additionalEntryCount = computed(() => Math.max(summaryEntries.value.length - 1, 0))
+const upstreamBudget = computed(() => quotaWindows.value.find(window => window.amount)?.amount)
 </script>
 
 <template>
   <div class="box-border grid min-h-16.5 w-full min-w-0 content-center gap-1.5 py-1.5">
-    <template v-if="account.authenticationKind === 'api_key'">
+    <template v-if="account.upstream?.discovered">
+      <div class="flex min-w-0 items-baseline justify-between gap-2 text-cp-xs">
+        <strong v-if="upstreamBudget" class="truncate font-mono text-cp-text" title="上游 Key 剩余额度 / 总额">
+          {{ upstreamBudget.remainingDisplay }} / {{ upstreamBudget.totalDisplay }}
+        </strong>
+        <span v-else-if="account.upstream.pool" class="text-cp-text-secondary">
+          账号池 {{ account.upstream.pool.states.ready }} / {{ account.upstream.pool.accountCount }} 就绪
+        </span>
+        <span v-else class="text-cp-text-secondary">互联额度未公开</span>
+        <AccountCapacityIndicator :capacity="account.capacity" @show-details="emit('showConcurrency')" />
+      </div>
+      <span v-if="upstreamBudget" class="text-cp-xs text-cp-text-tertiary">上游已用 {{ upstreamBudget.usedDisplay }}</span>
+      <span v-if="account.upstream.stale" class="text-cp-xs text-cp-warning-text">观测已过期</span>
+    </template>
+    <template v-else-if="account.authenticationKind === 'api_key'">
       <span
         class="flex min-w-0 items-baseline gap-1 font-mono leading-none tabular-nums"
         title="本地累计总 Token"

@@ -107,9 +107,9 @@ OpenAI 临时传输恢复状态按“账号 + 逻辑会话”隔离，同一个�
 
 | 职责 | 代码与回归入口 |
 | --- | --- |
-| 状态隔离、有效期和代次 | [session_transport.rs](../backend/crates/providers/openai/src/session_transport.rs)、[Admin 测试](../backend/crates/providers/openai/tests/admin.rs) |
+| 状态隔离、有效期和代次 | [session_transport.rs](../backend/crates/providers/openai/src/session_transport.rs)、[Admin 测试](../backend/crates/providers/openai/tests/admin/mod.rs) |
 | 生成路径和失败反馈 | [execution.rs](../backend/crates/providers/openai/src/provider/execution.rs)、[failure.rs](../backend/crates/providers/openai/src/provider/failure.rs) |
-| 管理投影与恢复入口 | [Provider admin.rs](../backend/crates/providers/openai/src/admin.rs)、[账号用例](../backend/crates/gateway-admin/src/use_case/accounts/mod.rs)、[降级提示](../frontend/src/views/accounts/components/AccountWebSocketDegradedIndicator.vue) |
+| 管理投影与恢复入口 | [Provider admin.rs](../backend/crates/providers/openai/src/admin/mod.rs)、[账号用例](../backend/crates/gateway-admin/src/use_case/accounts/mod.rs)、[降级提示](../frontend/src/views/accounts/components/AccountWebSocketDegradedIndicator.vue) |
 
 ## 协议与模型目录
 
@@ -138,6 +138,23 @@ API Key 上游支持标准 OpenAI `data[].id` 列表和完整 Codex `models[]` �
 | Chat 入口、校验和交付 | [API chat](../backend/crates/gateway-api/src/openai/chat/http.rs)、[入口测试](../backend/crates/gateway-api/tests/openai/chat/http.rs) |
 | 纯协议转换 | [Chat request](../backend/crates/gateway-protocol/src/openai/chat/request.rs)、[response](../backend/crates/gateway-protocol/src/openai/chat/response.rs)、[stream](../backend/crates/gateway-protocol/src/openai/chat/stream.rs)、[协议测试](../backend/crates/gateway-protocol/tests/openai/chat/request.rs) |
 | 上游目录判别及校验 | [transport/catalog.rs](../backend/crates/providers/openai/src/transport/catalog.rs)、[credential/catalog.rs 测试](../backend/crates/providers/openai/tests/credential/catalog.rs) |
+
+### 原生模型资格与互联
+
+原生 OpenAI 和 xAI 账号先满足有效目录与本地模型政策，再参与权重、亲和或固定账号选择。
+OpenAI OAuth 按已知套餐隔离目录，API Key 按账号及凭据版本隔离；未知套餐或没有有效目录时交由上游验证。
+明确拒绝模型只冷却该账号与模型 30 分钟，凭据变化后旧冷却失效，不扩大为账号级冻结或放宽续接换号限制
+
+CPR Link v2 共享权限默认关闭，只公开绑定有效分组中的直连 OAuth 账号，不递归公开 API Key 转接账号。
+授权范围内的保底账号可进入匿名池观测，但协议不传递调度角色；实际推理仍按本地普通／保底阶段执行。
+接入互联不改变账号用途、创建默认值或 `recoveryAttempts`，各节点各自执行恢复预算，不协商跨节点总次数。
+对外字段与有效期见 [CPR 互联只读协议](api.md#cpr-互联只读协议)
+
+| 职责 | 代码与回归入口 |
+| --- | --- |
+| 共享授权与本地聚合 | [peer_link](../backend/crates/gateway-admin/src/use_case/peer_link/mod.rs)、[导出回归](../backend/crates/gateway-admin/tests/use_case/peer_link/mod.rs) |
+| 发现、连接隔离与恢复 | [upstream](../backend/crates/gateway-admin/src/use_case/peer_link/upstream/mod.rs)、[同步回归](../backend/crates/gateway-admin/tests/use_case/peer_link/upstream/mod.rs) |
+| 原生模型资格 | [OpenAI selector](../backend/crates/providers/openai/src/credential/selector.rs)、[资格回归](../backend/crates/providers/openai/tests/provider/contract/model_account_eligibility.rs) |
 
 ## 请求记录与诊断
 
@@ -211,6 +228,8 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 | `0039_email_alerts.sql` | 邮件告警设置与可靠投递状态 |
 | `0040_quota_alerts.sql` | OAuth 额度预警检查进度与周期去重 |
 | `0041_account_error_protection.sql` | 账号错误保护设置、规则和保护 revision；移除旧容量冻结设置列 |
+| `0042_client_key_portable_history.sql` | Client Key 可移植历史开关，默认关闭 |
+| `0043_cpr_link.sql` | Client Key 共享权限默认关闭，账号额度 JSON 上限为 8 MiB |
 
 实际文件和冻结摘要见[迁移目录](../backend/migrations/README.md#冻结规则)。
 业务备份沿用当前精简归档合同；下载已有 PostgreSQL custom 归档时保留 `.dump` 扩展，不将其误标为 `.sql.gz`。

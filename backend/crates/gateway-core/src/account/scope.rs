@@ -49,6 +49,7 @@ pub struct RuntimeAccount {
     group_ids: Arc<BTreeSet<AccountGroupId>>,
     model_access: super::AccountModelAccess,
     scheduling_role: crate::account::AccountSchedulingRole,
+    direct_authentication_kind: Option<String>,
 }
 
 impl RuntimeAccount {
@@ -73,6 +74,7 @@ impl RuntimeAccount {
             group_ids: Arc::new(group_ids),
             scheduling_role: crate::account::AccountSchedulingRole::Regular,
             model_access: super::AccountModelAccess::all(),
+            direct_authentication_kind: None,
         }
     }
 
@@ -80,6 +82,23 @@ impl RuntimeAccount {
     pub fn with_model_access(mut self, model_access: super::AccountModelAccess) -> Self {
         self.model_access = model_access;
         self
+    }
+
+    /// Provider 确认该认证方式直接使用自身资源，而非继续转供另一个节点
+    #[must_use]
+    pub fn with_direct_authentication_kind(mut self, kind: Option<String>) -> Self {
+        self.direct_authentication_kind = kind;
+        self
+    }
+
+    #[must_use]
+    pub const fn is_direct_account(&self) -> bool {
+        self.direct_authentication_kind.is_some()
+    }
+
+    #[must_use]
+    pub fn direct_authentication_kind(&self) -> Option<&str> {
+        self.direct_authentication_kind.as_deref()
     }
 
     #[must_use]
@@ -265,6 +284,7 @@ impl ClientRoutingScope {
 pub struct FrozenAccountScope {
     portable_history: bool,
     allow_image_generation: bool,
+    direct_accounts_only: bool,
     fast_mode: FastMode,
     request_profiles: BTreeMap<ProviderKind, super::OpaqueProviderData>,
     directory: Arc<RuntimeAccountDirectory>,
@@ -311,6 +331,31 @@ impl FrozenAccountScope {
                 && self.allows(id)
                 && model.is_none_or(|model| self.allows_model(id, model))
         })
+    }
+
+    /// 枚举冻结权限实际允许的账号，保留所有既有直连和分组约束
+    pub fn allowed_account_ids(&self) -> impl Iterator<Item = &ProviderAccountId> {
+        self.directory.accounts.keys().filter(|id| self.allows(id))
+    }
+
+    /// 互联限制与原账号范围取交集，分组变更和请求局部重选均不能扩大它
+    #[must_use]
+    pub fn with_direct_accounts_only(mut self, enabled: bool) -> Self {
+        self.direct_accounts_only = enabled;
+        if enabled {
+            self.provider_kinds = Arc::new(
+                self.provider_kinds
+                    .iter()
+                    .filter(|provider| {
+                        self.directory.accounts.iter().any(|(id, account)| {
+                            account.provider_kind() == *provider && self.allows(id)
+                        })
+                    })
+                    .cloned()
+                    .collect(),
+            );
+        }
+        self
     }
 
     /// Key 绑定分组合并后的生图权限，与账号成员资格一同冻结
@@ -366,6 +411,7 @@ impl FrozenAccountScope {
         Self {
             portable_history: false,
             allow_image_generation: true,
+            direct_accounts_only: false,
             fast_mode: FastMode::Default,
             request_profiles: BTreeMap::new(),
             directory,
@@ -425,7 +471,10 @@ impl FrozenAccountScope {
         let Some(account) = self.directory.account(account_id) else {
             return false;
         };
-        if self.excluded_account_ids.contains(account_id)
+        if (self.direct_accounts_only
+            && (!account.is_direct_account()
+                || matches!(self.client_scope, ClientRoutingScope::AllAccounts)))
+            || self.excluded_account_ids.contains(account_id)
             || !self.provider_kinds.contains(account.provider_kind())
             || self
                 .allowed_account_ids
@@ -452,6 +501,16 @@ impl FrozenAccountScope {
                 .directory
                 .account(account_id)
                 .is_some_and(|account| account.model_access.allows(upstream_model))
+    }
+
+    /// 当前凭据类型必须与已授权的直连事实相同，快照发布间隙不能转成代理账号
+    #[must_use]
+    pub fn allows_current_account(&self, account: &super::ProviderAccount) -> bool {
+        self.allows(account.id())
+            && (!self.direct_accounts_only
+                || self.directory.account(account.id()).is_some_and(|frozen| {
+                    frozen.direct_authentication_kind() == Some(account.authentication_kind())
+                }))
     }
 
     /// 目录按整个授权账号池过滤，不能只看用于获取元数据的账号政策

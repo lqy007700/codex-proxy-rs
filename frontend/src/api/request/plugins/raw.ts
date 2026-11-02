@@ -1,21 +1,5 @@
-import type { RequestContext, RequestNext } from './index'
+import type { RawResponse, RawResponseMeta, RequestContext, RequestNext } from '../types'
 import { ApiError, normalizeApiResponseError } from './error'
-
-export interface RawResponseMeta {
-  status: number
-  header: (name: string) => string | undefined
-}
-
-export interface RawResponse {
-  status: number
-  contentType: string
-  body: ArrayBuffer
-}
-
-export interface RawResponseOptions {
-  maximumBytes: number
-  accept: (response: RawResponseMeta) => boolean
-}
 
 export async function rawPlugin(context: RequestContext, next: RequestNext) {
   const options = context.raw

@@ -1,4 +1,4 @@
-import type { RequestContext, RequestNext } from './index'
+import type { RequestContext, RequestNext } from '../types'
 import { ApiError, isTransientApiError } from './error'
 
 export async function retryPlugin(context: RequestContext, next: RequestNext) {

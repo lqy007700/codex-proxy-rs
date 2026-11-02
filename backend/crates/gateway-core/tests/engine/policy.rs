@@ -543,3 +543,71 @@ fn recovery_roles_follow_the_frozen_scope_and_preserve_hard_eligibility() {
         );
     }
 }
+
+#[test]
+fn peer_sharing_scope_preserves_local_recovery_stages() {
+    use gateway_core::{
+        account::{AccountSchedulingRole, AccountSelector},
+        engine::recovery::AccountRecoveryStage,
+        routing::{
+            AccountGroupId, ClientRoutingScope, FrozenAccountScope, RoutingGroupSnapshot,
+            RuntimeAccount, RuntimeAccountDirectory,
+        },
+    };
+    let provider = ProviderKind::new("openai").unwrap();
+    let group = AccountGroupId::new("grp_11111111111111111111111111111111").unwrap();
+    let candidates = [
+        candidate("acct_a"),
+        candidate("acct_b"),
+        candidate("acct_d"),
+    ];
+    let directory = Arc::new(RuntimeAccountDirectory::new(
+        candidates
+            .iter()
+            .map(|candidate| {
+                let id = candidate.account.id().clone();
+                let role = if id == account_id("acct_d") {
+                    AccountSchedulingRole::Fallback
+                } else {
+                    AccountSchedulingRole::Regular
+                };
+                let account =
+                    RuntimeAccount::new(provider.clone(), BTreeSet::from([group.clone()]))
+                        .with_scheduling_role(role)
+                        .with_direct_authentication_kind(Some("test".into()));
+                (id, account)
+            })
+            .collect(),
+    ));
+    let scope = Arc::new(
+        FrozenAccountScope::new(
+            directory,
+            ClientRoutingScope::restricted(
+                vec![RoutingGroupSnapshot::new(group.clone(), "peer".into())],
+                BTreeSet::from([group]),
+                BTreeSet::from([provider]),
+            )
+            .unwrap(),
+        )
+        .with_direct_accounts_only(true),
+    );
+    for (stage, expected) in [
+        (AccountRecoveryStage::Initial, "acct_a"),
+        (
+            AccountRecoveryStage::OtherAccounts {
+                initial: account_id("acct_a"),
+                after: None,
+            },
+            "acct_b",
+        ),
+        (AccountRecoveryStage::Fallback, "acct_d"),
+    ] {
+        let mut selection = context();
+        selection.account_scope = Some(scope.clone());
+        // 即使软亲和指向保底，共享权限也不能让它绕过本地恢复阶段
+        selection.preferred_account = Some(account_id("acct_d"));
+        stage.prepare_selection(&candidates, &mut selection, None);
+        let selected = AccountSelector.select(&candidates, &selection).unwrap();
+        assert_eq!(selected.candidate().account.id(), &account_id(expected));
+    }
+}

@@ -1,6 +1,7 @@
 //! OpenAI 凭据合同测试入口，以及凭据编码、持久化与选号约束测试
 
 mod capacity;
+mod cooldown_reads;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
@@ -229,12 +230,21 @@ fn selector_with_runtime(
         verified_at: chrono::Utc::now(),
     });
     let http = reqwest::Client::builder().build().expect("HTTP client");
+    let catalog = Arc::new(
+        provider_openai::credential::CodexCredentialCatalogService::new(
+            store.repository(),
+            profile.clone(),
+            http.clone(),
+            OFFICIAL_CODEX_BASE_URL.to_owned(),
+            crate::support::catalog_cache(),
+        ),
+    );
     let quota = Arc::new(CodexCredentialQuotaService::new(
         store.repository(),
         profile,
         http,
         OFFICIAL_CODEX_BASE_URL.to_owned(),
-        cooldowns,
+        cooldowns.clone(),
         crate::support::runtime_policy(),
     ));
     CodexCredentialSelector::new(
@@ -244,6 +254,8 @@ fn selector_with_runtime(
         session_affinity,
         Arc::new(MemorySessionExclusions::default()),
         quota,
+        catalog,
+        cooldowns,
         account_feedback,
         CodexCookiePolicy::official().expect("official cookie policy"),
     )
@@ -1554,6 +1566,8 @@ fn native_continuation_surfaces_the_original_accounts_quota_signal_to_the_coordi
     });
     let observed_at = SystemTime::now();
     let outcome = block_on(store.compare_and_swap_quota(QuotaObservation {
+        expected_connection: None,
+
         plan_type: None,
         account_id: original.id().clone(),
         expected_revision: original.revision(),

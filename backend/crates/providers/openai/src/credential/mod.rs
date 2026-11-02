@@ -4,6 +4,7 @@ mod admin;
 mod affinity;
 mod api_key;
 mod catalog;
+mod codec;
 mod cookie;
 mod eligibility;
 mod oauth;
@@ -13,7 +14,6 @@ pub(crate) use quota::snapshot::parse_account_quota_snapshot;
 mod recovery_log;
 mod refresh;
 mod repository;
-mod security;
 mod selector;
 pub mod token_client;
 mod types;
@@ -42,6 +42,10 @@ pub use catalog::{
     CodexCatalogScope, CodexCredentialCatalogError, CodexCredentialCatalogService,
     CodexCredentialCatalogSnapshot, CodexPlanCatalog,
 };
+pub use codec::{
+    CodexCredentialCodec, CodexCredentialDataError, CodexRuntimeAuthentication,
+    CodexRuntimeCredential,
+};
 pub use cookie::{CodexCookiePolicy, CookiePolicyError};
 pub use oauth::{
     CodexOAuthAdmin, CodexOAuthAdminError, CodexOAuthAdminService, CodexOAuthAuthorizationStarted,
@@ -63,10 +67,6 @@ pub use refresh::{
     DueCodexCredential,
 };
 pub use repository::{CodexCredentialRepository, CredentialRepositoryError};
-pub use security::{
-    CodexCredentialCodec, CodexCredentialDataError, CodexRuntimeAuthentication,
-    CodexRuntimeCredential,
-};
 pub use selector::{
     CodexAccountFailure, CodexCredentialLease, CodexCredentialSelector, CredentialSelectionError,
     SelectCodexCredential,
@@ -79,3 +79,8 @@ pub use types::{
 };
 
 mod diagnostics;
+
+/// 直连资格由 Provider 拥有，执行快照与只读导出使用同一判断
+pub(crate) fn is_direct_account_kind(authentication_kind: &str) -> bool {
+    authentication_kind == CODEX_AUTHENTICATION_KIND_OAUTH
+}

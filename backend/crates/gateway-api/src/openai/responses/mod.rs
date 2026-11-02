@@ -8,8 +8,9 @@ mod response;
 mod validation;
 pub mod websocket;
 
+pub use crate::client_error::{ProtocolError, ProtocolErrorBody};
 pub(crate) use crate::request_context::request_client_context;
-pub use error::{ProtocolError, ProtocolErrorBody, RequestDecodeError, ResponseEncodeError};
+pub use error::{RequestDecodeError, ResponseEncodeError};
 pub(crate) use http::{
     ResponseAuthorization, ResponsesHttpRequest, execute_prepared_responses, execution_response,
     responses,

@@ -1,13 +1,7 @@
 import type { RequestOptions } from '../request'
+import type { RequestLocation, RequestLocationDetection } from '../types/location'
 import type { AccountGroupRef } from './groups'
-import type { RequestLocation } from './settings'
 import request from '../request'
-
-export type ProxyLocationDetection
-  = | { status: 'notRequested' }
-    | { status: 'detected', location: RequestLocation }
-    | { status: 'failed', message: string }
-    | { status: 'conflict' }
 
 export interface DetectedProxyLocation {
   location: RequestLocation
@@ -17,7 +11,7 @@ export interface DetectedProxyLocation {
 }
 
 export interface OutboundProxyTest {
-  location: ProxyLocationDetection
+  location: RequestLocationDetection
   success: boolean
   latencyMs: number
   exitIp: string | null

@@ -1277,7 +1277,7 @@ fn provider_and_quota_with_runtime_ports(
         profile.clone(),
         http.clone(),
         base_url.clone(),
-        cooldowns,
+        cooldowns.clone(),
         policy,
     ));
     let account_feedback = Arc::new(AccountFeedbackStats::default());
@@ -1288,6 +1288,8 @@ fn provider_and_quota_with_runtime_ports(
         session_affinity,
         Arc::new(MemorySessionExclusions::default()),
         Arc::clone(&quota),
+        Arc::clone(&catalog),
+        cooldowns,
         Arc::clone(&account_feedback),
         CodexCookiePolicy::official().expect("cookie policy"),
     ));
@@ -7233,6 +7235,8 @@ async fn affinity_quota_switch_should_clear_old_turn_state_without_a_provider_st
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            expected_connection: None,
+
             plan_type: None,
             account_id: first_account.id().clone(),
             expected_revision: first_account.revision(),
@@ -8221,6 +8225,8 @@ async fn official_usage_limit_failure_persists_fact_without_fabricating_usage() 
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            expected_connection: None,
+
             plan_type: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
@@ -9806,6 +9812,8 @@ async fn quota_limited_account_diagnostic_uses_upstream() {
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            expected_connection: None,
+
             plan_type: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
@@ -11099,7 +11107,7 @@ async fn api_key_native_endpoints_preserve_bodies_headers_and_own_base_url() {
 }
 
 #[tokio::test]
-async fn api_key_responses_forward_lite_memgen_and_native_compaction_without_catalog_gates() {
+async fn api_key_responses_forward_lite_memgen_and_native_compaction_with_catalog_eligibility() {
     let upstream = MockServer::start().await;
     let store = Arc::new(MemoryAccountStore::default());
     store
@@ -11111,9 +11119,7 @@ async fn api_key_responses_forward_lite_memgen_and_native_compaction_without_cat
         .await;
     Mock::given(method("GET"))
         .and(path("/models"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"data":[{"id":"different-model"}]})),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data":[{"id":"gpt-5.4"}]})))
         .expect(1)
         .mount(&upstream)
         .await;

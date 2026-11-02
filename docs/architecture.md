@@ -57,12 +57,12 @@ flowchart TB
 | --- | --- |
 | `backend/apps/gateway` | 读取顶层配置、连接 Bundle、注册 Provider 与 Worker |
 | `backend/apps/plugin-cli`（包名 `codex-proxy-plugin-cli`） | `cpr-plugin package` 校验作者清单并生成平台元数据、资源摘要与归档；内部仅依赖 SDK，不参与网关运行时加载 |
-| `gateway-protocol` | 跨层共享的 OpenAI wire contract、SSE 编解码与无业务 owner 的解析事实，不依赖其他 workspace crate |
+| `gateway-protocol` | 跨层共享的 OpenAI 与 CPR 互联 wire contract、SSE 编解码与无业务 owner 的解析事实，不依赖其他 workspace crate |
 | `gateway-core` | operation、canonical event、请求快照、路由、admission、attempt 协调、交付边界和计量 |
-| `gateway-admin` | 管理领域、Key 用量查询、Provider/Store 端口、审计语义、备份与历史保留策略 |
+| `gateway-admin` | 管理领域、Key 用量与互联观测、Provider/Store 端口、审计语义、备份与历史保留策略 |
 | `gateway-api` | HTTP/WS/SSE 解码与交付、Admin 与 Key 用量 wire、静态 Web UI；不直接访问 Store 或具体 Provider |
 | `gateway-store` | PostgreSQL、Redis、S3/R2、`pg_dump` 适配器；不拥有业务策略 |
-| `gateway-host` | 配置加载、日志、HTTP 生命周期、Worker 监督与历史保留任务、系统更新及外部价格源适配 |
+| `gateway-host` | 配置加载、日志、HTTP 生命周期、Worker 监督与历史保留任务、系统更新、互联传输及外部价格源适配 |
 | `gateway-plugin/sdk`（包名 `gateway-plugin-sdk`） | 公开插件清单与线协议，独立于网关领域；异步收发通过可选 `io` feature 提供 |
 | `gateway-plugin/runtime`（包名 `gateway-plugin-runtime`） | 插件包校验、能力适配、双向 RPC 与发布集合；通过 Host 管理子进程和受管 HTTP |
 | `providers/openai` | OpenAI OAuth、账号选择、目录、额度、Responses/Images/Search transport |
@@ -324,7 +324,7 @@ Provider 模型能力、目录代次与 `ProviderCatalogPort` 由 `routing::cata
 该只读合同，不反向依赖执行注册表；`ProviderRegistry` 实现目录端口，维护唯一的 Provider
 注册集合。已知空目录与查询失败的未知目录保持不同语义，目录替身无需实现请求执行。
 Provider 可为模型提供来源账号集合；Core 在公开目录查询时结合冻结账号范围与政策过滤来源，
-配置发布复用已缓存的来源事实。来源集合只约束目录展示，不改变发现型目录的推理准入语义
+配置发布复用已缓存的来源事实。来源集合用于目录展示；原生 Provider 选号另按有效目录、认证类型和本地模型政策核对账号资格，不因权重或亲和绕过
 
 客户端原生模型目录同样由 Provider 拥有，通过 `ExecutionService` 和现有 Registry 的只读调用传递。
 `routing::catalog` 的原生条目只包含模型 ID 与不透明协议正文，Core 负责冻结账号范围和整对象模型映射，
@@ -502,7 +502,10 @@ credential state 调度，不以是否存在上游用户 ID 推断可用性；OA
 状态恢复和未补齐身份的凭据轮换保留 `unknown`。
 API Key 默认 HTTP/SSE，可选 WS 优先；选号先验证传输资格，WS pool 与 continuation 按凭据版本隔离。
 OAuth 与 API Key 共用业务请求、响应和能力透传链路，差异限定在上游地址、认证、传输配置及明确的上游请求合同适配。
-OpenAI 模型目录用于发现，不因目录缺项拒绝请求；管理员配置的模型权限仍由 Core 与选号链路执行
+OpenAI 原生选号读取既有目录快照：OAuth 按已知套餐隔离，API Key 按账号及凭据版本隔离。
+有效目录明确缺项时排除账号；未知套餐或没有有效目录时交由上游验证，不为每次推理新增目录请求。
+本地模型权限由 Core 与选号链路执行，受管适配器使用自己的模型合同。
+上游明确拒绝模型后，Provider 写入按账号、凭据版本与模型隔离的冷却，不改变账号级保护及请求恢复预算
 
 - OpenAI 是透明边界。正文兼容、身份归一和显式请求策略之外的业务字段保留原始语义；
   业务响应按原始字节转发，客户端错误兼容与原生续写额度恢复按明确例外处理，见 [OpenAI 透传](api.md#openai-透传)。
@@ -1002,6 +1005,20 @@ Admin 仅为开启自动使用的账号保存卡片 ID、到期时间、下一�
 设置剩余周额度上限时，Admin 在新消费前通过 Provider 刷新额度，复用账号周窗口归属；超过上限或无法确认时保留卡片重查。
 上游明确返回 `nothing_to_reset` 时清除未决键并保留卡片，下一次消费使用新键；未确认操作始终沿原键完成确认。
 计划写入通过版本比较拒绝过期覆盖，全局提前时间或周额度上限变更唤醒本地重算，关闭自动使用保留未决键供重新开启后恢复
+
+### CPR 互联状态边界
+
+`gateway-protocol::peer` 拥有 v2 wire 与解析上限；Admin 拥有共享授权、聚合、发现、退避和观测有效性。
+API 只处理数据面认证与响应，Host 负责受限 HTTP 传输，Provider 提供连接凭据及认证类型判断。
+组合根独立注册互联 Worker，首查、周期和手动刷新共用连接级锁与容量，普通列表 GET 只读本地观测
+
+互联内容复用账号额度持久化，不建立第二套额度事实。连接身份包含账号、凭据版本和有效出口，
+Store 提交时核对当前连接及观测时间；缓存随连接变化失效，迟到响应不能恢复旧内容。
+停用停止同步，删除清理缓存；取消和超时释放槽位、锁与任务资源，不支持结论持久化并允许手动重探测
+
+只有有效且新于耗尽事实的明确允许才能解除 Key 预算耗尽；金额增加、窗口重置、失败或缺失字段不能证明恢复。
+模型额度观测只提供 Smart 评分，不派生跨模型冻结。导出查询使用冻结与当前授权交集，
+不占推理并发、RPM 或更新最近推理时间；原始账号身份及本地调度角色不进入匿名协议
 
 ## 10. 观测与后台任务
 

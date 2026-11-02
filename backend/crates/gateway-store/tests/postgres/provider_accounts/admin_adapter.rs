@@ -3,6 +3,51 @@
 use super::*;
 
 #[tokio::test]
+async fn peer_group_reads_preserve_fork_policy_fields_and_current_group_permission() {
+    let Some(database) = TestDatabase::create("peer_group_policy").await else {
+        return;
+    };
+    let repository = PgProviderAccountRepository::new(database.pool.clone());
+    repository
+        .insert_provider_account(account("acct_peer_scope", "peer-scope"))
+        .await
+        .unwrap();
+    let group = "grp_00000000000000000000000000000043";
+    sqlx::query("insert into account_groups(id,name,color,enabled,created_at,updated_at) values($1,'peer scope','#2563EBFF',true,now(),now())")
+        .bind(group).execute(&database.pool).await.unwrap();
+    sqlx::query("insert into account_group_accounts(account_group_id,provider_account_id,created_at) values($1,'acct_peer_scope',now())")
+        .bind(group).execute(&database.pool).await.unwrap();
+    sqlx::query("update provider_accounts set scheduling_role='fallback',allow_credits=true where id='acct_peer_scope'")
+        .execute(&database.pool).await.unwrap();
+    let store = admin_account_store(&database.pool);
+    let ids = [ProviderAccountId::new("acct_peer_scope").unwrap()];
+    let groups = [AccountGroupId::new(group).unwrap()];
+    let records = store
+        .load_accounts_in_enabled_groups(&ids, &groups)
+        .await
+        .unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0].scheduling_role,
+        gateway_core::account::AccountSchedulingRole::Fallback
+    );
+    assert!(records[0].allow_credits);
+    sqlx::query("update account_groups set enabled=false where id=$1")
+        .bind(group)
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    assert!(
+        store
+            .load_accounts_in_enabled_groups(&ids, &groups)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    database.close().await;
+}
+
+#[tokio::test]
 async fn account_existence_does_not_require_capacity_settings() {
     let Some(database) = TestDatabase::create("account_existence").await else {
         return;

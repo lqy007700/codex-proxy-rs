@@ -233,7 +233,11 @@ export function useAccountMutations(options: {
           selectedIds.delete(accountId)
           options.selectedIds.value = selectedIds
         }
-        ZNotification.success({ message: '额度已刷新' })
+        ZNotification.success({
+          message: result.account.upstream?.lastError === 'unsupported'
+            ? '已完成识别，上游未提供互联能力'
+            : '额度已刷新',
+        })
       }
       catch {}
     })

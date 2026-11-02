@@ -1,4 +1,4 @@
-import type { ApiKey } from '@/api'
+import type { ApiKey, ApiKeyPeerSharing } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
 import { cloneDeep } from 'es-toolkit'
 import { ref, shallowRef } from 'vue'
@@ -7,6 +7,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { notification as ZNotification } from '@/utils/notification'
 
 export interface ApiKeyFormValue {
+  peerSharing: ApiKeyPeerSharing
   portableHistory: boolean
   providerRequestProfileOverrides: ProviderRequestProfiles
   customKey: string
@@ -39,6 +40,7 @@ export function useApiKeyEditor(options: {
   function openEdit(key: ApiKey) {
     editingKey.value = key
     form.value = {
+      peerSharing: { ...key.peerSharing },
       providerRequestProfileOverrides: cloneDeep(key.providerRequestProfileOverrides),
       portableHistory: key.portableHistory,
       customKey: '',
@@ -75,6 +77,7 @@ export function useApiKeyEditor(options: {
     await savingKeyAction.run(
       async () => {
         const payload = {
+          peerSharing: { ...form.value.peerSharing },
           portableHistory: form.value.portableHistory,
           name: form.value.name.trim(),
           label: form.value.label.trim() || null,
@@ -143,6 +146,12 @@ export function useApiKeyEditor(options: {
 
 function emptyForm(): ApiKeyFormValue {
   return {
+    peerSharing: {
+      enabled: false,
+      sharePool: false,
+      shareQuota: false,
+      sharePlans: false,
+    },
     portableHistory: false,
     providerRequestProfileOverrides: {},
     customKey: '',

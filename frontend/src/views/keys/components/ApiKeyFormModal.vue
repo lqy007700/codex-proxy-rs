@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ApiKeyFormValue } from '../composables/useApiKeyEditor'
-import type { AccountGroupRef } from '@/api'
-import { ZButton, ZDialog, ZForm, ZFormItem, ZInput, ZSwitch } from '@codex-proxy/ui'
+import type { AccountGroupRef, ApiKeyPeerSharing } from '@/api'
+import { ZButton, ZCheckbox, ZDialog, ZForm, ZFormItem, ZInput, ZSwitch } from '@codex-proxy/ui'
 
 import { DollarSign, KeyRound } from '@lucide/vue'
 import { computed, useTemplateRef, watch } from 'vue'
@@ -23,7 +23,7 @@ const open = defineModel<boolean>({ default: false })
 const form = defineModel<ApiKeyFormValue>('form', { required: true })
 const title = computed(() => props.editing ? '编辑密钥' : '创建 API Key')
 const formRef = useTemplateRef<InstanceType<typeof ZForm>>('formElement')
-const rules = useApiKeyFormRules()
+const rules = useApiKeyFormRules(() => form.value.peerSharing.enabled)
 
 watch(open, () => formRef.value?.clearValidate())
 
@@ -35,6 +35,13 @@ async function requestSave() {
 
 function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFormValue[Key]) {
   form.value = { ...form.value, [key]: value }
+}
+
+function updatePeerSharing(key: keyof ApiKeyPeerSharing, value: boolean) {
+  const sharing = { ...form.value.peerSharing, [key]: value }
+  if (!sharing.sharePool)
+    sharing.sharePlans = false
+  updateForm('peerSharing', sharing)
 }
 </script>
 
@@ -89,13 +96,34 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
         </ZFormItem>
       </div>
 
-      <ZFormItem label="分组">
+      <ZFormItem prop="groupIds" label="分组" :required="form.peerSharing.enabled">
         <AccountGroupCheckboxGrid
           :model-value="form.groupIds" :groups="groups"
           :loading="groupLoading"
           :disabled="saving"
           @update:model-value="updateForm('groupIds', $event)"
         />
+      </ZFormItem>
+
+      <ZFormItem label="CPR 互联">
+        <div class="grid gap-2">
+          <div class="flex flex-wrap items-center gap-x-5 gap-y-3">
+            <ZSwitch
+              :model-value="form.peerSharing.enabled"
+              aria-label="CPR 互联"
+              :disabled="saving"
+              @update:model-value="updatePeerSharing('enabled', $event)"
+            />
+            <template v-if="form.peerSharing.enabled">
+              <ZCheckbox :model-value="form.peerSharing.sharePool" label="账号池" :disabled="saving" @update:model-value="updatePeerSharing('sharePool', $event)" />
+              <ZCheckbox :model-value="form.peerSharing.shareQuota" label="额度与模型" :disabled="saving" @update:model-value="updatePeerSharing('shareQuota', $event)" />
+              <ZCheckbox :model-value="form.peerSharing.sharePlans" label="套餐分布" :disabled="saving || !form.peerSharing.sharePool" @update:model-value="updatePeerSharing('sharePlans', $event)" />
+            </template>
+          </div>
+          <p v-if="form.peerSharing.enabled" class="text-sm text-cp-text-secondary">
+            公开此 Key 的预算，推理与共享范围限于所选分组的直连 OAuth 账号
+          </p>
+        </div>
       </ZFormItem>
 
       <ZFormItem label="跨渠道聊天兼容">

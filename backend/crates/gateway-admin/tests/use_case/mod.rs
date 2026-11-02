@@ -11,11 +11,12 @@ mod credentials;
 mod freeze_recovery;
 mod import_tasks;
 mod observability;
-mod plugin_update;
+mod peer_link;
 mod plugins;
 mod proxies;
 mod settings;
 mod system;
+mod system_preflight;
 mod usage_data;
 
 use std::{
@@ -281,6 +282,8 @@ impl AdminHarness {
                 Arc::new(alerts::TestAlertPorts),
             ),
             gateway_admin::AdminRuntimePorts {
+                upstream_info: None,
+
                 timezone: Default::default(),
                 service_middleware: self.service_middleware,
                 plugin_preparation: Arc::new(plugins::TestPluginPorts),
@@ -481,6 +484,13 @@ impl AccountGroupStore for UnavailableAccountGroupStore {
 
 #[async_trait]
 impl AccountStore for UnavailableStore {
+    async fn load_account_record(
+        &self,
+        _: &gateway_core::account::ProviderAccountId,
+    ) -> AdminStoreResult<Option<gateway_admin::model::accounts::AccountRecord>> {
+        Err(unavailable("account"))
+    }
+
     async fn account_exists(&self, _: &str) -> AdminStoreResult<bool> {
         Err(unavailable("account"))
     }
@@ -884,6 +894,7 @@ impl SettingsStore for UnavailableStore {
 }
 
 struct UnavailableProvider {
+    peer_enabled: bool,
     kind: ProviderKind,
     dashboard_profile: Option<DashboardWireProfile>,
     calculated_billing: Option<gateway_admin::model::observability::CalculatedBillingBreakdown>,
@@ -905,6 +916,7 @@ impl gateway_admin::ports::pricing::PricingSource for UnavailablePricingSource {
 impl UnavailableProvider {
     fn new(kind: &str) -> Self {
         Self {
+            peer_enabled: false,
             kind: ProviderKind::new(kind).expect("provider kind"),
             dashboard_profile: None,
             calculated_billing: None,
@@ -918,6 +930,28 @@ pub(super) fn test_provider(kind: &str) -> Arc<dyn ProviderAdmin> {
 
 #[async_trait]
 impl ProviderAdmin for UnavailableProvider {
+    fn peer_authentication_kinds(&self) -> &[&str] {
+        if self.peer_enabled {
+            &["peer_test"]
+        } else {
+            &[]
+        }
+    }
+
+    fn peer_connection(
+        &self,
+        loaded: &gateway_core::account::LoadedCredential,
+    ) -> Result<Option<gateway_admin::ports::peer::PeerConnection>, ProviderAdminError> {
+        Ok(
+            (self.peer_enabled && loaded.account.authentication_kind() == "peer_test").then(|| {
+                gateway_admin::ports::peer::PeerConnection {
+                    base_url: format!("https://{}.invalid/v1", self.kind),
+                    bearer_token: secrecy::SecretString::from("test-peer-only"),
+                }
+            }),
+        )
+    }
+
     fn provider_kind(&self) -> &ProviderKind {
         &self.kind
     }
@@ -1006,6 +1040,8 @@ impl ProviderAdmin for UnavailableProvider {
 
 pub(super) fn dashboard_profile_provider() -> Arc<dyn ProviderAdmin> {
     Arc::new(UnavailableProvider {
+        peer_enabled: false,
+
         kind: ProviderKind::new("openai").expect("provider kind"),
         dashboard_profile: Some(DashboardWireProfile {
             provider: "openai".to_owned(),
@@ -1049,6 +1085,8 @@ pub(super) fn calculated_billing_provider() -> Arc<dyn ProviderAdmin> {
             .expect("test billing amount"),
     };
     Arc::new(UnavailableProvider {
+        peer_enabled: false,
+
         kind: ProviderKind::new("openai").expect("provider kind"),
         dashboard_profile: None,
         calculated_billing: Some(

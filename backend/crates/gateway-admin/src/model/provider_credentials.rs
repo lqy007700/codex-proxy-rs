@@ -790,6 +790,7 @@ impl ProviderQuotaWindowRole {
 /// 一个 Provider quota 窗口的公共投影
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderQuotaWindow {
+    pub upstream: Option<super::upstream_info::UpstreamQuotaWindow>,
     pub key: String,
     pub group: String,
     pub label: String,
@@ -820,9 +821,17 @@ pub struct ProviderQuotaRequest {
     pub rolling_usage: Option<AccountUsage>,
 }
 
+/// 当前目录页已读取的账号事实，批量投影不触发上游刷新
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderQuotaReadRequest<'a> {
+    pub account: &'a crate::model::accounts::AccountRecord,
+    pub rolling_usage: Option<&'a crate::model::accounts::AccountUsage>,
+}
+
 /// Provider 已解析的 quota 结果及其不透明差异字段
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct ProviderQuota {
+    pub upstream: Option<super::upstream_info::ProviderUpstreamInfo>,
     /// 上游额度响应明确提供的套餐，可用于补全账号展示
     pub plan_type: Option<String>,
     pub observed_at: Option<DateTime<Utc>>,
@@ -999,6 +1008,21 @@ impl ProviderQuota {
         self.usage_windows()
             .filter(|(window, _)| window.local_usage.is_some())
             .min_by_key(|(_, period)| *period)
+    }
+
+    /// 互联账号按最长的 Key 消费周期统计本地用量，池内账号窗口不代表此 Key 的周期
+    #[must_use]
+    pub fn upstream_usage_window(&self) -> Option<&ProviderQuotaWindow> {
+        self.windows
+            .iter()
+            .filter(|window| {
+                window
+                    .upstream
+                    .as_ref()
+                    .is_some_and(|upstream| upstream.amount.is_some())
+                    && window.window_seconds.is_some_and(|seconds| seconds > 0)
+            })
+            .max_by_key(|window| window.window_seconds)
     }
 
     /// 统计与预测共用窗口归属规则，避免把模型专属桶或短期限流当作账号容量

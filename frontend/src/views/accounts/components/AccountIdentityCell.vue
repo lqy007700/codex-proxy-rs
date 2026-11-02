@@ -4,12 +4,13 @@ import type { Account } from '@/api'
 import { computed } from 'vue'
 
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
+import AccountUpstreamStatus from '@/components/account/AccountUpstreamStatus.vue'
 import { stablePresetVisualToneClass } from '@/utils/color'
 import { accountIdentityLabel } from '../utils/accountIdentity'
 import AccountNotesPopover from './AccountNotesPopover.vue'
 
 type AccountIdentity = Pick<Account, 'id' | 'email' | 'planType' | 'planTypeDisplay'>
-  & Partial<Pick<Account, 'accountId' | 'notes' | 'name' | 'authenticationKind' | 'schedulingRole'>>
+  & Partial<Pick<Account, 'accountId' | 'notes' | 'name' | 'authenticationKind' | 'schedulingRole' | 'upstream'>>
 
 const props = withDefaults(
   defineProps<{
@@ -87,6 +88,7 @@ const avatarToneClass = computed(() => {
         <span v-if="account.schedulingRole === 'fallback'" class="shrink-0 text-cp-xs font-medium text-cp-warning">
           保底
         </span>
+        <AccountUpstreamStatus v-if="account.upstream" :upstream="account.upstream" />
         <span
           v-if="metaPosition === 'title' && (showPlan || $slots.meta)"
           class="inline-flex shrink-0 items-center justify-end"

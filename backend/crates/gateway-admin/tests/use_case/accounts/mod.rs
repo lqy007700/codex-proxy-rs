@@ -753,6 +753,19 @@ impl FakeAccountStore {
 
 #[async_trait]
 impl AccountStore for FakeAccountStore {
+    async fn load_account_record(
+        &self,
+        id: &ProviderAccountId,
+    ) -> AdminStoreResult<Option<AccountRecord>> {
+        Ok(self
+            .accounts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|account| account.id == id.as_str())
+            .cloned())
+    }
+
     async fn account_exists(&self, account_id: &str) -> AdminStoreResult<bool> {
         self.record("store.account_exists");
         Ok(self
@@ -1494,6 +1507,7 @@ async fn plugin_account_save_publishes_native_credential_change() {
         ProviderAdminRegistry::new([provider.clone() as Arc<dyn ProviderAdmin>]).unwrap(),
         store.clone(),
         snapshot,
+        None,
     );
     let result = access
         .save(
@@ -1537,6 +1551,7 @@ async fn plugin_account_reads_resolve_the_authoritative_provider_from_the_accoun
         ProviderAdminRegistry::new([registered_provider as Arc<dyn ProviderAdmin>]).unwrap(),
         store,
         Arc::new(RecordingPluginAccountPublication(events.clone())),
+        None,
     );
     let account_id = ProviderAccountId::new("acct_test").expect("account ID");
 
@@ -1584,6 +1599,7 @@ async fn plugin_account_save_rejects_stale_authentication_kind_before_commit() {
         ProviderAdminRegistry::new([provider as Arc<dyn ProviderAdmin>]).unwrap(),
         store.clone(),
         Arc::new(RecordingPluginAccountPublication(events.clone())),
+        None,
     );
 
     let error = access
@@ -1720,6 +1736,8 @@ async fn accounts_recover_disabled_should_only_enable_scheduling_and_preserve_qu
             credits: None,
             observed_at: Some(Utc::now()),
             windows: vec![ProviderQuotaWindow {
+                upstream: None,
+
                 key: "primary".to_owned(),
                 group: "shortTerm".to_owned(),
                 label: "5小时限额".to_owned(),
@@ -2072,11 +2090,15 @@ async fn accounts_list_should_degrade_quota_failure_to_empty_window_without_drop
     let events = events();
     let openai = FakeProviderAdmin::new("openai", events.clone());
     openai.set_quota(ProviderQuota {
+        upstream: None,
+
         credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
         refresh_token_expires_at: None,
         windows: vec![ProviderQuotaWindow {
+            upstream: None,
+
             key: "primary".to_owned(),
             group: "shortTerm".to_owned(),
             label: "5小时限额".to_owned(),
@@ -2205,11 +2227,15 @@ async fn accounts_list_should_map_unknown_credential_to_error_not_normal() {
 async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view() {
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        upstream: None,
+
         credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
         refresh_token_expires_at: None,
         windows: vec![ProviderQuotaWindow {
+            upstream: None,
+
             key: "primary".to_owned(),
             group: "shortTerm".to_owned(),
             label: "5小时限额".to_owned(),
@@ -2254,11 +2280,15 @@ async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view()
 async fn accounts_list_should_not_derive_exhaustion_from_provider_quota_view() {
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        upstream: None,
+
         credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
         refresh_token_expires_at: None,
         windows: vec![ProviderQuotaWindow {
+            upstream: None,
+
             key: "primary".to_owned(),
             group: "shortTerm".to_owned(),
             label: "5小时限额".to_owned(),
@@ -2310,6 +2340,8 @@ async fn quota_forecast_reads_raw_snapshot_and_limits_usage_to_observation_time(
         observed_at: Some(observed),
         limit_reached: true,
         windows: vec![ProviderQuotaWindow {
+            upstream: None,
+
             key: "week".to_owned(),
             group: "shortTerm".to_owned(),
             label: "周额度".to_owned(),
@@ -2398,6 +2430,8 @@ async fn quota_forecast_only_queries_the_two_selected_source_windows() {
         .map(|index| {
             let monthly = index % 2 == 1;
             ProviderQuotaWindow {
+                upstream: None,
+
                 key: if monthly {
                     format!("month-{index}")
                 } else {
@@ -2473,6 +2507,8 @@ async fn quota_forecast_same_window_reversal_keeps_recorded_usage_in_the_report(
             plan_type: Some("pro".to_owned()),
             observed_at: Some(observed),
             windows: vec![ProviderQuotaWindow {
+                upstream: None,
+
                 key: "week".to_owned(),
                 group: "shortTerm".to_owned(),
                 label: "周额度".to_owned(),
@@ -2552,6 +2588,8 @@ async fn quota_forecast_mid_cycle_sampling_accepts_small_reset_jitter_but_not_a_
         plan_type: Some("pro".to_owned()),
         observed_at: Some(observed),
         windows: vec![ProviderQuotaWindow {
+            upstream: None,
+
             key: "week".to_owned(),
             group: "shortTerm".to_owned(),
             label: "周额度".to_owned(),
@@ -2695,11 +2733,15 @@ async fn accounts_list_should_attach_local_usage_to_quota_windows() {
     let provider = FakeProviderAdmin::new("openai", events());
     let reset_at = Utc::now() + TimeDelta::hours(1);
     provider.set_quota(ProviderQuota {
+        upstream: None,
+
         credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
         refresh_token_expires_at: None,
         windows: vec![ProviderQuotaWindow {
+            upstream: None,
+
             key: "primary".to_owned(),
             group: "shortTerm".to_owned(),
             label: "5小时限额".to_owned(),
@@ -2764,6 +2806,8 @@ async fn accounts_list_and_quota_refresh_should_select_the_same_weekly_or_monthl
     let account_id = ProviderAccountId::new("acct_test").expect("account id");
     let reset_at = Utc::now() + TimeDelta::days(1);
     let short = ProviderQuotaWindow {
+        upstream: None,
+
         key: "short".to_owned(),
         group: "shortTerm".to_owned(),
         label: "5小时限额".to_owned(),
@@ -2853,12 +2897,16 @@ async fn accounts_list_should_not_attach_account_usage_to_model_specific_quota_w
     let provider = FakeProviderAdmin::new("openai", events());
     let reset_at = Utc::now() + TimeDelta::days(7);
     provider.set_quota(ProviderQuota {
+        upstream: None,
+
         credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
         refresh_token_expires_at: None,
         windows: vec![
             ProviderQuotaWindow {
+                upstream: None,
+
                 key: "core-primary".to_owned(),
                 group: "weekly".to_owned(),
                 label: "周额度".to_owned(),
@@ -2874,6 +2922,8 @@ async fn accounts_list_should_not_attach_account_usage_to_model_specific_quota_w
                 provider_data: None,
             },
             ProviderQuotaWindow {
+                upstream: None,
+
                 key: "codex-bengalfox-primary".to_owned(),
                 group: "weekly".to_owned(),
                 label: "周额度".to_owned(),
@@ -3155,6 +3205,8 @@ pub(super) fn document() -> ProviderDocument {
 
 fn empty_quota() -> ProviderQuota {
     ProviderQuota {
+        upstream: None,
+
         credits: None,
         plan_type: None,
         observed_at: None,
@@ -3601,6 +3653,7 @@ async fn plugin_quota_refresh_uses_native_provider_without_changing_configuratio
         ProviderAdminRegistry::new([provider.clone() as Arc<dyn ProviderAdmin>]).unwrap(),
         store,
         Arc::new(RecordingPluginAccountPublication(events.clone())),
+        None,
     );
     let id = ProviderAccountId::new("acct_test").unwrap();
     access.get_quota(&id).await.unwrap();

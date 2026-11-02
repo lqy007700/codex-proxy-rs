@@ -727,6 +727,8 @@ async fn threshold_services(
 fn weekly_quota(used_percent: f64) -> ProviderQuota {
     ProviderQuota {
         windows: vec![ProviderQuotaWindow {
+            upstream: None,
+
             key: "week".into(),
             group: "shortTerm".into(),
             label: "周额度".into(),

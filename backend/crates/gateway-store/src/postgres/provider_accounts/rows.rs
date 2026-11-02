@@ -5,7 +5,7 @@ use gateway_core::routing::AccountGroupId;
 
 pub(crate) const ENTITY: &str = "provider account";
 pub(crate) const CREDENTIALS_MAX_BYTES: usize = 256 * 1024;
-pub(crate) const QUOTA_MAX_BYTES: usize = 128 * 1024;
+pub(crate) const QUOTA_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) const MAX_ADMIN_IMPORT_BATCH: usize = 200;
 pub(crate) const ADMIN_USAGE_CHUNK_SIZE: usize = 200;
 
@@ -87,7 +87,6 @@ pub struct ProviderAccountSummary {
 pub struct ProviderAccountRecord {
     pub summary: ProviderAccountSummary,
     pub provider_credentials_json: JsonObject,
-    pub provider_quota_json: Option<JsonObject>,
 }
 
 impl fmt::Debug for ProviderAccountRecord {
@@ -96,10 +95,6 @@ impl fmt::Debug for ProviderAccountRecord {
             .debug_struct("ProviderAccountRecord")
             .field("summary", &self.summary)
             .field("provider_credentials_json", &"[REDACTED]")
-            .field(
-                "provider_quota_json",
-                &self.provider_quota_json.as_ref().map(|_| "[PROVIDER JSON]"),
-            )
             .finish()
     }
 }
@@ -153,7 +148,6 @@ impl NewProviderAccount {
     pub fn validate(&self) -> StoreResult<()> {
         require_nonempty(ENTITY, "id", &self.id)?;
         require_nonempty(ENTITY, "provider_kind", &self.provider_kind)?;
-        require_nonempty(ENTITY, "name", &self.name)?;
         if let Some(upstream_user_id) = &self.upstream_user_id {
             require_nonempty(ENTITY, "upstream_user_id", upstream_user_id)?;
         }
@@ -385,15 +379,9 @@ pub(crate) fn account_record_from_row(
             .map_err(|source| invalid("invalid credentials JSON").with_source(source))?,
         CREDENTIALS_MAX_BYTES,
     )?;
-    let quota = row
-        .try_get::<Option<serde_json::Value>, _>("provider_quota_json")
-        .map_err(|source| invalid("invalid quota JSON").with_source(source))?
-        .map(|value| JsonObject::try_from_value("provider_quota_json", value, QUOTA_MAX_BYTES))
-        .transpose()?;
     Ok(ProviderAccountRecord {
         summary: account_summary_from_row(row)?,
         provider_credentials_json: credentials,
-        provider_quota_json: quota,
     })
 }
 

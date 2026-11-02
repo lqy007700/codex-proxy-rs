@@ -18,8 +18,9 @@ use crate::model::provider_credentials::{
     PrepareCredentialImport, PrepareCredentialRefresh, PrepareCredentialRotation,
     PreparedAuthorizationCommit, PreparedCredentialImport, PreparedCredentialRotation,
     ProviderExport, ProviderExportCredentialInput, ProviderModelCatalogDocument, ProviderModels,
-    ProviderProfileAvatar, ProviderProfileStatistics, ProviderQuota, ProviderQuotaRequest,
-    ProviderResetCreditResult, ProviderResetCredits, ProviderSubscription, explicit_plan_type,
+    ProviderProfileAvatar, ProviderProfileStatistics, ProviderQuota, ProviderQuotaReadRequest,
+    ProviderQuotaRequest, ProviderResetCreditResult, ProviderResetCredits, ProviderSubscription,
+    explicit_plan_type,
 };
 use crate::model::{
     provider_credentials::{ProviderDocument, ProviderQuotaWindow},
@@ -178,6 +179,19 @@ pub trait ProviderAdmin: Send + Sync {
     }
 
     fn provider_kind(&self) -> &ProviderKind;
+    /// 与执行 Provider 共用的直连资格，未知实现默认不公开账号
+    fn is_direct_account(&self, _authentication_kind: &str) -> bool {
+        false
+    }
+
+    /// 仅依据本地账号事实判断通用模型资格；未知实现不能宣称完整覆盖
+    fn peer_model_eligible(
+        &self,
+        _account: &crate::model::accounts::AccountRecord,
+        _model: &str,
+    ) -> Option<bool> {
+        None
+    }
 
     /// 只读取原生 Provider 能力及账号类型，不执行网络或数据库查询
     fn account_capabilities(
@@ -308,6 +322,43 @@ pub trait ProviderAdmin: Send + Sync {
         request: ProviderQuotaRequest,
     ) -> Result<ProviderQuota, ProviderAdminError>;
 
+    /// 只读投影当前页额度，返回值与输入逐项对应，单个失败不影响其他账号
+    /// 没有批量存储能力的 Provider 继续使用原有单账号语义
+    async fn read_quotas(
+        &self,
+        requests: &[ProviderQuotaReadRequest<'_>],
+    ) -> Vec<Result<ProviderQuota, ProviderAdminError>> {
+        futures::future::join_all(requests.iter().map(|request| async {
+            let account_id = ProviderAccountId::new(request.account.id.clone())
+                .map_err(|_| ProviderAdminError::new(ProviderAdminErrorKind::Invalid))?;
+            self.quota(ProviderQuotaRequest {
+                account_id,
+                refresh: false,
+                rolling_usage: request.rolling_usage.cloned(),
+            })
+            .await
+        }))
+        .await
+    }
+
+    /// 仅依据账号类型声明 CPR 连接能力，通用用例不解析 Provider 凭据
+    fn peer_authentication_kinds(&self) -> &[&str] {
+        &[]
+    }
+
+    fn supports_peer_connection(&self, authentication_kind: &str) -> bool {
+        self.peer_authentication_kinds()
+            .contains(&authentication_kind)
+    }
+
+    /// 从本轮加载的凭据提取连接材料，避免在校验连接版本后另读一份凭据
+    fn peer_connection(
+        &self,
+        _loaded: &gateway_core::account::LoadedCredential,
+    ) -> Result<Option<super::peer::PeerConnection>, ProviderAdminError> {
+        Ok(None)
+    }
+
     /// 历史观测的协议字段仅由具体 Provider 解释；不支持时保留累计估算
     fn quota_forecast_observation(
         &self,
@@ -384,6 +435,10 @@ pub struct ProviderAdminRegistry {
 }
 
 impl ProviderAdminRegistry {
+    pub(crate) fn registered(&self) -> BTreeMap<ProviderKind, Arc<dyn ProviderAdmin>> {
+        self.providers.as_ref().clone()
+    }
+
     pub fn pricing_catalog(&self) -> gateway_core::metering::PricingOverrides {
         self.providers
             .iter()

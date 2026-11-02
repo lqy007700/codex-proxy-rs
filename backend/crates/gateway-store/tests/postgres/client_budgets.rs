@@ -746,6 +746,8 @@ async fn budget_updates_preserve_omitted_limits_and_do_not_clear_usage() {
         .await
         .unwrap();
     let update = UpdateClientKey {
+        peer_sharing: Default::default(),
+
         portable_history: None,
         request_profile_override_updates: Default::default(),
         id: ClientApiKeyId::new("key").unwrap(),

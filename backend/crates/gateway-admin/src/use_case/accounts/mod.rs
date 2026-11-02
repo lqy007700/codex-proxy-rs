@@ -30,8 +30,9 @@ use crate::{
             AccountDirectoryItem, AccountDirectoryPage, AccountExportBundle, AccountPersonalInfo,
             AccountRefreshResult, AccountUsagePeriod, ConsumeProviderResetCredit,
             PrepareCredentialRefresh, ProviderModelCatalogDocument, ProviderModels,
-            ProviderProfileAvatar, ProviderQuota, ProviderQuotaRequest, ProviderQuotaWindow,
-            ProviderResetCreditResult, ProviderResetCredits, QuotaLocalUsageAttribution,
+            ProviderProfileAvatar, ProviderQuota, ProviderQuotaReadRequest, ProviderQuotaRequest,
+            ProviderQuotaWindow, ProviderResetCreditResult, ProviderResetCredits,
+            QuotaLocalUsageAttribution,
         },
         quota_forecast::{
             AccountQuotaForecastReport, account_quota_forecasts, quota_forecast_source_window,
@@ -190,12 +191,17 @@ pub(crate) struct DefaultAccountsService {
     providers: ProviderAdminRegistry,
     snapshot: Arc<dyn SnapshotControl>,
     probe: Arc<dyn AccountProbe>,
+    upstream_info: Option<Arc<dyn crate::ports::peer::PeerUpstreamService>>,
     reset_credit_locks:
         Arc<futures::lock::Mutex<BTreeMap<ProviderAccountId, Arc<futures::lock::Mutex<()>>>>>,
 }
 
 impl DefaultAccountsService {
     #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "账号存储、发布、探测与互联分别通过独立端口注入"
+    )]
     pub(crate) fn new(
         accounts: Arc<dyn AccountStore>,
         account_runtime: Arc<dyn AccountRuntimeStore>,
@@ -204,6 +210,7 @@ impl DefaultAccountsService {
         providers: ProviderAdminRegistry,
         snapshot: Arc<dyn SnapshotControl>,
         probe: Arc<dyn AccountProbe>,
+        upstream_info: Option<Arc<dyn crate::ports::peer::PeerUpstreamService>>,
     ) -> Self {
         Self {
             accounts,
@@ -213,6 +220,7 @@ impl DefaultAccountsService {
             providers,
             snapshot,
             probe,
+            upstream_info,
             reset_credit_locks: Arc::new(futures::lock::Mutex::new(BTreeMap::new())),
         }
     }
@@ -227,6 +235,84 @@ impl DefaultAccountsService {
                 .entry(account_id.clone())
                 .or_insert_with(|| Arc::new(futures::lock::Mutex::new(()))),
         )
+    }
+
+    async fn read_quotas(
+        &self,
+        items: &[AccountPageItem],
+        rolling_usage: &BTreeMap<String, AccountUsage>,
+    ) -> Vec<ProviderQuota> {
+        let providers = &self.providers;
+        let mut groups = BTreeMap::<_, Vec<usize>>::new();
+        for (index, item) in items.iter().enumerate() {
+            groups
+                .entry(&item.account.provider_kind)
+                .or_default()
+                .push(index);
+        }
+        let batches = groups.into_iter().map(|(kind, indices)| async move {
+            let provider = match providers.require(kind) {
+                Ok(provider) => provider,
+                Err(error) => {
+                    tracing::warn!(
+                        provider = %kind,
+                        error = %error,
+                        "account directory provider is not registered; showing empty quota"
+                    );
+                    return Vec::new();
+                }
+            };
+            let requests = indices
+                .iter()
+                .map(|&index| {
+                    let account = &items[index].account;
+                    ProviderQuotaReadRequest {
+                        account,
+                        rolling_usage: rolling_usage.get(&account.id),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let results = super::peer_link::upstream::read_quotas(
+                self.upstream_info.as_deref(),
+                provider.as_ref(),
+                &requests,
+            )
+            .await;
+            if results.len() != indices.len() {
+                tracing::warn!(
+                    provider = %kind,
+                    expected = indices.len(),
+                    actual = results.len(),
+                    "account directory quota batch has invalid length; showing empty quota"
+                );
+                return Vec::new();
+            }
+            indices
+                .into_iter()
+                .zip(results)
+                .map(|(index, result)| {
+                    let quota = result.unwrap_or_else(|error| {
+                        tracing::warn!(
+                            account_id = %items[index].account.id,
+                            error = %error,
+                            "account directory quota projection failed; showing empty quota"
+                        );
+                        empty_quota()
+                    });
+                    (index, quota)
+                })
+                .collect::<Vec<_>>()
+        });
+        // Provider 可独立完成，回填原页顺序并保留未注册或失败账号的位置
+        let mut quotas = vec![empty_quota(); items.len()];
+        for (index, quota) in futures::future::join_all(batches)
+            .await
+            .into_iter()
+            .flatten()
+        {
+            quotas[index] = quota;
+        }
+        quotas
     }
 
     async fn load_account(
@@ -308,32 +394,51 @@ impl DefaultAccountsService {
     async fn load_api_key_usage(
         &self,
         accounts: &[AccountPageItem],
+        quotas: &[ProviderQuota],
     ) -> Result<BTreeMap<String, AccountUsage>, AdminError> {
         let now = Utc::now();
-        // API Key 没有套餐周期；本地累计直接查询账号创建后仍保留的请求记录
+        let mut usage = BTreeMap::new();
+        // 互联账号复用已聚合的最长 Key 窗口，普通 API Key 保留累计口径
         let windows = accounts
             .iter()
-            .filter(|item| item.account.authentication_kind == "api_key")
-            .map(|item| AccountUsageWindowQuery {
-                account_id: item.account.id.clone(),
-                key: "account-lifetime".to_owned(),
-                range: TimeRange {
-                    start: item.account.created_at,
-                    end: now,
-                },
+            .zip(quotas)
+            .filter(|(item, _)| item.account.authentication_kind == "api_key")
+            .filter_map(|(item, quota)| {
+                if quota
+                    .upstream
+                    .as_ref()
+                    .is_some_and(|upstream| upstream.discovered)
+                {
+                    if let Some(local_usage) = quota
+                        .upstream_usage_window()
+                        .and_then(|window| window.local_usage.as_ref())
+                    {
+                        usage.insert(item.account.id.clone(), local_usage.clone());
+                    }
+                    return None;
+                }
+                Some(AccountUsageWindowQuery {
+                    account_id: item.account.id.clone(),
+                    key: "account-lifetime".to_owned(),
+                    range: TimeRange {
+                        start: item.account.created_at,
+                        end: now,
+                    },
+                })
             })
             .collect::<Vec<_>>();
         if windows.is_empty() {
-            return Ok(BTreeMap::new());
+            return Ok(usage);
         }
-        Ok(self
-            .accounts
-            .load_account_usage_by_windows(&windows)
-            .await
-            .map_err(|error| map_store_error(error, "API Key account usage"))?
-            .into_iter()
-            .map(|result| (result.account_id, result.usage))
-            .collect())
+        usage.extend(
+            self.accounts
+                .load_account_usage_by_windows(&windows)
+                .await
+                .map_err(|error| map_store_error(error, "API Key account usage"))?
+                .into_iter()
+                .map(|result| (result.account_id, result.usage)),
+        );
+        Ok(usage)
     }
 
     async fn load_directory_item(
@@ -355,13 +460,17 @@ impl DefaultAccountsService {
             .await
             .map_err(|error| map_store_error(error, "rolling account usage"))?;
         let rolling_usage = rolling_usage.into_iter().next();
-        let mut quota = match provider
-            .quota(ProviderQuotaRequest {
+        let mut quota = match super::peer_link::upstream::read_quota(
+            self.upstream_info.as_deref(),
+            provider.as_ref(),
+            account,
+            ProviderQuotaRequest {
                 account_id: account_id.clone(),
                 refresh: refresh_quota,
                 rolling_usage: rolling_usage.clone(),
-            })
-            .await
+            },
+        )
+        .await
         {
             Ok(quota) => quota,
             // 凭据更新后的账号投影不要求 Provider 提供额度；显式刷新仍须支持该操作
@@ -385,7 +494,7 @@ impl DefaultAccountsService {
         )
         .await?;
         let usage = self
-            .load_api_key_usage(std::slice::from_ref(&stored))
+            .load_api_key_usage(std::slice::from_ref(&stored), std::slice::from_ref(&quota))
             .await?
             .remove(&stored.account.id)
             .or_else(|| {
@@ -482,48 +591,10 @@ impl AccountsService for DefaultAccountsService {
             .into_iter()
             .map(|usage| (usage.account_id.clone(), usage))
             .collect::<BTreeMap<_, _>>();
-        let mut quotas = futures::future::join_all(page.items.iter().map(|item| async {
-            let account = &item.account;
-            let account_id = ProviderAccountId::new(account.id.clone())
-                .map_err(|_| AdminError::invalid("Provider 账号 ID 不合法"))?;
-            // 单个账号的 quota 投影失败（Provider 未注册或 quota 读取失败）不拖垮整页：
-            // 该账号降级为空额度投影，其余账号与页面状态照常返回
-            let provider = match providers.require(&account.provider_kind) {
-                Ok(provider) => provider,
-                Err(error) => {
-                    tracing::warn!(
-                        account_id = %account.id,
-                        error = %error,
-                        "account directory provider is not registered; showing empty quota"
-                    );
-                    return Ok(empty_quota());
-                }
-            };
-            match provider
-                .quota(ProviderQuotaRequest {
-                    account_id,
-                    refresh: false,
-                    rolling_usage: rolling_usage.get(&account.id).cloned(),
-                })
-                .await
-            {
-                Ok(quota) => Ok(quota),
-                Err(error) => {
-                    tracing::warn!(
-                        account_id = %account.id,
-                        error = %error,
-                        "account directory quota projection failed; showing empty quota"
-                    );
-                    Ok(empty_quota())
-                }
-            }
-        }))
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, AdminError>>()?;
+        let mut quotas = self.read_quotas(&page.items, &rolling_usage).await;
         self.attach_quota_local_usage(&page.items, &mut quotas)
             .await?;
-        let mut api_key_usage = self.load_api_key_usage(&page.items).await?;
+        let mut api_key_usage = self.load_api_key_usage(&page.items, &quotas).await?;
         let items = page
             .items
             .into_iter()
@@ -654,9 +725,12 @@ impl AccountsService for DefaultAccountsService {
             "provider credential refresh",
         )
         .await?;
-        provider
-            .account_facts_changed(std::slice::from_ref(&result.account_id))
-            .await;
+        super::notify_account_facts_changed(
+            self.upstream_info.as_deref(),
+            provider.as_ref(),
+            std::slice::from_ref(&result.account_id),
+        )
+        .await;
         publish_committed(self.snapshot.as_ref(), result.config_revision).await?;
         let account = self.load_directory_item(&result.account_id, false).await?;
         Ok(AccountRefreshResult {
@@ -699,9 +773,12 @@ impl AccountsService for DefaultAccountsService {
                 .config_revision
         };
         provider.recover_account_runtime_state(&account_id);
-        provider
-            .account_facts_changed(std::slice::from_ref(&account_id))
-            .await;
+        super::notify_account_facts_changed(
+            self.upstream_info.as_deref(),
+            provider.as_ref(),
+            std::slice::from_ref(&account_id),
+        )
+        .await;
         publish_committed(self.snapshot.as_ref(), config_revision).await?;
         let account = self.load_directory_item(&account_id, false).await?;
         Ok(AccountRefreshResult {
@@ -725,11 +802,19 @@ impl AccountsService for DefaultAccountsService {
             .await
             .map_err(|error| map_store_error(error, "provider account"))?;
         if !enabled {
-            provider.account_unavailable(&account_id).await;
-        }
-        provider
-            .account_facts_changed(std::slice::from_ref(&account_id))
+            super::notify_account_unavailable(
+                self.upstream_info.as_deref(),
+                provider.as_ref(),
+                &account_id,
+            )
             .await;
+        }
+        super::notify_account_facts_changed(
+            self.upstream_info.as_deref(),
+            provider.as_ref(),
+            std::slice::from_ref(&account_id),
+        )
+        .await;
         publish_committed(self.snapshot.as_ref(), result.config_revision).await?;
         Ok(result)
     }
@@ -777,10 +862,20 @@ impl AccountsService for DefaultAccountsService {
         for (provider, provider_ids) in providers.values() {
             if enabled == Some(false) {
                 for account_id in provider_ids {
-                    provider.account_unavailable(account_id).await;
+                    super::notify_account_unavailable(
+                        self.upstream_info.as_deref(),
+                        provider.as_ref(),
+                        account_id,
+                    )
+                    .await;
                 }
             }
-            provider.account_facts_changed(provider_ids).await;
+            super::notify_account_facts_changed(
+                self.upstream_info.as_deref(),
+                provider.as_ref(),
+                provider_ids,
+            )
+            .await;
         }
         publish_committed(self.snapshot.as_ref(), result.config_revision).await?;
         Ok(result)
@@ -810,14 +905,18 @@ impl AccountsService for DefaultAccountsService {
         account_id: &ProviderAccountId,
     ) -> Result<AccountQuotaForecastReport, AdminError> {
         let (stored, provider) = self.provider_for_account(account_id).await?;
-        let quota = provider
-            .quota(ProviderQuotaRequest {
+        let quota = super::peer_link::upstream::read_quota(
+            self.upstream_info.as_deref(),
+            provider.as_ref(),
+            &stored.account,
+            ProviderQuotaRequest {
                 account_id: account_id.clone(),
                 refresh: false,
                 rolling_usage: None,
-            })
-            .await
-            .map_err(|error| map_provider_error(error, "forecast quota snapshot"))?;
+            },
+        )
+        .await
+        .map_err(|error| map_provider_error(error, "forecast quota snapshot"))?;
         let now = Utc::now();
         let mut samples = Vec::new();
         let mut selected_keys = BTreeSet::new();
@@ -1122,15 +1221,7 @@ fn map_reset_credits_error_after_refresh(
 
 /// 账号目录中单个账号 quota 读取失败时使用的空额度投影
 fn empty_quota() -> ProviderQuota {
-    ProviderQuota {
-        credits: None,
-        plan_type: None,
-        observed_at: None,
-        refresh_token_expires_at: None,
-        windows: Vec::new(),
-        limit_reached: false,
-        provider_data: None,
-    }
+    ProviderQuota::default()
 }
 
 fn quota_usage_window(
