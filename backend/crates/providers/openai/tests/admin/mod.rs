@@ -2013,6 +2013,7 @@ fn provider_ports_with_catalog(
 fn account_record(account: &ProviderAccount) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
+        model_mappings: Default::default(),
         scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
         allow_credits: false,
         outbound_proxy_id: None,

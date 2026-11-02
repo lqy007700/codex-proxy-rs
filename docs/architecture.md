@@ -327,7 +327,7 @@ Provider 可为模型提供来源账号集合；Core 在公开目录查询时结
 配置发布复用已缓存的来源事实。来源集合用于目录展示；原生 Provider 选号另按有效目录、认证类型和本地模型政策核对账号资格，不因权重或亲和绕过
 
 客户端原生模型目录同样由 Provider 拥有，通过 `ExecutionService` 和现有 Registry 的只读调用传递。
-`routing::catalog` 的原生条目只包含模型 ID 与不透明协议正文，Core 负责冻结账号范围和整对象模型映射，
+`routing::catalog` 的原生条目保留模型 ID、不透明协议正文及可选来源账号，Core 负责冻结账号范围和整对象模型映射，
 不解析上游字段；API 负责协议输出，不直接依赖具体 Provider。原生目录失败不会退回通用画像，只有不提供
 该协议原生目录的 Provider（如 xAI 的 Codex 适配）才走画像转换。目录读取不创建计量请求或推理 attempt。
 OpenAI 的账号/凭据 revision/客户端版本隔离、并发合并、TTL、容量与失效均归属 credential catalog
@@ -475,7 +475,7 @@ Client Key 鉴权完成后，API adapter 从有界请求头识别客户端，Cor
 - 跨 Provider 只在账号范围和能力都允许，且请求尚未到达上游或已被证明可安全重放时发生
 - 可恢复观测写入失败不能替换已经确定的客户端协议结果
 
-Responses 按模型目录编译候选；全局模型映射是精确映射，未命中时模型名原样交给候选 Provider。
+Responses 按模型目录和账号映射后的目标编译候选，未配置账号映射时沿用全局精确映射与透传规则。
 Images 与 standalone Search 是 OpenAI Provider 自有端点：两者都不参与文本模型映射，只在 Client Key
 的账号范围确实包含 OpenAI 账号时生成单一 OpenAI 候选。Images 的图片模型由 Provider 从正文旁路
 提取，用于账号模型政策检查，并在中间件改写后复验当前租约账号；不要求图片模型进入文本目录。
@@ -718,7 +718,7 @@ Client Key 与账号分组形成授权范围：
 - 已绑定分组为空或全部禁用时得到空池，绝不回退为全部账号
 - 分组可以包含多个 Provider，账号也可以属于多个分组
 
-Core 按映射后的模型冻结 Provider 归属：已知模型只在明确声明该模型且能力匹配的 Provider 中路由，
+Core 按各账号映射后的模型冻结 Provider 归属：已知模型只在明确声明该模型且能力匹配的 Provider 中路由，
 再应用账号授权、模型政策和请求约束；账号不可用或所属 Provider 被排除不能扩大归属范围。
 同名模型的多个所属 Provider 保持标识顺序，重试仍受发送与重放安全边界约束。
 未被任何目录识别的模型只有一个 Provider 透传候选时才交由上游验证，多个未知候选不按名称顺序猜选平台。
@@ -728,8 +728,10 @@ OpenAI Provider 在选号时排除 Grok 模型的 ChatGPT OAuth 账号，API Key
 默认账号并发上限为 `0` 时表示无限；账号独立正数上限仍优先，未设置则继承默认值。
 无限并发只跳过并发上限判断，保留在途租约计数及其他准入约束；含无限账号的容量不投影有限占用比例。
 `account::AccountModelAccess` 拥有管理员模型政策的校验与精确匹配语义，存入账号行的 `model_access_json`，
-由 `RuntimeAccountDirectory` / `FrozenAccountScope` 随配置快照冻结。Provider 在额度、亲和与租约之前
-按映射后的上游模型筛选账号；重试和 fallback 使用同一冻结政策。上游目录和凭据不承载或改写该政策。
+由 `RuntimeAccountDirectory` / `FrozenAccountScope` 随配置快照冻结。账号模型映射与该政策独立持久化，
+由 Core 路由统一解析目标及能力；同 Provider 的不同目标合并选号，不按模型拆分账号调度顺序。
+`ProviderCandidate` 的账号目标事实随 attempt 上下文传递，Provider 在额度、亲和与租约之前
+按该冻结目标筛选账号，选定后以同一目标构造请求、记录元数据并查价；重试和 fallback 使用同一冻结政策。上游目录和凭据不承载或改写该政策。
 客户端目录的政策过滤判断范围内整个候选池，原生模型对象仍由 Provider 独占解释
 
 账号编辑在一个事务中更新调度事实，批量更新只应用显式提供的字段。导入与首次 OAuth 可携带统一账号设置，由 Admin 传递给 Store，

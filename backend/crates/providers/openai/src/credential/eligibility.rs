@@ -15,6 +15,24 @@ pub(crate) enum CodexSelectionModel<'a> {
 }
 
 impl<'a> CodexSelectionModel<'a> {
+    pub(crate) fn for_account<'b>(
+        self,
+        attempt: &'b gateway_core::engine::AttemptContext,
+        account: &ProviderAccountId,
+    ) -> CodexSelectionModel<'b>
+    where
+        'a: 'b,
+    {
+        match self {
+            Self::Requested(model) => CodexSelectionModel::Requested(
+                attempt.account_model_override(account).unwrap_or(model),
+            ),
+            Self::Image(model) => CodexSelectionModel::Image(model),
+            Self::Search(model) => CodexSelectionModel::Search(model),
+            Self::Live(model) => CodexSelectionModel::Live(model),
+        }
+    }
+
     pub(crate) const fn model(self) -> Option<&'a str> {
         match self {
             Self::Requested(model) | Self::Live(model) => Some(model),

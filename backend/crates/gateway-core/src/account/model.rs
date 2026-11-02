@@ -856,6 +856,7 @@ pub struct ProviderAccount {
     weight: AccountWeight,
     scheduling_role: AccountSchedulingRole,
     model_access: super::AccountModelAccess,
+    model_mappings: super::AccountModelMappings,
     allow_credits: bool,
     credential_state: CredentialState,
     quota: QuotaState,
@@ -896,6 +897,7 @@ impl ProviderAccount {
             weight: AccountWeight::DEFAULT,
             scheduling_role: AccountSchedulingRole::Regular,
             model_access: super::AccountModelAccess::all(),
+            model_mappings: super::AccountModelMappings::empty(),
             allow_credits: false,
             credential_state: CredentialState::Unknown,
             quota: QuotaState::unknown(),
@@ -931,6 +933,17 @@ impl ProviderAccount {
         self.upstream_account_id = upstream_account_id;
         self.plan_type = plan_type;
         self
+    }
+
+    #[must_use]
+    pub fn with_model_mappings(mut self, mappings: super::AccountModelMappings) -> Self {
+        self.model_mappings = mappings;
+        self
+    }
+
+    #[must_use]
+    pub const fn model_mappings(&self) -> &super::AccountModelMappings {
+        &self.model_mappings
     }
 
     #[must_use]

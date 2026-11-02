@@ -72,6 +72,7 @@ pub struct ProviderAccountSummary {
     pub concurrency_limit: Option<AccountConcurrencyLimit>,
     pub weight: AccountWeight,
     pub model_access: gateway_core::account::AccountModelAccess,
+    pub model_mappings: gateway_core::account::AccountModelMappings,
     pub allow_credits: bool,
     pub credential_state: CredentialState,
     pub credential_observed_at: DateTime<Utc>,
@@ -259,6 +260,7 @@ pub struct BatchUpdateProviderAccountsAdmin {
     pub concurrency_limit: Option<Option<AccountConcurrencyLimit>>,
     pub weight: Option<AccountWeight>,
     pub model_access: Option<gateway_core::account::AccountModelAccess>,
+    pub model_mappings: Option<gateway_core::account::AccountModelMappings>,
     pub group_ids: Option<Vec<AccountGroupId>>,
     pub audit: AdminAuditEvent,
     pub scheduling_role: Option<gateway_core::account::AccountSchedulingRole>,
@@ -325,7 +327,7 @@ impl ProviderAccountStateUpdate {
 
 pub(crate) const ACCOUNT_SELECT: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
-            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, allow_credits, credential_state,
+            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
             last_error_reason, last_error_message,
             credential_observed_at, quota_observed_at, created_at, updated_at
@@ -336,7 +338,7 @@ pub(crate) const ACCOUNT_SELECT: &str = "select coalesce(proxy_enabled, true) as
 
 pub(crate) const ACCOUNT_SELECT_BY_IDS: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
-            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, allow_credits, credential_state,
+            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
             last_error_reason, last_error_message,
             credential_observed_at, quota_observed_at, created_at, updated_at
@@ -348,7 +350,7 @@ pub(crate) const ACCOUNT_SELECT_BY_IDS: &str = "select coalesce(proxy_enabled, t
 
 pub(crate) const REFRESH_CANDIDATES_SELECT: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
-            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, allow_credits, credential_state,
+            has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
             last_error_reason, last_error_message,
             credential_observed_at, quota_observed_at, created_at, updated_at
@@ -419,6 +421,7 @@ pub(crate) fn core_account_from_summary(
     .with_scheduling(summary.concurrency_limit, summary.weight)
     .with_scheduling_role(summary.scheduling_role)
     .with_model_access(summary.model_access)
+    .with_model_mappings(summary.model_mappings)
     .with_allow_credits(summary.allow_credits)
     .with_outbound_proxy(
         summary
@@ -496,6 +499,11 @@ pub(crate) fn account_summary_from_row(
             "scheduling_role",
         )?)
         .ok_or_else(|| invalid("invalid scheduling_role"))?,
+        model_mappings: get::<sqlx::types::Json<gateway_core::account::AccountModelMappings>>(
+            &row,
+            "model_mappings_json",
+        )?
+        .0,
         model_access: get::<sqlx::types::Json<gateway_core::account::AccountModelAccess>>(
             &row,
             "model_access_json",

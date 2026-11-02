@@ -131,6 +131,7 @@ pub struct AccountAttemptContext {
     credential_recovery_attempted: bool,
     diagnostic_required_account: bool,
     account_scope: Option<Arc<crate::account::scope::FrozenAccountScope>>,
+    routing_candidate: Option<Arc<crate::routing::ProviderCandidate>>,
     recovery_stage: recovery::AccountRecoveryStage,
 }
 
@@ -149,6 +150,7 @@ impl AccountAttemptContext {
             diagnostic_required_account: false,
             recovery_stage: recovery::AccountRecoveryStage::Initial,
             account_scope: None,
+            routing_candidate: None,
         }
     }
 
@@ -169,6 +171,7 @@ impl AccountAttemptContext {
             diagnostic_required_account: true,
             recovery_stage: recovery::AccountRecoveryStage::Initial,
             account_scope: None,
+            routing_candidate: None,
         }
     }
 
@@ -185,6 +188,16 @@ impl AccountAttemptContext {
         scope: Arc<crate::account::scope::FrozenAccountScope>,
     ) -> Self {
         self.account_scope = Some(scope);
+        self
+    }
+
+    /// 沿路由计划传递已编译目标，Provider 不按入口名重新解释账号映射
+    #[must_use]
+    pub fn with_routing_candidate(mut self, candidate: crate::routing::ProviderCandidate) -> Self {
+        self.account_scope = Some(Arc::clone(candidate.account_scope()));
+        self.routing_candidate = candidate
+            .has_account_model_routes()
+            .then(|| Arc::new(candidate));
         self
     }
 
@@ -592,6 +605,24 @@ impl AttemptContext {
         self.request.requested_model.as_ref()
     }
 
+    #[must_use]
+    pub fn has_account_model_routes(&self) -> bool {
+        self.account.routing_candidate.is_some()
+    }
+
+    /// 选号与实际发送共用请求冻结的账号映射，管理探测不应用账号覆盖
+    #[must_use]
+    pub fn account_model_override(&self, account: &ProviderAccountId) -> Option<&str> {
+        if self.is_diagnostic_required_account() {
+            return None;
+        }
+        self.account
+            .routing_candidate
+            .as_ref()?
+            .account_model_override(account)
+            .map(UpstreamModelId::as_str)
+    }
+
     /// 从本次请求冻结的发布代次选择上游适配器；不建立连接、不重新选号
     pub fn upstream_adapter(
         &self,
@@ -611,6 +642,14 @@ impl AttemptContext {
                     .map(|owner| owner.account()),
                 ContinuationAttempt::None | ContinuationAttempt::ReplayAny => None,
             });
+        let model = account
+            .and_then(|account| {
+                self.account
+                    .routing_candidate
+                    .as_ref()?
+                    .upstream_model_for_account(account)
+            })
+            .unwrap_or(model);
         self.request.upstream_adapters.as_ref().map_or(
             Ok(upstream_adapter::UpstreamAdapterSelection::Native),
             |plan| plan.select(self, provider, model, account),
@@ -988,6 +1027,23 @@ impl AttemptContext {
         &self.account.recovery_stage
     }
 
+    /// 只有所有账号目标一致时才向调度策略声明单一模型
+    #[must_use]
+    pub fn scheduling_model<'a>(
+        &'a self,
+        fallback: Option<&'a str>,
+        candidates: &[AccountCandidate],
+    ) -> Option<&'a str> {
+        self.account
+            .routing_candidate
+            .as_ref()
+            .map_or(fallback, |candidate| {
+                candidate
+                    .common_upstream_model(candidates.iter().map(|entry| entry.account.id()))
+                    .map(UpstreamModelId::as_str)
+            })
+    }
+
     /// 使用冻结策略选择账号；没有匹配策略时委托现有 `AccountSelector`
     pub async fn select_account<'a>(
         &self,
@@ -1014,6 +1070,8 @@ impl AttemptContext {
         }
         match self.request.request_policy() {
             Some(policy) => {
+                // 异构目标没有单一上游模型，保留旧插件 wire 的可选模型合同
+                let model = self.scheduling_model(model, candidates);
                 policy
                     .select_account(self.attempt_index, provider, model, candidates, context)
                     .await

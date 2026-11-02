@@ -1,5 +1,6 @@
 //! 执行服务的准入、预算、请求记录与终结行为测试
 
+mod account_mappings;
 mod identity;
 mod outbound;
 use gateway_core::routing::extensions::{ExtensionSetId, ExtensionSetLease, ExtensionSetReference};
@@ -3342,6 +3343,7 @@ impl Provider for NativeCatalogProvider {
             ["gpt-new", "gpt-start"]
                 .into_iter()
                 .map(|id| gateway_core::routing::ProviderModelDescriptor {
+                    source_account: None,
                     model: UpstreamModelId::new(id).expect("id"),
                     content: gateway_core::routing::ProviderModelContent::Native(
                         RawJsonPayload::new(

@@ -267,6 +267,13 @@ pub struct GrokSessionSelection {
 }
 
 impl GrokSessionSelection {
+    pub(crate) fn model_for_account<'a>(&'a self, account: &ProviderAccountId) -> &'a str {
+        self.upstream_context
+            .as_ref()
+            .and_then(|context| context.account_model_override(account))
+            .unwrap_or(self.upstream_model.as_str())
+    }
+
     pub(crate) fn with_recovery_stage(
         mut self,
         stage: gateway_core::engine::recovery::AccountRecoveryStage,

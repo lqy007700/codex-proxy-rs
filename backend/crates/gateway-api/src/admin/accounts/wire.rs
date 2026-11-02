@@ -70,6 +70,7 @@ pub struct BatchUpdateAccountsRequest {
     pub concurrency_limit: Option<Option<u64>>,
     pub weight: Option<u64>,
     pub model_access: Option<gateway_core::account::AccountModelAccess>,
+    pub model_mappings: Option<gateway_core::account::AccountModelMappings>,
     pub group_ids: Option<Vec<String>>,
     pub scheduling_role: Option<gateway_core::account::AccountSchedulingRole>,
 }
@@ -126,6 +127,7 @@ impl BatchUpdateAccountsRequest {
             && self.scheduling_role.is_none()
             && self.group_ids.is_none()
             && self.model_access.is_none()
+            && self.model_mappings.is_none()
             && self.outbound_proxy_id.is_none()
             && self.outbound_proxy_url.is_none()
         {
@@ -148,6 +150,7 @@ impl BatchUpdateAccountsRequest {
             weight: self.weight.map(parse_account_weight).transpose()?,
             scheduling_role: self.scheduling_role,
             model_access: self.model_access,
+            model_mappings: self.model_mappings,
             group_ids: self
                 .group_ids
                 .as_deref()
@@ -302,6 +305,7 @@ pub struct AccountView {
     pub capacity: AccountCapacityView,
     pub weight: u16,
     pub model_access: gateway_core::account::AccountModelAccess,
+    pub model_mappings: gateway_core::account::AccountModelMappings,
     pub allow_credits: bool,
     pub access_token_expires_at: Option<String>,
     pub access_token_expires_at_display: Option<String>,

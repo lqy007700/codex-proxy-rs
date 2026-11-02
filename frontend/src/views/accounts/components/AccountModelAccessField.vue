@@ -15,6 +15,8 @@ const props = withDefaults(defineProps<{
   allowPreserve?: boolean
 }>(), { disabled: false, allowPreserve: false })
 
+const emit = defineEmits<{ catalogChange: [models: string[]] }>()
+
 const MODEL_LIMIT = 256
 
 const model = defineModel<AccountModelAccess | undefined>({ required: true })
@@ -96,6 +98,7 @@ async function load(refresh = false) {
     )
     if (request.isCurrent(requestId)) {
       catalog.value = result.models
+      emit('catalogChange', result.models.map(model => model.id))
       catalogObservedAtDisplay.value = result.observedAt ? result.observedAtDisplay : undefined
     }
   }
@@ -113,6 +116,7 @@ watch([
 ], () => {
   request.invalidate()
   catalog.value = undefined
+  emit('catalogChange', [])
   catalogObservedAtDisplay.value = undefined
   search.value = ''
   inputError.value = ''

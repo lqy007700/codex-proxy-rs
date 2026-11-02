@@ -87,7 +87,7 @@ pub(super) async fn quota_and_models(
         let provider = providers.require(&account.provider_kind).ok();
         let mut account_models = Vec::new();
         for model in models {
-            let upstream = snapshot.mapped_model(model.as_str());
+            let upstream = snapshot.upstream_model_for_account(model, scope, &id);
             if !snapshot.allows_public_model_for_account(model, scope, &id)
                 || !account.model_access.allows(&upstream)
             {

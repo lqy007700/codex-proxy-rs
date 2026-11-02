@@ -196,6 +196,7 @@ const {
   concurrencyLimit: editingConcurrencyLimit,
   weight: editingWeight,
   modelAccess: editingModelAccess,
+  modelMappings: editingModelMappings,
   proxyMode: editingProxyMode,
   proxyId: editingProxyId,
   selectedGroupIds: editingGroupIds,
@@ -451,6 +452,7 @@ const {
       v-model:weight="editingWeight"
       v-model:scheduling-role="editingSchedulingRole"
       v-model:model-access="editingModelAccess"
+      v-model:model-mappings="editingModelMappings"
       v-model:proxy-mode="editingProxyMode"
       v-model:proxy-id="editingProxyId"
       v-model:selected-group-ids="editingGroupIds"

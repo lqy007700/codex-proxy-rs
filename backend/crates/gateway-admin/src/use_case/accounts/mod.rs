@@ -763,6 +763,7 @@ impl AccountsService for DefaultAccountsService {
                         concurrency_limit: None,
                         weight: None,
                         model_access: None,
+                        model_mappings: None,
                         group_ids: None,
                         outbound_proxy: None,
                     },

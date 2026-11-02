@@ -330,6 +330,51 @@ impl CodexCredentialCatalogService {
             .retain(|account| scope.allows(account.id()) && eligible_catalog_account(account, now));
         accounts.sort_by(|left, right| left.id().cmp(right.id()));
         let mut api_catalogs = BTreeMap::new();
+        if accounts.iter().any(|account| {
+            scope
+                .directory()
+                .account(account.id())
+                .is_some_and(|facts| facts.model_mappings().iter().next().is_some())
+        }) {
+            // 映射可能指向不同账号的不同对象，先保留来源，再由 Core 做公开名投影
+            let mut reads = stream::iter(accounts)
+                .map(|account| {
+                    let profile = request_profile.clone();
+                    async move {
+                        let result = self
+                            .cached_client_account_catalog(&account, client_version, profile)
+                            .await;
+                        (account.id().clone(), result)
+                    }
+                })
+                .buffer_unordered(MAX_CONCURRENT_API_CATALOGS);
+            let deadline = Instant::now() + MODEL_CATALOG_TIMEOUT;
+            let mut catalogs = BTreeMap::new();
+            let mut last_error = CodexCredentialCatalogError::NoEligibleCredential;
+            while let Ok(Some((account, result))) =
+                tokio::time::timeout_at(deadline, reads.next()).await
+            {
+                match result {
+                    Ok(models) => {
+                        let models = models
+                            .into_iter()
+                            .filter(|model| scope.allows_model(&account, model.model.as_str()))
+                            .map(|mut model| {
+                                model.source_account = Some(account.clone());
+                                model
+                            })
+                            .collect::<Vec<_>>();
+                        catalogs.insert(account, models);
+                    }
+                    Err(error) => last_error = error,
+                }
+            }
+            return if catalogs.is_empty() {
+                Err(last_error)
+            } else {
+                Ok(catalogs.into_values().flatten().collect())
+            };
+        }
         let (api_accounts, mut accounts): (Vec<_>, Vec<_>) =
             accounts.into_iter().partition(|account| {
                 account.authentication_kind() == super::CODEX_AUTHENTICATION_KIND_API_KEY
@@ -457,6 +502,7 @@ impl CodexCredentialCatalogService {
                             .models
                             .into_iter()
                             .map(|model| ProviderModelDescriptor {
+                                source_account: None,
                                 model: model.request_model().clone(),
                                 content: if model.document().protocol() == "codex" {
                                     ProviderModelContent::Native(model.document().clone())
@@ -540,9 +586,9 @@ impl CodexCredentialCatalogService {
     }
 
     /// 有效目录约束账号模型资格，缺失目录或未知套餐继续交由上游判断
-    pub(crate) fn scheduling_exclusions(
+    pub(crate) fn scheduling_exclusions<'a>(
         &self,
-        accounts: &[ProviderAccount],
+        accounts: impl Iterator<Item = &'a ProviderAccount>,
         model: &str,
         now: SystemTime,
     ) -> BTreeSet<ProviderAccountId> {
@@ -565,7 +611,6 @@ impl CodexCredentialCatalogService {
             .map(|(scope, _)| scope)
             .collect::<BTreeSet<_>>();
         accounts
-            .iter()
             .filter(|account| {
                 CodexCatalogScope::for_account(account)
                     .is_ok_and(|scope| excluded_scopes.contains(&scope))

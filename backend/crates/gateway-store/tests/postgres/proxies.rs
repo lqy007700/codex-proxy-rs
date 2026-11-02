@@ -355,6 +355,7 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
             let error = admin
                 .batch_update_accounts(
                     BatchUpdateAccounts {
+                        model_mappings: Default::default(),
                         scheduling_role: None,
                         allow_credits: None,
                         account_ids: vec![
@@ -398,6 +399,7 @@ fn success() -> ProxyTestResult {
 
 fn update(account_id: &str, selection: AccountProxySelection) -> UpdateAccount {
     UpdateAccount {
+        model_mappings: Default::default(),
         scheduling_role: None,
         notes: None,
         model_access: Default::default(),
@@ -1171,6 +1173,7 @@ async fn legacy_urls_join_one_catalog_entry_and_invalid_batch_rolls_back() {
         admin
             .batch_update_accounts(
                 BatchUpdateAccounts {
+                    model_mappings: Default::default(),
                     scheduling_role: None,
                     allow_credits: None,
                     model_access: Default::default(),

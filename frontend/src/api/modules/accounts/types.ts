@@ -167,6 +167,7 @@ export interface Account {
   weight: number
   schedulingRole: AccountSchedulingRole
   modelAccess: AccountModelAccess
+  modelMappings: Record<string, string>
   allowCredits: boolean
   accessTokenExpiresAt: string | null
   accessTokenExpiresAtDisplay: string | null

@@ -93,6 +93,7 @@ async fn fixture(sharing: ClientPeerSharing, plaintext: &str) -> (AdminTestFixtu
         },
         projection: resolve_account_status(&facts, now.into()),
         account: AccountRecord {
+            model_mappings: Default::default(),
             allow_credits: false,
             scheduling_role: Default::default(),
 

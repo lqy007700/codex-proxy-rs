@@ -420,6 +420,10 @@ pub(super) struct ColdJsonResponse {
 pub(super) struct OpenAiSessionState {
     pub(super) account_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) upstream_model: Option<String>,
+    #[serde(default)]
+    pub(super) account_model_mapping: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) credential_revision: Option<u64>,
     pub(super) conversation_id: Option<String>,
     #[serde(default)]
@@ -441,6 +445,8 @@ pub(super) enum OpenAiContinuationScope {
 
 pub(super) struct OpenAiSessionCapture {
     pub(super) account_id: String,
+    pub(super) upstream_model: String,
+    pub(super) account_model_mapping: bool,
     pub(super) credential_revision: Option<u64>,
     pub(super) conversation_id: Option<String>,
     pub(super) turn_state: Option<String>,
@@ -488,6 +494,8 @@ fn encode_openai_session_capture(
     };
     encode_openai_session_state(OpenAiSessionState {
         account_id: capture.account_id.clone(),
+        upstream_model: Some(capture.upstream_model.clone()),
+        account_model_mapping: capture.account_model_mapping,
         credential_revision: capture.credential_revision,
         conversation_id: capture.conversation_id.clone(),
         turn_state: capture.turn_state.clone(),

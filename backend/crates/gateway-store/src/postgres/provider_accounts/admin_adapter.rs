@@ -651,6 +651,9 @@ impl AccountStore for PgAdminAccountStore {
         if command.scheduling_role.is_some() {
             changed_fields.push("scheduling_role".to_owned());
         }
+        if command.model_mappings.is_some() {
+            changed_fields.push("model_mappings".to_owned());
+        }
         if command.model_access.is_some() {
             changed_fields.push("model_access".to_owned());
         }
@@ -671,6 +674,7 @@ impl AccountStore for PgAdminAccountStore {
                 weight: Some(command.weight),
                 scheduling_role: command.scheduling_role,
                 model_access: command.model_access,
+                model_mappings: command.model_mappings,
                 group_ids: Some(command.group_ids),
                 outbound_proxy: command.outbound_proxy,
                 audit: mutation_audit(
@@ -761,6 +765,9 @@ impl AccountStore for PgAdminAccountStore {
         if command.scheduling_role.is_some() {
             changed_fields.push("scheduling_role".to_owned());
         }
+        if command.model_mappings.is_some() {
+            changed_fields.push("model_mappings".to_owned());
+        }
         if command.model_access.is_some() {
             changed_fields.push("model_access".to_owned());
         }
@@ -778,6 +785,7 @@ impl AccountStore for PgAdminAccountStore {
                 weight: command.weight,
                 scheduling_role: command.scheduling_role,
                 model_access: command.model_access,
+                model_mappings: command.model_mappings,
                 group_ids: command.group_ids,
                 outbound_proxy: command.outbound_proxy,
                 audit: mutation_audit(

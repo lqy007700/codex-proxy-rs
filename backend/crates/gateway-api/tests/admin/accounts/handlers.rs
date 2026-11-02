@@ -273,6 +273,7 @@ fn account_page_item(
     AccountPageItem {
         protection_rules: Vec::new(),
         account: AccountRecord {
+            model_mappings: Default::default(),
             scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
             allow_credits: false,
             outbound_proxy_id: None,

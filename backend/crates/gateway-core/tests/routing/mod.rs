@@ -18,6 +18,7 @@ use gateway_core::routing::{
     UpstreamModelId,
 };
 
+mod account_mappings;
 mod privacy;
 mod request_settings;
 mod snapshot;

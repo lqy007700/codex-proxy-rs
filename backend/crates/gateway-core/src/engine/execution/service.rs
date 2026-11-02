@@ -62,8 +62,9 @@ use crate::{
     policy::{ClientApiKeyId, ClientPolicy},
     provider_ports::{ProviderSessionAffinityPort, ProviderStoreErrorKind},
     routing::{
-        FrozenAccountScope, ProviderCatalogUnavailable, PublicModelDescriptor, PublicModelId,
-        RoutingContext, RuntimeSnapshot, UpstreamModelId, request_settings::RequestSettings,
+        FrozenAccountScope, ProviderCatalogUnavailable, ProviderModelContent,
+        PublicModelDescriptor, PublicModelId, RoutingContext, RuntimeSnapshot, UpstreamModelId,
+        request_settings::RequestSettings,
     },
     runtime::{RuntimeSnapshotHandle, RuntimeSnapshotPublisher},
 };
@@ -1575,6 +1576,54 @@ impl ExecutionService for DefaultExecutionService {
                     }
                     continue;
                 };
+                if models.iter().any(|entry| entry.source_account.is_some()) {
+                    // 完整原生对象优先，稳定排序保留各来源的上游顺序，额外别名随后补入
+                    let mut sources = models.iter().collect::<Vec<_>>();
+                    sources.sort_by_key(|entry| {
+                        matches!(entry.content, ProviderModelContent::Adapted(_))
+                    });
+                    let ordered_models = sources
+                        .iter()
+                        .map(|entry| {
+                            PublicModelId::new(entry.model.as_str())
+                                .map_err(|_| ProviderCatalogUnavailable)
+                        })
+                        .chain(
+                            client
+                                .snapshot
+                                .public_models_for_provider(kind)
+                                .into_iter()
+                                .map(Ok),
+                        );
+                    for model in ordered_models {
+                        let model = model?;
+                        if seen.contains(&model) {
+                            continue;
+                        }
+                        let source = sources.iter().find(|entry| {
+                            entry.source_account.as_ref().is_some_and(|account| {
+                                scope.account_provider(account) == Some(kind)
+                                    && client
+                                        .snapshot
+                                        .allows_public_model_for_account(&model, scope, account)
+                                    && client
+                                        .snapshot
+                                        .upstream_model_for_account(&model, scope, account)
+                                        == entry.model.as_str()
+                            })
+                        });
+                        if let Some(source) = source {
+                            seen.insert(model.clone());
+                            result.push(source.content.for_public_model(model));
+                        }
+                    }
+                    for profile in client.snapshot.contributed_profiles_for_scope(kind, scope) {
+                        if seen.insert(profile.model().clone()) {
+                            result.push(PublicModelDescriptor::Adapted(profile));
+                        }
+                    }
+                    continue;
+                }
                 // 保留上游顺序；映射只选择完整的目标对象，不能跨账号/模型混拼字段
                 let by_id = models
                     .iter()

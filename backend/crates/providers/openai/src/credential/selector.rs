@@ -621,12 +621,15 @@ impl CodexCredentialSelector {
                                 .attempt
                                 .account_scope()
                                 .is_some_and(|scope| scope.allows(account.id())))
-                        && model.allows_account(account)
+                        && model
+                            .for_account(request.attempt, account.id())
+                            .allows_account(account)
                         && (diagnostic || {
-                            let allowed = request
-                                .attempt
-                                .account_scope()
-                                .is_some_and(|scope| model.allows(scope, account.id()));
+                            let allowed = request.attempt.account_scope().is_some_and(|scope| {
+                                model
+                                    .for_account(request.attempt, account.id())
+                                    .allows(scope, account.id())
+                            });
                             if !allowed {
                                 model_access_rejected += 1;
                             }
@@ -635,28 +638,67 @@ impl CodexCredentialSelector {
                 })
                 .collect::<Vec<_>>();
             let mut eligible = Vec::with_capacity(accounts.len());
-            let catalog_excluded = match model {
-                CodexSelectionModel::Requested(model) if !diagnostic => self
-                    .catalog
-                    .scheduling_exclusions(&accounts, model, SystemTime::now()),
-                _ => Default::default(),
-            };
+            let mut catalog_excluded = std::collections::BTreeSet::new();
+            if let CodexSelectionModel::Requested(default_model) = model
+                && !diagnostic
+            {
+                if request.attempt.has_account_model_routes() {
+                    let mut groups =
+                        std::collections::BTreeMap::<&str, Vec<&ProviderAccount>>::new();
+                    for account in &accounts {
+                        let target = request
+                            .attempt
+                            .account_model_override(account.id())
+                            .unwrap_or(default_model);
+                        groups.entry(target).or_default().push(account);
+                    }
+                    for (target, accounts) in groups {
+                        catalog_excluded.extend(self.catalog.scheduling_exclusions(
+                            accounts.into_iter(),
+                            target,
+                            SystemTime::now(),
+                        ));
+                    }
+                } else {
+                    catalog_excluded = self.catalog.scheduling_exclusions(
+                        accounts.iter(),
+                        default_model,
+                        SystemTime::now(),
+                    );
+                }
+            }
             let mut catalog_rejected = 0_usize;
             let mut native_accounts = std::collections::BTreeSet::new();
             for account in accounts {
-                let adapter = if let Some(model) = adapter_model.as_ref() {
-                    match request.attempt.upstream_adapter_for_account(
-                        &self.provider_kind,
-                        model,
-                        account.id(),
-                    ) {
-                        Ok(adapter) => adapter,
-                        // 已匹配但不可用的适配器不能回退到该账号的原生目标
-                        Err(_) => continue,
-                    }
+                let override_model = if adapter_model.is_some() {
+                    request
+                        .attempt
+                        .account_model_override(account.id())
+                        .filter(|target| {
+                            adapter_model
+                                .as_ref()
+                                .is_none_or(|model| model.as_str() != *target)
+                        })
+                        .map(gateway_core::routing::UpstreamModelId::new)
+                        .transpose()
+                        .map_err(|_| CredentialSelectionError::NoEligibleCredential)?
                 } else {
                     None
                 };
+                let adapter =
+                    if let Some(model) = override_model.as_ref().or(adapter_model.as_ref()) {
+                        match request.attempt.upstream_adapter_for_account(
+                            &self.provider_kind,
+                            model,
+                            account.id(),
+                        ) {
+                            Ok(adapter) => adapter,
+                            // 已匹配但不可用的适配器不能回退到该账号的原生目标
+                            Err(_) => continue,
+                        }
+                    } else {
+                        None
+                    };
                 if adapter.as_ref().is_some_and(|adapter| {
                     !adapter.supports_authentication(account.authentication_kind())
                 }) {
@@ -715,14 +757,6 @@ impl CodexCredentialSelector {
                 self.quota.prepare_scheduling(&accounts).await;
             }
             let mut rate_limits = HashMap::with_capacity(accounts.len());
-            let model_scope = match model {
-                CodexSelectionModel::Requested(model) => {
-                    gateway_core::routing::UpstreamModelId::new(model)
-                        .ok()
-                        .map(ProviderCooldownScope::upstream_model)
-                }
-                _ => None,
-            };
             if !diagnostic {
                 // 同一批候选并发读取实时冷却，避免逐账号累加 Redis 往返
                 // 分批限制在途读取，取消选号时直接释放本批 future，不启动后续批次
@@ -731,12 +765,19 @@ impl CodexCredentialSelector {
                         futures::future::join_all(batch.iter().map(|account| async {
                             let account_cooldown = self.quota.cooldown(account.id());
                             let model_cooldown = async {
-                                let scope = model_scope.as_ref()?;
+                                let CodexSelectionModel::Requested(target) =
+                                    model.for_account(request.attempt, account.id())
+                                else {
+                                    return None;
+                                };
+                                let scope = gateway_core::routing::UpstreamModelId::new(target)
+                                    .ok()
+                                    .map(ProviderCooldownScope::upstream_model)?;
                                 if !native_accounts.contains(account.id()) {
                                     return None;
                                 }
                                 self.cooldowns
-                                    .read_scoped(account.id(), scope)
+                                    .read_scoped(account.id(), &scope)
                                     .await
                                     .ok()
                                     .flatten()
@@ -798,7 +839,7 @@ impl CodexCredentialSelector {
                         })
                         .with_provider_quota(self.quota_signals(
                             &account,
-                            model,
+                            model.for_account(request.attempt, account.id()),
                             request.attempt.account_selection_policy().strategy(),
                         ))
                         .with_rate_limit(rate_limits.get(account.id()).copied().flatten())

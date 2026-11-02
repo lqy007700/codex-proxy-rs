@@ -37,6 +37,7 @@ pub struct ContributedModel {
 pub struct ProviderModelDescriptor {
     pub model: UpstreamModelId,
     pub content: ProviderModelContent,
+    pub source_account: Option<ProviderAccountId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

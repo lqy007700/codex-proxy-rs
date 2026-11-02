@@ -159,7 +159,7 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         let rows = sqlx::query(
             "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
                     upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
-                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, allow_credits, credential_state,
+                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
                     credential_observed_at, quota_access_state, quota_evidence,
                     quota_access_observed_at, quota_reset_at,
                     quota_observed_at, last_error_reason, last_error_message, created_at, updated_at
@@ -188,7 +188,7 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         let rows = sqlx::query(
             "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
                     upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
-                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, allow_credits, credential_state,
+                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
                     credential_observed_at, quota_access_state, quota_evidence,
                     quota_access_observed_at, quota_reset_at,
                     quota_observed_at, last_error_reason, last_error_message, created_at, updated_at
@@ -529,6 +529,7 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
                     weight: command.weight,
                     scheduling_role: command.scheduling_role,
                     model_access: command.model_access.as_ref(),
+                    model_mappings: command.model_mappings.as_ref(),
                     outbound_proxy: command.outbound_proxy.as_ref(),
                 },
             )
@@ -896,6 +897,7 @@ struct AccountSchedulingUpdate<'a> {
     weight: Option<AccountWeight>,
     scheduling_role: Option<gateway_core::account::AccountSchedulingRole>,
     model_access: Option<&'a gateway_core::account::AccountModelAccess>,
+    model_mappings: Option<&'a gateway_core::account::AccountModelMappings>,
     outbound_proxy: Option<&'a gateway_admin::model::proxies::AccountProxySelection>,
 }
 
@@ -910,6 +912,7 @@ async fn update_provider_accounts_scheduling_in_transaction(
         weight,
         scheduling_role,
         model_access,
+        model_mappings,
         outbound_proxy,
     } = update;
     let (proxy_id, proxy) = match outbound_proxy {
@@ -926,7 +929,8 @@ async fn update_provider_accounts_scheduling_in_transaction(
              outbound_proxy_url = case when $5 then $6 else outbound_proxy_url end,
              outbound_proxy_id = case when $5 then $7 else outbound_proxy_id end,
              model_access_json = coalesce($8, model_access_json),
-             scheduling_role = coalesce($10, scheduling_role)
+             scheduling_role = coalesce($10, scheduling_role),
+             model_mappings_json = coalesce($11, model_mappings_json)
          where id = any($1::text[])
          returning id",
     )
@@ -940,6 +944,7 @@ async fn update_provider_accounts_scheduling_in_transaction(
     .bind(model_access.map(sqlx::types::Json))
     .bind(concurrency_limit.is_some())
     .bind(scheduling_role.map(gateway_core::account::AccountSchedulingRole::as_str))
+    .bind(model_mappings.map(sqlx::types::Json))
     .fetch_all(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("set provider accounts state in admin transaction", source))?
@@ -1114,6 +1119,7 @@ pub(super) async fn import_provider_accounts_in_transaction(
                 weight: Some(settings.weight),
                 scheduling_role: None,
                 model_access: settings.model_access.as_ref(),
+                model_mappings: None,
                 outbound_proxy: None,
             },
         )
@@ -1181,6 +1187,7 @@ pub(super) async fn rotate_provider_account_admin_in_transaction(
                 weight: Some(settings.weight),
                 scheduling_role: None,
                 model_access: settings.model_access.as_ref(),
+                model_mappings: None,
                 outbound_proxy: settings.outbound_proxy.as_ref(),
             },
         )
@@ -1214,7 +1221,7 @@ impl PgProviderAccountRepository {
         let rows = sqlx::query(
             "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
                     upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
-                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, allow_credits, credential_state,
+                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
                     credential_observed_at, quota_access_state, quota_evidence,
                     quota_access_observed_at, quota_reset_at,
                     quota_observed_at, last_error_reason, last_error_message, created_at, updated_at

@@ -32,6 +32,7 @@ struct Facts {
 fn account() -> AccountRecord {
     let at = "2026-01-01T00:00:00Z".parse().unwrap();
     AccountRecord {
+        model_mappings: Default::default(),
         scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
         allow_credits: false,
         outbound_proxy_id: None,

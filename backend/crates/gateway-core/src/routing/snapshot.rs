@@ -19,8 +19,8 @@ use crate::validation::RoutingError;
 use super::{
     AccountGroupId, ClientRoutingScope, ConfigRevision, FrozenAccountScope, ModelCapabilities,
     ProviderCandidate, ProviderCatalogGeneration, ProviderCatalogPort, ProviderKind, ProviderModel,
-    PublicModelId, RoutingContext, RoutingGroupSnapshot, RoutingPlan, RuntimeAccount,
-    RuntimeAccountDirectory, UpstreamModelId,
+    ProviderModelRoute, PublicModelId, RoutingContext, RoutingGroupSnapshot, RoutingPlan,
+    RuntimeAccount, RuntimeAccountDirectory, UpstreamModelId,
 };
 
 const MAXIMUM_CATALOG_STABILITY_ATTEMPTS: usize = 4;
@@ -129,6 +129,7 @@ pub struct SnapshotProviderAccountFacts {
     account_id: ProviderAccountId,
     provider_kind: String,
     model_access: crate::account::AccountModelAccess,
+    model_mappings: crate::account::AccountModelMappings,
     scheduling_role: crate::account::AccountSchedulingRole,
     authentication_kind: String,
 }
@@ -155,6 +156,7 @@ impl SnapshotProviderAccountFacts {
             provider_kind: provider_kind.into(),
             scheduling_role: crate::account::AccountSchedulingRole::Regular,
             model_access: crate::account::AccountModelAccess::all(),
+            model_mappings: crate::account::AccountModelMappings::empty(),
             authentication_kind: String::new(),
         }
     }
@@ -164,6 +166,12 @@ impl SnapshotProviderAccountFacts {
     #[must_use]
     pub fn with_authentication_kind(mut self, authentication_kind: String) -> Self {
         self.authentication_kind = authentication_kind;
+        self
+    }
+
+    #[must_use]
+    pub fn with_model_mappings(mut self, mappings: crate::account::AccountModelMappings) -> Self {
+        self.model_mappings = mappings;
         self
     }
 
@@ -522,6 +530,7 @@ async fn compile_runtime_snapshot(
                 RuntimeAccount::new(provider_kind, BTreeSet::new())
                     .with_scheduling_role(account.scheduling_role)
                     .with_model_access(account.model_access)
+                    .with_model_mappings(account.model_mappings)
                     .with_direct_authentication_kind(
                         direct_account.then_some(account.authentication_kind),
                     ),
@@ -552,6 +561,7 @@ async fn compile_runtime_snapshot(
         *account = RuntimeAccount::new(account.provider_kind().clone(), group_ids)
             .with_scheduling_role(account.scheduling_role())
             .with_model_access(account.model_access().clone())
+            .with_model_mappings(account.model_mappings().clone())
             .with_direct_authentication_kind(
                 account.direct_authentication_kind().map(str::to_owned),
             );
@@ -714,6 +724,24 @@ impl RuntimeSnapshot {
         provider: &ProviderKind,
         scope: &FrozenAccountScope,
     ) -> Vec<super::PublicModelProfile> {
+        if scope.directory().model_aliases(provider).is_some() {
+            return self
+                .public_models_for_provider(provider)
+                .into_iter()
+                .filter_map(|model| {
+                    scope
+                        .allowed_account_ids()
+                        .find_map(|account| {
+                            self.contributed_presentation_for_account(
+                                provider, &model, scope, account,
+                            )
+                        })
+                        .map(|presentation| {
+                            super::PublicModelProfile::new(model, presentation.clone())
+                        })
+                })
+                .collect();
+        }
         self.contributed_models()
             .iter()
             .filter(|model| {
@@ -727,6 +755,37 @@ impl RuntimeSnapshot {
                 super::PublicModelProfile::new(model.id.clone(), model.presentation.clone())
             })
             .collect()
+    }
+
+    fn contributed_presentation_for_account(
+        &self,
+        provider: &ProviderKind,
+        public: &PublicModelId,
+        scope: &FrozenAccountScope,
+        account: &ProviderAccountId,
+    ) -> Option<&super::ModelPresentation> {
+        if scope.account_provider(account) != Some(provider)
+            || self
+                .model_alias(public.as_str())
+                .is_some_and(|alias| &alias.provider != provider)
+            || !scope.allows_model(
+                account,
+                &self.upstream_model_for_account(public, scope, account),
+            )
+        {
+            return None;
+        }
+        let contribution_id = scope
+            .model_override(account, public.as_str())
+            .unwrap_or(public.as_str());
+        self.contributed_models()
+            .iter()
+            .find(|entry| {
+                &entry.provider == provider
+                    && entry.id.as_str() == contribution_id
+                    && entry.accounts.contains(account)
+            })
+            .map(|entry| &entry.presentation)
     }
 
     fn model_alias(&self, model: &str) -> Option<&super::ContributedModelAlias> {
@@ -915,6 +974,13 @@ impl RuntimeSnapshot {
                 .keys()
                 .filter_map(|model| PublicModelId::new(model.clone()).ok()),
         );
+        if let Some(aliases) = self.account_directory.model_aliases(provider) {
+            models.extend(
+                aliases
+                    .iter()
+                    .filter_map(|source| PublicModelId::new(source).ok()),
+            );
+        }
         models.extend(
             self.model_aliases()
                 .iter()
@@ -1022,6 +1088,50 @@ impl RuntimeSnapshot {
         provider: &ProviderKind,
         scope: &FrozenAccountScope,
     ) -> Vec<super::PublicModelProfile> {
+        if scope.allowed_account_ids().any(|account| {
+            scope.account_provider(account) == Some(provider)
+                && scope
+                    .directory()
+                    .account(account)
+                    .is_some_and(|facts| facts.model_mappings().iter().next().is_some())
+        }) {
+            return self
+                .public_models_for_provider(provider)
+                .into_iter()
+                .filter_map(|model| {
+                    scope
+                        .allowed_account_ids()
+                        .filter(|account| scope.account_provider(account) == Some(provider))
+                        .find_map(|account| {
+                            if !self.allows_public_model_for_account(&model, scope, account) {
+                                return None;
+                            }
+                            let target = self.upstream_model_for_account(&model, scope, account);
+                            let presentation = self
+                                .provider_model_presentations
+                                .get(provider)
+                                .and_then(|models| {
+                                    models.iter().find_map(|(id, presentation)| {
+                                        (id.as_str() == target
+                                            && self.native_catalog_model_allowed_for_account(
+                                                provider, &model, scope, account,
+                                            ))
+                                        .then_some(presentation)
+                                    })
+                                })
+                                .or_else(|| {
+                                    self.contributed_presentation_for_account(
+                                        provider, &model, scope, account,
+                                    )
+                                })?;
+                            Some(super::PublicModelProfile::new(
+                                model.clone(),
+                                presentation.clone(),
+                            ))
+                        })
+                })
+                .collect();
+        }
         self.public_model_profiles_for_provider(provider)
             .into_iter()
             .filter(|profile| {
@@ -1052,19 +1162,54 @@ impl RuntimeSnapshot {
         else {
             return false;
         };
+        self.contains_resolved_model_for_provider(public_model.as_str(), &upstream_model, provider)
+            || self.account_directory.accounts().any(|(_, account)| {
+                account.provider_kind() == provider
+                    && account
+                        .model_mappings()
+                        .target(public_model.as_str())
+                        .is_some_and(|target| self.contains_target_for_provider(target, provider))
+            })
+    }
+
+    #[must_use]
+    pub fn upstream_model_for_account(
+        &self,
+        public_model: &PublicModelId,
+        scope: &FrozenAccountScope,
+        account: &ProviderAccountId,
+    ) -> String {
+        scope
+            .model_override(account, public_model.as_str())
+            .map_or_else(|| self.mapped_model(public_model.as_str()), str::to_owned)
+    }
+
+    fn contains_target_for_provider(&self, target: &str, provider: &ProviderKind) -> bool {
+        let Ok(target) = UpstreamModelId::new(target) else {
+            return false;
+        };
+        self.contains_resolved_model_for_provider(target.as_str(), &target, provider)
+    }
+
+    fn contains_resolved_model_for_provider(
+        &self,
+        public: &str,
+        upstream: &UpstreamModelId,
+        provider: &ProviderKind,
+    ) -> bool {
         self.provider_models
             .get(provider)
-            .is_some_and(|models| models.contains_key(&upstream_model))
+            .is_some_and(|models| models.contains_key(upstream))
             || self
                 .contributed_models()
                 .iter()
-                .any(|model| &model.provider == provider && &model.id == public_model)
+                .any(|model| &model.provider == provider && model.id.as_str() == public)
             || (!self.exhaustive_provider_catalogs.contains(provider)
                 && !self
                     .contributed_models()
                     .iter()
-                    .any(|model| &model.id == public_model)
-                && !self.is_known_upstream_model(&upstream_model))
+                    .any(|model| model.id.as_str() == public)
+                && !self.is_known_upstream_model(upstream))
     }
 
     /// 通用模型候选资格，不以原生目录来源限制推理，也不替代操作能力与实时选号检查
@@ -1078,15 +1223,23 @@ impl RuntimeSnapshot {
         let Some(provider) = scope.account_provider(account) else {
             return false;
         };
-        let upstream = self.mapped_model(public_model.as_str());
-        if !scope.allows_model(account, &upstream)
-            || !self.contains_public_model_for_provider(public_model, provider)
+        if self
+            .model_alias(public_model.as_str())
+            .is_some_and(|alias| &alias.provider != provider)
         {
             return false;
         }
+        let overridden = scope.model_override(account, public_model.as_str());
+        let upstream = self.upstream_model_for_account(public_model, scope, account);
+        let contribution_id = overridden.unwrap_or(public_model.as_str());
         let Ok(upstream) = UpstreamModelId::from_client_wire(upstream) else {
             return false;
         };
+        if !scope.allows_model(account, upstream.as_str())
+            || !self.contains_resolved_model_for_provider(contribution_id, &upstream, provider)
+        {
+            return false;
+        }
         let native = self
             .provider_models
             .get(provider)
@@ -1096,10 +1249,10 @@ impl RuntimeSnapshot {
             || !self
                 .contributed_models()
                 .iter()
-                .any(|model| &model.provider == provider && &model.id == public_model)
+                .any(|model| &model.provider == provider && model.id.as_str() == contribution_id)
             || self.contributed_models().iter().any(|model| {
                 &model.provider == provider
-                    && &model.id == public_model
+                    && model.id.as_str() == contribution_id
                     && model.accounts.contains(account)
             })
     }
@@ -1132,14 +1285,26 @@ impl RuntimeSnapshot {
         public_model: &PublicModelId,
         scope: &FrozenAccountScope,
     ) -> bool {
+        if self
+            .model_alias(public_model.as_str())
+            .is_some_and(|alias| &alias.provider != provider)
+        {
+            return false;
+        }
         self.native_catalog_model_allowed_for_scope(provider, public_model, scope)
-            || self.contributed_models().iter().any(|model| {
-                &model.provider == provider
-                    && &model.id == public_model
-                    && model.accounts.iter().any(|account| {
-                        scope.account_provider(account) == Some(provider)
-                            && scope
-                                .allows_model(account, &self.mapped_model(public_model.as_str()))
+            || scope.allowed_account_ids().any(|account| {
+                let contribution_id = scope
+                    .model_override(account, public_model.as_str())
+                    .unwrap_or(public_model.as_str());
+                scope.account_provider(account) == Some(provider)
+                    && scope.allows_model(
+                        account,
+                        &self.upstream_model_for_account(public_model, scope, account),
+                    )
+                    && self.contributed_models().iter().any(|model| {
+                        &model.provider == provider
+                            && model.id.as_str() == contribution_id
+                            && model.accounts.contains(account)
                     })
             })
     }
@@ -1150,26 +1315,61 @@ impl RuntimeSnapshot {
         public_model: &PublicModelId,
         scope: &FrozenAccountScope,
     ) -> bool {
-        let upstream_model = self.mapped_model(public_model.as_str());
+        scope.allowed_account_ids().any(|account| {
+            scope.account_provider(account) == Some(provider)
+                && self.native_catalog_model_allowed_for_account(
+                    provider,
+                    public_model,
+                    scope,
+                    account,
+                )
+        })
+    }
+
+    fn native_catalog_model_allowed_for_account(
+        &self,
+        provider: &ProviderKind,
+        public_model: &PublicModelId,
+        scope: &FrozenAccountScope,
+        account: &ProviderAccountId,
+    ) -> bool {
+        let upstream = self.upstream_model_for_account(public_model, scope, account);
+        if !scope.allows_model(account, &upstream) {
+            return false;
+        }
         match self
             .model_catalog_accounts
             .get(provider)
-            .and_then(|models| models.get(&upstream_model))
+            .and_then(|models| models.get(&upstream))
         {
-            Some(accounts) => accounts.iter().any(|account| {
-                scope.account_provider(account) == Some(provider)
-                    && scope.allows_model(account, &upstream_model)
-            }),
+            Some(accounts) => accounts.contains(account),
             None => {
-                // 只有插件声明的模型不能借非完整原生目录扩大到其他账号
-                let native = self.provider_models.get(provider).is_some_and(|models| {
-                    models.keys().any(|model| model.as_str() == upstream_model)
+                let native = self
+                    .provider_models
+                    .get(provider)
+                    .is_some_and(|models| models.keys().any(|model| model.as_str() == upstream));
+                let contribution_id = scope
+                    .model_override(account, public_model.as_str())
+                    .unwrap_or(public_model.as_str());
+                let contributed = self.contributed_models().iter().any(|model| {
+                    &model.provider == provider && model.id.as_str() == contribution_id
                 });
-                let contributed = self
-                    .contributed_models()
-                    .iter()
-                    .any(|model| &model.provider == provider && &model.id == public_model);
-                (native || !contributed) && scope.allows_provider_model(provider, &upstream_model)
+                let local_alias = self
+                    .account_directory
+                    .model_aliases(provider)
+                    .is_some_and(|aliases| aliases.contains(public_model.as_str()));
+                let inherited_alias = self
+                    .settings
+                    .values
+                    .model_mappings
+                    .contains_key(public_model.as_str())
+                    || self.model_alias(public_model.as_str()).is_some();
+                native
+                    || (!contributed
+                        && scope
+                            .model_override(account, public_model.as_str())
+                            .is_none()
+                        && (!local_alias || inherited_alias))
             }
         }
     }
@@ -1243,7 +1443,19 @@ impl RuntimeSnapshot {
         account_scope: Arc<FrozenAccountScope>,
         context: &RoutingContext,
     ) -> Result<RoutingPlan, RoutingError> {
-        self.plan_inner(public_model, operation, account_scope, context, true)
+        if matches!(operation, Operation::Generate(_))
+            && account_scope
+                .directory()
+                .has_model_mapping(public_model.as_str())
+            && account_scope.allowed_account_ids().any(|account| {
+                account_scope
+                    .model_override(account, public_model.as_str())
+                    .is_some()
+            })
+        {
+            return self.plan_account_mappings(public_model, operation, account_scope, context);
+        }
+        self.plan_inner(public_model, operation, account_scope, context, true, true)
     }
 
     /// 管理探测已固定目标账号，不使用数据面 Key 的账号模型政策裁决探测资格
@@ -1259,7 +1471,98 @@ impl RuntimeSnapshot {
             self.all_account_scope(),
             context,
             false,
+            true,
         )
+    }
+
+    fn plan_account_mappings(
+        &self,
+        public_model: &PublicModelId,
+        operation: &Operation,
+        account_scope: Arc<FrozenAccountScope>,
+        context: &RoutingContext,
+    ) -> Result<RoutingPlan, RoutingError> {
+        let mut inherited = BTreeSet::new();
+        let mut groups = BTreeMap::<(ProviderKind, String), BTreeSet<ProviderAccountId>>::new();
+        for account in account_scope.allowed_account_ids() {
+            if let Some(target) = account_scope.model_override(account, public_model.as_str()) {
+                if let Some(provider) = account_scope.account_provider(account) {
+                    if self
+                        .model_alias(public_model.as_str())
+                        .is_some_and(|alias| &alias.provider != provider)
+                    {
+                        continue;
+                    }
+                    groups
+                        .entry((provider.clone(), target.to_owned()))
+                        .or_default()
+                        .insert(account.clone());
+                }
+            } else {
+                inherited.insert(account.clone());
+            }
+        }
+        let mut plans = Vec::new();
+        if !inherited.is_empty() {
+            let scope = Arc::new(account_scope.restricted_to(&Default::default(), &inherited));
+            if let Ok(plan) = self.plan_inner(public_model, operation, scope, context, true, true) {
+                plans.push((plan, false));
+            }
+        }
+        for ((provider, target), accounts) in groups {
+            if context
+                .required_provider
+                .as_ref()
+                .is_some_and(|required| required != &provider)
+                || context.blocked_providers.contains(&provider)
+            {
+                continue;
+            }
+            let target = PublicModelId::new(target).map_err(|_| RoutingError::InvalidIdentifier)?;
+            let scope = Arc::new(account_scope.restricted_to(&Default::default(), &accounts));
+            let mut target_context = context.clone();
+            target_context.required_provider = Some(provider);
+            if let Ok(plan) =
+                self.plan_inner(&target, operation, scope, &target_context, true, false)
+            {
+                plans.push((plan, true));
+            }
+        }
+        let mut candidates = BTreeMap::<ProviderKind, ProviderCandidate>::new();
+        for (plan, account_mapping) in &plans {
+            for candidate in plan.candidates() {
+                let route = Arc::new(ProviderModelRoute {
+                    account_mapping: *account_mapping,
+                    upstream_model: candidate.upstream_model.clone(),
+                    model_presentation: candidate.model_presentation.clone(),
+                    emulated_features: candidate.emulated_features.clone(),
+                });
+                let merged = candidates
+                    .entry(candidate.provider.clone())
+                    .or_insert_with(|| candidate.clone());
+                let models = Arc::make_mut(&mut merged.account_models);
+                for account in candidate.account_scope.allowed_account_ids() {
+                    if candidate.account_scope.account_provider(account)
+                        == Some(candidate.provider())
+                    {
+                        models.insert(account.clone(), Arc::clone(&route));
+                    }
+                }
+            }
+        }
+        for candidate in candidates.values_mut() {
+            let accounts = candidate.account_models.keys().cloned().collect();
+            candidate.account_scope =
+                Arc::new(account_scope.restricted_to(&Default::default(), &accounts));
+        }
+        let Some((mut plan, _)) = plans.into_iter().next() else {
+            return Err(RoutingError::NoCapableProvider {
+                model: public_model.as_str().to_owned(),
+            });
+        };
+        plan.account_scope = account_scope;
+        plan.candidates = candidates.into_values().collect();
+        Ok(plan)
     }
 
     fn plan_inner(
@@ -1269,6 +1572,7 @@ impl RuntimeSnapshot {
         account_scope: Arc<FrozenAccountScope>,
         context: &RoutingContext,
         enforce_account_model_policy: bool,
+        resolve_global: bool,
     ) -> Result<RoutingPlan, RoutingError> {
         let requirements = operation.capability_requirements();
         let mut candidates = Vec::new();
@@ -1278,12 +1582,17 @@ impl RuntimeSnapshot {
         }
 
         let requested_model = public_model.as_str();
-        let mapped_model = self.mapped_model(requested_model);
-        let upstream_model = if self
-            .settings
-            .values
-            .model_mappings
-            .contains_key(requested_model)
+        let mapped_model = if resolve_global {
+            self.mapped_model(requested_model)
+        } else {
+            requested_model.to_owned()
+        };
+        let upstream_model = if !resolve_global
+            || self
+                .settings
+                .values
+                .model_mappings
+                .contains_key(requested_model)
             || self.model_alias(requested_model).is_some()
         {
             UpstreamModelId::new(mapped_model)
@@ -1306,9 +1615,10 @@ impl RuntimeSnapshot {
             if !self.providers.contains(provider) {
                 continue;
             }
-            if self
-                .model_alias(public_model.as_str())
-                .is_some_and(|alias| &alias.provider != provider)
+            if resolve_global
+                && self
+                    .model_alias(public_model.as_str())
+                    .is_some_and(|alias| &alias.provider != provider)
             {
                 continue;
             }
@@ -1404,6 +1714,7 @@ impl RuntimeSnapshot {
                 upstream_model: Some(upstream_model.clone()),
                 emulated_features,
                 account_scope: candidate_scope,
+                account_models: Arc::default(),
             });
         }
 
@@ -1522,6 +1833,7 @@ impl RuntimeSnapshot {
             upstream_model: upstream_model.cloned(),
             emulated_features: BTreeSet::new(),
             account_scope: Arc::clone(&account_scope),
+            account_models: Arc::default(),
         };
         Ok(RoutingPlan {
             request_body_limit: self.responses_max_decompressed_body_bytes(),

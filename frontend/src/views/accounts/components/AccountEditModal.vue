@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AccountModelMappingRow } from '../utils/modelMappings'
 import type { ApiKeyAccountForm } from '../utils/upstreamApiKey'
 
 import type { Account, AccountGroupRef, AccountModelAccess } from '@/api'
@@ -9,6 +10,7 @@ import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { isOpenAiApiKeyAccount, isOpenAiOAuthAccount } from '../utils/upstreamApiKey'
 import AccountApiKeyFields from './AccountApiKeyFields.vue'
 import AccountIdentityCell from './AccountIdentityCell.vue'
+import AccountModelMappingsField from './AccountModelMappingsField.vue'
 import AccountSettingsFields from './AccountSettingsFields.vue'
 
 defineProps<{
@@ -35,6 +37,7 @@ const notes = defineModel<string>('notes', { required: true })
 const enabled = defineModel<boolean>('enabled', { required: true })
 const concurrencyLimit = defineModel<string>('concurrencyLimit', { required: true })
 const modelAccess = defineModel<AccountModelAccess | undefined>('modelAccess', { required: true })
+const modelMappings = defineModel<AccountModelMappingRow[]>('modelMappings', { required: true })
 const weight = defineModel<string>('weight', { required: true })
 const schedulingRole = defineModel<Account['schedulingRole']>('schedulingRole', { required: true })
 const proxyMode = defineModel<string>('proxyMode', { required: true })
@@ -103,7 +106,11 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         :current-proxy-id="account.outboundProxyId"
         :endpoint="account.outboundProxyEndpoint"
         :account-id="account.id"
-      />
+      >
+        <template #model-mappings="{ models }">
+          <AccountModelMappingsField v-model="modelMappings" :models="models" :disabled="saving" />
+        </template>
+      </AccountSettingsFields>
 
       <ZFormItem label="备注">
         <ZTextarea

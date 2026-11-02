@@ -38,6 +38,7 @@ pub(crate) fn admin_account_record(
         weight: summary.weight,
         scheduling_role: summary.scheduling_role,
         model_access: summary.model_access,
+        model_mappings: summary.model_mappings,
         allow_credits: summary.allow_credits,
         credential_state: summary.credential_state,
         credential_observed_at: summary.credential_observed_at,

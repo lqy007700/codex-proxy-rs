@@ -137,7 +137,7 @@ impl GrokAccountSessionSelector {
                     .filter(|account| {
                         request
                             .account_scope()
-                            .allows_model(account.id(), request.upstream_model().as_str())
+                            .allows_model(account.id(), request.model_for_account(account.id()))
                     })
                     .collect()
             };
@@ -145,10 +145,17 @@ impl GrokAccountSessionSelector {
                 .into_iter()
                 .filter(|account| {
                     request.upstream_context.as_ref().is_none_or(|context| {
+                        let override_model = context
+                            .account_model_override(account.id())
+                            .map(UpstreamModelId::new)
+                            .transpose();
+                        let Ok(override_model) = override_model else {
+                            return false;
+                        };
                         context
                             .upstream_adapter_for_account(
                                 &self.provider_kind,
-                                request.upstream_model(),
+                                override_model.as_ref().unwrap_or(request.upstream_model()),
                                 account.id(),
                             )
                             .is_ok_and(|adapter| {
@@ -169,6 +176,9 @@ impl GrokAccountSessionSelector {
                         GrokCatalogScope::for_account(account)
                             .ok()
                             .filter(|scope| scope.as_str() != "plan:unknown")
+                            .map(|scope| {
+                                (scope, request.model_for_account(account.id()).to_owned())
+                            })
                     })
                     .collect::<Vec<_>>();
                 let unique_scopes = account_scopes
@@ -176,11 +186,11 @@ impl GrokAccountSessionSelector {
                     .flatten()
                     .cloned()
                     .collect::<std::collections::BTreeSet<_>>();
-                let support_reads = futures::future::join_all(unique_scopes.iter().map(|scope| {
-                    self.catalog_cache
-                        .observed_model_support(scope, request.upstream_model().as_str())
-                }))
-                .await;
+                let support_reads =
+                    futures::future::join_all(unique_scopes.iter().map(|(scope, model)| {
+                        self.catalog_cache.observed_model_support(scope, model)
+                    }))
+                    .await;
                 let support_by_scope = unique_scopes
                     .into_iter()
                     .zip(support_reads)
@@ -224,8 +234,7 @@ impl GrokAccountSessionSelector {
             let runtime_cooldowns = if diagnostic {
                 std::collections::BTreeMap::new()
             } else {
-                self.runtime_cooldowns(&catalog_eligible, request.upstream_model())
-                    .await
+                self.runtime_cooldowns(&catalog_eligible, &request).await
             };
             let mut candidates = catalog_eligible
                 .into_iter()
@@ -287,7 +296,15 @@ impl GrokAccountSessionSelector {
                             .select_account(
                                 request.attempt_index(),
                                 &self.provider_kind,
-                                Some(request.upstream_model().as_str()),
+                                request.upstream_context.as_ref().map_or(
+                                    Some(request.upstream_model().as_str()),
+                                    |attempt| {
+                                        attempt.scheduling_model(
+                                            Some(request.upstream_model().as_str()),
+                                            &candidates,
+                                        )
+                                    },
+                                ),
                                 &candidates,
                                 &mut context,
                             )
@@ -463,21 +480,21 @@ impl GrokAccountSessionSelector {
     async fn runtime_cooldowns(
         &self,
         accounts: &[ProviderAccount],
-        upstream_model: &UpstreamModelId,
+        request: &GrokSessionSelection,
     ) -> std::collections::BTreeMap<ProviderAccountId, RuntimeCooldown> {
         let now = SystemTime::now();
-        let model_scope = ProviderCooldownScope::upstream_model(upstream_model.clone());
+
         // 账号级和当前模型级冷却都并发批量读取，避免逐账号串行往返
         let account_reads = futures::future::join_all(
             accounts
                 .iter()
                 .map(|account| self.cooldowns.read(account.id())),
         );
-        let model_reads = futures::future::join_all(
-            accounts
-                .iter()
-                .map(|account| self.cooldowns.read_scoped(account.id(), &model_scope)),
-        );
+        let model_reads = futures::future::join_all(accounts.iter().map(|account| async {
+            let model = UpstreamModelId::new(request.model_for_account(account.id())).ok()?;
+            let scope = ProviderCooldownScope::upstream_model(model);
+            Some(self.cooldowns.read_scoped(account.id(), &scope).await)
+        }));
         let (account_reads, model_reads) = futures::join!(account_reads, model_reads);
         let mut cooled = std::collections::BTreeMap::new();
         for ((account, account_read), model_read) in
@@ -494,7 +511,7 @@ impl GrokAccountSessionSelector {
                     RuntimeCooldownScope::Account,
                 );
             }
-            if let Ok(Some(cooldown)) = model_read
+            if let Some(Ok(Some(cooldown))) = model_read
                 && cooldown.until() > now
             {
                 insert_runtime_cooldown(

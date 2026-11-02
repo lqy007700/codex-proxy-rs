@@ -1826,3 +1826,65 @@ fn grouped_account_roles_are_frozen_across_snapshot_publication() {
         );
     }
 }
+
+#[test]
+fn account_mappings_keep_contributed_alias_profiles_and_unmatched_models_consistent() {
+    use gateway_core::account::{AccountModelMappings, ProviderAccountId};
+    use gateway_core::routing::{RuntimeAccount, RuntimeAccountDirectory};
+    let account = ProviderAccountId::new("acct_openai").unwrap();
+    let provider = ProviderKind::new("openai").unwrap();
+    let presentation = ModelPresentation::new(Some("Adapted target".into()), None);
+    let mut snapshot = super::snapshot().with_extensions(Some(ExtensionSetReference::new(
+        ExtensionSetId::new("account-mapping-models".into()).unwrap(),
+        Arc::new(ModelLease(vec![gateway_core::routing::ContributedModel {
+            owner: "fixture".into(),
+            id: PublicModelId::new("adapted-model").unwrap(),
+            provider: provider.clone(),
+            accounts: [account.clone()].into(),
+            capabilities: super::capabilities(),
+            presentation: presentation.clone(),
+        }])),
+    )));
+    let values = snapshot
+        .settings()
+        .clone()
+        .with_model_mappings(BTreeMap::from([("adapted-model".into(), "gpt-5.5".into())]));
+    snapshot = snapshot.with_settings(&values).unwrap();
+    snapshot =
+        snapshot.with_account_directory(Arc::new(RuntimeAccountDirectory::new(BTreeMap::from([
+            (
+                account.clone(),
+                RuntimeAccount::new(provider, Default::default()).with_model_mappings(
+                    AccountModelMappings::new(BTreeMap::from([(
+                        "alias".into(),
+                        "adapted-model".into(),
+                    )]))
+                    .unwrap(),
+                ),
+            ),
+        ]))));
+    let scope = snapshot.all_account_scope();
+    let profiles = snapshot.public_model_profiles_for_scope(&scope);
+    for name in ["alias", "adapted-model"] {
+        let profile = profiles
+            .iter()
+            .find(|profile| profile.model().as_str() == name)
+            .expect("both mapped and unmatched contribution profiles remain visible");
+        assert_eq!(profile.presentation(), &presentation);
+    }
+    let plan = snapshot
+        .plan(
+            &PublicModelId::new("alias").unwrap(),
+            &super::operation(),
+            scope,
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        plan.candidates()[0]
+            .upstream_model_for_account(&account)
+            .unwrap()
+            .as_str(),
+        "adapted-model"
+    );
+}

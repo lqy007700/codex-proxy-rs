@@ -62,6 +62,7 @@ interface AccountUpdateParam {
   concurrencyLimit: number | null
   weight: number
   modelAccess?: AccountModelAccess
+  modelMappings?: Record<string, string>
   groupIds: string[]
 }
 
@@ -75,6 +76,7 @@ interface AccountBatchUpdateParam {
   concurrencyLimit?: number | null
   weight?: number
   modelAccess?: AccountModelAccess
+  modelMappings?: Record<string, string>
   groupIds?: string[]
 }
 

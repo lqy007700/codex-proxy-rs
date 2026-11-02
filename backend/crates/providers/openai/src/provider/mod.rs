@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{StreamExt, future::BoxFuture};
-use gateway_core::account::{AccountFeedbackStats, ProviderAccount};
+use gateway_core::account::{AccountFeedbackStats, ProviderAccount, ProviderAccountId};
 use gateway_core::engine::continuation::{ContinuationBinding, NativeContinuationScope};
 use gateway_core::engine::middleware::MiddlewareHeader;
 use gateway_core::engine::provider::{
@@ -173,6 +173,33 @@ struct PreparedGenerateRequest {
 }
 
 impl PreparedGenerateRequest {
+    fn check_model_continuation(
+        &self,
+        context: &AttemptContext,
+        account: &ProviderAccountId,
+        target: &str,
+    ) -> Result<(), ProviderError> {
+        // 原生增量状态不能随账号映射改变模型，旧状态未记录目标时要求完整历史重放
+        if self.continuation_requested
+            && (context.account_model_override(account).is_some()
+                || self
+                    .previous_session
+                    .as_ref()
+                    .is_some_and(|state| state.account_model_mapping))
+            && self
+                .previous_session
+                .as_ref()
+                .and_then(|state| state.upstream_model.as_deref())
+                .map_or_else(
+                    || context.account_model_override(account).is_some(),
+                    |previous| previous != target,
+                )
+        {
+            return Err(continuation_replay_required_error("model_changed"));
+        }
+        Ok(())
+    }
+
     fn checked_native_continuation_scope(
         &self,
         context: &AttemptContext,
@@ -632,43 +659,23 @@ impl Provider for CodexProvider {
                 UpstreamSendState::NotSent,
             ));
         };
+        let pinned_candidate = context
+            .required_account()
+            .or_else(|| {
+                context
+                    .continuation()
+                    .and_then(ContinuationBinding::pinned)
+                    .map(|pin| pin.account())
+            })
+            .map(|account| candidate.for_account(account));
+        let candidate = pinned_candidate.as_ref().unwrap_or(candidate);
         let Some(upstream_model) = candidate.upstream_model() else {
             return Err(provider_error(
                 ProviderErrorKind::Protocol,
                 UpstreamSendState::NotSent,
             ));
         };
-        // 请求设置先形成原生正文基线；attempt 的显式改写进入终端后不再次被覆盖
-        let mut operation = Operation::Generate(generate.clone());
-        if context.fast_mode() != gateway_core::account::FastMode::Default
-            && let Operation::Generate(generate) = &operation
-            && generate.protocol_payload().protocol() == PROVIDER_NAME
-        {
-            let mut request =
-                CodexResponsesRequest::from_body(generate.protocol_payload().body().clone());
-            let supports_priority = candidate.model_presentation().is_some_and(|model| {
-                model
-                    .service_tiers()
-                    .iter()
-                    .any(|tier| tier.id() == "priority")
-            });
-            if request.apply_fast_policy(context.fast_mode(), supports_priority) {
-                let body = serde_json::to_vec(request.body()).map_err(|_| {
-                    provider_error(
-                        ProviderErrorKind::InvalidRequest,
-                        UpstreamSendState::NotSent,
-                    )
-                })?;
-                operation = operation
-                    .replace_middleware_wire(PROVIDER_NAME, body.into())
-                    .map_err(|_| {
-                        provider_error(
-                            ProviderErrorKind::InvalidRequest,
-                            UpstreamSendState::NotSent,
-                        )
-                    })?;
-            }
-        }
+        let operation = prepare_generate_operation(generate, candidate, &context)?;
         let Operation::Generate(generate) = &operation else {
             unreachable!("generate settings keep the operation kind")
         };
@@ -704,6 +711,14 @@ impl Provider for CodexProvider {
             .map(|upstream| self.prepare_generate_request(generate, upstream, &context));
         if let Some(prepared) = preselection.as_ref() {
             prepared.checked_native_continuation_scope(&context)?;
+            if let Some(account) = context.required_account().or_else(|| {
+                context
+                    .continuation()
+                    .and_then(ContinuationBinding::pinned)
+                    .map(|pin| pin.account())
+            }) {
+                prepared.check_model_continuation(&context, account, upstream_model.as_str())?;
+            }
         }
         let (selection_session_affinity, selection_cyber_policy_key, requires_websocket) =
             preselection.map_or(adapter_affinity.unwrap_or((None, None, false)), |prepared| {
@@ -753,8 +768,23 @@ impl Provider for CodexProvider {
         };
         let account_selection_wait_ms =
             u64::try_from(selection_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let selected_candidate = candidate.for_account(lease.account_id());
+        let operation = if selected_candidate.upstream_model() != candidate.upstream_model() {
+            let Operation::Generate(original) = request.operation() else {
+                unreachable!("generate request")
+            };
+            prepare_generate_operation(original, &selected_candidate, &context)?
+        } else {
+            operation
+        };
+        let Operation::Generate(generate) = &operation else {
+            unreachable!("generate request")
+        };
+        let upstream_model = selected_candidate.upstream_model().ok_or_else(|| {
+            provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
+        })?;
         let adapter = context.upstream_adapter_for_account(
-            candidate.provider(),
+            selected_candidate.provider(),
             upstream_model,
             lease.account_id(),
         )?;
@@ -864,6 +894,11 @@ impl CodexProvider {
         );
         let processed = self.prepare_generate_request(&generate, upstream, &context);
         let native_scope = processed.checked_native_continuation_scope(&context)?;
+        processed.check_model_continuation(
+            &context,
+            lease.account_id(),
+            upstream_model.as_str(),
+        )?;
         let mut upstream_request = processed.upstream;
         let session_transport_key =
             derive_codex_transport_key(&upstream_request, context.client_api_key_ref());
@@ -1152,6 +1187,8 @@ impl CodexProvider {
         let session_capture =
             (!continuation_requested || previous_session.is_some()).then(|| OpenAiSessionCapture {
                 account_id: lease.account_id().as_str().to_owned(),
+                upstream_model: upstream_model.as_str().to_owned(),
+                account_model_mapping: context.account_model_override(lease.account_id()).is_some(),
                 credential_revision: matches!(
                     lease.authentication(),
                     crate::credential::CodexRuntimeAuthentication::ApiKey(_)
@@ -1233,4 +1270,42 @@ fn native_request_requirements(request: &GenerateRequest) -> CapabilityRequireme
         request.protocol_payload().clone(),
     ))
     .capability_requirements()
+}
+
+fn prepare_generate_operation(
+    generate: &GenerateRequest,
+    candidate: &ProviderCandidate,
+    context: &AttemptContext,
+) -> Result<Operation, ProviderError> {
+    let mut operation = Operation::Generate(generate.clone());
+    if context.fast_mode() != gateway_core::account::FastMode::Default
+        && let Operation::Generate(generate) = &operation
+        && generate.protocol_payload().protocol() == PROVIDER_NAME
+    {
+        let mut request =
+            CodexResponsesRequest::from_body(generate.protocol_payload().body().clone());
+        let supports_priority = candidate.model_presentation().is_some_and(|model| {
+            model
+                .service_tiers()
+                .iter()
+                .any(|tier| tier.id() == "priority")
+        });
+        if request.apply_fast_policy(context.fast_mode(), supports_priority) {
+            let body = serde_json::to_vec(request.body()).map_err(|_| {
+                provider_error(
+                    ProviderErrorKind::InvalidRequest,
+                    UpstreamSendState::NotSent,
+                )
+            })?;
+            operation = operation
+                .replace_middleware_wire(PROVIDER_NAME, body.into())
+                .map_err(|_| {
+                    provider_error(
+                        ProviderErrorKind::InvalidRequest,
+                        UpstreamSendState::NotSent,
+                    )
+                })?;
+        }
+    }
+    Ok(operation)
 }

@@ -205,7 +205,8 @@ impl ProviderCallMetadata {
     #[must_use]
     pub fn confirms(&self, candidate: &ProviderCandidate) -> bool {
         candidate.provider() == &self.provider
-            && candidate.upstream_model() == self.upstream_model.as_ref()
+            && candidate.upstream_model_for_account(&self.provider_account_id)
+                == self.upstream_model.as_ref()
     }
 }
 

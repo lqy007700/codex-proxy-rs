@@ -1,3 +1,4 @@
+import type { AccountModelMappingRow } from '../utils/modelMappings'
 import type { Account, AccountModelAccess, ApiKeyConfiguration } from '@/api'
 
 import { ref, shallowRef, watch } from 'vue'
@@ -6,6 +7,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
 import { notification as ZNotification } from '@/utils/notification'
 import { accountModelAccessError } from '../utils/modelAccess'
+import { accountModelMappingsError } from '../utils/modelMappings'
 import { concurrencyLimitInput, parseAccountSchedulingForm } from '../utils/schedulingForm'
 import { apiKeyAccountError, emptyApiKeyAccountForm, isOpenAiApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
 
@@ -22,6 +24,7 @@ export function useAccountEditor(options: {
   const schedulingRole = shallowRef<Account['schedulingRole']>('regular')
   const weight = shallowRef('1')
   const modelAccess = ref<AccountModelAccess | undefined>()
+  const modelMappings = ref<AccountModelMappingRow[]>([])
   const proxyMode = shallowRef('preserve')
   const proxyId = shallowRef('')
   const selectedGroupIds = ref<string[]>([])
@@ -82,6 +85,7 @@ export function useAccountEditor(options: {
       ...account.modelAccess,
       models: [...account.modelAccess.models],
     }
+    modelMappings.value = Object.entries(account.modelMappings ?? {}).map(([requestedModel, upstreamModel]) => ({ requestedModel, upstreamModel }))
     selectedGroupIds.value = account.groups.map(group => group.id)
     apiKey.value = emptyApiKeyAccountForm()
     oauthTransport.value = 'prefer_websocket'
@@ -108,7 +112,7 @@ export function useAccountEditor(options: {
         return
       }
     }
-    const modelError = accountModelAccessError(modelAccess.value)
+    const modelError = accountModelAccessError(modelAccess.value) ?? accountModelMappingsError(modelMappings.value)
     if (modelError) {
       ZNotification.warning({ message: modelError })
       return
@@ -124,6 +128,10 @@ export function useAccountEditor(options: {
     }
 
     await saveAction.run(async () => {
+      const mappings = Object.fromEntries(modelMappings.value.map(row => [row.requestedModel, row.upstreamModel]))
+      const originalMappings = editingAccount.value?.modelMappings ?? {}
+      const mappingsChanged = Object.keys(mappings).length !== Object.keys(originalMappings).length
+        || Object.entries(mappings).some(([source, target]) => originalMappings[source] !== target)
       const settings = {
         accountId,
         notes: notes.value,
@@ -137,6 +145,7 @@ export function useAccountEditor(options: {
         concurrencyLimit: scheduling.values.concurrencyLimit,
         weight: scheduling.values.weight,
         modelAccess: modelAccess.value,
+        modelMappings: mappingsChanged ? mappings : undefined,
         groupIds: [
           ...new Set(selectedGroupIds.value),
         ],
@@ -191,6 +200,7 @@ export function useAccountEditor(options: {
     concurrencyLimit,
     weight,
     modelAccess,
+    modelMappings,
     proxyMode,
     proxyId,
     selectedGroupIds,

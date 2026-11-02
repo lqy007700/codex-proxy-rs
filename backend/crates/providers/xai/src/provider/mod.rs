@@ -364,7 +364,10 @@ impl GrokBuildProvider {
         let account_selection_wait_ms =
             u64::try_from(selection_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
         Ok(SelectedGrokAttempt {
-            upstream_model: upstream_model.clone(),
+            upstream_model: candidate
+                .upstream_model_for_account(selected.account_id())
+                .cloned()
+                .ok_or_else(protocol_not_sent)?,
             selected,
             account_selection_wait_ms,
             context,

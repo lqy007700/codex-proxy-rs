@@ -137,6 +137,7 @@ pub(super) fn account_view(
         weight: account.weight.get(),
         scheduling_role: account.scheduling_role,
         model_access: account.model_access,
+        model_mappings: account.model_mappings,
         allow_credits: account.allow_credits,
         outbound_proxy_id: account.outbound_proxy_id,
         outbound_proxy_endpoint: account

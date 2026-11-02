@@ -48,6 +48,7 @@ pub struct RuntimeAccount {
     provider_kind: ProviderKind,
     group_ids: Arc<BTreeSet<AccountGroupId>>,
     model_access: super::AccountModelAccess,
+    model_mappings: super::AccountModelMappings,
     scheduling_role: crate::account::AccountSchedulingRole,
     direct_authentication_kind: Option<String>,
 }
@@ -74,8 +75,20 @@ impl RuntimeAccount {
             group_ids: Arc::new(group_ids),
             scheduling_role: crate::account::AccountSchedulingRole::Regular,
             model_access: super::AccountModelAccess::all(),
+            model_mappings: super::AccountModelMappings::empty(),
             direct_authentication_kind: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_model_mappings(mut self, mappings: super::AccountModelMappings) -> Self {
+        self.model_mappings = mappings;
+        self
+    }
+
+    #[must_use]
+    pub const fn model_mappings(&self) -> &super::AccountModelMappings {
+        &self.model_mappings
     }
 
     #[must_use]
@@ -121,16 +134,28 @@ impl RuntimeAccount {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeAccountDirectory {
     accounts: BTreeMap<ProviderAccountId, RuntimeAccount>,
+    model_aliases: BTreeMap<ProviderKind, BTreeSet<String>>,
     providers_with_accounts: BTreeSet<ProviderKind>,
     providers_by_group: BTreeMap<AccountGroupId, BTreeSet<ProviderKind>>,
 }
 
 impl RuntimeAccountDirectory {
+    pub fn accounts(&self) -> impl Iterator<Item = (&ProviderAccountId, &RuntimeAccount)> {
+        self.accounts.iter()
+    }
+
     #[must_use]
     pub fn new(accounts: BTreeMap<ProviderAccountId, RuntimeAccount>) -> Self {
+        let mut model_aliases = BTreeMap::<ProviderKind, BTreeSet<String>>::new();
         let mut providers_with_accounts = BTreeSet::new();
         let mut providers_by_group = BTreeMap::<AccountGroupId, BTreeSet<ProviderKind>>::new();
         for account in accounts.values() {
+            for (source, _) in account.model_mappings().iter() {
+                model_aliases
+                    .entry(account.provider_kind.clone())
+                    .or_default()
+                    .insert(source.to_owned());
+            }
             providers_with_accounts.insert(account.provider_kind.clone());
             for group_id in account.group_ids.iter() {
                 providers_by_group
@@ -141,9 +166,22 @@ impl RuntimeAccountDirectory {
         }
         Self {
             accounts,
+            model_aliases,
             providers_with_accounts,
             providers_by_group,
         }
+    }
+
+    #[must_use]
+    pub fn model_aliases(&self, provider: &ProviderKind) -> Option<&BTreeSet<String>> {
+        self.model_aliases.get(provider)
+    }
+
+    #[must_use]
+    pub fn has_model_mapping(&self, requested: &str) -> bool {
+        self.model_aliases
+            .values()
+            .any(|aliases| aliases.contains(requested))
     }
 
     #[must_use]
@@ -501,6 +539,15 @@ impl FrozenAccountScope {
                 .directory
                 .account(account_id)
                 .is_some_and(|account| account.model_access.allows(upstream_model))
+    }
+
+    /// 只解析原始请求名的账号覆盖，调用方保留未命中时的全局映射语义
+    #[must_use]
+    pub fn model_override(&self, account: &ProviderAccountId, requested: &str) -> Option<&str> {
+        self.directory
+            .account(account)?
+            .model_mappings()
+            .target(requested)
     }
 
     /// 当前凭据类型必须与已授权的直连事实相同，快照发布间隙不能转成代理账号

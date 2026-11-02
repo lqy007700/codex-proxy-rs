@@ -610,7 +610,9 @@ middleware 的 `next` 最多调用一次，重试与额外模型执行通过独�
 
 `policy.route_model` 和 `policy.schedule_account` 只提出决定，宿主随后复核 Key 规则、模型能力、账号资格和租约。
 `scheduler` 必须声明 `version: 3`。`candidates` 已按 Key 范围、模型权限、账号状态和原生续写绑定收窄，
-同时包含暂时繁忙但可以等待的账号；`available` 表示本次可以立即尝试租约，不保证租约一定成功
+同时包含暂时繁忙但可以等待的账号；`available` 表示本次可以立即尝试租约，不保证租约一定成功。
+账号模型映射使候选目标不同时，调度输入省略 `model`；候选仍已逐账号验证有效模型，
+选号后的 attempt 和上游适配器使用所选账号的实际目标，不增加调度 wire 字段
 
 - `Pick { account_id }` 显式选号，只能指定 `available: true` 的候选
 - `Delegate` 将完整候选交给宿主现有调度

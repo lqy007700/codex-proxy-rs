@@ -22,7 +22,7 @@ use std::fmt;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::Arc;
 
-use crate::account::{AccountSelectionPolicy, FastMode};
+use crate::account::{AccountSelectionPolicy, FastMode, ProviderAccountId};
 use crate::operation::{CapabilityRequirements, Feature, OperationKind};
 use crate::validation::{IdentifierError, RoutingError, validate_text};
 
@@ -540,9 +540,78 @@ pub struct ProviderCandidate {
     model_presentation: Option<ModelPresentation>,
     emulated_features: BTreeSet<Feature>,
     account_scope: Arc<FrozenAccountScope>,
+    account_models: Arc<BTreeMap<ProviderAccountId, Arc<ProviderModelRoute>>>,
+}
+
+/// 按账号冻结的模型事实，选号之后不能重新读取目录或解释映射
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProviderModelRoute {
+    account_mapping: bool,
+    upstream_model: Option<UpstreamModelId>,
+    model_presentation: Option<ModelPresentation>,
+    emulated_features: BTreeSet<Feature>,
 }
 
 impl ProviderCandidate {
+    pub(crate) fn has_account_model_routes(&self) -> bool {
+        !self.account_models.is_empty()
+    }
+
+    pub(crate) fn account_model_override(
+        &self,
+        account: &ProviderAccountId,
+    ) -> Option<&UpstreamModelId> {
+        self.account_models
+            .get(account)
+            .filter(|route| route.account_mapping)?
+            .upstream_model
+            .as_ref()
+    }
+
+    pub(crate) fn common_upstream_model<'a>(
+        &self,
+        accounts: impl Iterator<Item = &'a ProviderAccountId>,
+    ) -> Option<&UpstreamModelId> {
+        let mut models = accounts.map(|account| self.upstream_model_for_account(account));
+        let first = models.next()??;
+        models.all(|model| model == Some(first)).then_some(first)
+    }
+
+    #[must_use]
+    pub fn upstream_model_for_account(
+        &self,
+        account: &ProviderAccountId,
+    ) -> Option<&UpstreamModelId> {
+        self.account_models
+            .get(account)
+            .map_or(self.upstream_model.as_ref(), |route| {
+                route.upstream_model.as_ref()
+            })
+    }
+
+    /// 将已选账号的目标及能力作为该次发送的唯一模型事实
+    #[must_use]
+    pub fn for_account(&self, account: &ProviderAccountId) -> Self {
+        let mut selected = self.clone();
+        if let Some(route) = self.account_models.get(account) {
+            selected.upstream_model = route.upstream_model.clone();
+            selected.model_presentation = route.model_presentation.clone();
+            selected.emulated_features = route.emulated_features.clone();
+        }
+        selected
+    }
+
+    #[must_use]
+    pub fn has_scheduling_role(&self, role: crate::account::AccountSchedulingRole) -> bool {
+        self.account_scope.allowed_account_ids().any(|account| {
+            self.account_scope.account_provider(account) == Some(&self.provider)
+                && self.account_scope.scheduling_role(account) == Some(role)
+                && self
+                    .upstream_model_for_account(account)
+                    .is_none_or(|model| self.account_scope.allows_model(account, model.as_str()))
+        })
+    }
+
     /// 与路由计划冻结的上游模型目录，重试时不读取新的目录代次
     #[must_use]
     pub const fn model_presentation(&self) -> Option<&ModelPresentation> {

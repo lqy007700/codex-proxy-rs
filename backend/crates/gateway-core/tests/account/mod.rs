@@ -2,6 +2,7 @@
 
 mod location;
 mod model_access;
+mod model_mappings;
 mod proxy;
 mod selection;
 mod selection_diagnostics;

@@ -9,10 +9,12 @@ mod location;
 pub use location::{InvalidRequestLocation, RequestLocation};
 mod model;
 mod model_access;
+mod model_mappings;
 pub use model_access::{
     AccountModelAccess, AccountModelAccessMode, InvalidAccountModelAccess,
     MAX_ACCOUNT_ACCESS_MODELS,
 };
+pub use model_mappings::{AccountModelMappings, InvalidAccountModelMappings};
 mod proxy;
 pub use proxy::{InvalidOutboundProxy, OutboundProxy};
 pub mod scope;

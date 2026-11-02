@@ -1111,7 +1111,7 @@ where
                 pinned_account.clone(),
                 self.account_state_owner.clone(),
             )
-            .with_account_scope(Arc::clone(candidate.account_scope())),
+            .with_routing_candidate(candidate.clone()),
         }
         .with_recovery_stage(self.account_recovery.stage().clone())
         .with_credential_recovery_attempted(pinned_account.as_ref().is_some_and(|account| {
@@ -1622,11 +1622,7 @@ where
 
     fn has_fallback_account(&self) -> bool {
         self.plan.candidates().iter().any(|candidate| {
-            candidate.account_scope().has_scheduling_role(
-                candidate.provider(),
-                candidate.upstream_model().map(|model| model.as_str()),
-                crate::account::AccountSchedulingRole::Fallback,
-            )
+            candidate.has_scheduling_role(crate::account::AccountSchedulingRole::Fallback)
         })
     }
 

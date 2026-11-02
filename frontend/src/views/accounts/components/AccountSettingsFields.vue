@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AccountGroupRef, AccountModelAccess, AccountSchedulingRole } from '@/api'
 import { ZFormItem, ZInput, ZSegmented, ZSwitch } from '@codex-proxy/ui'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import AccountGroupCheckboxGrid from '@/components/AccountGroupCheckboxGrid.vue'
 import AccountModelAccessField from './AccountModelAccessField.vue'
 import AccountProxyField from './AccountProxyField.vue'
@@ -20,6 +20,8 @@ const props = withDefaults(defineProps<{
   preserveSchedulingRole?: boolean
   proxyError?: string
 }>(), { preserveProxy: true, showScheduling: true })
+
+const modelCatalog = ref<string[]>([])
 
 const modelAccess = defineModel<AccountModelAccess | undefined>('modelAccess', { required: true })
 const enabled = defineModel<boolean>('enabled', { required: true })
@@ -42,7 +44,8 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
 
 <template>
   <div class="grid gap-5">
-    <AccountModelAccessField v-model="modelAccess" :account-id="accountId" :disabled="disabled" :allow-preserve="preserveModelAccess" />
+    <AccountModelAccessField v-model="modelAccess" :account-id="accountId" :disabled="disabled" :allow-preserve="preserveModelAccess" @catalog-change="modelCatalog = $event" />
+    <slot name="model-mappings" :models="modelCatalog" />
     <div v-if="showScheduling" class="flex min-h-6 items-center justify-between gap-3">
       <span class="text-cp leading-none font-medium text-cp-text-secondary">调度</span>
       <ZSwitch
