@@ -396,6 +396,11 @@ Responses WebSocket 接受文本消息，`response.create` 在同一连接串行
 下游探活包含消息接收中的字节进度，完整消息收齐后才进入中间件与请求处理。
 持续上传可刷新链路活动，停传且不响应心跳的连接仍会超时回收；心跳参数见[部署说明](../deploy/README.md#公网访问)
 
+Codex OAuth 上游 WS 首包未声明搜索时，后续首次启用搜索需要新连接，非生成预热也属于首包。
+HTTP/SSE 与 WS 入站共用此判断；新链在发送前重新建连，依赖原连接的增量请求返回
+`400 previous_response_not_found`，由客户端携带完整历史重试。网关保留搜索配置与完整输入，
+已初始化搜索的连接可继续复用；API Key Responses API 不应用此限制
+
 其余文本消息发送到当前执行绑定的上游 WebSocket，未知类型、模式和扩展字段由上游校验。
 `response.interrupt` 的 `discard_partial_items` 模式若指向当前逻辑请求已交付的响应 ID，
 网关会保留中断意图；重试交付新的 `response.created` 后，以新 ID 转发中断，避免换号空档丢失控制消息。
@@ -471,7 +476,9 @@ xAI 没有 Codex 原生目录，使用官方 CLI proxy 当前目录生成通用�
 可通过 Client Key 分组限定目标平台。一个 Provider 内的多个 API Key 账号仍按账号模型政策与调度规则选择，
 原生账号的有效目录明确未收录模型时排除该账号；未知套餐或没有有效目录时交由上游验证。
 OAuth 目录资格按已知套餐隔离，API Key 按账号及凭据版本隔离；权重、亲和和固定账号不能绕过资格。
-明确拒绝模型后只冷却该账号与模型 30 分钟，不冻结其他模型；受管适配器使用自身模型合同。
+OpenAI 仅按结构化 `model_not_found` 与 HTTP 400/403/404 或无状态码的流内错误识别模型拒绝，
+只冷却该账号与模型 30 分钟，不从消息正文推断权限。`unsupported_value` 属于请求参数错误，
+不触发模型冷却或换号；受管适配器使用自身模型合同。
 ChatGPT OAuth 账号不接受 Grok 模型
 
 目录账号只能来自本次 Client Key 冻结的账号范围。OpenAI 的 OAuth 目录按账号 ID 排序，使用首个成功读取的
@@ -594,8 +601,12 @@ OpenAI 明确返回 `server_is_overloaded`、`slow_down` 或模型容量不足�
 恢复轮询遍历除初始账号之外的合格普通池，不按日常调度策略或权重层截断候选；权限、模型、额度、冷却和并发限制仍然有效。
 恢复轮询与保底保留根会话主绑定，下一条普通请求仍按原有亲和与调度规则选号。
 严格亲和的跟随子线程和原生增量续接仍遵守账号归属，不能为保底强行跨账号。
-上游 `Retry-After` 优先于本地指数退避，不截断、不叠加随机等待；未提供时采用 500ms 起、最高 2s 的退避并附加随机等待。
-等待受请求截止时间和取消约束，重试受请求总尝试次数约束。
+有效的上游 `Retry-After` 接受秒数、HTTP 日期和零延迟，优先于本地指数退避，不截断、不叠加随机等待。
+`maxRetryAfterSeconds` 限制单次建议等待，默认 240 秒，取值 0～4294967295，0 表示不接受正数等待。
+超过上限时跳过当前账号等待，在原有共享预算、安全门禁及普通／保底阶段内尝试换号；
+无法恢复时保留最后一次上游错误与等待提示，不截短建议后重试原账号。该限制同样作用于 WS 同账号传输重试和转 HTTP 回退。
+未提供有效等待建议时采用 500ms 起、最高 2s 的退避并附加随机等待；本地退避不受此设置限制。
+该值不是请求总时长，在请求入场时冻结；等待仍受截止时间和取消约束，重试受请求总尝试次数约束。
 已发送的容量失败计入[智能调度健康分](architecture.md#智能调度)，可用账号的会话亲和优先。
 容量不足不触发 Provider 全局熔断，也不作为账号额度耗尽；启用账号错误保护且规则达到阈值时写入临时冷却。
 客户端错误兼容由 API 编码出口统一处理：最终交付的 `server_is_overloaded`、`slow_down` 错误码
@@ -667,6 +678,9 @@ Key 必须开启 `peerSharing.enabled` 并显式绑定非空分组；共享范�
 | `pool_summary` → `pool` | 匿名池总数、互斥状态计数及可选套餐分布 |
 | `quota_windows` → `quota.accounts` | 匿名账号、各自观测有效期及额度窗口，不将不同账号百分比相加 |
 | `model_availability` → `models` | 模型额度观测，不承诺首次选号或即时容量 |
+
+公开套餐分布时优先使用明确套餐，缺失时从本地已保存的额度快照补全；未知套餐保持未知。
+套餐公开不要求同时公开额度，也不触发回源刷新或扩大额度公开范围
 
 匿名账号 ID 在同 Key 下稳定、跨 Key 隔离，不公开邮箱、名称、内部账号 ID、出口或凭据。
 金额使用非负十进制字符串，不限额的总额与剩余额度为 `null`；金额窗口与本机 Token 统计不是同一口径。
@@ -1667,6 +1681,9 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 并发修改导致版本过期时返回 `409`，不保存当前请求；读取最新设置并确认差异后再提交，不能静默重试覆盖。
 成功响应返回新版本，后续请求使用发布后的快照
 
+运行设置保存包含必填的 `maxRetryAfterSeconds`；缺失、非整数或超出 u32 范围返回 `422`，不写入配置。
+调用插件 `settings.load`／`settings.replace` 的程序应使用包含 `max_retry_after_seconds` 的匹配 SDK 重建
+
 位置检测返回 `status: detected` 与 `location`，双栈出口时区不一致时返回 `conflict`，
 无法获取出口或位置时返回 `failed` 与 `message`。检测忽略进程代理环境变量，复用代理探测的超时与并发限制；
 前端仅在成功时填入草稿，仍需保存设置才会生效
@@ -1682,6 +1699,7 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 | 模型映射 | `modelMappings` |
 | 凭据刷新 | `refreshMarginSeconds`、`refreshConcurrency` |
 | [并发与排队](#并发与排队) | `maxConcurrentPerAccount`、`maxWaitingPerKey`、`maxWaitingPerAccount`、`openaiGuardianReservedConcurrency`、`concurrencyWaitTimeoutSeconds` |
+| [上游重试等待](#容量拒绝与重试) | `maxRetryAfterSeconds` |
 | [亲和与换号](#账号亲和与换号) | `openaiAccountAffinity`、`openaiSessionAffinityTtlHours`、`maxAccountRotations`、`recoveryAttempts` |
 | [调度策略](#智能调度) | `rotationStrategy`、`smartScheduling` |
 | [请求解压](#请求解压上限) | `responsesMaxDecompressedBodyBytes` |

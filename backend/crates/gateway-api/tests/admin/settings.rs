@@ -58,6 +58,7 @@ fn update_body() -> Value {
         "recoveryAttempts": 4,
         "openaiSessionAffinityTtlHours": 24,
         "concurrencyWaitTimeoutSeconds": 30,
+        "maxRetryAfterSeconds": 240,
         "responsesMaxDecompressedBodyBytes": 67108864,
         "rotationStrategy": "round_robin",
         "smartScheduling": gateway_core::account::SmartSchedulingConfig::default(),
@@ -465,6 +466,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             max_waiting_per_key: 0,
             max_waiting_per_account: 0,
             concurrency_wait_timeout_seconds: 30,
+            max_retry_after_seconds: 240,
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
             max_account_rotations: 3,
@@ -532,6 +534,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
                 "updatedAtDisplay": "2026-08-02 18:30:00"
     });
     expected["recoveryAttempts"] = json!(4);
+    expected["maxRetryAfterSeconds"] = json!(240);
     assert_eq!(value, expected);
 }
 

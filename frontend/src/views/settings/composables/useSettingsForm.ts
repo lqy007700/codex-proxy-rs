@@ -51,6 +51,7 @@ export function useSettingsForm() {
     maxWaitingPerKey: null as number | null,
     maxWaitingPerAccount: null as number | null,
     concurrencyWaitTimeoutSeconds: null as number | null,
+    maxRetryAfterSeconds: null as number | null,
     responsesMaxDecompressedBodyMiB: null as number | null,
 
     rotationStrategy: '' as RotationStrategy | '',
@@ -92,7 +93,7 @@ export function useSettingsForm() {
     mappings.value = initial.mappings
   }
 
-  function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'recoveryAttempts' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays') {
+  function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'recoveryAttempts' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'maxRetryAfterSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays') {
     return computed({
       get: () => (form[key] === null
         ? ''
@@ -124,6 +125,7 @@ export function useSettingsForm() {
   const resetCreditMaxWeeklyRemainingPercentValue = numericModel('resetCreditMaxWeeklyRemainingPercent')
   const usageRetentionDaysValue = numericModel('usageRetentionDays')
   const concurrencyWaitTimeoutSecondsValue = numericModel('concurrencyWaitTimeoutSeconds')
+  const maxRetryAfterSecondsValue = numericModel('maxRetryAfterSeconds')
 
   const minCodexDesktopVersionError = computed(() => versionError(form.minCodexDesktopVersion))
   const minCodexCliVersionError = computed(() => versionError(form.minCodexCliVersion))
@@ -151,6 +153,7 @@ export function useSettingsForm() {
     form.maxWaitingPerKey = data.maxWaitingPerKey
     form.maxWaitingPerAccount = data.maxWaitingPerAccount
     form.concurrencyWaitTimeoutSeconds = data.concurrencyWaitTimeoutSeconds
+    form.maxRetryAfterSeconds = data.maxRetryAfterSeconds
     form.responsesMaxDecompressedBodyMiB = data.responsesMaxDecompressedBodyBytes / MIB
 
     form.smartScheduling = { ...data.smartScheduling }
@@ -263,7 +266,7 @@ export function useSettingsForm() {
     const savedSettings = saved.value
     if (saving.value || loading.value || detectingLocation.value || !savedSettings)
       return
-    const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, recoveryAttempts, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, responsesMaxDecompressedBodyMiB } = form
+    const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, recoveryAttempts, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, maxRetryAfterSeconds, responsesMaxDecompressedBodyMiB } = form
     if (!openaiAccountAffinity || maxAccountRotations === null || openaiSessionAffinityTtlHours === null || refreshMarginSeconds === null || refreshConcurrency === null || maxConcurrentPerAccount === null || openaiGuardianReservedConcurrency === null || !rotationStrategy || maxWaitingPerKey === null || maxWaitingPerAccount === null || concurrencyWaitTimeoutSeconds === null) {
       ZNotification.warning({ message: '请完整填写并发、队列、凭据刷新参数和调度策略' })
       return
@@ -274,6 +277,10 @@ export function useSettingsForm() {
     }
     if (!Number.isInteger(maxAccountRotations) || maxAccountRotations < 0 || maxAccountRotations > 31) {
       ZNotification.warning({ message: '最大换号次数应为 0～31 的整数，0 表示不换号' })
+      return
+    }
+    if (maxRetryAfterSeconds === null || !Number.isInteger(maxRetryAfterSeconds) || maxRetryAfterSeconds < 0 || maxRetryAfterSeconds > 4294967295) {
+      ZNotification.warning({ message: '上游重试等待上限需为 0～4294967295 的整数' })
       return
     }
     if (recoveryAttempts === null || !Number.isInteger(recoveryAttempts) || recoveryAttempts < 1 || recoveryAttempts > 31) {
@@ -368,6 +375,7 @@ export function useSettingsForm() {
         maxWaitingPerKey,
         maxWaitingPerAccount,
         concurrencyWaitTimeoutSeconds,
+        maxRetryAfterSeconds,
         responsesMaxDecompressedBodyBytes: responsesMaxDecompressedBodyMiB * MIB,
         rotationStrategy,
         smartScheduling: { ...smartScheduling },
@@ -426,6 +434,7 @@ export function useSettingsForm() {
     maxWaitingPerKeyValue,
     maxWaitingPerAccountValue,
     concurrencyWaitTimeoutSecondsValue,
+    maxRetryAfterSecondsValue,
     responsesMaxDecompressedBodyMiBValue,
     usageRetentionDaysValue,
     resetCreditLeadMinutesValue,

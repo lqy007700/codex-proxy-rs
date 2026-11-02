@@ -5,6 +5,7 @@ mod body;
 mod grok;
 mod headers;
 mod search_history;
+mod search_tools;
 
 use gateway_core::engine::middleware::MiddlewareHeader;
 use serde_json::{Map, Value};
@@ -12,6 +13,7 @@ use serde_json::{Map, Value};
 use super::protocol::responses::CodexResponsesRequest;
 
 pub(super) use body::normalize_codex_request_body;
+pub(super) use search_tools::declares_hosted_search;
 
 pub(crate) fn normalize_selected_codex_downstream_body(
     request: &mut CodexResponsesRequest,

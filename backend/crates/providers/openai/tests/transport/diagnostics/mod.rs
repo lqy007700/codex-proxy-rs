@@ -40,6 +40,60 @@ fn only_empty_http_not_found_responses_are_cloudflare_path_blocks() {
 }
 
 #[test]
+fn model_rejection_requires_the_official_code_and_status() {
+    for status in [400, 403, 404] {
+        assert_eq!(
+            classify(
+                status,
+                r#"{"error":{"code":"model_not_found","message":"Access to this deployment ended."}}"#
+            ),
+            CodexFailureCategory::ModelUnsupported
+        );
+    }
+    for (status, body, expected) in [
+        (
+            400,
+            r#"{"error":{"code":"unsupported_value","type":"invalid_request_error","param":"reasoning.effort","message":"Unsupported value: 'none' is not supported with the 'gpt-6-astra' model. Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'."}}"#,
+            CodexFailureCategory::InvalidRequest,
+        ),
+        (
+            400,
+            r#"{"error":{"message":"The model is not supported."}}"#,
+            CodexFailureCategory::InvalidRequest,
+        ),
+        (
+            400,
+            r#"{"error":{"code":"unknown_error","message":"model_not_supported"}}"#,
+            CodexFailureCategory::InvalidRequest,
+        ),
+        (
+            400,
+            r#"{"error":{"code":"unknown_error"},"detail":"model_not_available"}"#,
+            CodexFailureCategory::InvalidRequest,
+        ),
+        (
+            500,
+            r#"{"error":{"code":"model_not_found","message":"The model is not available."}}"#,
+            CodexFailureCategory::Unavailable,
+        ),
+    ] {
+        let failure = CodexUpstreamFailure::from_response(
+            reqwest::StatusCode::from_u16(status).unwrap(),
+            body,
+            None,
+            &CodexUpstreamDiagnostics::default(),
+            None,
+            &[],
+            &[],
+            CodexUpstreamSendPhase::AfterPayload,
+        );
+        assert_eq!(failure.category(), expected, "{body}");
+        // 二开仅为明确的 500/503 服务故障保留安全恢复，参数错误仍禁止重放
+        assert_eq!(failure.replay_is_safe(), status == 500, "{body}");
+    }
+}
+
+#[test]
 fn flex_capacity_rejection_should_be_terminal_even_before_payload_send() {
     for phase in [
         CodexUpstreamSendPhase::BeforePayload,

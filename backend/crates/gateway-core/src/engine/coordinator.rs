@@ -1791,6 +1791,10 @@ where
                 error.pre_delivery_retry(),
                 Some(crate::error::PreDeliveryRetry::SameAccountConnectionRetry { .. })
             );
+        // 服务器建议不可截短；超限后只允许沿既有安全门禁推进恢复阶段
+        let retry_after_exceeds_limit = error
+            .retry_after()
+            .is_some_and(|delay| delay > self.plan.max_retry_after());
         // Provider 的有界同账号传输恢复是尽力重试策略，不要求把 Sent/Ambiguous
         // 改写成安全证明；外部副作用、取消、预算与下游提交仍由 Core 拦截
         let transport_recovery = match error.pre_delivery_retry() {
@@ -1813,7 +1817,8 @@ where
             Some(crate::error::PreDeliveryRetry::SameAccountTransportRetry {
                 retry_index,
                 delay,
-            }) if !execution_effect_observed
+            }) if !retry_after_exceeds_limit
+                && !execution_effect_observed
                 && !self.connection_budget.exhausted()
                 && !self.replay_barrier_reached
                 && !self.delivery_pending =>
@@ -1821,7 +1826,8 @@ where
                 Some((AttemptTransport::Retry(retry_index), delay))
             }
             Some(crate::error::PreDeliveryRetry::SameAccountTransportFallback)
-                if !execution_effect_observed
+                if !retry_after_exceeds_limit
+                    && !execution_effect_observed
                     && !self.connection_budget.exhausted()
                     && !self.replay_barrier_reached
                     && !self.delivery_pending =>
@@ -1896,7 +1902,11 @@ where
                 max_delay,
                 jitter,
                 ..
-            }) if ordinary_retry && !suppress_transient_retry && !bounded_transient_retry => {
+            }) if ordinary_retry
+                && !suppress_transient_retry
+                && !bounded_transient_retry
+                && !retry_after_exceeds_limit =>
+            {
                 let retries = self
                     .transient_retry_counts
                     .entry(current.metadata.provider_account_id().clone())
@@ -1932,7 +1942,9 @@ where
             && ((bounded_transient_retry && ordinary_retry && !suppress_transient_retry)
                 || account_rotation_retry);
         if staged_recovery {
-            let mut retry_same = self.account_recovery.record_failure(account_rotation_retry);
+            let mut retry_same = self
+                .account_recovery
+                .record_failure(account_rotation_retry || retry_after_exceeds_limit);
             let budget_exhausted = match error.pre_delivery_retry() {
                 Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
                     policy:
@@ -1951,23 +1963,28 @@ where
                 self.account_recovery.enter_fallback();
                 retry_same = false;
             }
-            let delay = match error.pre_delivery_retry() {
-                Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
-                    initial_delay,
-                    max_delay,
-                    jitter,
-                    ..
-                }) => error.retry_after().unwrap_or_else(|| {
-                    initial_delay
-                        .saturating_mul(
-                            1_u32
-                                .checked_shl(self.bounded_transient_retries)
-                                .unwrap_or(u32::MAX),
-                        )
-                        .min(max_delay)
-                        .saturating_add(jitter)
-                }),
-                _ => error.retry_after().unwrap_or_default(),
+            // 超限只跳过当前账号等待，不重置普通账号与保底的共享预算
+            let delay = if retry_after_exceeds_limit {
+                Duration::ZERO
+            } else {
+                match error.pre_delivery_retry() {
+                    Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
+                        initial_delay,
+                        max_delay,
+                        jitter,
+                        ..
+                    }) => error.retry_after().unwrap_or_else(|| {
+                        initial_delay
+                            .saturating_mul(
+                                1_u32
+                                    .checked_shl(self.bounded_transient_retries)
+                                    .unwrap_or(u32::MAX),
+                            )
+                            .min(max_delay)
+                            .saturating_add(jitter)
+                    }),
+                    _ => error.retry_after().unwrap_or_default(),
+                }
             };
             if retry_same {
                 transient_retry = Some(delay);
@@ -2061,6 +2078,8 @@ where
             "connectionRotation": connection_rotation.is_some(),
             "reserveConnectionRotation": reserve_connection_rotation,
             "transientRetry": transient_retry.is_some(),
+            "retryAfterExceeded": retry_after_exceeds_limit,
+            "maxRetryAfterSeconds": self.plan.max_retry_after().as_secs(),
             "clientRetrySuppressed": suppress_transient_retry,
             "rotationRetry": rotation_retry, "accountRotations": self.account_rotations,
             "connectionRetry": connection_retry_requested,

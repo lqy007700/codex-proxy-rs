@@ -396,7 +396,7 @@ fn pooled_websocket_request(conversation_id: &str) -> CodexResponsesRequest {
     request
 }
 
-fn completed_websocket_response(
+pub(crate) fn completed_websocket_response(
     response_id: &str,
     input_tokens: u64,
     output_tokens: u64,

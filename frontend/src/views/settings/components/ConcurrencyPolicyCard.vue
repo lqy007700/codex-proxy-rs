@@ -7,6 +7,7 @@ const maxConcurrentPerAccount = defineModel<string>('maxConcurrentPerAccount', {
 const maxWaitingPerKey = defineModel<string>('maxWaitingPerKey', { required: true })
 const maxWaitingPerAccount = defineModel<string>('maxWaitingPerAccount', { required: true })
 const concurrencyWaitTimeoutSeconds = defineModel<string>('concurrencyWaitTimeoutSeconds', { required: true })
+const maxRetryAfterSeconds = defineModel<string>('maxRetryAfterSeconds', { required: true })
 const openaiGuardianReservedConcurrency = defineModel<string>('openaiGuardianReservedConcurrency', { required: true })
 </script>
 
@@ -55,6 +56,22 @@ const openaiGuardianReservedConcurrency = defineModel<string>('openaiGuardianRes
           </ZPopover>
         </template>
         <ZInput v-model="openaiGuardianReservedConcurrency" aria-label="自动审批独立并发" type="number" min="0" max="4294967295" step="1" />
+      </ZFormItem>
+      <ZFormItem label="上游重试等待上限（秒）" description="限制单次上游建议等待，0 表示不接受正数等待">
+        <template #label-extra>
+          <ZPopover class="-my-1" trigger="hover-click" placement="top-start">
+            <template #reference="{ open }">
+              <ZIconButton aria-label="上游重试等待上限说明" :title="undefined" :aria-expanded="open" class="size-6! hover:bg-transparent! active:bg-transparent!">
+                <CircleAlert class="size-3.5" aria-hidden="true" />
+              </ZIconButton>
+            </template>
+            <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+              <p>上游建议等待超出此值时，按现有重试规则尝试换号，无可用账号时返回上游错误</p>
+              <p>此值不是请求总时长，未提供有效等待建议时仍使用本地退避</p>
+            </div>
+          </ZPopover>
+        </template>
+        <ZInput v-model="maxRetryAfterSeconds" aria-label="上游重试等待上限（秒）" type="number" min="0" max="4294967295" step="1" />
       </ZFormItem>
     </ZForm>
   </ZCard>
