@@ -7,6 +7,7 @@ import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import AccountUpstreamStatus from '@/components/account/AccountUpstreamStatus.vue'
 import { stablePresetVisualToneClass } from '@/utils/color'
 import { accountIdentityLabel } from '../utils/accountIdentity'
+import AccountFallbackIndicator from './AccountFallbackIndicator.vue'
 import AccountNotesPopover from './AccountNotesPopover.vue'
 
 type AccountIdentity = Pick<Account, 'id' | 'email' | 'planType' | 'planTypeDisplay'>
@@ -85,9 +86,7 @@ const avatarToneClass = computed(() => {
         <span class="min-w-0 flex-1 truncate text-cp font-heavy text-cp-text" :title="displayTitle">
           {{ displayTitle }}
         </span>
-        <span v-if="account.schedulingRole === 'fallback'" class="shrink-0 text-cp-xs font-medium text-cp-warning">
-          保底
-        </span>
+        <AccountFallbackIndicator v-if="account.schedulingRole === 'fallback'" />
         <AccountUpstreamStatus v-if="account.upstream" :upstream="account.upstream" />
         <span
           v-if="metaPosition === 'title' && (showPlan || $slots.meta)"
