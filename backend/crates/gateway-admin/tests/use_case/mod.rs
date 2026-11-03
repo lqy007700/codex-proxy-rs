@@ -1232,3 +1232,5 @@ impl gateway_admin::ports::reset_credit_automation::ResetCreditAutomationStore
         Err(unavailable("reset-credit automation"))
     }
 }
+
+mod affinity;

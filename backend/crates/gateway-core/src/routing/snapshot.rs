@@ -31,6 +31,7 @@ type ModelCatalogAccounts = BTreeMap<ProviderKind, BTreeMap<String, BTreeSet<Pro
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotClientPolicyFacts {
     portable_history: bool,
+    identity_policy: crate::policy::CallerIdentityPolicy,
     peer_sharing: ClientPeerSharing,
     name_snapshot: Option<String>,
     request_profiles: BTreeMap<ProviderKind, crate::account::OpaqueProviderData>,
@@ -41,6 +42,12 @@ pub struct SnapshotClientPolicyFacts {
 }
 
 impl SnapshotClientPolicyFacts {
+    #[must_use]
+    pub fn with_identity_policy(mut self, policy: crate::policy::CallerIdentityPolicy) -> Self {
+        self.identity_policy = policy;
+        self
+    }
+
     #[must_use]
     pub const fn with_portable_history(mut self, enabled: bool) -> Self {
         self.portable_history = enabled;
@@ -76,6 +83,7 @@ impl SnapshotClientPolicyFacts {
         limits: RateLimits,
     ) -> Self {
         Self {
+            identity_policy: Default::default(),
             peer_sharing: ClientPeerSharing::default(),
             key_id,
             portable_history: false,
@@ -641,7 +649,8 @@ async fn compile_runtime_snapshot(
                 policy.limits,
             )
             .with_name_snapshot(policy.name_snapshot)
-            .with_peer_sharing(policy.peer_sharing),
+            .with_peer_sharing(policy.peer_sharing)
+            .with_identity_policy(policy.identity_policy),
         );
     }
 

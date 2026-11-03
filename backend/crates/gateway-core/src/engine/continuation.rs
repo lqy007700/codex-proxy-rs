@@ -59,6 +59,7 @@ pub struct NativeContinuationPin {
     /// Provider 原生 response handle
     upstream_response_id: PreviousResponseId,
     client_api_key_id: ClientApiKeyId,
+    caller_identity: Option<crate::policy::CallerIdentity>,
     provider: ProviderKind,
     account: ProviderAccountId,
     scope: NativeContinuationScope,
@@ -66,6 +67,24 @@ pub struct NativeContinuationPin {
 }
 
 impl NativeContinuationPin {
+    #[must_use]
+    pub fn with_caller_identity(mut self, caller: crate::policy::CallerIdentity) -> Self {
+        self.caller_identity = Some(caller);
+        self
+    }
+
+    #[must_use]
+    pub fn caller_identity(&self) -> crate::policy::CallerIdentity {
+        self.caller_identity
+            .clone()
+            .unwrap_or_else(|| crate::policy::CallerIdentity::direct(&self.client_api_key_id))
+    }
+
+    #[must_use]
+    pub fn matches_caller(&self, caller: &crate::policy::CallerIdentity) -> bool {
+        &self.caller_identity() == caller
+    }
+
     #[must_use]
     pub const fn new(
         previous_response_id: PreviousResponseId,
@@ -78,6 +97,7 @@ impl NativeContinuationPin {
             previous_response_id,
             upstream_response_id,
             client_api_key_id,
+            caller_identity: None,
             provider,
             account,
             scope: NativeContinuationScope::ConnectionLocal,
@@ -268,6 +288,21 @@ impl NativeContinuationStoreError {
 /// 亲和记录按调用方 API Key 隔离；Redis 不可用或超时必须由调用方 fail-open，
 /// 但命中其他 Key 的记录必须 fail closed
 pub trait NativeContinuationPort: Send + Sync {
+    fn resolve_for_caller<'a>(
+        &'a self,
+        key: &'a ClientApiKeyId,
+        caller: &'a crate::policy::CallerIdentity,
+        response: &'a PreviousResponseId,
+    ) -> BoxFuture<'a, Result<Option<NativeContinuationPin>, NativeContinuationStoreError>> {
+        Box::pin(async move {
+            let pin = self.resolve(key, response).await?;
+            if pin.as_ref().is_some_and(|pin| !pin.matches_caller(caller)) {
+                return Err(NativeContinuationStoreError::ownership_mismatch());
+            }
+            Ok(pin)
+        })
+    }
+
     fn resolve<'a>(
         &'a self,
         client_api_key_id: &'a ClientApiKeyId,

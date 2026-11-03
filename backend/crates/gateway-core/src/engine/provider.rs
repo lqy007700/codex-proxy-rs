@@ -1198,6 +1198,15 @@ pub trait Provider: Send + Sync {
         true
     }
 
+    fn request_observation_for_caller(
+        &self,
+        operation: &Operation,
+        key: &ClientApiKeyId,
+        _caller: &crate::policy::CallerIdentity,
+    ) -> ProviderRequestObservation {
+        self.request_observation(operation, key)
+    }
+
     /// 解释 Provider 差异化观测字段；不参与路由和传输
     fn request_observation(
         &self,
@@ -1344,12 +1353,14 @@ impl ProviderRegistry {
         provider: &ProviderKind,
         operation: &Operation,
         client_api_key_id: &ClientApiKeyId,
+        caller: &crate::policy::CallerIdentity,
     ) -> ProviderRequestObservation {
-        self.providers
-            .get(provider)
-            .map_or_else(ProviderRequestObservation::default, |registered| {
-                registered.request_observation(operation, client_api_key_id)
-            })
+        self.providers.get(provider).map_or_else(
+            ProviderRequestObservation::default,
+            |registered| {
+                registered.request_observation_for_caller(operation, client_api_key_id, caller)
+            },
+        )
     }
 
     /// 判断 Provider 是否已注册

@@ -244,7 +244,7 @@ impl CodexProvider {
             )
         })?;
         let session_affinity =
-            derive_live_session_affinity(&request, &[], context.client_api_key_ref());
+            derive_live_session_affinity(&request, &[], &context.session_namespace());
         let selection_started_at = Instant::now();
         let lease = self
             .selector
@@ -313,7 +313,7 @@ impl CodexProvider {
         let session_affinity = derive_live_session_affinity(
             &request,
             &middleware_headers,
-            context.client_api_key_ref(),
+            &context.session_namespace(),
         );
         if !context.is_diagnostic_required_account() {
             self.selector
@@ -322,6 +322,7 @@ impl CodexProvider {
                     session_affinity.as_ref(),
                     None,
                     context.account_selection_policy(),
+                    &context,
                 )
                 .await
                 .map_err(map_selection_error)?;

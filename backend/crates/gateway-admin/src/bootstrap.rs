@@ -85,6 +85,9 @@ async fn initialize_inner(
         .resolve_and_validate(Path::new("."))
         .map_err(|error| AdminError::invalid(error.to_string()))?;
 
+    let affinity = store
+        .affinity()
+        .map(|ports| use_case::affinity::AffinityService::new(ports, snapshot.clone()));
     let auth = Arc::new(DefaultAuthService::new(
         &config,
         client_config.session_ttl_minutes,
@@ -209,6 +212,7 @@ async fn initialize_inner(
             store.account_runtime(),
             snapshot.clone(),
         )),
+        affinity,
         client_keys: Arc::new(DefaultClientKeyService::new(
             store.client_keys(),
             snapshot.clone(),

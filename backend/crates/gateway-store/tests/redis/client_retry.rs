@@ -28,6 +28,7 @@ async fn repository() -> Option<(RedisClientRetryRepository, ConnectionManager, 
 
 fn key(client: &str, thread: &str, turn: &str) -> ClientRetryKey {
     ClientRetryKey {
+        caller_identity: None,
         client_key_id: ClientApiKeyId::new(client).unwrap(),
         turn: ClientTurn::new(thread.to_owned(), turn.to_owned()).unwrap(),
     }

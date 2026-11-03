@@ -4,6 +4,7 @@ use std::num::{NonZeroU16, NonZeroU64};
 
 pub mod account_groups;
 pub mod accounts;
+pub mod affinity;
 pub mod alerts;
 pub mod analytics;
 pub mod audit;

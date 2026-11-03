@@ -118,6 +118,18 @@ fn client_authentication_request(
         .map_err(|_| ClientApiKeyAuthError::MalformedAuthorization)?;
     let request = ClientAuthenticationRequest::new(raw.to_owned())
         .map_err(|_| ClientApiKeyAuthError::MalformedAuthorization)?;
+    let request = request.with_forwarded_caller(gateway_core::policy::ForwardedCallerHeaders {
+        users: headers
+            .get_all("x-cpr-user-id")
+            .iter()
+            .map(|v| v.to_str().unwrap_or("").to_owned())
+            .collect(),
+        tokens: headers
+            .get_all("x-cpr-token-id")
+            .iter()
+            .map(|v| v.to_str().unwrap_or("").to_owned())
+            .collect(),
+    });
     let request = request.with_request_context(
         crate::middleware::current().and_then(|context| context.extensions.shared_request()),
     );

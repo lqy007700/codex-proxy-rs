@@ -89,6 +89,7 @@ impl CostSource {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewModelRequest {
+    pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
     pub id: String,
     pub client_api_key_name_snapshot: Option<String>,
     pub client_api_key_ref: String,
@@ -414,8 +415,8 @@ impl ModelRequestRepository for PgExecutionStore {
                insert into model_requests (
                  id, client_api_key_ref, operation, client_transport,
                  requested_model_id, image_generation_requested, started_at,
-                 continuation_affinity_hash, continuation_requested, request_kind, request_observation_json
-               ) values ($1, $2, $3, $4, $5, $6, $7, $9, $10, $11, $12)
+                 continuation_affinity_hash, continuation_requested, request_kind, request_observation_json, caller_identity_json
+               ) values ($1, $2, $3, $4, $5, $6, $7, $9, $10, $11, $12, $13)
                returning id
              ) insert into model_request_leases (request_id, lease_expires_at)
                select id, $8 from inserted",
@@ -432,6 +433,7 @@ impl ModelRequestRepository for PgExecutionStore {
         .bind(request.continuation.requested)
         .bind(request.request_kind)
         .bind(observation)
+        .bind(request.caller_identity.map(sqlx::types::Json))
         .execute(&self.pool)
         .await
         .map_err(|source| postgres_unavailable("insert model request", source))?;
@@ -456,7 +458,7 @@ impl ModelRequestRepository for PgExecutionStore {
                  requested_model_id, image_generation_requested, started_at,
                  continuation_affinity_hash, continuation_requested, request_kind, request_observation_json,
                  provider_kind, provider_account_ref, upstream_model_id,
-                 upstream_transport, attempt_count, upstream_send_state
+                 upstream_transport, attempt_count, upstream_send_state, caller_identity_json
                ) select $1, $2, $3, $4, $5, $6, $7, $9, $10, $11,
                  $12::jsonb || jsonb_build_object(
                    'account', coalesce($14::jsonb, '{}'::jsonb),
@@ -464,7 +466,7 @@ impl ModelRequestRepository for PgExecutionStore {
                    'scheduling', ($12::jsonb -> 'scheduling') || jsonb_strip_nulls(jsonb_build_object(
                      'accountSelectionWaitMs', $19::bigint,
                      'capacityUsedSlots', $20::bigint, 'capacityTotalSlots', $21::bigint))),
-                 $13, $15, $16, $17, 1, 'not_sent'
+                 $13, $15, $16, $17, 1, 'not_sent', $22
                returning id
              ) insert into model_request_leases (request_id, lease_expires_at)
                select id, $8 from inserted",
@@ -499,6 +501,7 @@ impl ModelRequestRepository for PgExecutionStore {
             attempt.capacity_total_slots,
             "capacity_total_slots",
         )?)
+        .bind(request.caller_identity.map(sqlx::types::Json))
         .execute(&self.pool)
         .await
         .map_err(|source| {
@@ -1270,6 +1273,7 @@ fn new_model_request_row(request: CoreNewModelRequest) -> NewModelRequest {
     let (routing_scope, routing_group_refs, routing_group_names_snapshot) =
         routing_snapshot_row(&request.routing);
     NewModelRequest {
+        caller_identity: request.caller_identity,
         id: request.id.as_str().to_owned(),
         client_api_key_name_snapshot: request.client_api_key_name_snapshot,
         client_api_key_ref: request.client_api_key_ref.as_str().to_owned(),

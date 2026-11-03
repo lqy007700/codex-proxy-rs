@@ -43,11 +43,23 @@ pub struct ClientAuthenticationRequest {
     invocation: Option<Arc<super::extensions::InvocationOrigin>>,
     request_context: Option<Arc<super::extensions::RequestContext>>,
     settings: Option<crate::routing::request_settings::RequestSettings>,
+    forwarded_caller: crate::policy::ForwardedCallerHeaders,
     authorization: Arc<str>,
     native_bearer: Option<PlaintextClientApiKey>,
 }
 
 impl ClientAuthenticationRequest {
+    #[must_use]
+    pub fn with_forwarded_caller(mut self, headers: crate::policy::ForwardedCallerHeaders) -> Self {
+        self.forwarded_caller = headers;
+        self
+    }
+
+    #[must_use]
+    pub const fn forwarded_caller(&self) -> &crate::policy::ForwardedCallerHeaders {
+        &self.forwarded_caller
+    }
+
     /// 子认证继承受信调用的来源、取消和副作用归属，不据此跳过认证器
     #[must_use]
     pub fn with_invocation(mut self, origin: super::extensions::InvocationOrigin) -> Self {
@@ -120,6 +132,7 @@ impl ClientAuthenticationRequest {
             .filter(|value| !value.is_empty())
             .and_then(|value| PlaintextClientApiKey::new(value.to_owned()).ok());
         Ok(Self {
+            forwarded_caller: crate::policy::ForwardedCallerHeaders::default(),
             invocation: None,
             settings: None,
             request_context: None,

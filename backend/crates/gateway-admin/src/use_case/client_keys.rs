@@ -165,6 +165,10 @@ impl ClientKeyService for DefaultClientKeyService {
                 .and_then(|provider| provider.preview_client_profile(profile))
                 .map_err(|error| super::map_provider_error(error, "client profile"))?;
         }
+        command
+            .identity_policy
+            .validate()
+            .map_err(|_| AdminError::invalid("invalid caller identity policy"))?;
         validate_peer_sharing(command.peer_sharing, &command.group_ids)?;
         let id = ClientApiKeyId::new(format!("key_{}", Uuid::now_v7().simple()))
             .map_err(|_| AdminError::internal("创建 Client API Key ID 失败"))?;
@@ -179,6 +183,7 @@ impl ClientKeyService for DefaultClientKeyService {
                 NewClientKey {
                     portable_history: command.portable_history,
                     peer_sharing: command.peer_sharing,
+                    identity_policy: command.identity_policy,
                     request_profile_overrides: command.request_profile_overrides,
                     id,
                     name: command.name,
@@ -213,6 +218,11 @@ impl ClientKeyService for DefaultClientKeyService {
                     .and_then(|provider| provider.preview_client_profile(profile))
                     .map_err(|error| super::map_provider_error(error, "client profile"))?;
             }
+        }
+        if let Some(policy) = &command.identity_policy {
+            policy
+                .validate()
+                .map_err(|_| AdminError::invalid("调用方身份配置不合法"))?;
         }
         if let Some(sharing) = command.peer_sharing {
             validate_peer_sharing(sharing, &command.group_ids)?;

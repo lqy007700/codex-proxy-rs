@@ -1,7 +1,6 @@
 //! 逻辑会话账号绑定与线程传输隔离键的单向派生
 
 use gateway_core::operation::RawJsonPayload;
-use gateway_core::policy::ClientApiKeyId;
 use gateway_core::provider_ports::{ProviderSessionAffinityKey, ProviderSessionAlias};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -113,11 +112,11 @@ impl CodexSessionAffinity {
 #[must_use]
 pub(crate) fn derive_previous_response_id_hash(
     previous_response_id: &str,
-    client_api_key_id: &ClientApiKeyId,
+    client_api_key_id: &(impl AsRef<str> + ?Sized),
 ) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"codex-previous-response-observation-v1\0");
-    hasher.update(client_api_key_id.as_str().as_bytes());
+    hasher.update(client_api_key_id.as_ref().as_bytes());
     hasher.update(b"\0");
     hasher.update(previous_response_id.as_bytes());
     hex::encode(hasher.finalize())
@@ -125,7 +124,7 @@ pub(crate) fn derive_previous_response_id_hash(
 
 pub(crate) fn derive_codex_session_affinity(
     request: &CodexResponsesRequest,
-    client_api_key_id: &ClientApiKeyId,
+    client_api_key_id: &(impl AsRef<str> + ?Sized),
 ) -> Option<CodexSessionAffinity> {
     let session_id = non_empty(request.client_account_session_id.as_deref())?;
     session_affinity(
@@ -140,7 +139,7 @@ pub(crate) fn derive_codex_session_affinity(
 /// 原生 JSON 端点与 Responses 共用绑定命名空间，Search id 是逻辑会话身份
 pub(crate) fn derive_codex_endpoint_session_affinity(
     payload: &RawJsonPayload,
-    client_api_key_id: &ClientApiKeyId,
+    client_api_key_id: &(impl AsRef<str> + ?Sized),
     body_session_field: &str,
 ) -> Option<CodexSessionAffinity> {
     derive_endpoint_affinity_with_headers(payload, client_api_key_id, body_session_field, &[])
@@ -148,7 +147,7 @@ pub(crate) fn derive_codex_endpoint_session_affinity(
 
 pub(crate) fn derive_endpoint_affinity_with_headers(
     payload: &RawJsonPayload,
-    client_api_key_id: &ClientApiKeyId,
+    client_api_key_id: &(impl AsRef<str> + ?Sized),
     body_session_field: &str,
     headers: &[gateway_core::engine::middleware::MiddlewareHeader],
 ) -> Option<CodexSessionAffinity> {
@@ -175,7 +174,7 @@ pub(crate) fn derive_endpoint_affinity_with_headers(
 pub(crate) fn derive_live_session_affinity(
     request: &gateway_core::operation::ProviderHttpRequest,
     headers: &[gateway_core::engine::middleware::MiddlewareHeader],
-    client_api_key_id: &ClientApiKeyId,
+    client_api_key_id: &(impl AsRef<str> + ?Sized),
 ) -> Option<CodexSessionAffinity> {
     let mut effective = headers.to_vec();
     effective.extend(
@@ -211,7 +210,7 @@ pub(crate) fn derive_live_session_affinity(
 /// HTTP 降级等传输状态仍按线程隔离，不能跟随整个对话的账号绑定扩大范围
 pub(crate) fn derive_codex_transport_key(
     request: &CodexResponsesRequest,
-    client_api_key_id: &ClientApiKeyId,
+    client_api_key_id: &(impl AsRef<str> + ?Sized),
 ) -> Option<ProviderSessionAffinityKey> {
     let (source, anchor) = non_empty(request.client_thread_id.as_deref())
         .map(|thread| ("thread-transport", thread.to_owned()))
@@ -223,14 +222,14 @@ fn session_affinity(
     anchor_source: &'static str,
     anchor: String,
     session_id: Option<String>,
-    client_api_key_id: &ClientApiKeyId,
+    client_api_key_id: &(impl AsRef<str> + ?Sized),
 ) -> Option<CodexSessionAffinity> {
     let session_key = opaque_affinity_key(anchor_source, &anchor)?;
     let key = opaque_affinity_key(
         "client-session",
         &format!(
             "{}\0{}",
-            client_api_key_id.as_str(),
+            client_api_key_id.as_ref(),
             session_key.expose_to_store()
         ),
     )?;
@@ -269,7 +268,7 @@ fn opaque_affinity_key(domain: &str, value: &str) -> Option<ProviderSessionAffin
 /// 请求内容哈希误当成长会话；`previous_response_id` 续写不参与该策略
 pub(crate) fn derive_codex_cyber_policy_session_key(
     request: &CodexResponsesRequest,
-    client_api_key_id: &ClientApiKeyId,
+    client_api_key_id: &(impl AsRef<str> + ?Sized),
 ) -> Option<ProviderSessionAffinityKey> {
     if request.previous_response_id().is_some() {
         return None;
@@ -285,7 +284,7 @@ pub(crate) fn derive_codex_cyber_policy_session_key(
         })?;
     let mut hasher = Sha256::new();
     hasher.update(b"cyber-policy-session\0");
-    hasher.update(client_api_key_id.as_str().as_bytes());
+    hasher.update(client_api_key_id.as_ref().as_bytes());
     hasher.update(b"\0");
     hasher.update(session_id.as_bytes());
     ProviderSessionAffinityKey::try_new(hex::encode(hasher.finalize())).ok()
@@ -298,8 +297,8 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 /// 官方 Images 的轮次 ID 与 Responses turn_id 对应，关联必须隔离客户端 API Key
 pub(crate) fn derive_turn_alias(
     turn_id: &str,
-    client: &ClientApiKeyId,
+    client: &(impl AsRef<str> + ?Sized),
 ) -> Option<ProviderSessionAffinityKey> {
     let turn_id = non_empty(Some(turn_id))?;
-    opaque_affinity_key("client-turn", &format!("{}\0{turn_id}", client.as_str()))
+    opaque_affinity_key("client-turn", &format!("{}\0{turn_id}", client.as_ref()))
 }

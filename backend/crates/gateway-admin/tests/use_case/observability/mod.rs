@@ -1407,6 +1407,7 @@ fn total_record(
     now: DateTime<Utc>,
 ) -> UsageListRecord {
     UsageListRecord {
+        caller_identity: None,
         error_code: None,
         client_status_code: None,
         outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,

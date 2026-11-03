@@ -262,6 +262,7 @@ pub(crate) fn usage_list_record_view(
         .clone()
         .or_else(|| record.requested_model_id.clone());
     UsageListRecordView {
+        caller_identity: record.caller_identity,
         error_code: record.error_code,
         error_message: record.error_message.clone(),
         logical_outcome: record.outcome.as_str().to_owned(),
@@ -363,6 +364,7 @@ pub(crate) fn usage_record_view(
         .or_else(|| record.requested_model_id.clone());
     let metadata = provider_metadata_fields(record.provider_metadata_json.as_deref());
     UsageRecordView {
+        caller_identity: record.caller_identity,
         error_details: record.error_details,
         failure_class: record.error_kind,
         provider_error_code: record.provider_error_code,

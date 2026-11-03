@@ -117,6 +117,7 @@ fn routing_plan(operation: &Operation, backup: bool) -> gateway_core::routing::R
 
 fn model_request(operation: &Operation) -> NewModelRequest {
     NewModelRequest {
+        caller_identity: None,
         admission_decision_ms: None,
         id: ModelRequestId::new("req_xai_selection_retry").unwrap(),
         client_api_key_name_snapshot: None,

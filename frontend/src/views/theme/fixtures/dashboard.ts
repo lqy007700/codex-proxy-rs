@@ -113,6 +113,7 @@ function previewUsageRecord(options: PreviewUsageRecordOptions): UsageListRecord
   const stream = options.clientTransport !== 'http_json'
 
   return {
+    callerIdentity: null,
     id: options.id,
     logicalOutcome: 'succeeded',
     attemptCount: 1,

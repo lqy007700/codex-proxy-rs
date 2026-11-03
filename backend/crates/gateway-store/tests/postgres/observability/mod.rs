@@ -1775,6 +1775,10 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
             scope: Default::default(),
             range,
             filter: admin_observability::UsageFilter {
+                caller_mode: None,
+                caller_source_id: None,
+                caller_user_id: None,
+                caller_token_id: None,
                 client_api_key_ref: Some("key_observe".to_owned()),
                 request_id: Some("req_observe_success".to_owned()),
                 provider_account_ref: Some("acct_observe".to_owned()),
@@ -3106,5 +3110,83 @@ async fn diagnostic_export_reads_exact_targets_and_prioritizes_final_error() {
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0].event_id, "ops_observe_retry");
     assert!(errors[0].request_id.is_none());
+    database.close().await;
+}
+
+#[tokio::test]
+async fn trusted_caller_filters_keep_usage_pages_details_and_analytics_in_the_same_scope() {
+    use gateway_core::policy::CallerIdentity;
+    let Some(database) = TestDatabase::create("trusted_usage").await else {
+        return;
+    };
+    let now = Utc::now();
+    seed_observability_facts(&database.pool, now).await.unwrap();
+    let caller = CallerIdentity::NewApi {
+        source_id: "source_a".into(),
+        user_id: "9007199254740993".into(),
+        token_id: "11".into(),
+    };
+    sqlx::query("update model_requests set caller_identity_json=$1 where id='req_observe_success'")
+        .bind(sqlx::types::Json(&caller))
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    super::drain_analytics(&database.pool).await;
+    let repository = observability_repository(&database.pool);
+    let range =
+        ObservabilityRange::new(now - TimeDelta::hours(1), now + TimeDelta::hours(1)).unwrap();
+    let filter = UsageRecordFilter {
+        caller_mode: Some("newApi".into()),
+        caller_source_id: Some("source_a".into()),
+        caller_user_id: Some("9007199254740993".into()),
+        caller_token_id: Some("11".into()),
+        ..Default::default()
+    };
+    let page = repository
+        .list_usage_records(UsageRecordQuery {
+            scope: admin_observability::UsageRecordScope::All,
+            range,
+            filter: filter.clone(),
+            current_page: 1,
+            page_size: ObservabilityPageSize::new(10).unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items[0].caller_identity.as_ref(), Some(&caller));
+    let detail = repository
+        .usage_record_detail("req_observe_success")
+        .await
+        .unwrap();
+    assert_eq!(detail.request.caller_identity.as_ref(), Some(&caller));
+    let summary = repository
+        .usage_summary(range, filter.clone())
+        .await
+        .unwrap();
+    assert_eq!(summary.requests.request_count, 1);
+    let other = UsageRecordFilter {
+        caller_token_id: Some("12".into()),
+        ..filter
+    };
+    let page = repository
+        .list_usage_records(UsageRecordQuery {
+            scope: admin_observability::UsageRecordScope::All,
+            range,
+            filter: other.clone(),
+            current_page: 1,
+            page_size: ObservabilityPageSize::new(10).unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.total, 0);
+    assert_eq!(
+        repository
+            .usage_summary(range, other)
+            .await
+            .unwrap()
+            .requests
+            .request_count,
+        0
+    );
     database.close().await;
 }

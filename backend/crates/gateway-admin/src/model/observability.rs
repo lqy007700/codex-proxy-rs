@@ -157,6 +157,11 @@ impl OtherRequestOutcome {
 /// 用量记录过滤条件
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct UsageFilter {
+    pub caller_mode: Option<String>,
+    pub caller_source_id: Option<String>,
+    pub caller_user_id: Option<String>,
+    pub caller_token_id: Option<String>,
+
     pub client_api_key_ref: Option<String>,
     pub request_id: Option<String>,
     pub provider_account_ref: Option<String>,
@@ -682,6 +687,7 @@ pub struct DashboardObservation {
 /// 使用记录表格的窄读模型
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageListRecord {
+    pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
     pub outcome: RequestOutcome,
     pub attempt_count: u32,
     pub error_code: Option<String>,
@@ -746,6 +752,7 @@ pub struct UsageListRecord {
 /// 一次完整模型请求的公共观测记录
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageRecord {
+    pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
     pub id: String,
     pub client_api_key_ref: String,
     pub config_revision: u64,

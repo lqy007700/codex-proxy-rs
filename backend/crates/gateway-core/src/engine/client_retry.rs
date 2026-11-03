@@ -15,6 +15,7 @@ const STORE_TIMEOUT: Duration = Duration::from_millis(100);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientRetryKey {
     pub client_key_id: ClientApiKeyId,
+    pub caller_identity: Option<crate::policy::CallerIdentity>,
     pub turn: ClientTurn,
 }
 

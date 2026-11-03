@@ -73,6 +73,7 @@ const navItems = [
   { label: '代理管理', icon: Network, path: '/proxies' },
   { label: '分组管理', icon: FolderTree, path: '/groups' },
   { label: 'API 密钥', icon: KeyRound, path: '/keys' },
+  { label: '账号亲和', icon: Network, path: '/affinity' },
   { label: '使用统计', icon: ChartNoAxesColumn, path: '/usage' },
   { label: '插件', icon: Puzzle, path: '/plugins' },
   { label: '系统设置', icon: Settings, path: '/settings' },

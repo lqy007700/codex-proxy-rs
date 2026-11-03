@@ -114,6 +114,12 @@ async fn open_sideband(
         Ok(client) => client,
         Err(error) => return client_access_error_response(error),
     };
+    if !matches!(
+        client.policy().identity_policy(),
+        gateway_core::policy::CallerIdentityPolicy::Direct
+    ) {
+        return super::realtime_unsupported_response("Realtime with trusted caller identity");
+    }
     let Some(gateway) = service.live_gateway() else {
         return realtime_unsupported_response("Codex live sideband");
     };

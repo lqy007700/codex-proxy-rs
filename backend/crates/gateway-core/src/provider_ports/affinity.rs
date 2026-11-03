@@ -39,13 +39,46 @@ impl fmt::Debug for ProviderSessionAffinityKey {
 }
 
 /// 会话绑定快照；版本区分同一账号的不同认领，防止过期和 A → B → A 后的旧写入
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "action", rename_all = "camelCase", deny_unknown_fields)]
+pub enum SessionBindingDirective {
+    Clear,
+    Reassign,
+    Target {
+        #[serde(rename = "accountId")]
+        account_id: String,
+    },
+}
+
+/// 一次发送前观测，用于管理索引；不保存原始会话 ID 或凭据
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderSessionObservation {
+    pub caller: crate::policy::CallerIdentity,
+    pub client_key_id: String,
+    pub request_id: String,
+    pub actual_account_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderSessionBinding {
     account_id: ProviderAccountId,
     revision: String,
+    directive: Option<SessionBindingDirective>,
 }
 
 impl ProviderSessionBinding {
+    #[must_use]
+    pub fn with_directive(mut self, directive: Option<SessionBindingDirective>) -> Self {
+        self.directive = directive;
+        self
+    }
+
+    #[must_use]
+    pub const fn directive(&self) -> Option<&SessionBindingDirective> {
+        self.directive.as_ref()
+    }
+
     pub fn new(
         account_id: ProviderAccountId,
         revision: String,
@@ -59,6 +92,7 @@ impl ProviderSessionBinding {
         Ok(Self {
             account_id,
             revision,
+            directive: None,
         })
     }
 
@@ -83,6 +117,16 @@ pub struct ProviderSessionAlias {
 
 /// 客户端作用域内的会话账号绑定，原始会话身份由 Provider 哈希后传入
 pub trait ProviderSessionAffinityPort: Send + Sync {
+    fn observe<'a>(
+        &'a self,
+        _provider: &'a ProviderKind,
+        _key: &'a ProviderSessionAffinityKey,
+        _observation: ProviderSessionObservation,
+        _ttl: Duration,
+    ) -> BoxFuture<'a, Result<(), ProviderStoreError>> {
+        Box::pin(async { Ok(()) })
+    }
+
     fn load<'a>(
         &'a self,
         provider_kind: &'a ProviderKind,

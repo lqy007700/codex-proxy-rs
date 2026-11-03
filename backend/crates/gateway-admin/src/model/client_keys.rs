@@ -110,6 +110,7 @@ pub struct ClientKeyListQuery {
 pub struct ClientKeyRecord {
     pub portable_history: bool,
     pub peer_sharing: gateway_core::policy::ClientPeerSharing,
+    pub identity_policy: gateway_core::policy::CallerIdentityPolicy,
     pub request_profile_overrides: ProviderRequestProfileOverrides,
     pub id: ClientApiKeyId,
     pub name: String,
@@ -171,6 +172,7 @@ impl fmt::Debug for ClientKeySecret {
 pub struct CreateClientKey {
     pub portable_history: bool,
     pub peer_sharing: gateway_core::policy::ClientPeerSharing,
+    pub identity_policy: gateway_core::policy::CallerIdentityPolicy,
     pub request_profile_overrides: ProviderRequestProfileOverrides,
     pub custom_key: Option<PlaintextClientApiKey>,
     pub name: String,
@@ -185,6 +187,7 @@ pub struct CreateClientKey {
 pub struct NewClientKey {
     pub portable_history: bool,
     pub peer_sharing: gateway_core::policy::ClientPeerSharing,
+    pub identity_policy: gateway_core::policy::CallerIdentityPolicy,
     pub request_profile_overrides: ProviderRequestProfileOverrides,
     pub id: ClientApiKeyId,
     pub name: String,
@@ -212,6 +215,7 @@ impl fmt::Debug for NewClientKey {
 pub struct UpdateClientKey {
     pub portable_history: Option<bool>,
     pub peer_sharing: Option<gateway_core::policy::ClientPeerSharing>,
+    pub identity_policy: Option<gateway_core::policy::CallerIdentityPolicy>,
     pub request_profile_override_updates: ProviderRequestProfileOverrideUpdates,
     pub id: ClientApiKeyId,
     pub name: String,

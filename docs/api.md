@@ -71,6 +71,37 @@ ChatGPT 远程控制使用 `(codex_chatgpt_<平台>_remote; <版本>)` 形式的
 因缺失或非法版本被门禁拒绝时，`code` 为 `client_version_unavailable`，`current_version` 为 `null`，
 提示检查客户端版本及反向代理是否保留 `User-Agent` 和 `version` 头
 
+### 可信调用方身份
+
+Client Key 的 `identityPolicy` 默认为 `{ "mode": "direct" }`，以 CPR Key 隔离亲和，忽略客户端伪造的身份头。
+New API 共用 CPR Key 分发多用户、多 Token 请求时，管理员可将该 Key 配置为：
+
+```json
+{"mode":"newApi","sourceId":"b7bb7de9-7b06-4caa-8070-352af86a8a4a","allowUnidentified":false}
+```
+
+`sourceId` 引用启用的稳定身份来源；同一 New API 实例的替换 Key 应复用该来源。
+New API 须在验证终端 Token 后覆盖以下头，不得透传终端用户自行提交的值：
+
+```http
+Authorization: Bearer <共享 CPR Key>
+X-CPR-User-Id: 101
+X-CPR-Token-Id: 1001
+```
+
+两个 ID 均使用正整数的规范十进制字符串，最大为 `18446744073709551615`；不接受前导零、空白、
+逗号合并或重复头。CPR 只信任显式配置的转发 Key，来源由该 Key 的配置确定，不接受请求指定来源。
+这些 ID 不包含实际 Token 密钥；持有转发 Key 即具备声明该来源下用户和 Token 的权限，该 Key 只应交给可信分发端
+
+用户亲和以来源、用户、Token 和显式会话共同隔离，同一用户不同 Token 不自动共享会话。
+认证、预算、并发和分组权限仍归 CPR Key；来源停用后关联 Key 无法通过新请求认证。
+身份头在最终出站边界移除，不传给模型上游。HTTP JSON、SSE 与 Responses WebSocket 均使用此身份；
+New API 模式的 Live 创建、挂断和 Realtime sideband 暂不支持，返回 `501`
+
+`allowUnidentified` 默认关闭；开启时仅允许两个头同时缺失的探测请求，部分缺失或非法值仍返回 `401`。
+无身份请求按每次请求的临时范围选号，不建立会话绑定或轮次关联，也不能使用 `previous_response_id`。
+转发请求的原生续接必须找到同一来源、用户和 Token 的原始账号记录；记录丢失或归属不符时拒绝续接，须发送完整历史开始新链
+
 ### 管理接口
 
 所有 `/api/admin/*` 请求都需要以下任一鉴权方式：
@@ -1592,11 +1623,14 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 | `POST` | `/api/admin/client-keys/delete` | `{ id }` | 删除 |
 
 创建字段为 `name`、可选 `label`、`groupIds`、`maxConcurrency`、`requestsPerMinute`、可选
-`dailyLimitUsd`、`weeklyLimitUsd`、`customKey`、`portableHistory`、`peerSharing` 和 `providerRequestProfileOverrides`。更新请求携带 `id`，不接受 `customKey`。
+`dailyLimitUsd`、`weeklyLimitUsd`、`customKey`、`portableHistory`、`peerSharing`、`identityPolicy` 和 `providerRequestProfileOverrides`。更新请求携带 `id`，不接受 `customKey`。
 `groupIds` 必须显式提交：空数组派生 `routingScope: "all"`，非空数组派生
 `routingScope: "groups"`。响应同时返回分组引用 `groups`，以及从当前有效账号池派生、仅供展示的
 `providerKinds`。创建和 reveal 响应会返回完整明文 Key，调用方
 必须立即安全保存
+
+`identityPolicy` 创建时省略为直连，更新时省略或 `null` 保留原值，列表与详情返回当前配置。
+模式、来源与转发要求见[可信调用方身份](#可信调用方身份)
 
 `peerSharing` 为 `{ enabled, sharePool, shareQuota, sharePlans }`，创建时省略默认全部关闭，
 更新时省略或 `null` 保留原配置，提交对象时替换完整配置；`sharePlans` 依赖 `sharePool`。
@@ -1613,9 +1647,9 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 增量请求在实际遇到密文拒绝后投影 `previous_response_not_found`，请求客户端提供完整历史，内部保留真实上游错误和发送事实
 其他不可迁移历史保留上游拒绝，需要客户端恢复可读消息及工具结果，或使用可读摘要开始新会话；网关不解密、拼接或保存整份聊天
 
-恢复产生有效输出或成功完成后，以指纹记录此次排除的旧项，按 Key、线程或会话、目标账号、凭据版本和端点隔离
+恢复产生有效输出或成功完成后，以指纹记录此次排除的旧项，按调用方、线程或会话、目标账号、凭据版本和端点隔离
 后续自包含请求只过滤精确匹配的旧项，新推理继续保留；相同 ID 搭配不同密文不视为同一项
-无会话身份时使用该 Key 和目标内的独立无会话范围；记录按会话亲和时长保留，最长 24 小时，匹配后续期，每个范围最多 4096 项
+无会话身份时使用该调用方和目标内的独立无会话范围；记录按会话亲和时长保留，最长 24 小时，匹配后续期，每个范围最多 4096 项
 缓存读写各最多等待 100ms；记录过期、缓存故障或超限不阻断正常响应，也不退化为全量清理，后续请求可能再次经历拒绝与一次恢复
 关闭开关停用自动恢复及旧项过滤，不启用每次清空推理的模式
 
@@ -1705,6 +1739,50 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 自动结算按网关请求 ID 幂等执行，响应交付不等待费用落库，额度查询中的已用金额在后台写入后可见。
 账本独立于使用统计日志，记录保留至删除 Key，
 不受 `usageRetentionDays` 影响
+
+### 账号亲和管理
+
+管理端 `/affinity` 提供会话列表，以及本页用户、Token、账号汇总，可从 Key、账号或请求详情进入对应筛选。
+此页只覆盖已观测且未过期的 OpenAI 会话绑定，不包含全部历史请求；xAI 的确定性选号不产生可管理的持久绑定。
+没有可靠会话标识的请求不推测会话，未知轮次也不会凭空创建绑定
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| `GET` | `/api/admin/affinity/sessions` | 查询会话与绑定版本 |
+| `GET` | `/api/admin/affinity/sources` | 查询稳定身份来源 |
+| `POST` | `/api/admin/affinity/sources/save` | 保存 `{ id, name, enabled }`，`id` 为 UUID，改名保留原 ID |
+| `POST` | `/api/admin/affinity/preview` | 冻结明确选择的会话与版本，创建 15 分钟预览 |
+| `POST` | `/api/admin/affinity/apply` | 提交 `{ operationId }`，逐项执行或恢复原操作结果 |
+| `GET` | `/api/admin/affinity/operations` | 最近 50 条预览及逐项结果 |
+
+会话查询可组合 `mode`（`direct` / `newApi`）、`sourceId`、`clientKeyId`、`userId`、`tokenId`、
+`provider`、`accountId`、`reference`、`requestId`、`status`（`bound` / `pending`）及 `cursor`。
+`accountId` 筛选主绑定账号，`requestId` 筛选最近观测的请求。每页最多扫描 200 个索引项，筛选后可能为空；
+存在 `nextCursor` 时可继续翻页，不返回全局总数。响应 `coverage: "observedOnly"`，索引或元数据明确缺失时返回 `503`
+
+预览示例：
+
+```json
+{
+  "operationId": "9bd88c29-d2e1-44fa-a46c-c8de30d6de61",
+  "selection": [{"provider":"openai","reference":"<会话不透明引用>","revision":"<32 位绑定版本>"}],
+  "directive": {"action":"reassign"}
+}
+```
+
+每次须显式选择 1～200 个会话，不提供不受限的全用户清理。
+`directive` 为 `{action:"clear"}`、`{action:"reassign"}` 或 `{action:"target",accountId:"..."}`：
+清除允许下一次选号仍选原账号，重新分配排除原账号，指定目标只允许目标账号。
+目标须属于当前 Key 的启用普通账号范围；模型、健康、容量和其他调度条件仍在实际请求时检查，预览不预留容量
+
+预览不会修改绑定。执行按完整绑定和版本比较，结果以 `provider:reference` 为键，状态为
+`applied`、`conflict`、`rejected` 或可重试的 `failed`。过期或冲突项不覆盖新状态，已执行项重试返回原结果。
+成功只挂起下一次安全选号的指令；请求取得租约并成功更新绑定后消耗该指令。
+已准入请求继续完成，原生续接不迁移账号；存在待执行指令的原生续接要求客户端提交完整历史开始新链
+
+`auditRecorded:false` 表示审计尚未持久化，可使用同一 `operationId` 重试补写；补写依赖主动重试，没有后台自动对账。
+Redis 操作回执保留 30 天；预览日志在到期 30 天后随新预览按批回收，独立管理审计遵守审计保留期。
+亲和操作日志不随业务备份恢复。时间字段保留 UTC 原值，并返回部署时区的 `...AtDisplay` 显示值
 
 ## 8. 运行设置
 
@@ -2317,6 +2395,11 @@ request/response/upstream ID、outcome 与搜索文本。`search` 仅供明细�
 `/api/admin/usage/records` 的 `search` 支持完整时间关键词：`HH:mm:ss` 查询部署时区今天的对应时间，
 `YYYY-MM-DD HH:mm:ss` 查询指定日期的对应时间。按请求开始时间匹配整秒，包含该秒内的毫秒记录，
 时间关键词优先于查询的日期范围，其他筛选继续生效，不改变统计概览。未完成或无效的时间输入仍按普通文本搜索
+
+列表与详情的 `callerIdentity` 为入口冻结的调用方：直连 `{mode:"direct",keyId}`，
+New API `{mode:"newApi",sourceId,userId,tokenId}`，无身份探测 `{mode:"unidentified",requestId}`；
+未记录身份的旧请求及内部诊断保持 `null`。`callerMode`、`callerSourceId`、`callerUserId`、`callerTokenId`
+可筛选明细、汇总与诊断，ID 始终为字符串。之后修改 Key 模式或来源名称不会改写请求身份
 
 请求列表的 `errorCode` / `errorMessage` 提供最终请求的错误码与错误信息，未记录时为 `null`
 

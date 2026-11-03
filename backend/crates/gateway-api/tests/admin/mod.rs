@@ -1094,6 +1094,7 @@ impl ClientKeyStore for MemoryClientKeyStore {
         Ok(Some(ClientKeySecret::new(
             ClientKeyRecord {
                 peer_sharing: Default::default(),
+                identity_policy: Default::default(),
 
                 portable_history: false,
                 request_profile_overrides: Default::default(),
@@ -1982,3 +1983,5 @@ impl gateway_admin::ports::reset_credit_automation::ResetCreditAutomationStore f
         Err(unavailable("reset-credit automation"))
     }
 }
+
+mod affinity;

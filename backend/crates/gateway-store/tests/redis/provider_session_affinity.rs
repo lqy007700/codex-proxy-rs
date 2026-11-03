@@ -336,3 +336,230 @@ async fn binding_and_turn_alias_can_renew_beyond_one_day_and_shorten_without_sca
     }
     assert_eq!(repo.load(&provider, &session).await.unwrap(), binding);
 }
+
+#[tokio::test]
+async fn management_directives_are_versioned_idempotent_and_preserve_remaining_ttl() {
+    use gateway_admin::{model::affinity::*, ports::affinity::AffinityBindingStore as _};
+    use gateway_core::{
+        policy::{CallerIdentity, ClientApiKeyId},
+        provider_ports::{ProviderSessionObservation, SessionBindingDirective},
+    };
+    let Some((repo, _, _)) = affinity_repository().await else {
+        return;
+    };
+    let provider = ProviderKind::new("openai").unwrap();
+    for directive in [
+        SessionBindingDirective::Clear,
+        SessionBindingDirective::Reassign,
+        SessionBindingDirective::Target {
+            account_id: "acct_new".into(),
+        },
+    ] {
+        let key = ProviderSessionAffinityKey::try_new(Uuid::new_v4().to_string()).unwrap();
+        let account = ProviderAccountId::new("acct_old").unwrap();
+        let old = repo
+            .compare_and_bind(&provider, &key, None, &account, Duration::from_secs(60))
+            .await
+            .unwrap()
+            .unwrap();
+        repo.observe(
+            &provider,
+            &key,
+            ProviderSessionObservation {
+                caller: CallerIdentity::direct(&ClientApiKeyId::new("key_a").unwrap()),
+                client_key_id: "key_a".into(),
+                request_id: "req_observed".into(),
+                actual_account_id: "acct_temporary".into(),
+            },
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
+        let session = repo
+            .session("openai", key.expose_to_store())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.account_id, "acct_old");
+        assert_eq!(session.observation.actual_account_id, "acct_temporary");
+        let item = AffinityPlanItem {
+            session: session.clone(),
+            next_revision: Uuid::new_v4().simple().to_string(),
+            rejection: None,
+        };
+        let plan = AffinityPlan {
+            operation_id: Uuid::new_v4().to_string(),
+            directive: directive.clone(),
+            items: vec![item.clone()],
+            created_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now() + chrono::Duration::minutes(15),
+        };
+        let applied = repo.apply(&plan, &item, None).await.unwrap();
+        assert_eq!(applied.status, "applied");
+        let pending = repo.load(&provider, &key).await.unwrap().unwrap();
+        assert_eq!(pending.directive(), Some(&directive));
+        assert_ne!(pending.revision(), old.revision());
+        assert!(
+            repo.compare_and_bind(
+                &provider,
+                &key,
+                Some(&old),
+                &account,
+                Duration::from_secs(60)
+            )
+            .await
+            .unwrap()
+            .is_none(),
+            "in-flight old admission cannot resurrect binding"
+        );
+        let after = repo
+            .session("openai", key.expose_to_store())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(after.expires_at <= session.expires_at + chrono::Duration::milliseconds(20));
+        let selected = ProviderAccountId::new("acct_new").unwrap();
+        let consumed = repo
+            .compare_and_bind(
+                &provider,
+                &key,
+                Some(&pending),
+                &selected,
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(consumed.directive().is_none());
+        assert_ne!(consumed.revision(), pending.revision());
+        assert_eq!(
+            repo.apply(&plan, &item, Some("eligibility revoked after mutation"))
+                .await
+                .unwrap()
+                .status,
+            "applied"
+        );
+        assert_eq!(repo.load(&provider, &key).await.unwrap(), Some(consumed));
+        assert_eq!(
+            repo.receipt(&plan, &item).await.unwrap().unwrap().status,
+            "applied"
+        );
+        let conflict_plan = AffinityPlan {
+            operation_id: Uuid::new_v4().to_string(),
+            ..plan.clone()
+        };
+        assert_eq!(
+            repo.apply(&conflict_plan, &item, None)
+                .await
+                .unwrap()
+                .status,
+            "conflict"
+        );
+        let expired = AffinityPlan {
+            operation_id: Uuid::new_v4().to_string(),
+            expires_at: chrono::Utc::now() - chrono::Duration::seconds(1),
+            ..plan
+        };
+        assert_eq!(
+            repo.apply(&expired, &item, None).await.unwrap().status,
+            "rejected"
+        );
+    }
+    let page = repo
+        .list(&AffinityQuery {
+            request_id: Some("req_observed".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 3);
+    assert_eq!(page.coverage, "observedOnly");
+    assert!(
+        repo.list(&AffinityQuery {
+            user_id: Some("1".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .items
+        .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn missing_affinity_index_or_metadata_is_unavailable_and_unidentified_is_not_indexed() {
+    use gateway_admin::{
+        model::affinity::AffinityQuery, ports::affinity::AffinityBindingStore as _,
+    };
+    use gateway_core::{policy::CallerIdentity, provider_ports::ProviderSessionObservation};
+    let Some((repo, mut connection, namespace)) = affinity_repository().await else {
+        return;
+    };
+    let provider = ProviderKind::new("openai").unwrap();
+    let key = ProviderSessionAffinityKey::try_new("index-state").unwrap();
+    repo.compare_and_bind(
+        &provider,
+        &key,
+        None,
+        &ProviderAccountId::new("acct_a").unwrap(),
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    let mut observation = ProviderSessionObservation {
+        caller: CallerIdentity::Unidentified {
+            request_id: "probe".into(),
+        },
+        client_key_id: "key_a".into(),
+        request_id: "request".into(),
+        actual_account_id: "acct_a".into(),
+    };
+    repo.observe(
+        &provider,
+        &key,
+        observation.clone(),
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    assert!(
+        repo.list(&AffinityQuery::default())
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    observation.caller = CallerIdentity::NewApi {
+        source_id: "source".into(),
+        user_id: "1".into(),
+        token_id: "2".into(),
+    };
+    repo.observe(&provider, &key, observation, Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.list(&AffinityQuery::default())
+            .await
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    redis::cmd("DEL")
+        .arg(format!("{namespace}:scheduler:affinity-index"))
+        .query_async::<i64>(&mut connection)
+        .await
+        .unwrap();
+    assert!(repo.list(&AffinityQuery::default()).await.is_err());
+    let metadata: Vec<String> = redis::cmd("KEYS")
+        .arg(format!("{namespace}:scheduler:session-binding:*:metadata"))
+        .query_async(&mut connection)
+        .await
+        .unwrap();
+    redis::cmd("DEL")
+        .arg(metadata)
+        .query_async::<i64>(&mut connection)
+        .await
+        .unwrap();
+    assert!(repo.session("openai", key.expose_to_store()).await.is_err());
+}

@@ -86,6 +86,7 @@ pub struct ImageBillingView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageListRecordView {
+    pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub logical_outcome: String,
@@ -128,6 +129,7 @@ pub struct UsageListRecordView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageRecordView {
+    pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
     pub error_details: Option<String>,
     pub failure_class: Option<String>,
     pub provider_error_code: Option<String>,

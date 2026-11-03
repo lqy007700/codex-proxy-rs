@@ -15,6 +15,7 @@ use uuid::Uuid;
 mod account_groups;
 mod admin_security_audit;
 mod admission_recovery;
+mod affinity;
 mod alerts;
 mod analytics;
 mod analytics_buckets;

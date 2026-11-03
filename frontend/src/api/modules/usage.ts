@@ -1,4 +1,5 @@
 import type { RequestOptions } from '../request'
+import type { CallerIdentity } from './affinity'
 import type { AnalyticsMetadata } from './analytics'
 import { API_BASE_URL } from '../constants'
 import request from '../request'
@@ -79,6 +80,7 @@ export interface UsageRecordMetadata {
 }
 
 export interface UsageListRecord {
+  callerIdentity: CallerIdentity | null
   logicalOutcome: string
   attemptCount: number
   message: string | null
@@ -118,6 +120,7 @@ export interface UsageListRecord {
 }
 
 export interface UsageRecord {
+  callerIdentity: CallerIdentity | null
   errorDetails: string | null
   failureClass: string | null
   providerErrorCode: string | null
@@ -499,7 +502,17 @@ export interface UsageDiagnosticsResponse {
 }
 
 // 请求参数类型：仅定义 API 边界的形状，调用方不依赖显式声明。
-interface UsageRangeQuery {
+export interface CallerUsageFilters {
+  callerMode?: string
+  callerSourceId?: string
+  callerUserId?: string
+  callerTokenId?: string
+  requestId?: string
+  clientApiKeyId?: string
+  accountId?: string
+}
+
+interface UsageRangeQuery extends CallerUsageFilters {
   startTime: string
   endTime: string
   provider?: string

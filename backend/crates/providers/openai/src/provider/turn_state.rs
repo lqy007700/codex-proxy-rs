@@ -41,7 +41,7 @@ impl TurnStateOwnership {
             .filter(|id| !id.is_empty())?;
         let mut identity = Sha256::new();
         for part in [
-            context.client_api_key_ref().as_str(),
+            context.session_namespace().as_str(),
             lease.account_id().as_str(),
             request.client_session_id.as_deref().unwrap_or_default(),
             request.client_thread_id.as_deref().unwrap_or_default(),

@@ -13,6 +13,7 @@ const EXCLUDED_DATA: &[&str] = &[
     "model_request_leases",
     "ops_events",
     "admin_audit_events",
+    "affinity_operations",
     "alert_events",
     "alert_notifications",
     "quota_alert_windows",

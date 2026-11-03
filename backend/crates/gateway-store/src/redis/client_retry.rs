@@ -35,11 +35,11 @@ impl RedisClientRetryRepository {
 
     fn key(&self, key: &ClientRetryKey) -> String {
         let mut digest = Sha256::new();
-        for part in [
-            key.client_key_id.as_str(),
-            key.turn.thread_id(),
-            key.turn.turn_id(),
-        ] {
+        let namespace = key.caller_identity.as_ref().map_or_else(
+            || key.client_key_id.as_str().to_owned(),
+            gateway_core::policy::CallerIdentity::session_namespace,
+        );
+        for part in [namespace.as_str(), key.turn.thread_id(), key.turn.turn_id()] {
             digest.update((part.len() as u64).to_be_bytes());
             digest.update(part.as_bytes());
         }

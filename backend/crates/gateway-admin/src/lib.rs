@@ -20,6 +20,7 @@ pub mod ports;
 pub mod public_service;
 mod reset_credit_worker;
 mod use_case;
+pub use use_case::affinity::AffinityService;
 pub use use_case::plugins::{PluginDistributionPorts, PluginManagementService, PluginsService};
 
 pub use use_case::key_usage::KeyUsageService;
@@ -203,6 +204,7 @@ pub enum AdminConfigError {
 /// 字段全部私有；调用方经 accessor 直接调用能力，不需要命名内部 `use_case` 模块
 #[derive(Clone)]
 pub struct AdminServices {
+    affinity: Option<use_case::affinity::AffinityService>,
     timezone: gateway_core::time::DeploymentTimeZone,
     public_services: Arc<public_service::Registry>,
     plugins: Arc<PluginsService>,
@@ -228,6 +230,11 @@ pub struct AdminServices {
 }
 
 impl AdminServices {
+    #[must_use]
+    pub fn affinity(&self) -> Option<&use_case::affinity::AffinityService> {
+        self.affinity.as_ref()
+    }
+
     #[must_use]
     pub const fn timezone(&self) -> gateway_core::time::DeploymentTimeZone {
         self.timezone

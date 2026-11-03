@@ -7,6 +7,9 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutationAuditOperation {
+    CallerIdentitySourceSave,
+    AffinityPreview,
+    AffinityApply,
     AlertSettingsUpdate,
     AlertEmailTest,
     ModelPricingSync,
@@ -60,6 +63,9 @@ impl MutationAuditOperation {
     #[must_use]
     pub const fn classification(self) -> (&'static str, &'static str) {
         match self {
+            Self::CallerIdentitySourceSave => ("save", "caller_identity_source"),
+            Self::AffinityPreview => ("preview", "affinity_operation"),
+            Self::AffinityApply => ("apply", "affinity_operation"),
             Self::AlertSettingsUpdate => ("alerts.settings_updated", "alert_settings"),
             Self::AlertEmailTest => ("alerts.email_test", "alert_settings"),
             Self::ModelPricingSync => ("pricing.sync", "model_pricing"),

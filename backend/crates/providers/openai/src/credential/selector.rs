@@ -384,6 +384,33 @@ impl CodexCredentialSelector {
         .await
     }
 
+    async fn observe_session(
+        &self,
+        key: &ProviderSessionAffinityKey,
+        attempt: &AttemptContext,
+        account: &ProviderAccountId,
+        policy: AccountSelectionPolicy,
+    ) -> Result<(), CredentialSelectionError> {
+        // 普通选号和改写后的会话校验共用有界观测，持有租约时不无限等待管理索引
+        tokio::time::timeout(
+            SESSION_AFFINITY_TIMEOUT,
+            self.session_affinity.observe(
+                &self.provider_kind,
+                key,
+                gateway_core::provider_ports::ProviderSessionObservation {
+                    caller: attempt.caller_identity(),
+                    client_key_id: attempt.client_api_key_ref().as_str().to_owned(),
+                    request_id: attempt.request_id().as_str().to_owned(),
+                    actual_account_id: account.as_str().to_owned(),
+                },
+                policy.openai_session_affinity_ttl(),
+            ),
+        )
+        .await
+        .map_err(binding_store_error)?
+        .map_err(binding_store_error)
+    }
+
     /// 中间件完成请求改写后，用真实 OpenAI 会话事实复验已持有的租约
     ///
     /// 此处只复用既有亲和与 cyber-policy 端口，不再次选号；冲突必须在发送前失败，
@@ -394,15 +421,26 @@ impl CodexCredentialSelector {
         session_affinity: Option<&CodexSessionAffinity>,
         cyber_policy_session_key: Option<&ProviderSessionAffinityKey>,
         policy: AccountSelectionPolicy,
+        attempt: &AttemptContext,
     ) -> Result<(), CredentialSelectionError> {
         let selected_account = lease.account.id().clone();
-        if let Some(affinity) = session_affinity
+        if let Some(affinity) =
+            session_affinity.filter(|_| !attempt.caller_identity().is_unidentified())
             && lease.admitted_session.as_ref() != Some(affinity.key())
         {
             let current = self.lookup_session_affinity(affinity.key()).await?;
             if current
                 .as_ref()
-                .is_some_and(|binding| binding.account_id() != &selected_account)
+                .is_some_and(|binding| match binding.directive() {
+                    Some(gateway_core::provider_ports::SessionBindingDirective::Clear) => false,
+                    Some(gateway_core::provider_ports::SessionBindingDirective::Reassign) => {
+                        binding.account_id() == &selected_account
+                    }
+                    Some(gateway_core::provider_ports::SessionBindingDirective::Target {
+                        account_id,
+                    }) => account_id != selected_account.as_str(),
+                    None => binding.account_id() != &selected_account,
+                })
                 || !self
                     .admit_session(
                         affinity.key(),
@@ -416,6 +454,8 @@ impl CodexCredentialSelector {
                     CredentialSelectionError::NoEligibleCredential,
                 )));
             }
+            self.observe_session(affinity.key(), attempt, &selected_account, policy)
+                .await?;
             lease.admitted_session = Some(affinity.key().clone());
         }
 
@@ -506,13 +546,9 @@ impl CodexCredentialSelector {
             _ => None,
         };
         let diagnostic = request.attempt.is_diagnostic_required_account();
-        let binding_key = request.session_affinity_key.filter(|_| {
-            !diagnostic
-                && (matches!(
-                    request.attempt.recovery_stage(),
-                    gateway_core::engine::recovery::AccountRecoveryStage::Initial
-                ) || follow_only)
-        });
+        let binding_key = request
+            .session_affinity_key
+            .filter(|_| !diagnostic && !request.attempt.caller_identity().is_unidentified());
         let affinity_mode = request
             .attempt
             .account_selection_policy()
@@ -581,11 +617,26 @@ impl CodexCredentialSelector {
         let pinned_account = required_account.or_else(|| continuation_account.clone());
         let mut snapshot_retries = 0;
         'capacity: loop {
-            let binding = if let Some(key) = binding_key {
+            let binding_snapshot = if let Some(key) = binding_key {
                 self.lookup_session_affinity(key).await?
             } else {
                 None
             };
+            if binding_snapshot
+                .as_ref()
+                .is_some_and(|binding| binding.directive().is_some())
+                && continuation_account.is_some()
+            {
+                return Err(CredentialSelectionError::ContinuationOwnerChanged);
+            }
+            let normal_admission = matches!(
+                request.attempt.recovery_stage(),
+                gateway_core::engine::recovery::AccountRecoveryStage::Initial
+            ) || follow_only;
+            let binding = binding_snapshot
+                .as_ref()
+                .filter(|binding| normal_admission && binding.directive().is_none())
+                .cloned();
             // 非严格模式的续写可以归属分流账号；严格绑定迁移后才拒绝旧 owner
             if affinity_mode == AccountAffinity::Strict
                 && binding
@@ -863,6 +914,24 @@ impl CodexCredentialSelector {
                 .prepare_cyber_policy_scope(cyber_policy_session_key)
                 .await;
             let mut excluded = request.attempt.excluded_accounts().clone();
+            if let Some(pending) = binding_snapshot.as_ref() {
+                match pending.directive() {
+                    Some(gateway_core::provider_ports::SessionBindingDirective::Reassign) => {
+                        excluded.insert(pending.account_id().clone());
+                    }
+                    Some(gateway_core::provider_ports::SessionBindingDirective::Target {
+                        account_id,
+                    }) => {
+                        excluded.extend(
+                            candidates
+                                .iter()
+                                .filter(|candidate| candidate.account.id().as_str() != account_id)
+                                .map(|candidate| candidate.account.id().clone()),
+                        );
+                    }
+                    _ => {}
+                }
+            }
             if let Some(state) = cyber_policy_scope
                 .as_ref()
                 .and_then(|scope| scope.state.as_ref())
@@ -1076,6 +1145,21 @@ impl CodexCredentialSelector {
                 };
                 affinity.observe_preferred_selection(selection.preferred());
                 let selected = selection.candidate();
+                // 管理员挂起指令属于发送边界，插件的显式选号也不能绕过
+                if binding_snapshot
+                    .as_ref()
+                    .is_some_and(|binding| match binding.directive() {
+                        Some(gateway_core::provider_ports::SessionBindingDirective::Reassign) => {
+                            binding.account_id() == selected.account.id()
+                        }
+                        Some(gateway_core::provider_ports::SessionBindingDirective::Target {
+                            account_id,
+                        }) => account_id != selected.account.id().as_str(),
+                        _ => false,
+                    })
+                {
+                    return Err(CredentialSelectionError::NoEligibleCredential);
+                }
                 let account = candidates
                     .iter()
                     .find(|candidate| candidate.account.id() == selected.account.id())
@@ -1132,25 +1216,36 @@ impl CodexCredentialSelector {
                             .and_then(|scope| scope.scheduling_role(account.id()))
                             .unwrap_or_else(|| account.scheduling_role())
                             == gateway_core::account::AccountSchedulingRole::Regular;
-                        if let Some(key) = binding_key.filter(|_| regular_account)
-                            && !self
-                                .admit_session(
-                                    key,
-                                    binding.as_ref(),
-                                    // 分流只改变本次租约，CAS 续期仍保留会话主账号
-                                    binding
+                        if let Some(key) = binding_key.filter(|_| {
+                            regular_account
+                                && (normal_admission
+                                    || binding_snapshot
                                         .as_ref()
-                                        .filter(|_| affinity_mode == AccountAffinity::Preferred)
-                                        .map_or(account.id(), ProviderSessionBinding::account_id),
-                                    request
-                                        .attempt
-                                        .account_selection_policy()
-                                        .openai_session_affinity_ttl(),
-                                )
-                                .await?
+                                        .is_some_and(|binding| binding.directive().is_some()))
+                        }) && !self
+                            .admit_session(
+                                key,
+                                binding_snapshot.as_ref(),
+                                // 分流只改变本次租约，CAS 续期仍保留会话主账号
+                                binding
+                                    .as_ref()
+                                    .filter(|_| affinity_mode == AccountAffinity::Preferred)
+                                    .map_or(account.id(), ProviderSessionBinding::account_id),
+                                request
+                                    .attempt
+                                    .account_selection_policy()
+                                    .openai_session_affinity_ttl(),
+                            )
+                            .await?
                         {
                             drop(guard);
                             continue 'capacity;
+                        }
+                        if let Some(key) = request.session_affinity_key.filter(|_| {
+                            !diagnostic && !request.attempt.caller_identity().is_unidentified()
+                        }) {
+                            self.observe_session(key, request.attempt, account.id(), policy)
+                                .await?;
                         }
                         let affinity_telemetry = affinity.telemetry(account.id());
                         let affinity_observation = request.session_affinity_observation;

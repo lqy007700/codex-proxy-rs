@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use gateway_core::operation::GenerateRequest;
-use gateway_core::policy::ClientApiKeyId;
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
@@ -196,7 +195,7 @@ impl GrokResponsesRequest {
     pub fn encode(
         request: &GenerateRequest,
         upstream_model: &str,
-        client_api_key_ref: &ClientApiKeyId,
+        client_api_key_ref: &(impl AsRef<str> + ?Sized),
     ) -> Result<Self, GrokRequestEncodeError> {
         Self::encode_inner(request, upstream_model, client_api_key_ref, true, false)
     }
@@ -204,7 +203,7 @@ impl GrokResponsesRequest {
     pub(super) fn encode_compaction_source(
         request: &GenerateRequest,
         upstream_model: &str,
-        client_api_key_ref: &ClientApiKeyId,
+        client_api_key_ref: &(impl AsRef<str> + ?Sized),
     ) -> Result<Self, GrokRequestEncodeError> {
         Self::encode_inner(request, upstream_model, client_api_key_ref, false, true)
     }
@@ -212,7 +211,7 @@ impl GrokResponsesRequest {
     fn encode_inner(
         request: &GenerateRequest,
         upstream_model: &str,
-        client_api_key_ref: &ClientApiKeyId,
+        client_api_key_ref: &(impl AsRef<str> + ?Sized),
         allow_cache_route: bool,
         should_consume_terminal_compaction_trigger: bool,
     ) -> Result<Self, GrokRequestEncodeError> {
@@ -237,7 +236,7 @@ impl GrokResponsesRequest {
         let session_seed = explicit_session_seed(request, &body);
         let enable_cache_route = allow_cache_route && session_seed.is_some();
         let identity = resolve_session_identity(
-            client_api_key_ref.as_str(),
+            client_api_key_ref.as_ref(),
             &upstream_model,
             session_seed.as_deref(),
             &body,

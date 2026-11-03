@@ -1043,7 +1043,11 @@ pub(super) fn collection_for(
     filter: &UsageRecordFilter,
     dimension: Option<DiagnosticDimension>,
 ) -> Option<&'static str> {
-    if filter.request_id.is_some()
+    if filter.caller_mode.is_some()
+        || filter.caller_source_id.is_some()
+        || filter.caller_user_id.is_some()
+        || filter.caller_token_id.is_some()
+        || filter.request_id.is_some()
         || filter.attempt_index.is_some()
         || filter.response_id.is_some()
         || filter.upstream_request_id.is_some()

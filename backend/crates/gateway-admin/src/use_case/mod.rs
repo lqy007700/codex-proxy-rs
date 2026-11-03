@@ -2,6 +2,7 @@
 
 pub mod account_groups;
 pub mod accounts;
+pub mod affinity;
 pub mod auth;
 pub mod backup;
 pub mod client_distribution;

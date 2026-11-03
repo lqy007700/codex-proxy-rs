@@ -19,7 +19,7 @@ use super::protocol::responses::CodexResponsesRequest;
 pub(super) fn is_managed_identity_header(name: &str) -> bool {
     matches!(
         name,
-        "authorization"
+        "x-cpr-user-id" | "x-cpr-token-id" | "authorization"
             | "x-api-key"
             | "x-openai-actor-authorization"
             | "cookie"
@@ -333,6 +333,8 @@ fn websocket_header_order(name: &str) -> usize {
         "x-responsesapi-include-timing-metrics",
         "originator",
         "user-agent",
+        "x-cpr-user-id",
+        "x-cpr-token-id",
         "authorization",
         "chatgpt-account-id",
     ];

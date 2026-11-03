@@ -49,6 +49,11 @@ impl Request {
         let mut headers = http::HeaderMap::try_with_capacity(self.headers.len())
             .map_err(|_| preparation_error(ProviderErrorKind::InvalidRequest))?;
         for header in &self.headers {
+            if header.name().eq_ignore_ascii_case("x-cpr-user-id")
+                || header.name().eq_ignore_ascii_case("x-cpr-token-id")
+            {
+                continue;
+            }
             let name = http::HeaderName::from_bytes(header.name().as_bytes())
                 .map_err(|_| preparation_error(ProviderErrorKind::InvalidRequest))?;
             let value = http::HeaderValue::from_bytes(header.value())

@@ -480,3 +480,5 @@ impl NativeContinuationPort for UnusedContinuation {
         Box::pin(async { unreachable!("authentication fixture does not execute") })
     }
 }
+
+mod trusted_identity;

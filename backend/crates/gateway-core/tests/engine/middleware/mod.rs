@@ -758,3 +758,24 @@ fn attempt_middleware_cannot_add_image_generation_to_a_denied_scope() {
         }
     }
 }
+
+#[test]
+fn outbound_boundary_removes_trusted_caller_headers_even_when_reintroduced_by_middleware() {
+    use gateway_core::engine::middleware::outbound::{Request, Target};
+    let prepared = Request {
+        target: Target::Http {
+            method: http::Method::POST,
+            uri: "https://example.invalid/responses".parse().unwrap(),
+        },
+        headers: vec![
+            MiddlewareHeader::new("X-CPR-User-Id", Bytes::from_static(b"1")),
+            MiddlewareHeader::new("x-cpr-token-id", Bytes::from_static(b"2")),
+            MiddlewareHeader::new("x-request-id", Bytes::from_static(b"safe-request")),
+        ],
+        body: Bytes::new(),
+    };
+    let headers = prepared.header_map().unwrap();
+    assert!(!headers.contains_key("x-cpr-user-id"));
+    assert!(!headers.contains_key("x-cpr-token-id"));
+    assert_eq!(headers["x-request-id"], "safe-request");
+}

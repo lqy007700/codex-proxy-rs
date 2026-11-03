@@ -241,3 +241,66 @@ async fn delete_namespace_keys(connection: &mut ConnectionManager, namespace: &s
             .expect("delete isolated native continuation keys");
     }
 }
+
+#[tokio::test]
+async fn trusted_continuation_survives_key_rotation_but_rejects_other_users_tokens_and_sources() {
+    use gateway_core::policy::CallerIdentity;
+    let Some((repository, mut connection, namespace)) = repository().await else {
+        return;
+    };
+    let caller = CallerIdentity::NewApi {
+        source_id: "source_a".into(),
+        user_id: "1".into(),
+        token_id: "2".into(),
+    };
+    let response = PreviousResponseId::new("resp_trusted_scope");
+    repository
+        .record(
+            NativeContinuationPin::new(
+                response.clone(),
+                response.clone(),
+                client_key("key_old"),
+                ProviderKind::new("openai").unwrap(),
+                ProviderAccountId::new("acct_owner").unwrap(),
+            )
+            .with_caller_identity(caller.clone()),
+        )
+        .await
+        .unwrap();
+    let pin = repository
+        .resolve_for_caller(&client_key("key_replacement"), &caller, &response)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(pin.account().as_str(), "acct_owner");
+    assert_eq!(pin.caller_identity(), caller);
+    for other in [
+        CallerIdentity::NewApi {
+            source_id: "source_b".into(),
+            user_id: "1".into(),
+            token_id: "2".into(),
+        },
+        CallerIdentity::NewApi {
+            source_id: "source_a".into(),
+            user_id: "2".into(),
+            token_id: "2".into(),
+        },
+        CallerIdentity::NewApi {
+            source_id: "source_a".into(),
+            user_id: "1".into(),
+            token_id: "3".into(),
+        },
+        CallerIdentity::direct(&client_key("key_old")),
+        CallerIdentity::Unidentified {
+            request_id: "probe".into(),
+        },
+    ] {
+        assert!(
+            repository
+                .resolve_for_caller(&client_key("key_old"), &other, &response)
+                .await
+                .is_err()
+        );
+    }
+    delete_namespace_keys(&mut connection, &namespace).await;
+}

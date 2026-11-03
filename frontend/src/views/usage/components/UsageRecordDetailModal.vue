@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { EChartsOption } from 'echarts'
 import type { UsageRecordDetail } from '@/api'
-
 import { defineTableColumns, ZButton, ZDialog, ZTable } from '@codex-proxy/ui'
+
 import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { chartTooltipStyle } from '@/components/charts/tooltip'
 import {
@@ -138,6 +139,28 @@ const clientUpstreamItems = computed(() => [
 ])
 
 const identifierItems = computed(() => [
+  ...(props.record?.callerIdentity?.mode === 'newApi'
+    ? [
+        {
+          label: '身份来源 ID',
+          value: props.record.callerIdentity.sourceId,
+          mono: true,
+          wrap: true,
+        },
+        {
+          label: 'New API 用户 ID',
+          value: props.record.callerIdentity.userId,
+          mono: true,
+          wrap: true,
+        },
+        {
+          label: 'New API Token ID',
+          value: props.record.callerIdentity.tokenId,
+          mono: true,
+          wrap: true,
+        },
+      ]
+    : []),
   {
     label: '请求 ID',
     value: props.record?.requestId,
@@ -603,6 +626,9 @@ const tokenDonutOption = computed<EChartsOption>(() => {
     </div>
 
     <template #footer>
+      <RouterLink v-if="record?.callerIdentity?.mode === 'newApi'" :to="{ path: '/affinity', query: { sourceId: record.callerIdentity.sourceId, userId: record.callerIdentity.userId, tokenId: record.callerIdentity.tokenId } }" class="mr-auto text-cp-sm text-cp-link">
+        查看调用方亲和
+      </RouterLink>
       <ZButton type="primary" @click="open = false">
         关闭
       </ZButton>

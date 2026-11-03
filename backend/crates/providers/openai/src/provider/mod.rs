@@ -287,9 +287,9 @@ impl CodexProvider {
             }
         }
         let session_affinity =
-            derive_codex_session_affinity(&upstream, context.client_api_key_ref());
+            derive_codex_session_affinity(&upstream, &context.session_namespace());
         let cyber_policy_session_key =
-            derive_codex_cyber_policy_session_key(&upstream, context.client_api_key_ref());
+            derive_codex_cyber_policy_session_key(&upstream, &context.session_namespace());
         PreparedGenerateRequest {
             upstream,
             previous_session,
@@ -306,7 +306,7 @@ impl CodexProvider {
         context: &AttemptContext,
         affinity: Option<&CodexSessionAffinity>,
     ) -> Result<(), ProviderError> {
-        if context.is_diagnostic_required_account() {
+        if context.is_diagnostic_required_account() || context.caller_identity().is_unidentified() {
             return Ok(());
         }
         if let Some(affinity) = affinity
@@ -315,7 +315,7 @@ impl CodexProvider {
                 generate.protocol_payload().context(),
                 headers,
             )
-            .and_then(|turn| derive_turn_alias(&turn, context.client_api_key_ref()))
+            .and_then(|turn| derive_turn_alias(&turn, &context.session_namespace()))
         {
             self.selector
                 .remember_turn(
@@ -515,8 +515,22 @@ impl Provider for CodexProvider {
     fn request_observation(
         &self,
         operation: &Operation,
-        client_api_key_id: &gateway_core::policy::ClientApiKeyId,
+        key: &gateway_core::policy::ClientApiKeyId,
     ) -> ProviderRequestObservation {
+        self.request_observation_for_caller(
+            operation,
+            key,
+            &gateway_core::policy::CallerIdentity::direct(key),
+        )
+    }
+    fn request_observation_for_caller(
+        &self,
+        operation: &Operation,
+        _client_api_key_id: &gateway_core::policy::ClientApiKeyId,
+        caller: &gateway_core::policy::CallerIdentity,
+    ) -> ProviderRequestObservation {
+        let namespace = caller.session_namespace();
+        let client_api_key_id = namespace.as_str();
         let Operation::Generate(request) = operation else {
             let affinity = match operation {
                 Operation::Search(request) => derive_codex_endpoint_session_affinity(
@@ -704,8 +718,8 @@ impl Provider for CodexProvider {
             .is_some_and(CodexResponsesRequest::is_guardian);
         let adapter_affinity = upstream.as_ref().filter(|_| adapted).map(|request| {
             (
-                derive_codex_session_affinity(request, context.client_api_key_ref()),
-                derive_codex_cyber_policy_session_key(request, context.client_api_key_ref()),
+                derive_codex_session_affinity(request, &context.session_namespace()),
+                derive_codex_cyber_policy_session_key(request, &context.session_namespace()),
                 false,
             )
         });
@@ -904,7 +918,7 @@ impl CodexProvider {
         )?;
         let mut upstream_request = processed.upstream;
         let session_transport_key =
-            derive_codex_transport_key(&upstream_request, context.client_api_key_ref());
+            derive_codex_transport_key(&upstream_request, &context.session_namespace());
         let previous_session = processed.previous_session;
         let continuation_requested = processed.continuation_requested;
         if !context.is_diagnostic_required_account() {
@@ -914,6 +928,7 @@ impl CodexProvider {
                     processed.session_affinity.as_ref(),
                     processed.cyber_policy_session_key.as_ref(),
                     context.account_selection_policy(),
+                    &context,
                 )
                 .await
                 .map_err(map_selection_error)?;
@@ -1018,7 +1033,7 @@ impl CodexProvider {
         .and_then(|response_id| {
             self.guardian_routing
                 .get(
-                    context.client_api_key_ref(),
+                    &context.session_namespace(),
                     lease.account_id(),
                     response_id,
                 )

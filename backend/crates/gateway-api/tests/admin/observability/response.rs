@@ -702,6 +702,7 @@ pub(super) fn usage_record_with_account(
     use gateway_admin::model::observability::{RequestOutcome, UsageRecord};
 
     UsageRecord {
+        caller_identity: None,
         id: id.to_owned(),
         client_api_key_ref: "key_detail".to_owned(),
         config_revision: 1,
@@ -839,6 +840,7 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         .lock()
         .expect("usage records")
         .push(UsageListRecord {
+            caller_identity: None,
             error_code: None,
             client_status_code: None,
             outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,

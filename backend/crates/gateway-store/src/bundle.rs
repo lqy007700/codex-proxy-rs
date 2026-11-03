@@ -229,6 +229,15 @@ async fn connect(
         )),
     );
 
+    let admin_ports =
+        admin_ports.with_affinity(gateway_admin::ports::affinity::AffinityStorePorts {
+            bindings: Arc::new(redis::RedisProviderSessionAffinityRepository::new(
+                redis_connection.clone(),
+                REDIS_NAMESPACE,
+            )?),
+            journal: Arc::new(postgres::PgAffinityJournal::new(pool.clone())),
+        });
+
     let execution_repository = Arc::new(postgres::PgExecutionStore::new(pool.clone()));
     let (execution, execution_writer) =
         postgres::BufferedExecutionStore::new(Arc::clone(&execution_repository));

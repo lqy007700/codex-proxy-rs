@@ -97,6 +97,7 @@ impl ClientKeyStore for TestClientKeyStore {
         self.plaintexts.lock().unwrap().push(key.plaintext);
         let record = ClientKeyRecord {
             peer_sharing: Default::default(),
+            identity_policy: Default::default(),
 
             portable_history: key.portable_history,
             request_profile_overrides: Default::default(),
@@ -238,6 +239,7 @@ async fn plugin_client_key_list_projects_only_public_identity_and_uses_stable_na
             config_revision: Revision::new(7).expect("revision"),
             items: vec![ClientKeyRecord {
                 peer_sharing: Default::default(),
+                identity_policy: Default::default(),
 
                 portable_history: false,
                 request_profile_overrides: Default::default(),
@@ -377,6 +379,7 @@ async fn duplicate_names_report_the_same_actionable_conflict_on_create_and_updat
             &mutation_context(),
             UpdateClientKey {
                 peer_sharing: Default::default(),
+                identity_policy: Default::default(),
 
                 portable_history: None,
                 request_profile_override_updates: Default::default(),
@@ -400,6 +403,7 @@ async fn duplicate_names_report_the_same_actionable_conflict_on_create_and_updat
 fn create_command(key: Option<&str>) -> CreateClientKey {
     CreateClientKey {
         peer_sharing: Default::default(),
+        identity_policy: Default::default(),
 
         portable_history: false,
         request_profile_overrides: Default::default(),
@@ -449,6 +453,7 @@ async fn duplicate_group_ids_are_rejected_before_key_creation_or_update() {
             &mutation_context(),
             UpdateClientKey {
                 peer_sharing: Default::default(),
+                identity_policy: Default::default(),
 
                 portable_history: None,
                 request_profile_override_updates: Default::default(),

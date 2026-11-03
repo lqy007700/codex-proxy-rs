@@ -13066,3 +13066,5 @@ fn assert_scoped_search_body(actual: &[u8], original: &[u8]) {
         )
     );
 }
+
+mod trusted_identity;

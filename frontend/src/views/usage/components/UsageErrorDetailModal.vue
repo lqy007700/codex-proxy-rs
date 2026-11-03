@@ -2,6 +2,7 @@
 import type { UsageRecordDetail } from '@/api'
 import { ZButton, ZDialog } from '@codex-proxy/ui'
 import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import { usageAccountText, usageModelDisplay, usageTransportType } from '@/components/usage/shared/presenter'
 import { formatDuration } from '@/utils/format'
 import { attemptOutcomeClass, attemptOutcomeText, visibleResponseText } from '../utils/detail'
@@ -62,6 +63,28 @@ const contextItems = computed(() => [
   },
 ])
 const identifierItems = computed(() => [
+  ...(props.record?.callerIdentity?.mode === 'newApi'
+    ? [
+        {
+          label: '身份来源 ID',
+          value: props.record.callerIdentity.sourceId,
+          mono: true,
+          wrap: true,
+        },
+        {
+          label: 'New API 用户 ID',
+          value: props.record.callerIdentity.userId,
+          mono: true,
+          wrap: true,
+        },
+        {
+          label: 'New API Token ID',
+          value: props.record.callerIdentity.tokenId,
+          mono: true,
+          wrap: true,
+        },
+      ]
+    : []),
   { label: '客户端状态码', value: props.record?.clientStatusCode, mono: true },
   { label: '上游状态码', value: props.record?.upstreamStatusCode, mono: true },
   {
@@ -181,6 +204,9 @@ const attempts = computed(() => (props.record?.attempts ?? []).map(attempt => ({
     </div>
 
     <template #footer>
+      <RouterLink v-if="record?.callerIdentity?.mode === 'newApi'" :to="{ path: '/affinity', query: { sourceId: record.callerIdentity.sourceId, userId: record.callerIdentity.userId, tokenId: record.callerIdentity.tokenId } }" class="mr-auto text-cp-sm text-cp-link">
+        查看调用方亲和
+      </RouterLink>
       <ZButton type="primary" @click="open = false">
         关闭
       </ZButton>

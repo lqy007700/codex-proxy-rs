@@ -603,6 +603,7 @@ impl AdminAccountStorePorts {
 /// 该类型不提供通用拆包入口
 #[derive(Clone)]
 pub struct AdminStorePorts {
+    affinity: Option<super::affinity::AffinityStorePorts>,
     accounts: AdminAccountStorePorts,
     auth: Arc<dyn AuthStore>,
     client_keys: Arc<dyn ClientKeyStore>,
@@ -617,6 +618,17 @@ pub struct AdminStorePorts {
 }
 
 impl AdminStorePorts {
+    #[must_use]
+    pub fn with_affinity(mut self, affinity: super::affinity::AffinityStorePorts) -> Self {
+        self.affinity = Some(affinity);
+        self
+    }
+
+    #[must_use]
+    pub fn affinity(&self) -> Option<super::affinity::AffinityStorePorts> {
+        self.affinity.clone()
+    }
+
     #[must_use]
     pub fn usage_data(&self) -> Arc<dyn super::usage_data::UsageDataStore> {
         self.usage_data.clone()
@@ -656,6 +668,7 @@ impl AdminStorePorts {
         alerts: Arc<dyn super::alerts::AlertRepository>,
     ) -> Self {
         Self {
+            affinity: None,
             accounts,
             auth,
             client_keys,

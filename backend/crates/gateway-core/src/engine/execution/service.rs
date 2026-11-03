@@ -219,7 +219,10 @@ impl DefaultExecutionService {
             .find(|policy| policy.authorize().is_ok())
             .cloned()
             .ok_or(ClientAuthenticationError::InvalidKey)?;
-        let policy = RequestSettings::new(snapshot.clone()).apply_policy(policy);
+        let policy = RequestSettings::new(snapshot.clone())
+            .apply_policy(policy)
+            .freeze_caller(authentication.forwarded_caller())
+            .map_err(|_| ClientAuthenticationError::InvalidKey)?;
         Ok(AuthenticatedClient {
             settings: None,
             snapshot,
@@ -276,6 +279,9 @@ impl DefaultExecutionService {
             Some(settings) => settings.apply_policy(policy),
             None => RequestSettings::new(snapshot.clone()).apply_policy(policy),
         };
+        let policy = policy
+            .freeze_caller(authentication.forwarded_caller())
+            .map_err(|_| ClientAuthenticationError::InvalidKey)?;
         Ok(AuthenticatedClient {
             settings: authentication.take_settings(),
             snapshot,
@@ -331,12 +337,34 @@ impl DefaultExecutionService {
     ) -> Result<PreparedRootExecution, GatewayError> {
         // 长连接每次执行都重新鉴权并冻结当前策略，确保限额和授权变更对新请求生效
         let expected_key_id = client.policy.key_id().clone();
+        let expected_caller_policy = client.policy.identity_policy().clone();
+        let expected_caller = client.policy.caller_identity();
         let authentication = client.authentication.clone().ok_or_else(|| {
             GatewayError::new(
                 GatewayErrorKind::Internal,
                 "Bound execution identity cannot enter the public start path.",
             )
         })?;
+        let latest = self.snapshots.acquire().map_err(|_| {
+            authentication_gateway_error(ClientAuthenticationError::SnapshotUnavailable)
+        })?;
+        let latest_policy = latest.client_policy(&expected_key_id);
+        if expected_caller_policy != crate::policy::CallerIdentityPolicy::Direct
+            || latest_policy.is_some_and(|policy| {
+                policy.identity_policy() != &crate::policy::CallerIdentityPolicy::Direct
+            })
+        {
+            let latest_policy = latest_policy
+                .filter(|policy| policy.authorize().is_ok())
+                .ok_or_else(|| {
+                    authentication_gateway_error(ClientAuthenticationError::InvalidKey)
+                })?;
+            if latest_policy.identity_policy() != &expected_caller_policy {
+                return Err(authentication_gateway_error(
+                    ClientAuthenticationError::InvalidKey,
+                ));
+            }
+        }
         let authentication = match client.settings.clone() {
             Some(settings) => authentication.with_settings(settings),
             None => authentication,
@@ -345,7 +373,10 @@ impl DefaultExecutionService {
             .authenticate_request_without_usage(authentication)
             .await
             .and_then(|client| {
-                (client.policy.key_id() == &expected_key_id)
+                (client.policy.key_id() == &expected_key_id
+                    && client.policy.identity_policy() == &expected_caller_policy
+                    && (expected_caller.is_unidentified()
+                        || client.policy.caller_identity() == expected_caller))
                     .then_some(client)
                     .ok_or(ClientAuthenticationError::InvalidKey)
             })
@@ -584,9 +615,11 @@ impl DefaultExecutionService {
             .map_err(map_routing_error)?;
             let continuation = match request.metadata.previous_response_id.as_ref() {
                 Some(previous) => {
+                    let caller = request.client.policy.caller_identity();
+                    if caller.is_unidentified() { return Err(GatewayError::new(GatewayErrorKind::PolicyDenied, "Unidentified requests cannot continue a response.")); }
                     let resolve = self
                         .continuation
-                        .resolve(request.client.policy.key_id(), previous)
+                        .resolve_for_caller(request.client.policy.key_id(), &caller, previous)
                         .fuse();
                     let timeout = Delay::new(COORDINATION_TIMEOUT).fuse();
                     pin_mut!(resolve, timeout);
@@ -612,7 +645,7 @@ impl DefaultExecutionService {
                         _ = timeout => None,
                     };
                     Some(match pin {
-                        Some(pin) if !pin.matches_client(request.client.policy.key_id()) => {
+                        Some(pin) if !pin.matches_caller(&caller) => {
                             return Err(GatewayError::new(GatewayErrorKind::PolicyDenied, "Continuation does not belong to this client API key."));
                         }
                         Some(pin) if !authorization.account_scope.allows(pin.account()) => {
@@ -626,6 +659,9 @@ impl DefaultExecutionService {
                         Some(pin) => {
                             attach_continuation_session_state(&mut request.operation, &pin);
                             ContinuationBinding::Pinned(pin)
+                        }
+                        None if !matches!(caller, crate::policy::CallerIdentity::Direct { .. }) => {
+                            return Err(GatewayError::new(GatewayErrorKind::PolicyDenied, "Trusted caller continuation ownership is unavailable; send complete history to start a new chain."));
                         }
                         None => ContinuationBinding::External(previous.clone()),
                     })
@@ -644,6 +680,7 @@ impl DefaultExecutionService {
                 .map(|graph| Arc::clone(&graph.effects));
             let extensions =
                 CoordinationExtensions::new(continuation, request_observation.clone())
+                    .with_caller_identity(request.client.policy.caller_identity())
                     .with_response_control(authorization.response_control.clone())
                     .with_request_policy(request_policy)
                     .with_upstream_adapters(upstream_adapters)
@@ -813,6 +850,7 @@ impl DefaultExecutionService {
                     candidate.provider(),
                     &operation,
                     client.policy.key_id(),
+                    &client.policy.caller_identity(),
                 )
             });
         let (request_kind, subagent_kind) = if let Some(nested) = authorization.nested.as_ref() {
@@ -838,6 +876,7 @@ impl DefaultExecutionService {
             );
         }
         let new_request = NewModelRequest {
+            caller_identity: Some(client.policy.caller_identity()),
             id: request_id.clone(),
             client_api_key_name_snapshot: client.policy.name_snapshot().map(str::to_owned),
             client_api_key_ref: client.policy.key_id().clone(),
@@ -1081,6 +1120,15 @@ impl DefaultExecutionService {
                     "Client API key no longer exists.",
                 )
             })?;
+        if !matches!(
+            policy.identity_policy(),
+            crate::policy::CallerIdentityPolicy::Direct
+        ) {
+            return Err(GatewayError::new(
+                GatewayErrorKind::PolicyDenied,
+                "Proxy keys require an authenticated caller envelope.",
+            ));
+        }
         policy.authorize().map_err(|_| {
             GatewayError::new(
                 GatewayErrorKind::PolicyDenied,
@@ -1371,6 +1419,7 @@ impl DefaultExecutionService {
         let actor = ClientApiKeyId::new("admin_connection_test")
             .map_err(|_| GatewayError::new(GatewayErrorKind::Internal, "Invalid admin actor."))?;
         let new_request = NewModelRequest {
+            caller_identity: None,
             id: request_id,
             client_api_key_name_snapshot: None,
             client_api_key_ref: actor,

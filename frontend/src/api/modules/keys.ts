@@ -14,6 +14,7 @@ export interface ApiKeyPeerSharing {
 }
 
 export interface ApiKey {
+  identityPolicy: import('./affinity').CallerIdentityPolicy
   peerSharing: ApiKeyPeerSharing
   portableHistory: boolean
   providerRequestProfileOverrides: ProviderRequestProfiles
@@ -78,6 +79,7 @@ interface ApiKeyListParams {
 }
 
 export interface ApiKeyWriteParam {
+  identityPolicy?: import('./affinity').CallerIdentityPolicy
   peerSharing?: ApiKeyPeerSharing | null
   portableHistory?: boolean
   name: string

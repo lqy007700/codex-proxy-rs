@@ -6,7 +6,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use gateway_core::error::IdentifierError;
 use gateway_core::event::{GatewayEvent, ProtocolWireEvent, ProviderEvent, ResponseMeta};
 use gateway_core::operation::GenerateRequest;
-use gateway_core::policy::ClientApiKeyId;
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
@@ -55,7 +54,7 @@ impl GrokCompactionRequest {
     pub fn encode(
         request: &GenerateRequest,
         upstream_model: &str,
-        client_api_key_ref: &ClientApiKeyId,
+        client_api_key_ref: &(impl AsRef<str> + ?Sized),
     ) -> Result<Self, GrokRequestEncodeError> {
         let normalized = GrokResponsesRequest::encode_compaction_source(
             request,

@@ -208,9 +208,10 @@ impl HistoryAttempt {
             .authentication()
             .responses_api_base_url()
             .unwrap_or(response_origin.as_str());
+        let session_namespace = context.session_namespace();
         let scope_fields = (
             "codex-history-scope-v1",
-            context.client_api_key_ref().as_str(),
+            session_namespace.as_str(),
             PROVIDER_NAME,
             thread.or(request.client_account_session_id.as_deref()),
             lease.account_id().as_str(),

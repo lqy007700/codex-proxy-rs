@@ -53,6 +53,7 @@ async fn key_facts_read_current_database_groups_without_secrets() {
             .update_client_key(
                 UpdateClientKey {
                     peer_sharing: Default::default(),
+                    identity_policy: Default::default(),
 
                     portable_history: None,
                     request_profile_override_updates: Default::default(),

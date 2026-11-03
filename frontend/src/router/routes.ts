@@ -53,6 +53,11 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/keys/index.vue'),
       },
       {
+        path: 'affinity',
+        name: 'affinity',
+        component: () => import('@/views/affinity/index.vue'),
+      },
+      {
         path: 'usage',
         name: 'usage',
         component: () => import('@/views/usage/index.vue'),

@@ -3,7 +3,8 @@ import type { ApiKey } from '@/api'
 
 import { ZIconButton, ZMenuItem, ZPopover } from '@codex-proxy/ui'
 
-import { MoreHorizontal, Pencil, Power, RotateCcw, Terminal, Trash2, Upload } from '@lucide/vue'
+import { MoreHorizontal, Network, Pencil, Power, RotateCcw, Terminal, Trash2, Upload } from '@lucide/vue'
+import { useRouter } from 'vue-router'
 
 defineProps<{
   apiKey: ApiKey
@@ -21,6 +22,8 @@ const emit = defineEmits<{
   edit: [apiKey: ApiKey]
   resetBudget: [apiKey: ApiKey]
 }>()
+
+const router = useRouter()
 </script>
 
 <template>
@@ -50,6 +53,12 @@ const emit = defineEmits<{
       </template>
       <template #default="{ close }">
         <div class="w-44 p-1.5">
+          <ZMenuItem @click.stop="(close(), router.push({ path: '/affinity', query: { clientKeyId: apiKey.id } }))">
+            <template #icon>
+              <Network class="size-3.5 text-cp-text-quaternary" />
+            </template>
+            查看账号亲和
+          </ZMenuItem>
           <ZMenuItem @click.stop="(close(), emit('resetBudget', apiKey))">
             <template #icon>
               <RotateCcw class="size-3.5 text-cp-text-quaternary" />

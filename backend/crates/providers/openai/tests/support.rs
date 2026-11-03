@@ -882,6 +882,36 @@ impl MemorySessionAffinity {
         self.bindings.lock().expect("session affinity lock").len()
     }
 
+    pub(crate) fn bindings_snapshot(
+        &self,
+    ) -> Vec<(
+        (String, String),
+        gateway_core::provider_ports::ProviderSessionBinding,
+    )> {
+        self.bindings
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect()
+    }
+
+    pub(crate) fn set_directive(
+        &self,
+        key: &(String, String),
+        directive: gateway_core::provider_ports::SessionBindingDirective,
+    ) {
+        let mut bindings = self.bindings.lock().unwrap();
+        let current = bindings.get(key).unwrap();
+        let pending = gateway_core::provider_ports::ProviderSessionBinding::new(
+            current.account_id().clone(),
+            uuid::Uuid::new_v4().simple().to_string(),
+        )
+        .unwrap()
+        .with_directive(Some(directive));
+        bindings.insert(key.clone(), pending);
+    }
+
     pub(crate) fn seed_binding(
         &self,
         provider_kind: &ProviderKind,
@@ -974,7 +1004,7 @@ impl ProviderSessionAffinityPort for MemorySessionAffinity {
                 return Ok(None);
             }
             let binding = expected
-                .filter(|binding| binding.account_id() == account)
+                .filter(|binding| binding.account_id() == account && binding.directive().is_none())
                 .cloned()
                 .unwrap_or_else(|| {
                     gateway_core::provider_ports::ProviderSessionBinding::new(

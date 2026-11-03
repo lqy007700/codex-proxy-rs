@@ -46,6 +46,7 @@ async fn portable_history_persists_into_snapshots_and_omitted_updates_preserve_i
         .create_client_key(
             NewClientKey {
                 peer_sharing: Default::default(),
+                identity_policy: Default::default(),
 
                 portable_history: true,
                 request_profile_overrides: Default::default(),
@@ -76,6 +77,7 @@ async fn portable_history_persists_into_snapshots_and_omitted_updates_preserve_i
             .update_client_key(
                 UpdateClientKey {
                     peer_sharing: Default::default(),
+                    identity_policy: Default::default(),
 
                     portable_history: value,
                     request_profile_override_updates: Default::default(),
@@ -134,6 +136,7 @@ async fn migrated_keys_persist_exactly_and_keep_short_keys_masked() {
             .create_client_key(
                 NewClientKey {
                     peer_sharing: Default::default(),
+                    identity_policy: Default::default(),
 
                     portable_history: false,
                     request_profile_overrides: Default::default(),
@@ -192,6 +195,7 @@ async fn duplicate_migrated_keys_conflict_atomically_without_extra_audits() {
     let key = "legacy-key-case-sensitive!";
     let command = |id: &str| NewClientKey {
         peer_sharing: Default::default(),
+        identity_policy: Default::default(),
 
         portable_history: false,
         request_profile_overrides: Default::default(),
@@ -231,6 +235,7 @@ async fn duplicate_migrated_keys_conflict_atomically_without_extra_audits() {
 fn generated_client_key_format_remains_valid() {
     let key = NewClientApiKey {
         peer_sharing: Default::default(),
+        identity_policy: Default::default(),
 
         portable_history: false,
         request_profile_overrides: Default::default(),
@@ -267,6 +272,7 @@ async fn client_key_names_are_checked_atomically_on_create_and_rename() {
     };
     let create = |id: &str, name: &str| NewClientKey {
         peer_sharing: Default::default(),
+        identity_policy: Default::default(),
 
         portable_history: false,
         request_profile_overrides: Default::default(),
@@ -280,6 +286,7 @@ async fn client_key_names_are_checked_atomically_on_create_and_rename() {
     };
     let update = |id: ClientApiKeyId, name: &str| UpdateClientKey {
         peer_sharing: Default::default(),
+        identity_policy: Default::default(),
 
         portable_history: None,
         request_profile_override_updates: Default::default(),
@@ -746,6 +753,7 @@ fn client_key_debug_redacts_plaintext() {
     let secret = format!("sk_{}", "s".repeat(43));
     let key = NewClientApiKey {
         peer_sharing: Default::default(),
+        identity_policy: Default::default(),
 
         portable_history: false,
         request_profile_overrides: Default::default(),
@@ -822,6 +830,7 @@ async fn key_profile_override_roundtrips_and_explicit_clear_restores_inheritance
         .create_client_key(
             NewClientKey {
                 peer_sharing: Default::default(),
+                identity_policy: Default::default(),
 
                 portable_history: false,
                 id: id.clone(),
@@ -847,6 +856,7 @@ async fn key_profile_override_roundtrips_and_explicit_clear_restores_inheritance
     assert_eq!(record.request_profile_overrides.get(&xai), Some(&profile));
     let update = |override_value: Option<Option<OpaqueProviderData>>| UpdateClientKey {
         peer_sharing: Default::default(),
+        identity_policy: Default::default(),
 
         portable_history: None,
         id: id.clone(),
@@ -904,5 +914,173 @@ async fn key_profile_override_roundtrips_and_explicit_clear_restores_inheritance
         .await
         .unwrap();
     assert!(snapshot.client_api_keys[0].request_profiles.is_empty());
+    database.close().await;
+}
+
+#[tokio::test]
+async fn trusted_identity_persists_defaults_and_source_disable_removes_keys_from_runtime() {
+    use gateway_admin::model::{
+        MutationActor, MutationContext,
+        client_keys::{NewClientKey, UpdateClientKey},
+    };
+    use gateway_admin::{
+        model::affinity::IdentitySource, ports::affinity::AffinityJournalStore as _,
+    };
+    use gateway_core::policy::{CallerIdentityPolicy, RateLimits};
+    use gateway_store::postgres::PgAffinityJournal;
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create("trusted_identity").await else {
+        return;
+    };
+    let store = PgAdminClientKeyStore::new(database.pool.clone());
+    let context = MutationContext {
+        actor: MutationActor::System,
+        request_id: "portable-history-test".into(),
+    };
+    let id = ClientApiKeyId::new("key_trusted_identity").unwrap();
+    let journal = PgAffinityJournal::new(database.pool.clone());
+    let source = IdentitySource {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: "New API fixture".into(),
+        enabled: true,
+    };
+    journal.save_source(&context, source.clone()).await.unwrap();
+    let policy = CallerIdentityPolicy::NewApi {
+        source_id: source.id.clone(),
+        allow_unidentified: false,
+    };
+    let (_, created) = store
+        .create_client_key(
+            NewClientKey {
+                peer_sharing: Default::default(),
+                identity_policy: policy.clone(),
+
+                portable_history: true,
+                request_profile_overrides: Default::default(),
+                id: id.clone(),
+                name: "portable".into(),
+                label: None,
+                group_ids: vec![],
+                limits: RateLimits::unlimited(),
+                budget: Default::default(),
+                plaintext: "synthetic-portable-history-key".into(),
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.identity_policy, policy);
+    let repository = PgRuntimeSnapshotRepository::new(database.pool.clone());
+    assert_eq!(
+        repository
+            .load_runtime_snapshot()
+            .await
+            .unwrap()
+            .client_api_keys[0]
+            .identity_policy,
+        policy
+    );
+    let (_, updated) = store
+        .update_client_key(
+            UpdateClientKey {
+                id: id.clone(),
+                name: "renamed".into(),
+                label: None,
+                group_ids: vec![],
+                limits: RateLimits::unlimited(),
+                daily_limit_usd: None,
+                weekly_limit_usd: None,
+                portable_history: None,
+                peer_sharing: None,
+                identity_policy: None,
+                request_profile_override_updates: Default::default(),
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.identity_policy, policy);
+    journal
+        .save_source(
+            &context,
+            IdentitySource {
+                enabled: false,
+                ..source.clone()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        repository
+            .load_runtime_snapshot()
+            .await
+            .unwrap()
+            .client_api_keys
+            .is_empty()
+    );
+    journal
+        .save_source(
+            &context,
+            IdentitySource {
+                name: "renamed source".into(),
+                ..source
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        repository
+            .load_runtime_snapshot()
+            .await
+            .unwrap()
+            .client_api_keys[0]
+            .identity_policy,
+        policy
+    );
+    database.close().await;
+}
+
+#[tokio::test]
+async fn missing_caller_source_is_invalid_input_and_key_creation_rolls_back() {
+    use gateway_admin::{
+        model::{MutationActor, MutationContext, client_keys::NewClientKey},
+        ports::store::AdminStoreErrorKind,
+    };
+    use gateway_core::policy::{CallerIdentityPolicy, RateLimits};
+    let Some(database) = TestDatabase::create("missing_identity_source").await else {
+        return;
+    };
+    let store = PgAdminClientKeyStore::new(database.pool.clone());
+    let error = store
+        .create_client_key(
+            NewClientKey {
+                id: ClientApiKeyId::new("key_missing_source").unwrap(),
+                name: "missing source".into(),
+                label: None,
+                group_ids: vec![],
+                plaintext: "synthetic-missing-source-key".into(),
+                limits: RateLimits::unlimited(),
+                budget: Default::default(),
+                portable_history: false,
+                peer_sharing: Default::default(),
+                request_profile_overrides: Default::default(),
+                identity_policy: CallerIdentityPolicy::NewApi {
+                    source_id: uuid::Uuid::new_v4().to_string(),
+                    allow_unidentified: false,
+                },
+            },
+            &MutationContext {
+                actor: MutationActor::System,
+                request_id: "missing-source".into(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), AdminStoreErrorKind::Invalid);
+    let count: i64 = sqlx::query_scalar("select count(*) from client_api_keys")
+        .fetch_one(&database.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
     database.close().await;
 }

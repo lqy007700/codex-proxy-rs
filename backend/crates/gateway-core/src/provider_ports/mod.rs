@@ -12,6 +12,7 @@ mod affinity;
 pub use affinity::{
     ProviderSessionAffinityKey, ProviderSessionAffinityPort, ProviderSessionAlias,
     ProviderSessionBinding, ProviderSessionExclusionPort, ProviderSessionExclusions,
+    ProviderSessionObservation, SessionBindingDirective,
 };
 mod catalog;
 pub use catalog::{

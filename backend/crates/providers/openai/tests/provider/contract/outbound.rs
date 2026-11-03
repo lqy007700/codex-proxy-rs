@@ -83,6 +83,8 @@ async fn outbound_http_sends_final_encoded_bytes_and_target_without_restoring_de
             request.target = Target::Http { method: reqwest::Method::PATCH, uri: uri.parse().unwrap() };
             request.headers.retain(|header| !matches!(header.name(), "user-agent" | "content-encoding" | "content-type" | "authorization" | "accept"));
             request.headers.extend([
+                MiddlewareHeader::new("X-CPR-User-Id", Bytes::from_static(b"1")),
+                MiddlewareHeader::new("x-cpr-token-id", Bytes::from_static(b"2")),
                 MiddlewareHeader::new("x-plugin-values", Bytes::from_static(b"first")),
                 MiddlewareHeader::new("x-plugin-values", Bytes::from_static(b"second")),
                 MiddlewareHeader::new("x-plugin-bytes", Bytes::from_static(b"\x80")),
@@ -109,6 +111,8 @@ async fn outbound_http_sends_final_encoded_bytes_and_target_without_restoring_de
             "removed header restored: {name}"
         );
     }
+    assert!(!request.headers.contains_key("x-cpr-user-id"));
+    assert!(!request.headers.contains_key("x-cpr-token-id"));
     // 底层 reqwest 保留自身缺省 Accept，出站准备不承诺禁用该行为
     assert_eq!(request.headers["accept"], "*/*");
     assert_eq!(

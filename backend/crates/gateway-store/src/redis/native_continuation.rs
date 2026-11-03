@@ -77,6 +77,8 @@ pub struct RedisNativeContinuationRepository {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ContinuationWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_identity: Option<gateway_core::policy::CallerIdentity>,
     client_api_key_id: String,
     upstream_response_id: String,
     provider: String,
@@ -133,6 +135,33 @@ impl NativeContinuationPort for RedisNativeContinuationRepository {
                 })?;
             payload
                 .map(|payload| decode_pin(client_api_key_id, previous_response_id, &payload))
+                .transpose()
+        })
+    }
+
+    fn resolve_for_caller<'a>(
+        &'a self,
+        client_api_key_id: &'a ClientApiKeyId,
+        caller: &'a gateway_core::policy::CallerIdentity,
+        previous_response_id: &'a PreviousResponseId,
+    ) -> BoxFuture<'a, Result<Option<NativeContinuationPin>, NativeContinuationStoreError>> {
+        Box::pin(async move {
+            if previous_response_id.as_str().is_empty() {
+                return Ok(None);
+            }
+            let fingerprint = self.entry_fingerprint(previous_response_id.as_str())?;
+            let mut connection = self.connection.clone();
+            let payload = redis::cmd("GET")
+                .arg(self.entry_key(&fingerprint))
+                .query_async::<Option<String>>(&mut connection)
+                .await
+                .map_err(|error| {
+                    NativeContinuationStoreError::unavailable(format!("redis GET failed: {error}"))
+                })?;
+            payload
+                .map(|payload| {
+                    decode_pin_for_caller(client_api_key_id, caller, previous_response_id, &payload)
+                })
                 .transpose()
         })
     }
@@ -203,6 +232,10 @@ fn encode_pin(pin: &NativeContinuationPin) -> Result<String, NativeContinuationS
         ));
     }
     serde_json::to_string(&ContinuationWire {
+        caller_identity: match pin.caller_identity() {
+            gateway_core::policy::CallerIdentity::Direct { .. } => None,
+            caller => Some(caller),
+        },
         client_api_key_id: pin.client_api_key_id().as_str().to_owned(),
         upstream_response_id: pin.upstream_response_id().as_str().to_owned(),
         provider: pin.provider().as_str().to_owned(),
@@ -220,6 +253,20 @@ fn decode_pin(
     previous_response_id: &PreviousResponseId,
     payload: &str,
 ) -> Result<NativeContinuationPin, NativeContinuationStoreError> {
+    decode_pin_for_caller(
+        expected_client_api_key_id,
+        &gateway_core::policy::CallerIdentity::direct(expected_client_api_key_id),
+        previous_response_id,
+        payload,
+    )
+}
+
+fn decode_pin_for_caller(
+    _expected_client_api_key_id: &ClientApiKeyId,
+    caller: &gateway_core::policy::CallerIdentity,
+    previous_response_id: &PreviousResponseId,
+    payload: &str,
+) -> Result<NativeContinuationPin, NativeContinuationStoreError> {
     let wire: ContinuationWire = serde_json::from_str(payload)
         .map_err(|error| NativeContinuationStoreError::invalid_data(format!("{error}")))?;
     let provider = ProviderKind::new(wire.provider).map_err(|_| {
@@ -233,7 +280,10 @@ fn decode_pin(
             "pin payload contains an invalid client API key id",
         )
     })?;
-    if client_api_key_id != *expected_client_api_key_id {
+    let owner = wire
+        .caller_identity
+        .unwrap_or_else(|| gateway_core::policy::CallerIdentity::direct(&client_api_key_id));
+    if &owner != caller || caller.is_unidentified() {
         return Err(NativeContinuationStoreError::ownership_mismatch());
     }
     let upstream_response_id = PreviousResponseId::new(wire.upstream_response_id);
@@ -245,6 +295,7 @@ fn decode_pin(
         provider.clone(),
         account,
     )
+    .with_caller_identity(owner)
     .with_scope(scope);
     if let Some(state) = wire.session_state {
         if state.provider() != provider.as_str() {

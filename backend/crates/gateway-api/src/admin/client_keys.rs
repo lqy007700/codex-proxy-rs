@@ -157,6 +157,8 @@ pub struct CreateClientKeyRequest {
     #[serde(default)]
     peer_sharing: gateway_core::policy::ClientPeerSharing,
     #[serde(default)]
+    identity_policy: gateway_core::policy::CallerIdentityPolicy,
+    #[serde(default)]
     provider_request_profile_overrides: ProviderRequestProfileOverrides,
     openai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
     xai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
@@ -196,6 +198,7 @@ impl CreateClientKeyRequest {
         Ok(CreateClientKey {
             portable_history: self.portable_history,
             peer_sharing: self.peer_sharing,
+            identity_policy: self.identity_policy,
             request_profile_overrides,
             custom_key: self
                 .custom_key
@@ -224,6 +227,7 @@ impl CreateClientKeyRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateClientKeyRequest {
     peer_sharing: Option<gateway_core::policy::ClientPeerSharing>,
+    identity_policy: Option<gateway_core::policy::CallerIdentityPolicy>,
     #[serde(default)]
     portable_history: Option<bool>,
     #[serde(default)]
@@ -259,6 +263,7 @@ impl UpdateClientKeyRequest {
         Ok(UpdateClientKey {
             portable_history: self.portable_history,
             peer_sharing: self.peer_sharing,
+            identity_policy: self.identity_policy,
             request_profile_override_updates,
             id: client_key_id(self.id, "clientKeyMutationNotFound")?,
             name: self.name,
@@ -347,6 +352,8 @@ impl ClientKeyMutationRequest {
 pub struct ClientKeyView {
     portable_history: bool,
     peer_sharing: gateway_core::policy::ClientPeerSharing,
+    #[serde(default)]
+    identity_policy: gateway_core::policy::CallerIdentityPolicy,
     provider_request_profile_overrides: ProviderRequestProfileOverrides,
     /// 固定兼容字段；值始终从 provider_request_profile_overrides 派生
     openai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
@@ -399,6 +406,7 @@ impl From<(ClientKeyRecord, crate::time::TimePresenter)> for ClientKeyView {
             provider_request_profile_overrides,
             portable_history: record.portable_history,
             peer_sharing: record.peer_sharing,
+            identity_policy: record.identity_policy,
             id: record.id.to_string(),
             name: record.name,
             label: record.label,

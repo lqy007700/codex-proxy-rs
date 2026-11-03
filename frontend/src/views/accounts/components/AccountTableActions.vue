@@ -3,8 +3,9 @@ import type { Account } from '@/api'
 
 import { ZIconButton, ZMenuItem, ZPopover } from '@codex-proxy/ui'
 
-import { Download, KeyRound, MoreHorizontal, Pencil, RefreshCw, RotateCcw, Trash2, Wifi } from '@lucide/vue'
+import { Download, KeyRound, MoreHorizontal, Network, Pencil, RefreshCw, RotateCcw, Trash2, Wifi } from '@lucide/vue'
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 
 const props = defineProps<{
   account: Account
@@ -14,6 +15,7 @@ const props = defineProps<{
   refreshing: boolean
   testing: boolean
 }>()
+
 const emit = defineEmits<{
   edit: [account: Account]
   delete: [account: Account]
@@ -23,6 +25,8 @@ const emit = defineEmits<{
   reauthorize: [account: Account]
   downloadModelCatalog: [account: Account]
 }>()
+
+const router = useRouter()
 
 const credentialEligible = computed(() => props.account.authenticationKind === 'oauth')
 </script>
@@ -55,6 +59,12 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
 
       <template #default="{ close }">
         <div class="w-40 p-1.5">
+          <ZMenuItem @click.stop="(close(), router.push({ path: '/affinity', query: { accountId: account.id } }))">
+            <template #icon>
+              <Network class="size-3.5 text-cp-text-quaternary" />
+            </template>
+            查看关联会话
+          </ZMenuItem>
           <ZMenuItem
             :loading="testing"
             :disabled="testing"

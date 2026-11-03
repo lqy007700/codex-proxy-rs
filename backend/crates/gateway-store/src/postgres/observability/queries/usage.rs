@@ -12,6 +12,25 @@ pub(crate) fn push_usage_filter(
     alias: &str,
     search_request_ids: bool,
 ) {
+    let caller_filters = [
+        (&filter.caller_mode, "mode"),
+        (&filter.caller_source_id, "sourceId"),
+        (&filter.caller_user_id, "userId"),
+        (&filter.caller_token_id, "tokenId"),
+    ];
+    if caller_filters.iter().any(|(value, _)| value.is_some()) {
+        query.push(format!(" and exists(select 1 from model_requests caller_request where caller_request.id={alias}.id"));
+        for (value, field) in caller_filters {
+            if let Some(value) = value {
+                query
+                    .push(format!(
+                        " and caller_request.caller_identity_json->>'{field}' = "
+                    ))
+                    .push_bind(value.clone());
+            }
+        }
+        query.push(")");
+    }
     if let Some(value) = &filter.client_api_key_ref {
         query.push(format!(" and {alias}.client_api_key_ref = "));
         query.push_bind(value.clone());
@@ -107,7 +126,7 @@ pub(crate) fn push_usage_filter(
 }
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
-    "select mr.id, mr.outcome, mr.attempt_count, mr.provider_error_code as error_code, mr.error_message, mr.client_status_code, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
+    "select (select caller_identity_json from model_requests caller_request where caller_request.id=mr.id) as caller_identity_json, mr.id, mr.outcome, mr.attempt_count, mr.provider_error_code as error_code, mr.error_message, mr.client_status_code, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
             mr.provider_kind, mr.provider_account_ref,
             mr.provider_account_name_snapshot as provider_account_name,
             mr.provider_account_email_snapshot as provider_account_email,
@@ -130,7 +149,7 @@ pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
      from model_request_observations mr";
 
 pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
-    "select mr.id, mr.client_api_key_ref, mr.config_revision,
+    "select (select caller_identity_json from model_requests caller_request where caller_request.id=mr.id) as caller_identity_json, mr.id, mr.client_api_key_ref, mr.config_revision,
             mr.routing_scope, mr.routing_group_refs, mr.routing_group_names_snapshot,
             mr.protocol, mr.operation,
             mr.endpoint, mr.client_transport, mr.requested_model_id,

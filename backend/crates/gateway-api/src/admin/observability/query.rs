@@ -32,6 +32,11 @@ impl DashboardQuery {
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageQuery {
+    pub caller_mode: Option<String>,
+    pub caller_source_id: Option<String>,
+    pub caller_user_id: Option<String>,
+    pub caller_token_id: Option<String>,
+
     pub scope: Option<String>,
     pub current_page: Option<u32>,
     pub page_size: Option<u16>,
@@ -291,6 +296,11 @@ pub(crate) fn usage_filter(query: &UsageQuery) -> Result<domain::UsageFilter, Wi
         })
     });
     Ok(domain::UsageFilter {
+        caller_mode: non_empty(query.caller_mode.clone()),
+        caller_source_id: non_empty(query.caller_source_id.clone()),
+        caller_user_id: non_empty(query.caller_user_id.clone()),
+        caller_token_id: non_empty(query.caller_token_id.clone()),
+
         client_api_key_ref: non_empty(query.client_api_key_id.clone()),
         request_id: non_empty(query.request_id.clone()),
         provider_account_ref: non_empty(query.account_id.clone()),

@@ -3,7 +3,9 @@ import type { UsageTimeRangeParams } from './useUsageTimeRange'
 import type { UsageRecordScope } from '@/api'
 import type { AnalyticsMetadata } from '@/api/modules/analytics'
 
+import type { CallerUsageFilters } from '@/api/modules/usage'
 import { computed, onMounted, onScopeDispose, shallowRef, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   getUsageRecordInsightsDiagnostics,
   getUsageRecordInsightsOverview,
@@ -26,6 +28,23 @@ interface UsageLoadOptions {
 }
 
 export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
+  const route = useRoute()
+  const callerFilters = computed(() => {
+    const result: CallerUsageFilters = {}
+    for (const name of [
+      'callerMode',
+      'callerSourceId',
+      'callerUserId',
+      'callerTokenId',
+      'requestId',
+      'clientApiKeyId',
+      'accountId',
+    ] as const) {
+      if (typeof route.query[name] === 'string')
+        result[name] = route.query[name]
+    }
+    return result
+  })
   const analyticsLoading = shallowRef(true)
   const summary = shallowRef(emptySummary())
   const insights = shallowRef(emptyInsights())
@@ -50,6 +69,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   let diagnosticController: AbortController | undefined
   const scopedParams = () => ({
     ...options.timeRangeParams.value,
+    ...callerFilters.value,
     ...(providerQuery.value
       ? { provider: providerQuery.value }
       : {}),
@@ -63,11 +83,16 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   function snapshot() {
     return {
       ...options.latestTimeRangeParams(),
+      ...callerFilters.value,
       provider: providerQuery.value || undefined,
       search: search.value,
       scope: recordScope.value,
     }
   }
+
+  watch(callerFilters, () => {
+    void loadUsageRecords()
+  })
 
   function resetTable() {
     tableParams = snapshot()

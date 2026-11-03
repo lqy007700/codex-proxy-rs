@@ -464,6 +464,7 @@ fn client_key_responses_should_keep_shape_and_redact_creation_debug() {
     let view = ClientKeyView::from((
         gateway_admin::model::client_keys::ClientKeyRecord {
             peer_sharing: Default::default(),
+            identity_policy: Default::default(),
 
             portable_history: false,
             request_profile_overrides: Default::default(),

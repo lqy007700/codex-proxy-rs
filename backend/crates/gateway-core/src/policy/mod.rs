@@ -2,6 +2,11 @@
 //!
 //! Client API Key 冻结账号分组权限；模型名称不参与权限判断
 
+mod caller;
+pub use caller::{
+    CallerIdentity, CallerIdentityError, CallerIdentityPolicy, ForwardedCallerHeaders,
+};
+
 mod client_version;
 mod peer_sharing;
 
@@ -38,6 +43,12 @@ impl ClientApiKeyId {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl AsRef<str> for ClientApiKeyId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
     }
 }
 
@@ -122,6 +133,8 @@ pub struct ClientSettings {
 /// 从 `client_api_keys` 冻结的公开准入事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientPolicy {
+    identity_policy: CallerIdentityPolicy,
+    caller_identity: Option<CallerIdentity>,
     peer_sharing: ClientPeerSharing,
     name_snapshot: Option<String>,
     defaults: Arc<ClientSettings>,
@@ -133,6 +146,32 @@ pub struct ClientPolicy {
 }
 
 impl ClientPolicy {
+    #[must_use]
+    pub fn with_identity_policy(mut self, policy: CallerIdentityPolicy) -> Self {
+        self.identity_policy = policy;
+        self
+    }
+
+    #[must_use]
+    pub const fn identity_policy(&self) -> &CallerIdentityPolicy {
+        &self.identity_policy
+    }
+
+    pub fn freeze_caller(
+        mut self,
+        headers: &ForwardedCallerHeaders,
+    ) -> Result<Self, CallerIdentityError> {
+        self.caller_identity = Some(self.identity_policy.resolve(&self.key_id, headers)?);
+        Ok(self)
+    }
+
+    #[must_use]
+    pub fn caller_identity(&self) -> CallerIdentity {
+        self.caller_identity
+            .clone()
+            .unwrap_or_else(|| CallerIdentity::direct(&self.key_id))
+    }
+
     #[must_use]
     pub fn defaults(&self) -> &Arc<ClientSettings> {
         &self.defaults
@@ -168,6 +207,8 @@ impl ClientPolicy {
         limits: RateLimits,
     ) -> Self {
         Self {
+            identity_policy: CallerIdentityPolicy::default(),
+            caller_identity: None,
             peer_sharing: ClientPeerSharing::default(),
             name_snapshot: None,
             defaults: Arc::new(ClientSettings {

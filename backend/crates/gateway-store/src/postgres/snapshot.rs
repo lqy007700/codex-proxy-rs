@@ -152,6 +152,7 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                     .with_name_snapshot(key.name_snapshot)
                     .with_request_profiles(key.request_profiles)
                     .with_peer_sharing(key.peer_sharing)
+                    .with_identity_policy(key.identity_policy)
                 })
                 .collect();
             let account_groups = data
@@ -326,15 +327,16 @@ async fn load_client_keys(
             String,
             bool,
             sqlx::types::Json<gateway_core::policy::ClientPeerSharing>,
+            sqlx::types::Json<gateway_core::policy::CallerIdentityPolicy>,
         ),
     >(
         "select k.id, k.key,
                 coalesce(array_agg(kg.account_group_id order by kg.account_group_id)
                   filter (where kg.account_group_id is not null), '{}') as group_ids,
-                k.max_concurrency, k.requests_per_minute, k.provider_request_profiles_json, k.name, k.portable_history, k.peer_sharing_json
+                k.max_concurrency, k.requests_per_minute, k.provider_request_profiles_json, k.name, k.portable_history, k.peer_sharing_json, k.identity_policy_json
          from client_api_keys k
          left join client_api_key_groups kg on kg.client_api_key_id = k.id
-         where k.enabled
+         where k.enabled and (k.identity_source_id is null or exists(select 1 from caller_identity_sources s where s.id=k.identity_source_id and s.enabled))
          group by k.id
          order by k.id",
     )
@@ -348,6 +350,7 @@ async fn load_client_keys(
             key.request_profiles = decode_request_profiles(row.5.0)?;
             key.name_snapshot = Some(row.6);
             key.peer_sharing = row.8.0;
+            key.identity_policy = row.9.0;
             Ok(key)
         })
         .collect()

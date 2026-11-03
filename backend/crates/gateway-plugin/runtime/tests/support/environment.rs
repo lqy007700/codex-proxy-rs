@@ -100,6 +100,7 @@ impl Environment {
             .create_client_key(
                 NewClientKey {
                     peer_sharing: Default::default(),
+                    identity_policy: Default::default(),
 
                     portable_history: false,
                     request_profile_overrides: BTreeMap::new(),

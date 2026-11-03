@@ -46,6 +46,12 @@ pub(crate) async fn live_call(
         Ok(client) => client,
         Err(error) => return client_access_error_response(error),
     };
+    if !matches!(
+        client.policy().identity_policy(),
+        gateway_core::policy::CallerIdentityPolicy::Direct
+    ) {
+        return super::realtime_unsupported_response("Realtime with trusted caller identity");
+    }
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -119,6 +125,12 @@ pub(crate) async fn hangup(
         Ok(client) => client,
         Err(error) => return client_access_error_response(error),
     };
+    if !matches!(
+        client.policy().identity_policy(),
+        gateway_core::policy::CallerIdentityPolicy::Direct
+    ) {
+        return super::realtime_unsupported_response("Realtime with trusted caller identity");
+    }
     let Some(gateway) = service.live_gateway() else {
         return super::realtime_unsupported_response("Realtime hangup");
     };

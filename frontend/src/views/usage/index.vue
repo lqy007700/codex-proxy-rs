@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { TableColumn } from '@codex-proxy/ui'
 import type { UsageListRecord } from '@/api'
-import { defineTableColumns, useTableColumns, ZCard, ZDatePicker, ZIconButton, ZPageHeader, ZPagination, ZSegmented, ZTableColumnSettings } from '@codex-proxy/ui'
+import { defineTableColumns, useTableColumns, ZButton, ZCard, ZDatePicker, ZIconButton, ZPageHeader, ZPagination, ZSegmented, ZTableColumnSettings } from '@codex-proxy/ui'
 
 import { ChevronDown, CloudRain, Eye, List, Sun } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import ProviderFilter from '@/components/ProviderFilter.vue'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
 import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
@@ -19,6 +20,18 @@ import { useUsageRecordsTable } from './composables/useUsageRecordsTable'
 import { useUsageTimeRange } from './composables/useUsageTimeRange'
 import { isErrorUsageRecord } from './utils/detail'
 
+const route = useRoute()
+const router = useRouter()
+const scopedLabels = computed(() => [
+  ['requestId', '请求'],
+  ['callerSourceId', '来源'],
+  ['callerUserId', '用户'],
+  ['callerTokenId', 'Token'],
+  ['clientApiKeyId', 'Key'],
+  ['accountId', '账号'],
+].flatMap(([name, label]) => typeof route.query[name!] === 'string'
+  ? [`${label} ${route.query[name!]}`]
+  : []))
 const statsExpanded = shallowRef(true)
 const requestColumns = defineTableColumns<UsageListRecord>([
   {
@@ -111,6 +124,12 @@ watch(timeRange, () => {
       </template>
     </ZPageHeader>
 
+    <div v-if="scopedLabels.length" class="mt-4 flex flex-wrap items-center gap-3 text-cp-sm text-cp-text-secondary">
+      <span class="break-all">当前限定：{{ scopedLabels.join(' · ') }}</span>
+      <ZButton size="small" @click="router.replace({ path: '/usage' })">
+        清除限定
+      </ZButton>
+    </div>
     <ZCard
       class="mt-5 flex flex-col"
     >

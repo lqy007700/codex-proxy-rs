@@ -6,7 +6,9 @@ import { ZButton, ZCheckbox, ZDialog, ZForm, ZFormItem, ZInput, ZSwitch } from '
 import { DollarSign, KeyRound } from '@lucide/vue'
 import { computed, useTemplateRef, watch } from 'vue'
 import AccountGroupCheckboxGrid from '@/components/AccountGroupCheckboxGrid.vue'
+import CallerIdentityFields from '@/components/CallerIdentityFields.vue'
 import ProviderRequestProfilesEditor from '@/components/client-profile/ProviderRequestProfilesEditor.vue'
+import { notification as ZNotification } from '@/utils/notification'
 import { useApiKeyFormRules } from '../composables/useApiKeyFormRules'
 
 const props = defineProps<{
@@ -30,6 +32,10 @@ watch(open, () => formRef.value?.clearValidate())
 async function requestSave() {
   if (props.saving || !await formRef.value?.validate().catch(() => false))
     return
+  if (form.value.identityPolicy.mode === 'newApi' && !form.value.identityPolicy.sourceId) {
+    ZNotification.error({ message: '请选择或创建接入来源' })
+    return
+  }
   emit('save')
 }
 
@@ -68,6 +74,8 @@ function updatePeerSharing(key: keyof ApiKeyPeerSharing, value: boolean) {
           @update:model-value="updateForm('name', $event)"
         />
       </ZFormItem>
+
+      <CallerIdentityFields v-if="open" v-model="form.identityPolicy" :disabled="saving" />
 
       <div class="grid gap-6" :class="{ 'sm:grid-cols-2': !editing }">
         <ZFormItem label="标签（可选）">

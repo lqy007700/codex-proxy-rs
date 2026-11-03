@@ -60,7 +60,7 @@ impl CodexProvider {
         }
         let explicit = derive_endpoint_affinity_with_headers(
             payload,
-            context.client_api_key_ref(),
+            &context.session_namespace(),
             "session_id",
             headers,
         );
@@ -75,7 +75,7 @@ impl CodexProvider {
                     .and_then(Value::as_str)
             });
         let inferred = if let Some(alias) =
-            turn.and_then(|turn| derive_turn_alias(turn, context.client_api_key_ref()))
+            turn.and_then(|turn| derive_turn_alias(turn, &context.session_namespace()))
         {
             self.selector
                 .session_for_turn(&alias)
@@ -120,7 +120,7 @@ impl CodexProvider {
         }
         let session_affinity = derive_codex_endpoint_session_affinity(
             search.payload(),
-            context.client_api_key_ref(),
+            &context.session_namespace(),
             "id",
         );
         let response_origin = self.search_url.clone();
@@ -229,7 +229,7 @@ impl CodexProvider {
             }
             Operation::Search(search) => derive_endpoint_affinity_with_headers(
                 search.payload(),
-                context.client_api_key_ref(),
+                &context.session_namespace(),
                 "id",
                 &middleware_headers,
             ),
@@ -242,6 +242,7 @@ impl CodexProvider {
                     affinity.as_ref(),
                     None,
                     context.account_selection_policy(),
+                    &context,
                 )
                 .await
                 .map_err(map_selection_error)?;
@@ -1182,7 +1183,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             if let Some(affinity) = &routing_affinity {
                 for fact in events.iter().flat_map(ProviderEvent::canonical_facts) {
                     if let GatewayEvent::Started(meta) = fact {
-                        guardian_routing.remember(context.client_api_key_ref(), active_account.id(), meta.response_id(), affinity);
+                        guardian_routing.remember(&context.session_namespace(), active_account.id(), meta.response_id(), affinity);
                     }
                 }
             }

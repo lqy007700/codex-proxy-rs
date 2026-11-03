@@ -321,6 +321,7 @@ pub struct RequestAttemptContext {
     privacy: Option<Arc<dyn crate::settings::privacy::CompiledPrivacyPolicy>>,
     request_id: ModelRequestId,
     client_api_key_ref: ClientApiKeyId,
+    caller_identity: Option<crate::policy::CallerIdentity>,
     timing_started_at: Instant,
     trace: crate::diagnostics::TraceContext,
     concurrency_wait_budget: crate::concurrency::ConcurrencyWaitBudget,
@@ -337,6 +338,12 @@ pub struct RequestAttemptContext {
 }
 
 impl RequestAttemptContext {
+    #[must_use]
+    pub fn with_caller_identity(mut self, caller: crate::policy::CallerIdentity) -> Self {
+        self.caller_identity = Some(caller);
+        self
+    }
+
     fn with_account_error_protection(
         mut self,
         protection: Option<account_protection::ProtectionContext>,
@@ -432,6 +439,7 @@ impl RequestAttemptContext {
             lease_metadata: None,
             request_id,
             client_api_key_ref,
+            caller_identity: None,
             request_profile: None,
             pricing: Arc::default(),
             fast_mode: FastMode::Default,
@@ -585,6 +593,19 @@ pub struct AttemptContext {
 }
 
 impl AttemptContext {
+    #[must_use]
+    pub fn caller_identity(&self) -> crate::policy::CallerIdentity {
+        self.request
+            .caller_identity
+            .clone()
+            .unwrap_or_else(|| crate::policy::CallerIdentity::direct(self.client_api_key_ref()))
+    }
+
+    #[must_use]
+    pub fn session_namespace(&self) -> String {
+        self.caller_identity().session_namespace()
+    }
+
     #[must_use]
     pub const fn request_body_limit(&self) -> Option<usize> {
         self.request.request_body_limit
@@ -1096,6 +1117,7 @@ impl AttemptContext {
 /// 创建唯一 `model_requests` 行所需的入口事实
 #[derive(Debug, Clone)]
 pub struct NewModelRequest {
+    pub caller_identity: Option<crate::policy::CallerIdentity>,
     pub client_api_key_name_snapshot: Option<String>,
     pub id: ModelRequestId,
     pub client_api_key_ref: ClientApiKeyId,

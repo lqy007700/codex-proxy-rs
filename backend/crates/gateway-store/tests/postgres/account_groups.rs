@@ -200,6 +200,7 @@ async fn groups_aggregate_cross_provider_members_and_key_bindings_without_multip
         .update_client_key(
             UpdateClientKey {
                 peer_sharing: Default::default(),
+                identity_policy: Default::default(),
 
                 portable_history: None,
                 request_profile_override_updates: Default::default(),
@@ -229,6 +230,7 @@ async fn groups_aggregate_cross_provider_members_and_key_bindings_without_multip
         .update_client_key(
             UpdateClientKey {
                 peer_sharing: Default::default(),
+                identity_policy: Default::default(),
 
                 portable_history: None,
                 request_profile_override_updates: Default::default(),
@@ -448,6 +450,7 @@ fn new_key(id: &str, group_ids: Vec<AccountGroupId>) -> NewClientKey {
     let marker = char::from(id.as_bytes().last().copied().unwrap_or(b'k'));
     NewClientKey {
         peer_sharing: Default::default(),
+        identity_policy: Default::default(),
 
         portable_history: false,
         request_profile_overrides: Default::default(),

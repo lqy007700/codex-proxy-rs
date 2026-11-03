@@ -17,6 +17,11 @@ pub(crate) fn store_range(
 
 pub(crate) fn store_usage_filter(filter: admin_observability::UsageFilter) -> UsageRecordFilter {
     UsageRecordFilter {
+        caller_mode: filter.caller_mode,
+        caller_source_id: filter.caller_source_id,
+        caller_user_id: filter.caller_user_id,
+        caller_token_id: filter.caller_token_id,
+
         client_api_key_ref: filter.client_api_key_ref,
         request_id: filter.request_id,
         provider_account_ref: filter.provider_account_ref,
@@ -307,6 +312,11 @@ pub(crate) fn usage_list_record_from_row(
         cost_currency.as_deref(),
     )?;
     Ok(UsageListRecord {
+        caller_identity: get::<Option<sqlx::types::Json<gateway_core::policy::CallerIdentity>>>(
+            row,
+            "caller_identity_json",
+        )?
+        .map(|value| value.0),
         outcome: request_outcome(&get::<String>(row, "outcome")?)?,
         attempt_count: to_u32(get(row, "attempt_count")?)?,
         error_message: get(row, "error_message")?,
@@ -378,6 +388,11 @@ pub(crate) fn usage_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<
         cost_currency.as_deref(),
     )?;
     Ok(UsageRecord {
+        caller_identity: get::<Option<sqlx::types::Json<gateway_core::policy::CallerIdentity>>>(
+            row,
+            "caller_identity_json",
+        )?
+        .map(|value| value.0),
         billing,
         id: get(row, "id")?,
         client_api_key_ref: get(row, "client_api_key_ref")?,

@@ -39,6 +39,11 @@ pub(crate) fn observability_page_offset(
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UsageRecordFilter {
+    pub caller_mode: Option<String>,
+    pub caller_source_id: Option<String>,
+    pub caller_user_id: Option<String>,
+    pub caller_token_id: Option<String>,
+
     pub client_api_key_ref: Option<String>,
     pub request_id: Option<String>,
     pub provider_account_ref: Option<String>,
@@ -57,6 +62,10 @@ pub struct UsageRecordFilter {
 impl UsageRecordFilter {
     pub fn validate(&self) -> StoreResult<()> {
         for (value, field) in [
+            (self.caller_mode.as_deref(), "caller_mode"),
+            (self.caller_source_id.as_deref(), "caller_source_id"),
+            (self.caller_user_id.as_deref(), "caller_user_id"),
+            (self.caller_token_id.as_deref(), "caller_token_id"),
             (self.client_api_key_ref.as_deref(), "client API key filter"),
             (self.request_id.as_deref(), "request ID filter"),
             (

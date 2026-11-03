@@ -1,5 +1,7 @@
 //! PostgreSQL 业务表、连接与控制面事务的适配入口
 
+mod affinity;
+pub use affinity::PgAffinityJournal;
 mod account_groups;
 mod admin_security_audit;
 mod admission_recovery;

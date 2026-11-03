@@ -441,7 +441,7 @@ impl GrokBuildProvider {
         let mut upstream_request = GrokResponsesRequest::encode(
             &generate,
             upstream_model.as_str(),
-            context.client_api_key_ref(),
+            &context.session_namespace(),
         )
         .map_err(map_request_error)?;
         let wire_upstream_model = UpstreamModelId::new(
@@ -565,7 +565,7 @@ impl GrokBuildProvider {
         let upstream_request = GrokCompactionRequest::encode(
             &generate,
             upstream_model.as_str(),
-            context.client_api_key_ref(),
+            &context.session_namespace(),
         )
         .map_err(map_request_error)?;
         let wire_upstream_model = UpstreamModelId::new(
@@ -656,7 +656,7 @@ fn grok_selection_facts(
         let request = GrokCompactionRequest::encode(
             generate,
             upstream_model.as_str(),
-            context.client_api_key_ref(),
+            &context.session_namespace(),
         )
         .map_err(map_request_error)?;
         let selection_model = request
@@ -673,7 +673,7 @@ fn grok_selection_facts(
         let request = GrokResponsesRequest::encode(
             generate,
             upstream_model.as_str(),
-            context.client_api_key_ref(),
+            &context.session_namespace(),
         )
         .map_err(map_request_error)?;
         let selection_model = request

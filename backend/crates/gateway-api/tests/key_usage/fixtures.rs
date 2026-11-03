@@ -19,6 +19,7 @@ pub(super) async fn fixture() -> AdminTestFixture {
     let now = Utc::now();
     *fixture.client_key.lock().unwrap() = Some(ClientKeyRecord {
         peer_sharing: Default::default(),
+        identity_policy: Default::default(),
 
         portable_history: false,
         request_profile_overrides: Default::default(),
@@ -94,6 +95,7 @@ pub(super) async fn fixture() -> AdminTestFixture {
 
 fn usage_record() -> UsageListRecord {
     UsageListRecord {
+        caller_identity: None,
         error_code: None,
         client_status_code: None,
         outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
