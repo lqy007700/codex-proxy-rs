@@ -404,7 +404,7 @@ async fn portable_history_never_converts_unrelated_errors_or_non_self_contained_
                     .set_body_json(json!({"error":{"message":"invalid_encrypted_content"}})),
                 _ => encrypted_failure(400),
             })
-            .expect(if case == "500" { 2 } else { 1 })
+            .expect(if case == "500" { 4 } else { 1 })
             .mount(&server)
             .await;
         let accounts = Arc::new(MemoryAccountStore::default());
@@ -444,8 +444,16 @@ async fn portable_history_never_converts_unrelated_errors_or_non_self_contained_
         );
         assert_eq!(
             server.received_requests().await.unwrap().len(),
-            if case == "500" { 2 } else { 1 },
+            if case == "500" { 4 } else { 1 },
             "case {case}"
+        );
+        let requests = server.received_requests().await.unwrap();
+        let initial_input = captured_request_body(&requests[0])["input"].clone();
+        assert!(
+            requests
+                .iter()
+                .all(|request| captured_request_body(request)["input"] == initial_input),
+            "case {case}: unrelated errors must preserve encrypted history"
         );
         assert_eq!(cache.writes.load(Ordering::SeqCst), 0);
         if case == "disabled" {

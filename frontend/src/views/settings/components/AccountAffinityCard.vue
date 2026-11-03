@@ -8,6 +8,7 @@ const accountAffinity = defineModel<AccountAffinity | ''>({ required: true })
 const affinityTtlHours = defineModel<string>('ttlHours', { required: true })
 const maxAccountRotations = defineModel<string>('maxAccountRotations', { required: true })
 const recoveryAttempts = defineModel<string>('recoveryAttempts', { required: true })
+const recoveryRotationAttempts = defineModel<string>('recoveryRotationAttempts', { required: true })
 const affinityOptions = [
   { label: '宽松', value: 'relaxed' },
   { label: '优先', value: 'preferred' },
@@ -43,26 +44,45 @@ const affinityOptions = [
           </template>
         </ZInput>
       </ZFormItem>
-      <ZFormItem label="最大换号次数" description="其他恢复路径的换号上限，0 禁止换号，业务故障按尝试次数恢复">
-        <ZInput v-model="maxAccountRotations" aria-label="最大换号次数" type="number" min="0" max="31" step="1" :disabled="props.disabled" />
+      <ZFormItem label="其他恢复换号上限" description="连接、传输和续接等恢复路径的换号上限，0 表示禁止">
+        <ZInput v-model="maxAccountRotations" aria-label="其他恢复换号上限" type="number" min="0" max="31" step="1" :disabled="props.disabled" />
       </ZFormItem>
-      <ZFormItem label="普通账号尝试次数" description="包含首次尝试，保底账号另算 1 次">
+      <ZFormItem label="初始账号尝试次数" description="包含首次请求，同账号失败后间隔 1 秒再试">
         <template #label-extra>
           <ZPopover class="-my-1" trigger="hover-click" placement="top-start">
             <template #reference="{ open }">
-              <ZIconButton aria-label="普通账号尝试次数说明" :title="undefined" :aria-expanded="open" class="size-6! hover:bg-transparent! active:bg-transparent!">
+              <ZIconButton aria-label="初始账号尝试次数说明" :title="undefined" :aria-expanded="open" class="size-6! hover:bg-transparent! active:bg-transparent!">
                 <CircleAlert class="size-3.5" aria-hidden="true" />
               </ZIconButton>
             </template>
             <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
-              <p>初始账号分配向上取整的一半次数，其余次数用于其他普通账号轮询</p>
-              <p>默认 4 次：初始账号 2 次，其他普通账号合计 2 次</p>
-              <p>设为 3 次：A → A → B → 保底</p>
-              <p>没有其他普通账号时直接保底，成功或不可重试时提前结束</p>
+              <p>次数仅用于初始账号，不包含换号重试和最后一次保底</p>
+              <p>初始账号 3 次、换号 0 次：A → A → A → 保底</p>
+              <p>上游明确建议等待时优先使用其等待时间，账号不可用可提前结束本阶段</p>
+              <p>成功或不可重试时提前结束，原生续接和安全重放限制仍然有效</p>
             </div>
           </ZPopover>
         </template>
-        <ZInput v-model="recoveryAttempts" aria-label="普通账号尝试次数" type="number" min="1" max="31" step="1" :disabled="props.disabled" />
+        <ZInput v-model="recoveryAttempts" aria-label="初始账号尝试次数" type="number" min="1" max="31" step="1" :disabled="props.disabled" />
+      </ZFormItem>
+      <ZFormItem label="换号重试次数" description="其他普通账号合计尝试次数，0 表示直接保底">
+        <template #label-extra>
+          <ZPopover class="-my-1" trigger="hover-click" placement="top-start">
+            <template #reference="{ open }">
+              <ZIconButton aria-label="换号重试次数说明" :title="undefined" :aria-expanded="open" class="size-6! hover:bg-transparent! active:bg-transparent!">
+                <CircleAlert class="size-3.5" aria-hidden="true" />
+              </ZIconButton>
+            </template>
+            <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+              <p>默认 1 次，换号后不重新获得初始账号的尝试次数</p>
+              <p>初始账号 2 次、换号 1 次：A → A → B → 保底</p>
+              <p>初始账号 3 次、换号 2 次：A → A → A → B → C → 保底</p>
+              <p>只有 B 可用时可再次尝试 B，没有其他普通账号时直接保底</p>
+              <p>初始账号尝试与换号重试合计最多 31 次，保底另算 1 次</p>
+            </div>
+          </ZPopover>
+        </template>
+        <ZInput v-model="recoveryRotationAttempts" aria-label="换号重试次数" type="number" min="0" max="30" step="1" :disabled="props.disabled" />
       </ZFormItem>
     </ZForm>
   </ZCard>

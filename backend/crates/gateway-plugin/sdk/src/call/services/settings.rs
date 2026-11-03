@@ -150,6 +150,9 @@ pub struct RuntimeSettings {
     pub openai_account_affinity: AccountAffinity,
     pub max_account_rotations: u32,
     pub recovery_attempts: u32,
+    /// 旧插件设置服务保持原 wire；省略时由持久层保留当前业务换号预算
+    #[serde(default, skip_serializing)]
+    pub recovery_rotation_attempts: Option<u32>,
     pub openai_session_affinity_ttl_hours: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: SmartSchedulingConfig,
@@ -187,6 +190,9 @@ pub struct ReplaceRuntimeSettings {
     pub openai_account_affinity: AccountAffinity,
     pub max_account_rotations: u32,
     pub recovery_attempts: u32,
+    /// 旧插件设置服务保持原 wire；省略时由持久层保留当前业务换号预算
+    #[serde(default, skip_serializing)]
+    pub recovery_rotation_attempts: Option<u32>,
     pub openai_session_affinity_ttl_hours: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: SmartSchedulingConfig,
@@ -386,6 +392,7 @@ impl From<RuntimeSettings> for ReplaceRuntimeSettings {
             openai_account_affinity: settings.openai_account_affinity,
             max_account_rotations: settings.max_account_rotations,
             recovery_attempts: settings.recovery_attempts,
+            recovery_rotation_attempts: settings.recovery_rotation_attempts,
             openai_session_affinity_ttl_hours: settings.openai_session_affinity_ttl_hours,
             responses_max_decompressed_body_bytes: settings.responses_max_decompressed_body_bytes,
             smart_scheduling: settings.smart_scheduling,

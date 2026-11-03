@@ -36,6 +36,9 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
             openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
             max_account_rotations: 3,
             recovery_attempts: gateway_core::account::default_recovery_attempts(),
+            recovery_rotation_attempts: Some(
+                gateway_core::account::default_recovery_rotation_attempts(),
+            ),
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
@@ -1274,6 +1277,7 @@ async fn recovery_attempts_default_and_updates_reach_persisted_runtime_snapshots
     for attempts in [1, 2, 3, 4, 5, 7, 31] {
         let mut update = settings_with_margin(3600);
         update.values.recovery_attempts = attempts;
+        update.values.recovery_rotation_attempts = Some(if attempts == 31 { 0 } else { 1 });
         let before = repository
             .load_runtime_settings()
             .await
@@ -1295,6 +1299,7 @@ async fn recovery_attempts_default_and_updates_reach_persisted_runtime_snapshots
     for attempts in [0, 32] {
         let mut update = settings_with_margin(3600);
         update.values.recovery_attempts = attempts;
+        update.values.recovery_rotation_attempts = Some(if attempts == 31 { 0 } else { 1 });
         assert!(repository.update_runtime_settings(update).await.is_err());
     }
     for attempts in [-1, 0, 32] {
@@ -1357,4 +1362,99 @@ async fn protection_revision_tracks_only_policy_changes_and_survives_return_to_p
         final_settings.account_error_protection_revision > same.account_error_protection_revision
     );
     database.close().await;
+}
+
+#[tokio::test]
+async fn rotation_budget_survives_legacy_settings_writes_and_is_frozen_in_snapshot() {
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create("rotation_budget").await else {
+        return;
+    };
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    assert_eq!(
+        repository
+            .load_runtime_settings()
+            .await
+            .unwrap()
+            .values
+            .recovery_rotation_attempts,
+        Some(1)
+    );
+    for rotations in [0, 2, 30] {
+        let mut update = settings_with_margin(3600);
+        update.values.recovery_attempts = 1;
+        update.values.recovery_rotation_attempts = Some(rotations);
+        repository
+            .update_runtime_settings(update.clone())
+            .await
+            .unwrap();
+        update.values.recovery_rotation_attempts = None;
+        repository.update_runtime_settings(update).await.unwrap();
+        assert_eq!(
+            repository
+                .load_runtime_settings()
+                .await
+                .unwrap()
+                .values
+                .recovery_rotation_attempts,
+            Some(rotations)
+        );
+        let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+            .load_runtime_snapshot()
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(snapshot.settings).unwrap()["recovery_rotation_attempts"],
+            rotations
+        );
+    }
+    for (attempts, rotations) in [(1, -1_i64), (1, 31), (31, 1), (30, 2)] {
+        assert!(sqlx::query("update runtime_settings set recovery_attempts = $1, recovery_rotation_attempts = $2 where id = 1")
+            .bind(attempts as i64).bind(rotations).execute(&database.pool).await.is_err());
+    }
+    database.close().await;
+}
+
+#[tokio::test]
+async fn rotation_migration_preserves_existing_settings_and_handles_maximum_initial_budget() {
+    for attempts in [3_i64, 31] {
+        let Some(database) = TestDatabase::create("rotation_upgrade").await else {
+            return;
+        };
+        // 还原迁移前的设置表形状，只对本测试独立 schema 执行升级 SQL
+        sqlx::raw_sql("alter table runtime_settings drop column recovery_rotation_attempts")
+            .execute(&database.pool)
+            .await
+            .unwrap();
+        sqlx::query("update runtime_settings set recovery_attempts = $1 where id = 1")
+            .bind(attempts)
+            .execute(&database.pool)
+            .await
+            .unwrap();
+        let before: serde_json::Value =
+            sqlx::query_scalar("select to_jsonb(s) from runtime_settings s where id = 1")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../../../migrations/0046_recovery_rotation_attempts.sql"
+        ))
+        .execute(&database.pool)
+        .await
+        .unwrap();
+        let mut after: serde_json::Value =
+            sqlx::query_scalar("select to_jsonb(s) from runtime_settings s where id = 1")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            after
+                .as_object_mut()
+                .unwrap()
+                .remove("recovery_rotation_attempts"),
+            Some(serde_json::json!(if attempts == 31 { 0 } else { 1 }))
+        );
+        assert_eq!(after, before);
+        database.close().await;
+    }
 }

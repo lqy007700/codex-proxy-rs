@@ -191,7 +191,8 @@ async fn contributed_model_scope_survives_affinity_and_account_rotation() {
             let snapshot = RuntimeSnapshot::new(
                 ConfigRevision::new(1).unwrap(),
                 SettingsValues::new(3, "smart", Default::default(), None, None)
-                    .with_recovery_attempts(3),
+                    .with_recovery_attempts(2)
+                    .with_recovery_rotation_attempts(1),
                 vec![kind.clone()],
                 models,
                 Vec::new(),
@@ -319,7 +320,9 @@ async fn server_busy_retries_same_account_then_rotates_with_shared_budget_after_
     let snapshot = RuntimeSnapshot::new(
         ConfigRevision::new(1).unwrap(),
         SettingsValues::new(3, "smart", Default::default(), None, None)
-            .with_request_location(global_request_location(), true),
+            .with_request_location(global_request_location(), true)
+            .with_recovery_attempts(2)
+            .with_recovery_rotation_attempts(2),
         vec![kind.clone()],
         vec![ProviderModel::new(
             kind,
@@ -1090,7 +1093,7 @@ async fn account_queue_timeout_tries_eligible_fallback_without_restarting_wait_b
 async fn recovery_round_robin_uses_api_key_fallback_once_and_preserves_session_binding() {
     use gateway_core::account::AccountSchedulingRole;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    for (regular, fallback, failures, scenario, attempts, expected) in [
+    for (regular, fallback, failures, scenario, attempts, rotations, expected) in [
         (vec!["a", "b", "c"], true, 99, vec!["a", "a", "b", "c", "d"]),
         (vec!["a", "b"], true, 99, vec!["a", "a", "b", "b", "d"]),
         (vec!["a"], true, 99, vec!["a", "a", "d"]),
@@ -1131,7 +1134,7 @@ async fn recovery_round_robin_uses_api_key_fallback_once_and_preserves_session_b
         (vec!["a", "b", "c"], true, 99, "bad_request", vec!["a"]),
     ])
     .map(|(regular, fallback, failures, scenario, expected)| {
-        (regular, fallback, failures, scenario, 4, expected)
+        (regular, fallback, failures, scenario, 4_u32, expected)
     })
     .chain([
         (vec!["a", "b"], true, 99, "available", 1, vec!["a", "d"]),
@@ -1190,6 +1193,122 @@ async fn recovery_round_robin_uses_api_key_fallback_once_and_preserves_session_b
             "available",
             3,
             vec!["a", "a", "b"],
+        ),
+    ])
+    .map(
+        |(regular, fallback, failures, scenario, attempts, expected)| {
+            (
+                regular,
+                fallback,
+                failures,
+                scenario,
+                attempts.div_ceil(2),
+                attempts / 2,
+                expected,
+            )
+        },
+    )
+    .chain([
+        (
+            vec!["a", "b"],
+            true,
+            99,
+            "available",
+            3,
+            0,
+            vec!["a", "a", "a", "d"],
+        ),
+        (
+            vec!["a", "b"],
+            true,
+            99,
+            "available",
+            2,
+            0,
+            vec!["a", "a", "d"],
+        ),
+        (
+            vec!["a", "b"],
+            true,
+            99,
+            "available",
+            2,
+            1,
+            vec!["a", "a", "b", "d"],
+        ),
+        (
+            vec!["a", "b"],
+            true,
+            99,
+            "available",
+            3,
+            2,
+            vec!["a", "a", "a", "b", "b", "d"],
+        ),
+        (
+            vec!["a", "b", "c"],
+            true,
+            99,
+            "available",
+            3,
+            2,
+            vec!["a", "a", "a", "b", "c", "d"],
+        ),
+        (
+            vec!["a"],
+            true,
+            99,
+            "available",
+            3,
+            2,
+            vec!["a", "a", "a", "d"],
+        ),
+        (
+            vec!["a", "b"],
+            false,
+            99,
+            "available",
+            3,
+            0,
+            vec!["a", "a", "a"],
+        ),
+        (vec!["a", "b"], true, 0, "available", 3, 0, vec!["a"]),
+        (vec!["a", "b"], true, 1, "available", 3, 0, vec!["a", "a"]),
+        (
+            vec!["a", "b"],
+            true,
+            2,
+            "available",
+            3,
+            0,
+            vec!["a", "a", "a"],
+        ),
+        (
+            vec!["a", "b"],
+            true,
+            3,
+            "available",
+            3,
+            0,
+            vec!["a", "a", "a", "d"],
+        ),
+        (
+            vec!["a", "b"],
+            true,
+            99,
+            "available",
+            31,
+            0,
+            [vec!["a"; 31], vec!["d"]].concat(),
+        ),
+        (
+            vec!["a", "b"],
+            true,
+            99,
+            "available",
+            1,
+            30,
+            [vec!["a"], vec!["b"; 30], vec!["d"]].concat(),
         ),
     ]) {
         let store = Arc::new(MemoryAccountStore::default());
@@ -1271,7 +1390,9 @@ async fn recovery_round_robin_uses_api_key_fallback_once_and_preserves_session_b
             ConfigRevision::new(1).unwrap(),
             SettingsValues::new(2, "sticky", Default::default(), None, None)
                 .with_request_location(global_request_location(), true)
-                .with_recovery_attempts(attempts),
+                .with_recovery_attempts(attempts)
+                .with_recovery_rotation_attempts(rotations)
+                .with_max_account_rotations(0),
             vec![kind.clone()],
             vec![ProviderModel::new(
                 kind,

@@ -59,6 +59,9 @@ pub struct RuntimeSettingsValues {
     pub openai_account_affinity: gateway_core::account::AccountAffinity,
     pub max_account_rotations: u32,
     pub recovery_attempts: u32,
+    /// 旧插件设置服务保持原 wire；省略时由持久层保留当前业务换号预算
+    #[serde(default, skip_serializing)]
+    pub recovery_rotation_attempts: Option<u32>,
     pub openai_session_affinity_ttl_hours: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
@@ -205,6 +208,7 @@ impl RuntimeSettingsValues {
             self.concurrency_wait_timeout_seconds,
             self.max_account_rotations,
             self.recovery_attempts,
+            self.recovery_rotation_attempts.unwrap_or_default(),
             self.openai_session_affinity_ttl_hours,
         )?;
         gateway_core::settings::response_body_limit(self.responses_max_decompressed_body_bytes)?;

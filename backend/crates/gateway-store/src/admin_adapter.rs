@@ -109,6 +109,7 @@ impl SettingsStore for AdminSettingsStoreAdapter {
                     "openai_account_affinity".to_owned(),
                     "max_account_rotations".to_owned(),
                     "recovery_attempts".to_owned(),
+                    "recovery_rotation_attempts".to_owned(),
                     "openai_session_affinity_ttl_hours".to_owned(),
                     "responses_max_decompressed_body_bytes".to_owned(),
                     "rotation_strategy".to_owned(),

@@ -299,6 +299,7 @@ where
                     "affinity": plan.account_selection_policy().openai_account_affinity().as_str(),
                     "maxAccountRotations": plan.account_selection_policy().max_account_rotations(),
                     "recoveryAttempts": plan.account_selection_policy().recovery_attempts(),
+                    "recoveryRotationAttempts": plan.account_selection_policy().recovery_rotation_attempts(),
                     "maxRoutingAttempts": plan.max_attempts().get(),
                     "maxConcurrentPerAccount": plan.account_selection_policy().max_concurrent_per_account().get(),
                     "queueMaxWaiting": plan.account_selection_policy().queue_policy().max_waiting,
@@ -314,6 +315,7 @@ where
         let image_generation_requested = operation.image_generation_requested();
         let account_recovery = super::recovery::AccountRecovery::new(
             plan.account_selection_policy().recovery_attempts(),
+            plan.account_selection_policy().recovery_rotation_attempts(),
         );
         let mut session = ResponseExecutionSession {
             engine: Arc::clone(&self.engine),
@@ -1273,8 +1275,6 @@ where
                             } | crate::error::PreDeliveryRetry::AccountRotation)
                         ))
                         && !continuation_retry && !connection_fallback
-                        && (self.last_retryable_failure.is_none()
-                            || self.plan.account_selection_policy().max_account_rotations() > 0)
                         && self.account_selection.required_account().is_none()
                         && self.continuation_attempt == ContinuationAttempt::None
                         && !self.execution_effect_observed()
@@ -1288,12 +1288,13 @@ where
                             | ProviderErrorKind::ConcurrencyQueueTimeout)
                         && if self.account_recovery.is_fallback() {
                             self.advance_provider_candidate()
-                        } else if pinned_account.is_some() && !self.account_recovery.is_reselecting()
-                            && self.plan.account_selection_policy().max_account_rotations() > 0 {
+                        } else if pinned_account.is_some() && !self.account_recovery.is_reselecting() {
                             self.account_recovery.leave_initial();
-                            true
-                        } else if self.plan.account_selection_policy().max_account_rotations() > 0
-                            && self.advance_provider_candidate() {
+                            if self.account_recovery.is_fallback() {
+                                self.candidate_index = 0;
+                                self.has_fallback_account()
+                            } else { true }
+                        } else if self.advance_provider_candidate() {
                             // 普通候选仍按路由顺序用尽，不能因较早的 Provider 空池跳过后续普通账号
                             true
                         } else if self.has_fallback_account() {
@@ -1955,32 +1956,18 @@ where
                 }
                 _ => false,
             };
-            if budget_exhausted {
+            // 其他恢复可能已占用路由次数，最后一个普通槽位后仍为保底留一次机会
+            if budget_exhausted
+                || self.routing_attempts.saturating_add(1) >= self.plan.max_attempts().get()
+            {
                 self.account_recovery.enter_fallback();
                 retry_same = false;
             }
-            // 超限只跳过当前账号等待，不重置普通账号与保底的共享预算
-            let delay = if retry_after_exceeds_limit {
-                Duration::ZERO
+            // 本地业务同账号重试固定等待一秒；上游明确等待仍优先，跨账号不继承旧账号退避
+            let delay = if retry_same && !retry_after_exceeds_limit {
+                error.retry_after().unwrap_or(Duration::from_secs(1))
             } else {
-                match error.pre_delivery_retry() {
-                    Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
-                        initial_delay,
-                        max_delay,
-                        jitter,
-                        ..
-                    }) => error.retry_after().unwrap_or_else(|| {
-                        initial_delay
-                            .saturating_mul(
-                                1_u32
-                                    .checked_shl(self.bounded_transient_retries)
-                                    .unwrap_or(u32::MAX),
-                            )
-                            .min(max_delay)
-                            .saturating_add(jitter)
-                    }),
-                    _ => error.retry_after().unwrap_or_default(),
-                }
+                Duration::ZERO
             };
             if retry_same {
                 transient_retry = Some(delay);
@@ -2001,10 +1988,7 @@ where
             && !self
                 .credential_recovery_attempted_accounts
                 .contains(current.metadata.provider_account_id());
-        // 排除当前账号的重选必然换号：ordinary 重选与显式 AccountRotation 标记都落入
-        // 同一排除分支。换号预算只在这里消耗；同账号分支（瞬态退避、传输恢复、
-        // 凭据恢复重放、continuation 精确重连）不消耗。不能直接把预算门写进
-        // ordinary_retry：它是同账号瞬态退避的前置条件，会被连带误伤
+        // 业务恢复由两个独立尝试预算约束；其他恢复仍按实际账号变化限制换号
         // RetryThenReturnError 耗尽后直接交付错误，不能落入 ordinary_retry 的换号兜底
         let rotation_retry = !continuation_retry
             && !same_account_retry
@@ -2013,7 +1997,6 @@ where
             && (!bounded_transient_retry || rotation_delay.is_some())
             && transport_recovery.is_none()
             && (ordinary_retry || account_rotation_retry)
-            && self.plan.account_selection_policy().max_account_rotations() > 0
             && (if staged_recovery {
                 rotation_delay.is_some()
             } else {

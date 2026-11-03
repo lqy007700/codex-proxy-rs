@@ -128,14 +128,24 @@ async fn client_retry_budget_should_flow_through_http_and_live_websocket() {
             bounded_rotation: bounded,
         });
         let marker = Arc::new(RetryMarker::default());
+        let snapshot = crate::openai::snapshot_with_accounts(
+            "sk_retry_probe",
+            "openai",
+            "key_api_test",
+            &["acct_api_test", "acct_retry_b", "acct_retry_c"],
+        );
+        let snapshot = snapshot
+            .with_settings(
+                &snapshot
+                    .settings()
+                    .clone()
+                    .with_recovery_attempts(2)
+                    .with_recovery_rotation_attempts(2),
+            )
+            .unwrap();
         let execution = Arc::new(
             DefaultExecutionService::new(
-                RuntimeSnapshotHandle::new(crate::openai::snapshot_with_accounts(
-                    "sk_retry_probe",
-                    "openai",
-                    "key_api_test",
-                    &["acct_api_test", "acct_retry_b", "acct_retry_c"],
-                )),
+                RuntimeSnapshotHandle::new(snapshot),
                 Arc::new(SettlementPorts::default()),
                 ProviderRegistry::new([provider.clone() as Arc<dyn Provider>]).unwrap(),
                 Arc::new(InterruptAdmissions::default()),

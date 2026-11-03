@@ -87,16 +87,18 @@ pub(super) struct AccountRecovery {
     initial_failures: u32,
     other_failures: u32,
     attempt_limit: u32,
+    rotation_attempt_limit: u32,
 }
 
 impl AccountRecovery {
-    pub fn new(attempt_limit: u32) -> Self {
+    pub fn new(attempt_limit: u32, rotation_attempt_limit: u32) -> Self {
         Self {
             stage: AccountRecoveryStage::Initial,
             initial: None,
             initial_failures: 0,
             other_failures: 0,
             attempt_limit,
+            rotation_attempt_limit,
         }
     }
 
@@ -106,7 +108,9 @@ impl AccountRecovery {
 
     /// 普通尝试加一次保底所需的额外重试数等于普通尝试总数，仍尊重 Provider 的较小预算
     pub fn retry_limit(&self, provider_limit: u32) -> u32 {
-        self.attempt_limit.min(provider_limit)
+        self.attempt_limit
+            .saturating_add(self.rotation_attempt_limit)
+            .min(provider_limit)
     }
 
     pub fn observe_selected(&mut self, account: &ProviderAccountId) {
@@ -134,14 +138,14 @@ impl AccountRecovery {
         match &self.stage {
             AccountRecoveryStage::Initial => {
                 self.initial_failures += 1;
-                if self.initial_failures < self.attempt_limit.div_ceil(2) && !skip_initial {
+                if self.initial_failures < self.attempt_limit && !skip_initial {
                     return true;
                 }
                 self.leave_initial();
             }
             AccountRecoveryStage::OtherAccounts { .. } => {
                 self.other_failures += 1;
-                if self.other_failures >= self.attempt_limit / 2 {
+                if self.other_failures >= self.rotation_attempt_limit {
                     self.stage = AccountRecoveryStage::Fallback;
                 }
             }
@@ -151,7 +155,7 @@ impl AccountRecovery {
     }
 
     pub fn leave_initial(&mut self) {
-        if self.attempt_limit / 2 == 0 {
+        if self.rotation_attempt_limit == 0 {
             self.enter_fallback();
             return;
         }

@@ -269,7 +269,13 @@ fn recovery_attempts_are_validated_and_frozen_into_each_request_plan() {
     assert_eq!(facts["recovery_attempts"], 4);
     for attempts in [1, 2, 3, 4, 5, 7, 31] {
         let changed = original
-            .with_settings(&original.settings().clone().with_recovery_attempts(attempts))
+            .with_settings(
+                &original
+                    .settings()
+                    .clone()
+                    .with_recovery_attempts(attempts)
+                    .with_recovery_rotation_attempts(if attempts == 31 { 0 } else { 1 }),
+            )
             .unwrap();
         assert_eq!(
             serde_json::to_value(changed.settings()).unwrap()["recovery_attempts"],
@@ -279,7 +285,13 @@ fn recovery_attempts_are_validated_and_frozen_into_each_request_plan() {
     for attempts in [0, 32, u32::MAX] {
         assert!(
             original
-                .with_settings(&original.settings().clone().with_recovery_attempts(attempts))
+                .with_settings(
+                    &original
+                        .settings()
+                        .clone()
+                        .with_recovery_attempts(attempts)
+                        .with_recovery_rotation_attempts(if attempts == 31 { 0 } else { 1 })
+                )
                 .is_err()
         );
     }
@@ -295,4 +307,51 @@ fn recovery_attempts_are_validated_and_frozen_into_each_request_plan() {
         4
     );
     assert_eq!(serde_json::to_value(original.settings()).unwrap(), facts);
+}
+
+#[test]
+fn independent_rotation_budget_is_validated_and_does_not_mutate_existing_snapshots() {
+    let original = snapshot(1, "host");
+    let before = serde_json::to_value(original.settings()).unwrap();
+    assert_eq!(before["recovery_rotation_attempts"], 1);
+    for (attempts, rotations) in [(1, 0), (3, 2), (1, 30), (31, 0)] {
+        let changed = original
+            .with_settings(
+                &original
+                    .settings()
+                    .clone()
+                    .with_recovery_attempts(attempts)
+                    .with_recovery_rotation_attempts(rotations),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(changed.settings()).unwrap()["recovery_rotation_attempts"],
+            rotations
+        );
+    }
+    for (attempts, rotations) in [(1, 31), (31, 1), (30, 2), (1, u32::MAX)] {
+        assert!(
+            original
+                .with_settings(
+                    &original
+                        .settings()
+                        .clone()
+                        .with_recovery_attempts(attempts)
+                        .with_recovery_rotation_attempts(rotations)
+                )
+                .is_err()
+        );
+    }
+    let mut historical = before.clone();
+    historical
+        .as_object_mut()
+        .unwrap()
+        .remove("recovery_rotation_attempts");
+    let restored: gateway_core::settings::SettingsValues =
+        serde_json::from_value(historical).unwrap();
+    assert_eq!(
+        serde_json::to_value(restored).unwrap()["recovery_rotation_attempts"],
+        1
+    );
+    assert_eq!(serde_json::to_value(original.settings()).unwrap(), before);
 }

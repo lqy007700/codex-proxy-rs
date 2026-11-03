@@ -49,13 +49,19 @@ impl RotationStrategy {
 /// 单请求换号预算不能超过路由尝试总数减一
 pub const MAX_ACCOUNT_ROTATIONS: u32 = 31;
 
-/// 普通账号业务恢复的总尝试上限，保底另占一次路由尝试
+/// 普通账号业务恢复的合计尝试上限，保底另占一次路由尝试
 pub const MAX_RECOVERY_ATTEMPTS: u32 = 31;
 
-/// 普通账号恢复的默认总尝试次数，包含首次尝试
+/// 初始账号业务恢复的默认尝试次数，包含首次尝试
 #[must_use]
 pub const fn default_recovery_attempts() -> u32 {
     4
+}
+
+/// 业务恢复中其他普通账号的默认尝试次数
+#[must_use]
+pub const fn default_recovery_rotation_attempts() -> u32 {
+    1
 }
 
 /// 会话绑定与轮次关联共用的保留时长上限，单位小时
@@ -103,6 +109,7 @@ pub struct AccountSelectionPolicy {
     openai_account_affinity: AccountAffinity,
     max_account_rotations: u32,
     recovery_attempts: u32,
+    recovery_rotation_attempts: u32,
     openai_session_affinity_ttl: Duration,
 }
 
@@ -120,6 +127,7 @@ impl AccountSelectionPolicy {
             openai_account_affinity: AccountAffinity::default(),
             max_account_rotations: 3,
             recovery_attempts: default_recovery_attempts(),
+            recovery_rotation_attempts: default_recovery_rotation_attempts(),
             openai_session_affinity_ttl: Duration::from_secs(24 * 3600),
             queue_policy: ConcurrencyQueuePolicy {
                 max_waiting: 0,
@@ -159,6 +167,17 @@ impl AccountSelectionPolicy {
     #[must_use]
     pub const fn recovery_attempts(self) -> u32 {
         self.recovery_attempts
+    }
+
+    #[must_use]
+    pub const fn with_recovery_rotation_attempts(mut self, attempts: u32) -> Self {
+        self.recovery_rotation_attempts = attempts;
+        self
+    }
+
+    #[must_use]
+    pub const fn recovery_rotation_attempts(self) -> u32 {
+        self.recovery_rotation_attempts
     }
 
     #[must_use]

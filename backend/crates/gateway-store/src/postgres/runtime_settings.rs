@@ -155,7 +155,7 @@ pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResul
                     refresh_concurrency, max_concurrent_per_account,
                     rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                     audit_retention_days, min_codex_desktop_version,
-                    min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, openai_session_affinity_ttl_hours,
+                    min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
                     account_error_protection_json, account_error_protection_revision,
                     account_warmup_enabled, account_warmup_schedule_time, account_warmup_model, reset_credit_lead_minutes, reset_credit_max_weekly_remaining_percent
              from runtime_settings where id = 1",
@@ -311,7 +311,7 @@ pub(crate) async fn load_runtime_settings_in_transaction(
                 refresh_concurrency, max_concurrent_per_account,
                 rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                 audit_retention_days, min_codex_desktop_version,
-                min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, openai_session_affinity_ttl_hours,
+                min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
                 account_error_protection_json, account_error_protection_revision,
                 account_warmup_enabled, account_warmup_schedule_time, account_warmup_model, reset_credit_lead_minutes, reset_credit_max_weekly_remaining_percent
          from runtime_settings where id = 1",
@@ -393,6 +393,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
                      reset_credit_max_weekly_remaining_percent = $30,
                      recovery_attempts = $31,
                      max_retry_after_seconds = $32,
+                     recovery_rotation_attempts = coalesce($33, recovery_rotation_attempts),
 	                 updated_at = now()
 	             where id = 1
 	             returning config_revision",
@@ -437,6 +438,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     .bind(update.values.reset_credit_max_weekly_remaining_percent.map(i64::from))
     .bind(i64::from(update.values.recovery_attempts))
     .bind(i64::from(update.values.max_retry_after_seconds))
+    .bind(update.values.recovery_rotation_attempts.map(i64::from))
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("update runtime settings in transaction", source))?
@@ -529,6 +531,7 @@ struct RuntimeSettingsRow {
     openai_account_affinity: String,
     max_account_rotations: i64,
     recovery_attempts: i64,
+    recovery_rotation_attempts: i64,
     openai_session_affinity_ttl_hours: i64,
     responses_max_decompressed_body_bytes: i64,
     account_error_protection_revision: i64,
@@ -596,6 +599,7 @@ fn runtime_settings_from_row(row: RuntimeSettingsRow) -> StoreResult<RuntimeSett
             })?,
             max_account_rotations: to_u32(row.max_account_rotations)?,
             recovery_attempts: to_u32(row.recovery_attempts)?,
+            recovery_rotation_attempts: Some(to_u32(row.recovery_rotation_attempts)?),
             openai_session_affinity_ttl_hours: to_u32(row.openai_session_affinity_ttl_hours)?,
             responses_max_decompressed_body_bytes: to_u64(
                 row.responses_max_decompressed_body_bytes,

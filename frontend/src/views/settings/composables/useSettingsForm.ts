@@ -47,6 +47,7 @@ export function useSettingsForm() {
     openaiAccountAffinity: '' as AccountAffinity | '',
     maxAccountRotations: null as number | null,
     recoveryAttempts: null as number | null,
+    recoveryRotationAttempts: null as number | null,
     openaiSessionAffinityTtlHours: null as number | null,
     maxWaitingPerKey: null as number | null,
     maxWaitingPerAccount: null as number | null,
@@ -93,7 +94,7 @@ export function useSettingsForm() {
     mappings.value = initial.mappings
   }
 
-  function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'recoveryAttempts' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'maxRetryAfterSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays') {
+  function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'recoveryAttempts' | 'recoveryRotationAttempts' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'maxRetryAfterSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays') {
     return computed({
       get: () => (form[key] === null
         ? ''
@@ -117,6 +118,7 @@ export function useSettingsForm() {
   const openaiGuardianReservedConcurrencyValue = numericModel('openaiGuardianReservedConcurrency')
   const maxAccountRotationsValue = numericModel('maxAccountRotations')
   const recoveryAttemptsValue = numericModel('recoveryAttempts')
+  const recoveryRotationAttemptsValue = numericModel('recoveryRotationAttempts')
   const openaiSessionAffinityTtlHoursValue = numericModel('openaiSessionAffinityTtlHours')
   const maxWaitingPerKeyValue = numericModel('maxWaitingPerKey')
   const maxWaitingPerAccountValue = numericModel('maxWaitingPerAccount')
@@ -149,6 +151,7 @@ export function useSettingsForm() {
     form.openaiAccountAffinity = data.openaiAccountAffinity
     form.maxAccountRotations = data.maxAccountRotations
     form.recoveryAttempts = data.recoveryAttempts
+    form.recoveryRotationAttempts = data.recoveryRotationAttempts
     form.openaiSessionAffinityTtlHours = data.openaiSessionAffinityTtlHours
     form.maxWaitingPerKey = data.maxWaitingPerKey
     form.maxWaitingPerAccount = data.maxWaitingPerAccount
@@ -266,7 +269,7 @@ export function useSettingsForm() {
     const savedSettings = saved.value
     if (saving.value || loading.value || detectingLocation.value || !savedSettings)
       return
-    const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, recoveryAttempts, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, maxRetryAfterSeconds, responsesMaxDecompressedBodyMiB } = form
+    const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, recoveryAttempts, recoveryRotationAttempts, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, maxRetryAfterSeconds, responsesMaxDecompressedBodyMiB } = form
     if (!openaiAccountAffinity || maxAccountRotations === null || openaiSessionAffinityTtlHours === null || refreshMarginSeconds === null || refreshConcurrency === null || maxConcurrentPerAccount === null || openaiGuardianReservedConcurrency === null || !rotationStrategy || maxWaitingPerKey === null || maxWaitingPerAccount === null || concurrencyWaitTimeoutSeconds === null) {
       ZNotification.warning({ message: '请完整填写并发、队列、凭据刷新参数和调度策略' })
       return
@@ -276,7 +279,7 @@ export function useSettingsForm() {
       return
     }
     if (!Number.isInteger(maxAccountRotations) || maxAccountRotations < 0 || maxAccountRotations > 31) {
-      ZNotification.warning({ message: '最大换号次数应为 0～31 的整数，0 表示不换号' })
+      ZNotification.warning({ message: '其他恢复换号上限应为 0～31 的整数，0 表示禁止' })
       return
     }
     if (maxRetryAfterSeconds === null || !Number.isInteger(maxRetryAfterSeconds) || maxRetryAfterSeconds < 0 || maxRetryAfterSeconds > 4294967295) {
@@ -284,7 +287,15 @@ export function useSettingsForm() {
       return
     }
     if (recoveryAttempts === null || !Number.isInteger(recoveryAttempts) || recoveryAttempts < 1 || recoveryAttempts > 31) {
-      ZNotification.warning({ message: '普通账号尝试次数应为 1～31 的整数，包含首次尝试' })
+      ZNotification.warning({ message: '初始账号尝试次数应为 1～31 的整数，包含首次请求' })
+      return
+    }
+    if (recoveryRotationAttempts === null || !Number.isInteger(recoveryRotationAttempts) || recoveryRotationAttempts < 0 || recoveryRotationAttempts > 30) {
+      ZNotification.warning({ message: '换号重试次数需为 0～30 的整数' })
+      return
+    }
+    if (recoveryAttempts + recoveryRotationAttempts > 31) {
+      ZNotification.warning({ message: '初始账号尝试与换号重试合计不能超过 31 次' })
       return
     }
     if (!Number.isInteger(maxConcurrentPerAccount) || maxConcurrentPerAccount < 0 || maxConcurrentPerAccount > 4294967295) {
@@ -371,6 +382,7 @@ export function useSettingsForm() {
         openaiAccountAffinity,
         maxAccountRotations,
         recoveryAttempts,
+        recoveryRotationAttempts,
         openaiSessionAffinityTtlHours,
         maxWaitingPerKey,
         maxWaitingPerAccount,
@@ -430,6 +442,7 @@ export function useSettingsForm() {
     openaiGuardianReservedConcurrencyValue,
     maxAccountRotationsValue,
     recoveryAttemptsValue,
+    recoveryRotationAttemptsValue,
     openaiSessionAffinityTtlHoursValue,
     maxWaitingPerKeyValue,
     maxWaitingPerAccountValue,

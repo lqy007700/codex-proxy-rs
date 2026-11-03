@@ -51,6 +51,12 @@ pub struct RuntimeSettingsFields {
     pub max_account_rotations: u32,
     #[serde(default = "gateway_core::account::default_recovery_attempts")]
     pub recovery_attempts: u32,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_rotation_attempts"
+    )]
+    pub recovery_rotation_attempts: Option<u32>,
     pub openai_session_affinity_ttl_hours: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
@@ -65,6 +71,13 @@ pub struct RuntimeSettingsFields {
     pub account_warmup_model: Option<String>,
     pub reset_credit_lead_minutes: u32,
     pub reset_credit_max_weekly_remaining_percent: Option<u32>,
+}
+
+// 字段缺省表示保留已有值，显式 null 不能被误当成缺省更新
+fn deserialize_rotation_attempts<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u32>, D::Error> {
+    u32::deserialize(deserializer).map(Some)
 }
 
 /// 运行配置投影与设置页字段的聚合响应
@@ -759,6 +772,7 @@ impl RuntimeSettingsFields {
             openai_account_affinity: self.openai_account_affinity,
             max_account_rotations: self.max_account_rotations,
             recovery_attempts: self.recovery_attempts,
+            recovery_rotation_attempts: self.recovery_rotation_attempts,
             openai_session_affinity_ttl_hours: self.openai_session_affinity_ttl_hours,
             responses_max_decompressed_body_bytes: self.responses_max_decompressed_body_bytes,
             smart_scheduling: self.smart_scheduling,
@@ -800,6 +814,7 @@ impl From<gateway_admin::model::settings::RuntimeSettingsValues> for RuntimeSett
             openai_account_affinity: settings.openai_account_affinity,
             max_account_rotations: settings.max_account_rotations,
             recovery_attempts: settings.recovery_attempts,
+            recovery_rotation_attempts: settings.recovery_rotation_attempts,
             openai_session_affinity_ttl_hours: settings.openai_session_affinity_ttl_hours,
             responses_max_decompressed_body_bytes: settings.responses_max_decompressed_body_bytes,
             smart_scheduling: settings.smart_scheduling,
@@ -831,6 +846,7 @@ fn settings_validation_error(field: &'static str) -> WireValidationError {
         "concurrency_wait_timeout_seconds" => "concurrencyWaitTimeoutSeconds",
         "max_account_rotations" => "maxAccountRotations",
         "recovery_attempts" => "recoveryAttempts",
+        "recovery_rotation_attempts" => "recoveryRotationAttempts",
         "max_concurrent_per_account" => "maxConcurrentPerAccount",
         "max_waiting_per_account" => "maxWaitingPerAccount",
         "max_waiting_per_key" => "maxWaitingPerKey",

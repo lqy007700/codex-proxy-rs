@@ -1313,6 +1313,9 @@ impl SettingsStore for FixtureSettingsStore {
                 openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
                 max_account_rotations: 3,
                 recovery_attempts: gateway_core::account::default_recovery_attempts(),
+                recovery_rotation_attempts: Some(
+                    gateway_core::account::default_recovery_rotation_attempts(),
+                ),
                 openai_session_affinity_ttl_hours: 24,
                 responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
                 smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),

@@ -182,14 +182,21 @@ fn retry_session(
     let mut request = model_request(&operation, SystemTime::now() + Duration::from_secs(30));
     request.id = ModelRequestId::new(id).unwrap();
     request.client_api_key_ref = ClientApiKeyId::new(client).unwrap();
-    block_on(coordinator.start(
-        request,
-        operation.clone(),
-        plan(&operation),
-        None,
-        None,
-        CancellationToken::new(),
-    ))
+    block_on(
+        coordinator.start(
+            request,
+            operation.clone(),
+            plan_with_policy(
+                &operation,
+                AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::MIN)
+                    .with_recovery_attempts(2)
+                    .with_recovery_rotation_attempts(2),
+            ),
+            None,
+            None,
+            CancellationToken::new(),
+        ),
+    )
     .unwrap()
 }
 
@@ -1224,6 +1231,7 @@ fn plan_with_protection(
         .with_smart_scheduling(account_selection_policy.smart_scheduling())
         .with_max_account_rotations(account_selection_policy.max_account_rotations())
         .with_recovery_attempts(account_selection_policy.recovery_attempts())
+        .with_recovery_rotation_attempts(account_selection_policy.recovery_rotation_attempts())
         .with_openai_account_affinity(account_selection_policy.openai_account_affinity())
         .with_openai_session_affinity_ttl_hours(
             u32::try_from(
@@ -1271,6 +1279,15 @@ fn dual_provider_plan(operation: &Operation) -> RoutingPlan {
 }
 
 fn dual_provider_plan_with_fallback(operation: &Operation, fallback: bool) -> RoutingPlan {
+    dual_provider_plan_with_budget(operation, fallback, 4, 1)
+}
+
+fn dual_provider_plan_with_budget(
+    operation: &Operation,
+    fallback: bool,
+    attempts: u32,
+    rotations: u32,
+) -> RoutingPlan {
     let openai = ProviderKind::new("openai").expect("provider");
     let xai = ProviderKind::new("xai").expect("provider");
     let public_model = PublicModelId::new("gpt-5").expect("public model");
@@ -1300,7 +1317,9 @@ fn dual_provider_plan_with_fallback(operation: &Operation, fallback: bool) -> Ro
     let directory = Arc::new(RuntimeAccountDirectory::new(entries));
     let snapshot = RuntimeSnapshot::new(
         ConfigRevision::new(1).expect("config revision"),
-        gateway_core::settings::SettingsValues::new(2, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(2, "smart", Default::default(), None, None)
+            .with_recovery_attempts(attempts)
+            .with_recovery_rotation_attempts(rotations),
         vec![openai.clone(), xai.clone()],
         vec![
             ProviderModel::new(
@@ -4177,6 +4196,7 @@ fn bounded_rotation_policy() -> TransientRetryPolicy {
 fn bounded_rejection(attempt: usize) -> ProviderError {
     ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::Sent)
         .with_status(503)
+        .with_retry_after(Duration::ZERO)
         .with_upstream_code(OpaqueUpstreamValue::new(format!("reason_{attempt}")))
         .with_replay_safe()
         .with_client_visible_upstream_response(ClientVisibleUpstreamResponse::new(
@@ -4486,7 +4506,8 @@ fn unavailable_transient_retry_respects_rotation_policy_and_selection_failure_bo
         let route_plan = plan_with_policy(
             &operation,
             AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::MIN)
-                .with_max_account_rotations(rotations),
+                .with_max_account_rotations(rotations)
+                .with_recovery_rotation_attempts(if rotations == 0 { 0 } else { 1 }),
         );
         let mut selection_failure = ProviderError::new(kind, send_state);
         if prohibited {
@@ -4565,7 +4586,9 @@ fn unavailable_transient_retry_reuses_its_reserved_budget_without_resetting_it()
         let route_plan = plan_with_policy(
             &operation,
             AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::MIN)
-                .with_max_account_rotations(rotations),
+                .with_max_account_rotations(rotations)
+                .with_recovery_attempts(2)
+                .with_recovery_rotation_attempts(2),
         );
         let rejection = |index| {
             bounded_rejection(index).with_transient_retry(
@@ -4733,7 +4756,12 @@ fn bounded_server_error_retries_until_success() {
 #[test]
 fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback() {
     let operation = generate_operation();
-    let route_plan = plan(&operation);
+    let route_plan = plan_with_policy(
+        &operation,
+        AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::MIN)
+            .with_recovery_attempts(2)
+            .with_recovery_rotation_attempts(2),
+    );
     let mut scripts = Vec::new();
     scripts.extend(
         ["acct_first", "acct_first", "acct_second", "acct_other"]
@@ -4750,6 +4778,7 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
                     UpstreamSendState::Sent,
                 )
                 .with_status(if index % 3 == 1 { 500 } else { 503 })
+                .with_retry_after(Duration::ZERO)
                 .with_replay_safe()
                 .with_transient_retry(
                     NonZeroU32::new(3).unwrap(),
@@ -4835,7 +4864,9 @@ fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
             let route_plan = plan_with_policy(
                 &operation,
                 AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(10).unwrap())
-                    .with_max_account_rotations(rotations),
+                    .with_max_account_rotations(rotations)
+                    .with_recovery_attempts(2)
+                    .with_recovery_rotation_attempts(2),
             );
             let scripts = std::iter::repeat_n("acct_first", same_account_attempts)
                 .chain(["acct_second", "acct_other"])
@@ -4877,7 +4908,7 @@ fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
                 CancellationToken::new(),
             ))
             .unwrap();
-            let expected = if rotations == 0 { 2 } else { 4 };
+            let expected = 4;
             let result = block_on(session.collect_uncommitted());
             if succeeds {
                 result.unwrap();
@@ -4933,7 +4964,7 @@ fn bounded_transient_retries_share_budget_across_codes_and_accounts() {
                 })
                 .map(|event| event["data"]["delayMs"].as_u64().unwrap())
                 .collect();
-            assert_eq!(delays, [2, 3, 5, 5, 5, 5, 5][..expected - 1]);
+            assert_eq!(delays, vec![0; expected - 1]);
             let state = store.state.lock().unwrap();
             assert_eq!(state.intermediate_failures, expected - 1);
             assert_eq!(state.finalizations[0].attempt_count as usize, expected);
@@ -4996,32 +5027,29 @@ fn bounded_transient_retry_is_suppressed_for_repeated_client_turns() {
 }
 
 #[test]
-fn bounded_rotation_backoff_obeys_retry_after_cancellation_and_deadline() {
+fn bounded_same_account_wait_obeys_cancellation_and_deadline() {
     for cancel in [false, true] {
         let operation = generate_operation();
-        let route_plan = plan(&operation);
-        let scripts = (0..3)
-            .map(|index| Script::Stream {
-                account_id: if index < 2 {
-                    "acct_first"
-                } else {
-                    "acct_second"
-                },
-                items: vec![Err(bounded_rejection(index + 1).with_retry_after(
-                    if index == 2 {
-                        Duration::from_secs(60)
-                    } else {
-                        Duration::ZERO
-                    },
-                ))],
-            })
-            .collect();
-        let (coordinator, _, provider) = coordinator(scripts);
+        let (coordinator, _, provider) = coordinator(vec![Script::Stream {
+            account_id: "acct_first",
+            items: vec![Err(ProviderError::new(
+                ProviderErrorKind::Unavailable,
+                UpstreamSendState::Sent,
+            )
+            .with_replay_safe()
+            .with_transient_retry(
+                NonZeroU32::new(3).unwrap(),
+                Duration::ZERO,
+                Duration::ZERO,
+                Duration::ZERO,
+                bounded_rotation_policy(),
+            ))],
+        }]);
         let cancellation = CancellationToken::new();
         let mut session = block_on(coordinator.start(
             model_request(&operation, SystemTime::now() + Duration::from_millis(200)),
-            operation,
-            route_plan,
+            operation.clone(),
+            plan(&operation),
             None,
             None,
             cancellation.clone(),
@@ -5029,17 +5057,16 @@ fn bounded_rotation_backoff_obeys_retry_after_cancellation_and_deadline() {
         .unwrap();
         let mut collection = Box::pin(session.collect_uncommitted());
         assert!(block_on(async { futures::poll!(&mut collection) }).is_pending());
-        assert_eq!(provider.contexts.lock().unwrap().len(), 3);
-        assert_eq!(provider.released_leases.load(Ordering::SeqCst), 3);
+        assert_eq!(provider.contexts.lock().unwrap().len(), 1);
+        assert_eq!(provider.released_leases.load(Ordering::SeqCst), 1);
         if cancel {
             cancellation.cancel();
         }
-        let result = block_on(collection);
         assert!(matches!(
-            (cancel, result),
+            (cancel, block_on(collection)),
             (true, Err(EngineError::Cancelled)) | (false, Err(EngineError::Deadline))
         ));
-        assert_eq!(provider.contexts.lock().unwrap().len(), 3);
+        assert_eq!(provider.contexts.lock().unwrap().len(), 1);
         let trace = session.trace().snapshot().unwrap();
         let retry = trace["events"]
             .as_array()
@@ -5047,8 +5074,8 @@ fn bounded_rotation_backoff_obeys_retry_after_cancellation_and_deadline() {
             .iter()
             .rfind(|event| event["stage"] == "retry.decided")
             .unwrap();
-        assert_eq!(retry["data"]["rotationRetry"], true);
-        assert_eq!(retry["data"]["delayMs"], 60_000);
+        assert_eq!(retry["data"]["rotationRetry"], false);
+        assert_eq!(retry["data"]["delayMs"], 1_000);
     }
 }
 
@@ -5200,7 +5227,7 @@ fn retry_after_limit_preserves_regular_recovery_and_the_final_fallback_attempt()
     use gateway_core::engine::recovery::AccountRecoveryStage;
     for excessive in [false, true] {
         let operation = generate_operation();
-        let route_plan = dual_provider_plan_with_fallback(&operation, true);
+        let route_plan = dual_provider_plan_with_budget(&operation, true, 2, 2);
         let accounts = if excessive {
             vec![
                 "acct_openai_first",
@@ -5260,7 +5287,7 @@ fn retry_after_limit_preserves_regular_recovery_and_the_final_fallback_attempt()
         assert!(
             contexts
                 .iter()
-                .all(|context| context.account_selection_policy().recovery_attempts() == 4)
+                .all(|context| context.account_selection_policy().recovery_attempts() == 2)
         );
         assert_eq!(
             contexts
@@ -5284,12 +5311,13 @@ fn retry_after_limit_preserves_regular_recovery_and_the_final_fallback_attempt()
 }
 
 #[test]
-fn excessive_retry_after_cannot_bypass_the_fork_rotation_switch() {
+fn excessive_retry_after_cannot_bypass_zero_business_rotation_budget() {
     let operation = generate_operation();
     let route_plan = plan_with_policy(
         &operation,
         AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::MIN)
-            .with_max_account_rotations(0),
+            .with_max_account_rotations(0)
+            .with_recovery_rotation_attempts(0),
     );
     let (coordinator, _, provider) = coordinator(vec![
         Script::Stream {
@@ -8443,4 +8471,101 @@ fn request_recovery_cannot_override_ambiguous_send_or_committed_output() {
         assert!(block_on(session.collect_uncommitted()).is_err());
         assert_eq!(provider.contexts.lock().unwrap().len(), 1);
     }
+}
+
+#[test]
+fn fallback_retains_the_last_routing_slot_after_credential_recovery() {
+    use gateway_core::engine::recovery::AccountRecoveryStage;
+    let operation = generate_operation();
+    let route_plan = dual_provider_plan_with_budget(&operation, true, 31, 0);
+    let mut scripts = vec![Script::Stream {
+        account_id: "acct_openai_first",
+        items: vec![Err(ProviderError::new(
+            ProviderErrorKind::Unavailable,
+            UpstreamSendState::Sent,
+        )
+        .with_replay_safe()
+        .with_same_account_retry())],
+    }];
+    scripts.extend((0..30).map(|_| Script::Stream {
+        account_id: "acct_openai_first",
+        items: vec![Err(bounded_rejection(1).with_transient_retry(
+            NonZeroU32::new(31).unwrap(),
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+            TransientRetryPolicy::RetryThenRotateAccountWithBudget {
+                max_total_retries: NonZeroU32::new(31).unwrap(),
+                track_client_retry_failure: false,
+            },
+        ))],
+    }));
+    scripts.push(Script::Stream {
+        account_id: "acct_openai_second",
+        items: complete_stream(None),
+    });
+    let (coordinator, store, provider) = coordinator(scripts);
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    block_on(session.collect_uncommitted()).unwrap();
+    block_on(session.commit_downstream(Some(200))).unwrap();
+    let contexts = provider.contexts.lock().unwrap();
+    assert_eq!(contexts.len(), 32);
+    assert_eq!(
+        contexts.last().unwrap().recovery_stage(),
+        &AccountRecoveryStage::Fallback
+    );
+    assert_eq!(
+        store.state.lock().unwrap().finalizations[0].attempt_count,
+        32
+    );
+}
+
+#[test]
+fn fallback_selection_exhausts_provider_candidates_without_restarting_the_first() {
+    let operation = generate_operation();
+    let route_plan = dual_provider_plan_with_budget(&operation, true, 1, 0);
+    let unavailable = || {
+        Script::Error(ProviderError::new(
+            ProviderErrorKind::NoEligibleAccount,
+            UpstreamSendState::NotSent,
+        ))
+    };
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        Script::Stream {
+            account_id: "acct_openai_first",
+            items: vec![Err(bounded_rejection(1))],
+        },
+        unavailable(),
+    ]));
+    let second = Arc::new(ScriptedProvider::named("xai", vec![unavailable()]));
+    let mut registry = ProviderRegistry::builder();
+    registry.register(provider.clone()).unwrap();
+    registry.register(second.clone()).unwrap();
+    let coordinator = AttemptCoordinator::new(GatewayEngine::new(
+        Arc::new(FakeStore::default()),
+        registry.build(),
+    ));
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    let Err(EngineError::Provider(error)) = block_on(session.collect_uncommitted()) else {
+        panic!("last business failure required");
+    };
+    assert_eq!(error.upstream_code().unwrap().as_str(), "reason_1");
+    assert_eq!(provider.contexts.lock().unwrap().len(), 2);
+    assert_eq!(second.contexts.lock().unwrap().len(), 1);
 }

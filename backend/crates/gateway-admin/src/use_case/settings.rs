@@ -365,6 +365,16 @@ impl SettingsService for DefaultSettingsService {
         context: &MutationContext,
         mut command: ReplaceRuntimeSettings,
     ) -> Result<RuntimeSettings, AdminError> {
+        // 旧管理端和插件省略新增字段时保留持久值，最终写入仍由 revision 防止并发覆盖
+        if command.values.recovery_rotation_attempts.is_none() {
+            command.values.recovery_rotation_attempts = self
+                .store
+                .load_runtime_settings()
+                .await
+                .map_err(|error| map_store_error(error, "runtime settings"))?
+                .values
+                .recovery_rotation_attempts;
+        }
         validate_settings(&command)?;
         if command.values.codex_privacy_policy != Default::default() {
             self.profile_provider("openai")?

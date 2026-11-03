@@ -471,6 +471,9 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
             max_account_rotations: 3,
             recovery_attempts: gateway_core::account::default_recovery_attempts(),
+            recovery_rotation_attempts: Some(
+                gateway_core::account::default_recovery_rotation_attempts(),
+            ),
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
@@ -534,6 +537,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
                 "updatedAtDisplay": "2026-08-02 18:30:00"
     });
     expected["recoveryAttempts"] = json!(4);
+    expected["recoveryRotationAttempts"] = json!(1);
     expected["maxRetryAfterSeconds"] = json!(240);
     assert_eq!(value, expected);
 }
@@ -542,7 +546,11 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
 fn settings_service_contract_stays_flat_and_rejects_unknown_fields() {
     use gateway_admin::model::settings::{ReplaceRuntimeSettings, RuntimeSettings};
 
-    let current = super::test_runtime_settings();
+    let mut current = super::test_runtime_settings();
+    let host_wire = serde_json::to_value(&current).unwrap();
+    assert!(host_wire.get("recovery_rotation_attempts").is_none());
+    // 旧插件继续读取原合同，省略的新值在回写时由服务保留
+    current.values.recovery_rotation_attempts = None;
     assert_eq!(
         serde_json::from_slice::<RuntimeSettings>(&serde_json::to_vec(&current).unwrap()).unwrap(),
         current
@@ -1635,6 +1643,7 @@ async fn recovery_attempts_round_trip_and_reject_invalid_values() {
         fixture.auth.insert_session("valid-session");
         let mut body = update_body();
         body["recoveryAttempts"] = json!(attempts);
+        body["recoveryRotationAttempts"] = json!(if attempts == 31 { 0 } else { 1 });
         let response = app(fixture.state())
             .oneshot(request(
                 Method::POST,
@@ -1682,4 +1691,82 @@ async fn recovery_attempts_round_trip_and_reject_invalid_values() {
     omitted.as_object_mut().unwrap().remove("recoveryAttempts");
     let omitted: UpdateRuntimeSettingsRequest = serde_json::from_value(omitted).unwrap();
     assert_eq!(omitted.values.recovery_attempts, 4);
+}
+
+#[tokio::test]
+async fn recovery_rotation_attempts_round_trip_preserve_omissions_and_validate_combined_budget() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    for rotations in [0, 1, 2, 30] {
+        let current = response_json(
+            app(fixture.state())
+                .oneshot(request(Method::GET, "/api/admin/settings", None))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let mut body = update_body();
+        body["configRevision"] = current["data"]["configRevision"].clone();
+        body["recoveryAttempts"] = json!(1);
+        body["recoveryRotationAttempts"] = json!(rotations);
+        let response = app(fixture.state())
+            .oneshot(request(
+                Method::POST,
+                "/api/admin/settings/update",
+                Some(body.clone()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(response).await["data"]["recoveryRotationAttempts"],
+            rotations
+        );
+        let current = response_json(
+            app(fixture.state())
+                .oneshot(request(Method::GET, "/api/admin/settings", None))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(current["data"]["recoveryRotationAttempts"], rotations);
+        body["configRevision"] = current["data"]["configRevision"].clone();
+        body.as_object_mut()
+            .unwrap()
+            .remove("recoveryRotationAttempts");
+        let response = app(fixture.state())
+            .oneshot(request(
+                Method::POST,
+                "/api/admin/settings/update",
+                Some(body),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(response).await["data"]["recoveryRotationAttempts"],
+            rotations
+        );
+    }
+    for (attempts, rotations, status) in [
+        (1, json!(31), StatusCode::BAD_REQUEST),
+        (30, json!(2), StatusCode::BAD_REQUEST),
+        (1, json!(-1), StatusCode::UNPROCESSABLE_ENTITY),
+        (1, json!(1.5), StatusCode::UNPROCESSABLE_ENTITY),
+        (1, json!(4294967296_u64), StatusCode::UNPROCESSABLE_ENTITY),
+        (1, Value::Null, StatusCode::UNPROCESSABLE_ENTITY),
+    ] {
+        let mut body = update_body();
+        body["recoveryAttempts"] = json!(attempts);
+        body["recoveryRotationAttempts"] = rotations;
+        let response = app(fixture.state())
+            .oneshot(request(
+                Method::POST,
+                "/api/admin/settings/update",
+                Some(body),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+    }
 }

@@ -600,29 +600,30 @@ WebSocket 在交付有效输出前断线或超时，可按 `stream_max_retries` 
 外部副作用和下游提交仍限制恢复；取消与请求截止时间随时终止等待
 
 OpenAI 明确返回 `server_is_overloaded`、`slow_down` 或模型容量不足错误时，代理在允许安全重放且
-尚未交付输出的前提下，按 `recoveryAttempts=N` 分配普通账号的总尝试次数（含首次），默认 4，取值 1～31。
-初始账号 A 分配 `ceil(N / 2)` 次，其余 `floor(N / 2)` 次在排除 A 的其他合格普通账号中轮询，最后使用保底账号尝试 1 次，保底不计入 N。
-例如 A、B 为普通账号，D 为保底账号时：
+尚未交付输出的前提下，初始账号 A 最多尝试 `recoveryAttempts=N` 次（含首次），默认 4，取值 1～31。
+失败后再按 `recoveryRotationAttempts=M` 在排除 A 的其他合格普通账号中合计尝试 M 次，默认 1，取值 0～30。
+M 为 0 时直接进入保底；换号后不重新获得 N 次预算。N 与 M 合计最多 31 次，最后保底额外尝试 1 次。
+例如 A、B、C 为普通账号，D 为保底账号时：
 
-| `recoveryAttempts` | 全部失败时的尝试顺序 |
-| --- | --- |
-| 1 | `A-D` |
-| 2 | `A-B-D` |
-| 3 | `A-A-B-D` |
-| 4（默认） | `A-A-B-B-D` |
-| 5 | `A-A-A-B-B-D` |
+| N | M | 全部失败时的尝试顺序 |
+| --- | --- | --- |
+| 3 | 0 | `A-A-A-D` |
+| 2 | 0 | `A-A-D` |
+| 2 | 1 | `A-A-B-D` |
+| 3 | 2 | `A-A-A-B-C-D`，仅 B 可用时为 `A-A-A-B-B-D` |
+| 4（默认） | 1（默认） | `A-A-A-A-B-D` |
 
-存在多个其他普通账号时按轮询选择，默认顺序可为 `A-A-B-C-D`。
+换号阶段按轮询选择，M 统计实际业务尝试次数，不是不同账号数量。
 没有其他普通账号时直接进入保底，没有保底或保底失败时返回最后一次上游错误；任意一次成功立即结束。
 普通可恢复服务故障采用同一恢复链，两类错误共用预算；明确不可用的账号可提前切换，安全重放和原生续接限制不放宽。
 恢复轮询遍历除初始账号之外的合格普通池，不按日常调度策略或权重层截断候选；权限、模型、额度、冷却和并发限制仍然有效。
 恢复轮询与保底保留根会话主绑定，下一条普通请求仍按原有亲和与调度规则选号。
 严格亲和的跟随子线程和原生增量续接仍遵守账号归属，不能为保底强行跨账号。
-有效的上游 `Retry-After` 接受秒数、HTTP 日期和零延迟，优先于本地指数退避，不截断、不叠加随机等待。
+有效的上游 `Retry-After` 接受秒数、HTTP 日期和零延迟，同账号重试时优先于本地等待，不截断、不叠加随机等待。
 `maxRetryAfterSeconds` 限制单次建议等待，默认 240 秒，取值 0～4294967295，0 表示不接受正数等待。
 超过上限时跳过当前账号等待，在原有共享预算、安全门禁及普通／保底阶段内尝试换号；
 无法恢复时保留最后一次上游错误与等待提示，不截短建议后重试原账号。该限制同样作用于 WS 同账号传输重试和转 HTTP 回退。
-未提供有效等待建议时采用 500ms 起、最高 2s 的退避并附加随机等待；本地退避不受此设置限制。
+未提供有效等待建议时，初始账号的业务重试固定间隔 1 秒；进入其他普通账号或保底阶段不继承前一账号的等待。本地等待不受此设置限制。
 该值不是请求总时长，在请求入场时冻结；等待仍受截止时间和取消约束，重试受请求总尝试次数约束。
 已发送的容量失败计入[智能调度健康分](architecture.md#智能调度)，可用账号的会话亲和优先。
 容量不足不触发 Provider 全局熔断，也不作为账号额度耗尽；启用账号错误保护且规则达到阈值时写入临时冷却。
@@ -1743,7 +1744,7 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 | 凭据刷新 | `refreshMarginSeconds`、`refreshConcurrency` |
 | [并发与排队](#并发与排队) | `maxConcurrentPerAccount`、`maxWaitingPerKey`、`maxWaitingPerAccount`、`openaiGuardianReservedConcurrency`、`concurrencyWaitTimeoutSeconds` |
 | [上游重试等待](#容量拒绝与重试) | `maxRetryAfterSeconds` |
-| [亲和与换号](#账号亲和与换号) | `openaiAccountAffinity`、`openaiSessionAffinityTtlHours`、`maxAccountRotations`、`recoveryAttempts` |
+| [亲和与换号](#账号亲和与换号) | `openaiAccountAffinity`、`openaiSessionAffinityTtlHours`、`maxAccountRotations`、`recoveryAttempts`、`recoveryRotationAttempts` |
 | [调度策略](#智能调度) | `rotationStrategy`、`smartScheduling` |
 | [请求解压](#请求解压上限) | `responsesMaxDecompressedBodyBytes` |
 | [客户端门禁](#1-鉴权与公共约定) | `minCodexDesktopVersion`、`minCodexCliVersion` |
@@ -1884,12 +1885,13 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 响应完成不回写或续期。调整时长不扫描已有 Redis 键，已有记录保留原到期时间，下一次成功准入时使用新值；
 真正过期或丢失后按缺失绑定处理，存储读取错误不会被当作过期
 
-`maxAccountRotations` 是单请求最大换号次数，默认 3，取值 0～31；0 表示不换号。
-首次选号、同账号重试和选号时过滤不可用候选不计入换号次数，总路由尝试仍最多 32 次。
-非零值约束常规换号、传输和续接恢复，不提前截断[业务恢复链](#容量拒绝与重试)；0 仍禁止失败后的换号。
-提高该值不放宽安全重放或交付后的重试限制。
-`recoveryAttempts` 控制[业务恢复链](#容量拒绝与重试)中的普通账号总尝试次数，默认 4，取值 1～31，包含首次尝试，保底另算 1 次。
-设置更新请求须包含账号亲和、亲和时长与最大换号次数；未提供 `recoveryAttempts` 时使用默认值 4。
+`maxAccountRotations` 是连接、传输、续接等其他恢复路径的最大换号次数，默认 3，取值 0～31；0 表示禁止这些路径换号。
+首次选号、同账号重试和选号时过滤不可用候选不计入换号次数。
+[业务恢复链](#容量拒绝与重试)独立使用 `recoveryAttempts` 和 `recoveryRotationAttempts`，不受该值限制。
+总路由尝试仍最多 32 次，其他恢复占用路由次数时可提前结束普通阶段，为保底保留最后一次机会。
+提高任何预算都不放宽安全重放或交付后的重试限制。
+设置更新请求须包含账号亲和、亲和时长与其他恢复换号上限；未提供 `recoveryAttempts` 时使用默认值 4，
+省略 `recoveryRotationAttempts` 时保留已有值。旧插件设置服务继续使用原字段合同，写入时也保留业务换号预算。
 保存后对新请求生效，执行中请求及其重试沿用冻结值
 
 ### 请求解压上限
