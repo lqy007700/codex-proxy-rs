@@ -24,7 +24,7 @@ impl CallerIdentityPolicy {
         Ok(())
     }
 
-    /// 只消费入口冻结的原始头值，重复头保留到这里统一拒绝
+    /// 只采信入口冻结且完整合法的双 ID，识别失败沿用 Key 的无身份处理方式
     pub fn resolve(
         &self,
         key: &ClientApiKeyId,
@@ -40,9 +40,6 @@ impl CallerIdentityPolicy {
             } => {
                 self.validate()?;
                 match (headers.users.as_slice(), headers.tokens.as_slice()) {
-                    ([], []) if *allow_unidentified => Ok(CallerIdentity::Unidentified {
-                        request_id: uuid::Uuid::new_v4().to_string(),
-                    }),
                     ([user], [token]) if valid_id(user) && valid_id(token) => {
                         Ok(CallerIdentity::NewApi {
                             source_id: source_id.clone(),
@@ -50,7 +47,11 @@ impl CallerIdentityPolicy {
                             token_id: token.clone(),
                         })
                     }
-                    _ => Err(CallerIdentityError),
+                    // 身份透传配置不能阻断原有 Key 请求，也不能用部分 ID 猜测用户归属
+                    _ if *allow_unidentified => Ok(CallerIdentity::Unidentified {
+                        request_id: uuid::Uuid::new_v4().to_string(),
+                    }),
+                    _ => Ok(CallerIdentity::direct(key)),
                 }
             }
         }

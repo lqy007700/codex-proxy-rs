@@ -67,10 +67,13 @@ onMounted(load)
         同一来源可关联多个 CPR Key，轮换 Key 时复用此来源
       </p>
     </ZFormItem>
-    <ZFormItem label="允许无身份请求">
-      <ZSwitch :model-value="policy.allowUnidentified" :disabled="props.disabled" aria-label="允许无身份请求" @update:model-value="policy = { ...policy, allowUnidentified: $event }" />
+    <ZFormItem label="无身份请求隔离">
+      <ZSwitch :model-value="policy.allowUnidentified" :disabled="props.disabled" aria-label="无身份请求隔离" @update:model-value="policy = { ...policy, allowUnidentified: $event }" />
       <p class="mt-2 text-cp-xs text-cp-text-tertiary">
-        仅用于 New API 渠道探测，不建立用户亲和，也不能续接用户响应
+        身份缺失或无效时继续接收请求，关闭时按 CPR Key 原有方式处理
+      </p>
+      <p class="mt-1 text-cp-xs text-cp-text-tertiary">
+        开启后每次独立选号，不保存亲和且不能续聊，适合渠道探测
       </p>
     </ZFormItem>
   </template>

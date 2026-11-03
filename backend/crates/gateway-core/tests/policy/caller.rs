@@ -27,7 +27,7 @@ fn direct_keys_ignore_spoofed_identity_and_keep_legacy_namespace() {
     assert_eq!(caller.session_namespace(), key.as_str());
 }
 #[test]
-fn trusted_identity_rejects_missing_partial_duplicate_multivalue_and_noncanonical_ids() {
+fn incomplete_or_invalid_identity_falls_back_without_guessing_a_proxy_owner() {
     let key = ClientApiKeyId::new("key_shared").unwrap();
     for value in [
         "",
@@ -43,16 +43,18 @@ fn trusted_identity_rejects_missing_partial_duplicate_multivalue_and_noncanonica
         "١",
         "18446744073709551616",
     ] {
-        assert!(
+        assert_eq!(
             proxy(false)
                 .resolve(&key, &headers(&[value], &["2"]))
-                .is_err(),
+                .unwrap(),
+            CallerIdentity::direct(&key),
             "user {value:?}"
         );
         assert!(
             proxy(true)
                 .resolve(&key, &headers(&["1"], &[value]))
-                .is_err(),
+                .unwrap()
+                .is_unidentified(),
             "token {value:?}"
         );
     }
@@ -63,9 +65,17 @@ fn trusted_identity_rejects_missing_partial_duplicate_multivalue_and_noncanonica
         headers(&["1", "1"], &["2"]),
         headers(&["1"], &["2", "2"]),
     ] {
-        assert!(proxy(false).resolve(&key, &invalid).is_err());
+        assert_eq!(
+            proxy(false).resolve(&key, &invalid).unwrap(),
+            CallerIdentity::direct(&key)
+        );
+        assert!(
+            proxy(true)
+                .resolve(&key, &invalid)
+                .unwrap()
+                .is_unidentified()
+        );
     }
-    assert!(proxy(true).resolve(&key, &headers(&["1"], &[])).is_err());
     assert!(
         proxy(false)
             .resolve(
@@ -102,7 +112,7 @@ fn source_user_token_isolate_sessions_but_cpr_key_rotation_preserves_identity() 
     );
 }
 #[test]
-fn unidentified_probe_has_fresh_identity_and_malformed_headers_never_downgrade() {
+fn isolated_fallback_has_fresh_identity_even_when_headers_are_malformed() {
     let key = ClientApiKeyId::new("key_shared").unwrap();
     let first = proxy(true).resolve(&key, &headers(&[], &[])).unwrap();
     let second = proxy(true).resolve(&key, &headers(&[], &[])).unwrap();
@@ -111,6 +121,18 @@ fn unidentified_probe_has_fresh_identity_and_malformed_headers_never_downgrade()
     assert!(
         proxy(true)
             .resolve(&key, &headers(&["bad"], &["bad"]))
-            .is_err()
+            .unwrap()
+            .is_unidentified()
     );
+}
+
+#[test]
+fn invalid_source_configuration_still_fails_validation() {
+    let policy = CallerIdentityPolicy::NewApi {
+        source_id: "invalid-source".into(),
+        allow_unidentified: false,
+    };
+    let key = ClientApiKeyId::new("key_shared").unwrap();
+    assert!(policy.validate().is_err());
+    assert!(policy.resolve(&key, &headers(&[], &[])).is_err());
 }

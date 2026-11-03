@@ -307,25 +307,63 @@ async fn direct_and_newapi_http_json_sse_preserve_auth_key_and_record_distinct_c
     }
 }
 #[tokio::test]
-async fn newapi_rejects_duplicate_partial_and_malformed_headers_before_execution() {
-    let fixture = fixture(proxy(false)).await;
-    let mut duplicate = request(false, Some("1"), Some("2"));
-    duplicate
-        .headers_mut()
-        .append("x-cpr-user-id", "1".parse().unwrap());
-    for request in [
-        request(false, None, None),
-        request(false, Some("1"), None),
-        request(false, Some("01"), Some("2")),
-        request(false, Some("1,2"), Some("2")),
-        duplicate,
-    ] {
-        let response = fixture.app.clone().oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+async fn newapi_identity_errors_preserve_http_and_sse_requests_in_the_configured_fallback_scope() {
+    for isolated in [false, true] {
+        let fixture = fixture(proxy(isolated)).await;
+        for stream in [false, true] {
+            let mut duplicate = request(stream, Some("1"), Some("2"));
+            duplicate
+                .headers_mut()
+                .append("x-cpr-user-id", "1".parse().unwrap());
+            for request in [
+                request(stream, None, None),
+                request(stream, Some("1"), None),
+                request(stream, None, Some("2")),
+                request(stream, Some("01"), Some("2")),
+                request(stream, Some("1,2"), Some("2")),
+                duplicate,
+            ] {
+                let response = fixture.app.clone().oneshot(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                assert!(
+                    !to_bytes(response.into_body(), 1024 * 1024)
+                        .await
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+        }
+        let calls = fixture.provider.0.lock().unwrap();
+        let records = fixture.store.0.lock().unwrap();
+        assert_eq!(calls.len(), 12);
+        assert_eq!(records.len(), calls.len());
+        for (record, (caller, key)) in records.iter().zip(calls.iter()) {
+            assert_eq!(key, "key_api_test");
+            if isolated {
+                assert!(caller.is_unidentified());
+            } else {
+                assert_eq!(
+                    caller,
+                    &CallerIdentity::direct(&ClientApiKeyId::new(key).unwrap())
+                );
+            }
+            assert_eq!(record.caller_identity.as_ref(), Some(caller));
+        }
     }
+}
+#[tokio::test]
+async fn identity_fallback_does_not_bypass_client_key_authentication() {
+    let fixture = fixture(proxy(false)).await;
+    let mut request = request(false, None, None);
+    request
+        .headers_mut()
+        .insert("authorization", "Bearer wrong-key".parse().unwrap());
+    let response = fixture.app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert!(fixture.provider.0.lock().unwrap().is_empty());
     assert!(fixture.store.0.lock().unwrap().is_empty());
 }
+
 #[tokio::test]
 async fn optional_probe_requests_get_fresh_callers_and_cannot_continue_responses() {
     let fixture = fixture(proxy(true)).await;
@@ -363,7 +401,12 @@ async fn optional_probe_requests_get_fresh_callers_and_cannot_continue_responses
 #[tokio::test]
 async fn responses_websocket_keeps_handshake_identity_and_rejects_changed_source_before_next_turn()
 {
-    for policy in [CallerIdentityPolicy::Direct, proxy(false)] {
+    for (policy, identity) in [
+        (CallerIdentityPolicy::Direct, Some(("1", "11"))),
+        (proxy(false), Some(("1", "11"))),
+        (proxy(false), None),
+        (proxy(false), Some(("01", "11"))),
+    ] {
         let fixture = fixture(policy.clone()).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -377,12 +420,14 @@ async fn responses_websocket_keeps_handshake_identity_and_rejects_changed_source
             "authorization",
             "Bearer synthetic-shared-key".parse().unwrap(),
         );
-        request
-            .headers_mut()
-            .insert("x-cpr-user-id", "1".parse().unwrap());
-        request
-            .headers_mut()
-            .insert("x-cpr-token-id", "11".parse().unwrap());
+        if let Some((user, token)) = identity {
+            request
+                .headers_mut()
+                .insert("x-cpr-user-id", user.parse().unwrap());
+            request
+                .headers_mut()
+                .insert("x-cpr-token-id", token.parse().unwrap());
+        }
         let (mut socket, _) = connect_async(request).await.unwrap();
         socket.send(Message::text(json!({"type":"response.create","model":"model-a","input":"synthetic","stream":true}).to_string())).await.unwrap();
         loop {
@@ -399,6 +444,22 @@ async fn responses_websocket_keeps_handshake_identity_and_rejects_changed_source
             }
         }
         assert_eq!(fixture.provider.0.lock().unwrap().len(), 1);
+        {
+            let calls = fixture.provider.0.lock().unwrap();
+            let expected = if matches!(policy, CallerIdentityPolicy::NewApi { .. })
+                && identity == Some(("1", "11"))
+            {
+                CallerIdentity::NewApi {
+                    source_id: SOURCE.into(),
+                    user_id: "1".into(),
+                    token_id: "11".into(),
+                }
+            } else {
+                CallerIdentity::direct(&ClientApiKeyId::new("key_api_test").unwrap())
+            };
+            assert_eq!(calls[0].0, expected);
+            assert_eq!(calls[0].1, "key_api_test");
+        }
         if matches!(policy, CallerIdentityPolicy::NewApi { .. }) {
             fixture.snapshots.publish(identity_snapshot(
                 CallerIdentityPolicy::NewApi {
@@ -428,6 +489,63 @@ async fn responses_websocket_keeps_handshake_identity_and_rejects_changed_source
         let _ = socket.close(None).await;
         server.abort();
     }
+}
+
+#[tokio::test]
+async fn fallback_can_continue_direct_sessions_but_never_claims_a_trusted_users_response() {
+    let fixture = fixture(proxy(false)).await;
+    let key = ClientApiKeyId::new("key_api_test").unwrap();
+    for (response, caller) in [
+        ("resp_direct", CallerIdentity::direct(&key)),
+        (
+            "resp_user",
+            CallerIdentity::NewApi {
+                source_id: SOURCE.into(),
+                user_id: "1".into(),
+                token_id: "11".into(),
+            },
+        ),
+    ] {
+        fixture.continuations.0.lock().unwrap().push(
+            NativeContinuationPin::new(
+                PreviousResponseId::new(response),
+                PreviousResponseId::new(format!("upstream_{response}")),
+                key.clone(),
+                ProviderKind::new("openai").unwrap(),
+                ProviderAccountId::new("acct_api_test").unwrap(),
+            )
+            .with_caller_identity(caller)
+            .with_scope(gateway_core::engine::continuation::NativeContinuationScope::Persisted),
+        );
+    }
+    for (user, token, previous, allowed) in [
+        (None, None, "resp_direct", true),
+        (Some("bad"), Some("11"), "resp_direct", true),
+        (Some("1"), Some("11"), "resp_direct", false),
+        (None, None, "resp_user", false),
+        (Some("bad"), Some("11"), "resp_user", false),
+        (Some("1"), Some("11"), "resp_user", true),
+        (Some("1"), Some("12"), "resp_user", false),
+    ] {
+        let mut request = request(false, user, token);
+        *request.body_mut() = Body::from(
+            json!({"model":"model-a","input":"next","previous_response_id":previous}).to_string(),
+        );
+        let response = fixture.app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        assert_eq!(
+            status,
+            if allowed {
+                StatusCode::OK
+            } else {
+                StatusCode::FORBIDDEN
+            },
+            "{user:?}:{token:?} {previous}: {}",
+            String::from_utf8_lossy(&body)
+        );
+    }
+    assert_eq!(fixture.provider.0.lock().unwrap().len(), 3);
 }
 
 #[tokio::test]
