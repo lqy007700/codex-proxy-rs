@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use gateway_admin::model::system::{
-    SystemUpdateChannel as UpdateChannel, SystemUpdateDetail, SystemUpdatePolicy,
+    SystemDowngradeVersion, SystemUpdateChannel as UpdateChannel, SystemUpdateDetail,
+    SystemUpdatePolicy,
 };
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -13,6 +14,7 @@ use tokio::sync::Mutex;
 use super::{OperationError, SystemUpdateConfig, conflict, invalid, upstream};
 
 const APP_BINARY_NAME: &str = "codex-proxy-rs";
+const MAX_DOWNGRADE_VERSIONS: usize = 5;
 const CACHE_TTL: Duration = Duration::from_secs(20 * 60);
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,7 +70,7 @@ impl ReleaseCache {
             return Ok(detail);
         }
         let sequence = self.request_sequence.fetch_add(1, Ordering::Relaxed) + 1;
-        match fetch_latest(
+        match fetch_releases(
             &config.github_api_base,
             repository,
             &config.version,
@@ -76,11 +78,13 @@ impl ReleaseCache {
         )
         .await
         {
-            Ok(release) => {
-                let detail = release.as_ref().map_or_else(
+            Ok(releases) => {
+                let mut detail = releases.latest.as_ref().map_or_else(
                     || base_update_detail(config, channel, config.update_support_error(), None),
                     |release| detail_from_release(config, release, channel),
                 );
+                detail.downgrade_versions =
+                    releases.downgrades.iter().map(downgrade_version).collect();
                 let mut entry = self.entry.lock().await;
                 // 较慢的旧请求不能覆盖或清除新检查的结果，包括切走再切回同一通道
                 if self.request_sequence.load(Ordering::Relaxed) == sequence {
@@ -116,13 +120,18 @@ impl ReleaseCache {
     }
 }
 
-/// 优先返回可升级的最高版本，没有候选时保留当前版本的发布信息
-pub(crate) async fn fetch_latest(
+pub(crate) struct ReleaseCandidates {
+    pub(crate) latest: Option<GitHubRelease>,
+    pub(crate) downgrades: Vec<GitHubRelease>,
+}
+
+/// 同一发行快照同时决定最高升级版本和最近五个降级版本
+pub(crate) async fn fetch_releases(
     api_base: &str,
     repository: &str,
     current_version: &str,
     channel: UpdateChannel,
-) -> Result<Option<GitHubRelease>, OperationError> {
+) -> Result<ReleaseCandidates, OperationError> {
     validate_api_base(api_base).map_err(conflict)?;
     validate_repository(repository)?;
     let base = api_base.trim_end_matches('/');
@@ -137,6 +146,7 @@ pub(crate) async fn fetch_latest(
     // 所有发行线先过滤再排序，避免更高大版本或其他实验遮住仍可安装的更新
     let prefer_fork = fork_revision(&current).is_ok_and(|revision| revision.is_some());
     let mut latest: Option<(semver::Version, GitHubRelease)> = None;
+    let mut downgrades: Vec<(semver::Version, GitHubRelease)> = Vec::new();
     let mut page = 1;
     loop {
         let releases: Vec<GitHubRelease> = fetch_release_json(
@@ -146,9 +156,34 @@ pub(crate) async fn fetch_latest(
         .await?;
         let last_page = releases.len() < 100;
         for release in releases {
-            let Some(version) = eligible_release_version(&release, &current, channel) else {
+            let Some(version) = parse_release_version(&release.tag_name) else {
                 continue;
             };
+            if release.draft || release.prerelease == version.pre.is_empty() {
+                continue;
+            }
+            if downgrade_target_allowed(&current, &version, channel) {
+                if !downgrades.iter().any(|(existing, _)| *existing == version) {
+                    downgrades.push((version, release));
+                    // SemVer 构建元数据不表达先后，排序时为混合发行补齐确定的全序
+                    downgrades.sort_by(|(left, _), (right, _)| {
+                        compare_release_versions(right, left)
+                            .then_with(|| {
+                                fork_revision(right)
+                                    .ok()
+                                    .flatten()
+                                    .is_some()
+                                    .cmp(&fork_revision(left).ok().flatten().is_some())
+                            })
+                            .then_with(|| right.cmp(left))
+                    });
+                    downgrades.truncate(MAX_DOWNGRADE_VERSIONS);
+                }
+                continue;
+            }
+            if version != current && !update_target_allowed(&current, &version, channel) {
+                continue;
+            }
             if latest.as_ref().is_none_or(|(previous, _)| {
                 // 同基础版本的其他发行标识不能遮住本仓库的最高迭代
                 let comparison = compare_release_versions(&version, previous);
@@ -162,22 +197,13 @@ pub(crate) async fn fetch_latest(
             }
         }
         if last_page {
-            return Ok(latest.map(|(_, release)| release));
+            return Ok(ReleaseCandidates {
+                latest: latest.map(|(_, release)| release),
+                downgrades: downgrades.into_iter().map(|(_, release)| release).collect(),
+            });
         }
         page += 1;
     }
-}
-
-fn eligible_release_version(
-    release: &GitHubRelease,
-    current: &semver::Version,
-    channel: UpdateChannel,
-) -> Option<semver::Version> {
-    let version = parse_release_version(&release.tag_name)?;
-    (!release.draft
-        && release.prerelease != version.pre.is_empty()
-        && (version == *current || update_target_allowed(current, &version, channel)))
-    .then_some(version)
 }
 
 async fn fetch_release_json<T: serde::de::DeserializeOwned>(
@@ -217,6 +243,7 @@ pub(crate) fn detail_from_release(
         return base_update_detail(config, channel, unsupported_reason, None);
     }
     SystemUpdateDetail {
+        downgrade_versions: Vec::new(),
         policy: update_policy(config, channel),
         current_version: config.version.clone(),
         latest_version,
@@ -421,8 +448,26 @@ fn update_target_allowed(
     target: &semver::Version,
     selected: UpdateChannel,
 ) -> bool {
+    compare_release_versions(target, current).is_gt()
+        && target_channel_allowed(current, target, selected)
+}
+
+fn downgrade_target_allowed(
+    current: &semver::Version,
+    target: &semver::Version,
+    selected: UpdateChannel,
+) -> bool {
+    compare_release_versions(target, current).is_lt()
+        && target_channel_allowed(current, target, selected)
+}
+
+fn target_channel_allowed(
+    current: &semver::Version,
+    target: &semver::Version,
+    selected: UpdateChannel,
+) -> bool {
     use UpdateChannel::{Alpha, Beta, Experimental, Rc, Stable};
-    if current.major != target.major || !compare_release_versions(target, current).is_gt() {
+    if current.major != target.major {
         return false;
     }
     let (Some(current_channel), Some(target_channel)) =
@@ -459,6 +504,42 @@ pub(crate) fn validate_update_target(
         ));
     }
     Ok(())
+}
+
+pub(crate) fn validate_downgrade_target(
+    current: &str,
+    target: &str,
+    channel: UpdateChannel,
+) -> Result<(), OperationError> {
+    let current = parse_release_version(current).ok_or_else(|| conflict("当前版本格式无效"))?;
+    let target = parse_release_version(target).ok_or_else(|| invalid("目标版本号格式无效"))?;
+    if !downgrade_target_allowed(&current, &target, channel) {
+        return Err(conflict(
+            "降级目标必须低于当前版本，且属于所选通道、同一大版本和实验线",
+        ));
+    }
+    Ok(())
+}
+
+fn downgrade_version(release: &GitHubRelease) -> SystemDowngradeVersion {
+    let version = normalize_version(&release.tag_name);
+    let unsupported_reason = select_archive(release, &version)
+        .map_err(|error| error.message().to_owned())
+        .and_then(|_| {
+            release
+                .assets
+                .iter()
+                .any(|asset| asset.name == "checksums.txt")
+                .then_some(())
+                .ok_or_else(|| "此版本缺少 checksums.txt 校验文件".to_owned())
+        })
+        .err();
+    SystemDowngradeVersion {
+        version,
+        release_url: release.html_url.clone(),
+        notes: release.body.clone().or_else(|| release.name.clone()),
+        unsupported_reason,
+    }
 }
 
 fn repository_character(character: char) -> bool {
@@ -582,6 +663,7 @@ pub(super) fn base_update_detail(
     warning: Option<String>,
 ) -> SystemUpdateDetail {
     SystemUpdateDetail {
+        downgrade_versions: Vec::new(),
         policy: update_policy(config, channel),
         current_version: config.version.clone(),
         latest_version: config.version.clone(),

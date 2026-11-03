@@ -403,6 +403,7 @@ async fn update_should_restore_all_files_when_plugin_revision_changes_during_swa
         Arc::new(ChangingRevisionPreflight {
             confirmations: AtomicUsize::new(0),
         }),
+        gateway_admin::model::system::SystemUpdateMode::Upgrade,
     )
     .await
     .expect("update accepted");

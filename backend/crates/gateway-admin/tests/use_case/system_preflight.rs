@@ -265,8 +265,16 @@ impl SystemOperations for PreflightingSystem {
         _: Option<String>,
         _: Option<gateway_admin::model::system::SystemUpdateChannel>,
         preflight: Arc<dyn SystemUpdatePreflight>,
+        mode: gateway_admin::model::system::SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
-        let revision = preflight.validate(self.candidate.clone()).await?;
+        let revision = match mode {
+            gateway_admin::model::system::SystemUpdateMode::Upgrade => {
+                preflight.validate(self.candidate.clone()).await?
+            }
+            gateway_admin::model::system::SystemUpdateMode::Downgrade => {
+                preflight.validate_downgrade(self.candidate.clone()).await?
+            }
+        };
         preflight.confirm_revision(revision).await?;
         Ok(SystemOperationAccepted::Update {
             operation_id: "fixture".into(),
@@ -337,7 +345,11 @@ async fn system_update_accepts_compatible_enabled_plugins_at_the_same_revision()
 
     services
         .system()
-        .perform_update(Some("1.2.0".into()), None)
+        .perform_update(
+            Some("1.2.0".into()),
+            None,
+            gateway_admin::model::system::SystemUpdateMode::Upgrade,
+        )
         .await
         .expect("compatible update");
 }
@@ -373,7 +385,11 @@ async fn system_update_rejects_revision_changes() {
     assert!(
         services
             .system()
-            .perform_update(Some("1.2.0".into()), None)
+            .perform_update(
+                Some("1.2.0".into()),
+                None,
+                gateway_admin::model::system::SystemUpdateMode::Upgrade
+            )
             .await
             .is_err()
     );
@@ -399,7 +415,11 @@ async fn system_update_accepts_new_plugin_contracts_for_empty_disabled_and_enabl
             .await;
         services
             .system()
-            .perform_update(Some("1.2.0".into()), None)
+            .perform_update(
+                Some("1.2.0".into()),
+                None,
+                gateway_admin::model::system::SystemUpdateMode::Upgrade,
+            )
             .await
             .expect("plugin confirmation is deferred until restart");
     }
@@ -428,7 +448,11 @@ async fn system_update_keeps_release_identity_validation_without_plugins() {
         assert!(
             services
                 .system()
-                .perform_update(Some("1.2.0".into()), None)
+                .perform_update(
+                    Some("1.2.0".into()),
+                    None,
+                    gateway_admin::model::system::SystemUpdateMode::Upgrade
+                )
                 .await
                 .is_err(),
             "{field}"
@@ -450,7 +474,11 @@ async fn system_update_still_rechecks_revision_without_plugins() {
     assert!(
         services
             .system()
-            .perform_update(Some("1.2.0".into()), None)
+            .perform_update(
+                Some("1.2.0".into()),
+                None,
+                gateway_admin::model::system::SystemUpdateMode::Upgrade
+            )
             .await
             .is_err()
     );
@@ -603,4 +631,31 @@ async fn changed_configuration_after_restart_check_requires_a_new_confirmation()
             .is_err()
     );
     assert!(fixture.disabled.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn downgrade_requires_compatible_enabled_plugins_without_modifying_configuration() {
+    for (capability, compatible) in [("executor", true), ("models", false)] {
+        let fixture = Fixture::new(requirements("^1.0", "executor"), &[7]);
+        let services = super::AdminHarness::new()
+            .plugins(fixture.clone(), fixture.clone())
+            .system(Arc::new(PreflightingSystem {
+                candidate: candidate(capability),
+            }))
+            .build()
+            .await;
+        let result = services
+            .system()
+            .perform_update(
+                Some("1.2.0".into()),
+                None,
+                gateway_admin::model::system::SystemUpdateMode::Downgrade,
+            )
+            .await;
+        assert_eq!(result.is_ok(), compatible);
+        if !compatible {
+            assert!(result.unwrap_err().message().contains("Enabled fixture"));
+        }
+        assert!(fixture.disabled.lock().unwrap().is_empty());
+    }
 }

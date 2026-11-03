@@ -36,6 +36,25 @@ pub struct SystemUpdatePolicy {
     pub available_channels: Vec<SystemUpdateChannel>,
 }
 
+/// 安装意图由调用者明确确认，默认升级不能隐式接受旧版本
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SystemUpdateMode {
+    #[default]
+    Upgrade,
+    Downgrade,
+}
+
+/// 最近历史发行及当前平台的安装可用性
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemDowngradeVersion {
+    pub version: String,
+    pub release_url: Option<String>,
+    pub notes: Option<String>,
+    pub unsupported_reason: Option<String>,
+}
+
 /// 当前运行版本及更新检查摘要
 ///
 /// `deployment_mode_label` 之类的本地化字符串由 API 根据原始枚举值生成
@@ -57,6 +76,7 @@ pub struct SystemVersion {
 /// 部署模式与构建类型的展示标签归 API；其余字段均为 Host 已确认的原始事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemUpdateDetail {
+    pub downgrade_versions: Vec<SystemDowngradeVersion>,
     pub policy: SystemUpdatePolicy,
     pub current_version: String,
     pub latest_version: String,

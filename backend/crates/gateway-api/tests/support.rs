@@ -120,6 +120,7 @@ impl SystemOperations for VersionSystem {
         _: Option<String>,
         _: Option<gateway_admin::model::system::SystemUpdateChannel>,
         _: std::sync::Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
+        _mode: gateway_admin::model::system::SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
         unreachable!("client route must not perform updates")
     }

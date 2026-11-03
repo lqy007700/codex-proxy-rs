@@ -62,6 +62,25 @@ impl SystemUpdatePreflight for PluginSystemUpdatePreflight {
         self.validate(candidate).await
     }
 
+    async fn validate_downgrade(
+        &self,
+        candidate: SystemUpdateCandidate,
+    ) -> Result<Revision, SystemOperationError> {
+        let plan = self.plan(Some(candidate)).await?;
+        if !plan.incompatible_plugins.is_empty() {
+            let reasons = plan
+                .incompatible_plugins
+                .iter()
+                .map(|plugin| format!("{}（{}）", plugin.name, plugin.reason))
+                .collect::<Vec<_>>()
+                .join("、");
+            return Err(conflict(format!(
+                "无法确认以下启用插件与降级目标兼容，请先处理：{reasons}"
+            )));
+        }
+        Revision::new(plan.config_revision).map_err(|_| internal("插件配置版本无效"))
+    }
+
     async fn confirm_revision(&self, expected: Revision) -> Result<(), SystemOperationError> {
         let current = self
             .store

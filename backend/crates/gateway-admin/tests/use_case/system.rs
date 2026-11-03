@@ -45,6 +45,7 @@ impl SystemOperations for RecordingSystemOperations {
         _: Option<gateway_admin::model::system::SystemUpdateChannel>,
     ) -> Result<SystemUpdateDetail, SystemOperationError> {
         Ok(SystemUpdateDetail {
+            downgrade_versions: Vec::new(),
             policy: gateway_admin::model::system::SystemUpdatePolicy {
                 channel: gateway_admin::model::system::SystemUpdateChannel::Stable,
                 available_channels: vec![gateway_admin::model::system::SystemUpdateChannel::Stable],
@@ -72,6 +73,7 @@ impl SystemOperations for RecordingSystemOperations {
         target_version: Option<String>,
         channel: Option<gateway_admin::model::system::SystemUpdateChannel>,
         _: std::sync::Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
+        _mode: gateway_admin::model::system::SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
         *self.target.lock().expect("target") = Some(target_version.clone());
         *self.channel.lock().expect("channel") = channel;
@@ -159,7 +161,11 @@ async fn system_update_should_normalize_blank_target_to_latest() {
         .await;
     services
         .system()
-        .perform_update(Some("   ".to_owned()), None)
+        .perform_update(
+            Some("   ".to_owned()),
+            None,
+            gateway_admin::model::system::SystemUpdateMode::Upgrade,
+        )
         .await
         .expect("perform update");
 
@@ -176,7 +182,11 @@ async fn system_update_should_forward_the_confirmed_channel() {
     let channel = gateway_admin::model::system::SystemUpdateChannel::Beta;
     services
         .system()
-        .perform_update(Some(" 1.2.0-beta.1 ".into()), Some(channel))
+        .perform_update(
+            Some(" 1.2.0-beta.1 ".into()),
+            Some(channel),
+            gateway_admin::model::system::SystemUpdateMode::Upgrade,
+        )
         .await
         .expect("accepted");
     assert_eq!(

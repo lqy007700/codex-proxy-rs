@@ -19,9 +19,10 @@ use axum::{
 };
 use futures::{Stream, StreamExt};
 use gateway_admin::model::system::{
-    SystemOperationAccepted, SystemOperationKind, SystemOperationState, SystemOperationStatus,
-    SystemRestartPlan, SystemUpdateChannel, SystemUpdateDetail, SystemUpdateEvent,
-    SystemUpdateEventLevel, SystemUpdatePolicy, SystemUpdateStatus, SystemVersion,
+    SystemDowngradeVersion, SystemOperationAccepted, SystemOperationKind, SystemOperationState,
+    SystemOperationStatus, SystemRestartPlan, SystemUpdateChannel, SystemUpdateDetail,
+    SystemUpdateEvent, SystemUpdateEventLevel, SystemUpdateMode, SystemUpdatePolicy,
+    SystemUpdateStatus, SystemVersion,
 };
 use serde::{Deserialize, Serialize};
 
@@ -55,6 +56,8 @@ impl UpdateDetailQuery {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateRequest {
+    #[serde(default)]
+    mode: SystemUpdateMode,
     target_version: String,
     channel: Option<SystemUpdateChannel>,
 }
@@ -102,6 +105,7 @@ impl From<SystemVersion> for SystemVersionView {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SystemUpdateDetailView {
+    downgrade_versions: Vec<SystemDowngradeVersion>,
     policy: SystemUpdatePolicy,
     current_version: String,
     latest_version: String,
@@ -123,6 +127,7 @@ impl From<SystemUpdateDetail> for SystemUpdateDetailView {
         Self {
             deployment_mode_label: deployment_mode_label(&detail.deployment_mode).to_owned(),
             build_type_label: build_type_label(&detail.build_type),
+            downgrade_versions: detail.downgrade_versions,
             policy: detail.policy,
             current_version: detail.current_version,
             latest_version: detail.latest_version,
@@ -323,13 +328,14 @@ async fn perform_update<S>(
 where
     S: SessionState + Send + Sync,
 {
-    let (target, channel) = payload.map_or((None, None), |AdminJson(value)| {
-        (Some(value.target_version), value.channel)
-    });
+    let (target, channel, mode) = payload.map_or(
+        (None, None, SystemUpdateMode::Upgrade),
+        |AdminJson(value)| (Some(value.target_version), value.channel, value.mode),
+    );
     let result = state
         .admin_services()
         .system()
-        .perform_update(target, channel)
+        .perform_update(target, channel, mode)
         .await
         .map_err(map_system_error)?;
     let SystemOperationAccepted::Update {

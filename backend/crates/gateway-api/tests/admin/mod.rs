@@ -1829,6 +1829,7 @@ impl SystemOperations for UnusedSystem {
         _: Option<String>,
         _: Option<gateway_admin::model::system::SystemUpdateChannel>,
         _: Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
+        _mode: gateway_admin::model::system::SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
         Err(unavailable_system())
     }

@@ -1,6 +1,7 @@
 //! 系统更新测试入口与发行包、前置校验和本地安装夹具
 
 mod channels;
+mod downgrade;
 mod download;
 mod events;
 mod installation;
@@ -106,8 +107,14 @@ impl TestSystemUpdate for ProcessSystemOperations {
         &self,
         target: Option<String>,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
-        SystemOperations::perform_update(self, target, None, Arc::new(AllowingUpdatePreflight))
-            .await
+        SystemOperations::perform_update(
+            self,
+            target,
+            None,
+            Arc::new(AllowingUpdatePreflight),
+            gateway_admin::model::system::SystemUpdateMode::Upgrade,
+        )
+        .await
     }
 }
 

@@ -13,8 +13,8 @@ use futures::{StreamExt as _, stream};
 use gateway_admin::{
     model::system::{
         SystemOperationAccepted, SystemOperationKind, SystemOperationState, SystemOperationStatus,
-        SystemUpdateDetail, SystemUpdateEvent, SystemUpdateEventLevel, SystemUpdateStatus,
-        SystemVersion,
+        SystemUpdateDetail, SystemUpdateEvent, SystemUpdateEventLevel, SystemUpdateMode,
+        SystemUpdateStatus, SystemVersion,
     },
     ports::system::{SystemOperationError, SystemOperations, SystemUpdateEventStream},
 };
@@ -136,8 +136,11 @@ fn app(state: AdminTestState) -> Router {
 #[tokio::test]
 async fn update_detail_should_compress_json_starting_at_one_kib() {
     async fn detail(notes: String, encoding: &str) -> axum::response::Response {
-        let fixture =
-            AdminTestFixture::with_system(Arc::new(ProgressSystem { notes: Some(notes) })).await;
+        let fixture = AdminTestFixture::with_system(Arc::new(ProgressSystem {
+            notes: Some(notes),
+            ..Default::default()
+        }))
+        .await;
         fixture.auth.insert_session("valid-session");
         crate::openai::api_router_with_admin(fixture.services)
             .oneshot(
@@ -180,6 +183,7 @@ async fn update_detail_should_compress_json_starting_at_one_kib() {
 
 #[derive(Default)]
 struct ProgressSystem {
+    expected_mode: SystemUpdateMode,
     notes: Option<String>,
 }
 
@@ -196,6 +200,7 @@ impl SystemOperations for ProgressSystem {
     ) -> Result<SystemUpdateDetail, SystemOperationError> {
         use gateway_admin::model::system::{SystemUpdateChannel, SystemUpdatePolicy};
         Ok(SystemUpdateDetail {
+            downgrade_versions: Vec::new(),
             policy: SystemUpdatePolicy {
                 channel: channel.unwrap_or(SystemUpdateChannel::Stable),
                 available_channels: vec![SystemUpdateChannel::Stable, SystemUpdateChannel::Beta],
@@ -237,7 +242,9 @@ impl SystemOperations for ProgressSystem {
         target: Option<String>,
         _: Option<gateway_admin::model::system::SystemUpdateChannel>,
         _: Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
+        mode: gateway_admin::model::system::SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
+        assert_eq!(mode, self.expected_mode);
         Ok(SystemOperationAccepted::Update {
             operation_id: "update-1".to_owned(),
             deployment_mode: "docker".to_owned(),
@@ -313,4 +320,40 @@ async fn update_detail_should_validate_and_forward_the_temporary_channel() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn update_should_forward_explicit_downgrade_mode_and_default_to_upgrade() {
+    for (mode, payload) in [
+        (SystemUpdateMode::Upgrade, r#"{"targetVersion":"0.2.0"}"#),
+        (
+            SystemUpdateMode::Downgrade,
+            r#"{"targetVersion":"0.0.9","mode":"downgrade"}"#,
+        ),
+    ] {
+        let fixture = AdminTestFixture::with_system(Arc::new(ProgressSystem {
+            expected_mode: mode,
+            ..Default::default()
+        }))
+        .await;
+        fixture.auth.insert_session("valid-session");
+        let response = app(fixture.state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/admin/system/update")
+                    .header(header::COOKIE, "cpr_session=valid-session")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("x-request-id", "req_downgrade_mode")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+    assert!(
+        serde_json::from_str::<UpdateRequest>(r#"{"targetVersion":"0.0.9","mode":"invalid"}"#)
+            .is_err()
+    );
 }

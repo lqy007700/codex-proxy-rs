@@ -1,4 +1,4 @@
-import type { SystemRestartPlan, SystemUpdateChannel, SystemUpdatePolicy, SystemUpdateStatus } from '@/api'
+import type { SystemRestartPlan, SystemUpdateChannel, SystemUpdateMode, SystemUpdatePolicy, SystemUpdateStatus } from '@/api'
 import { until, useEventSource, useTimeoutPoll } from '@vueuse/core'
 import { delay } from 'es-toolkit'
 import { defineStore } from 'pinia'
@@ -115,15 +115,16 @@ export const useSystemUpdateStore = defineStore('system-update', () => {
     && statusAvailable.value && !needRestart.value && !UPDATE_BUSY_PHASES.has(phaseKind.value))
   const hasUpdate = computed(() => Boolean(version.value?.hasUpdate))
   const hasCandidateUpdate = computed(() => Boolean(updateInfo.value?.hasUpdate))
-  const canUpdate = computed(
+  const canInstall = computed(
     () =>
-      hasCandidateUpdate.value
-      && statusAvailable.value
+      statusAvailable.value
       && updateInfo.value?.policy.channel === selectedChannel.value
       && Boolean(updateInfo.value?.updateSupported)
       && !needRestart.value
       && !UPDATE_BUSY_PHASES.has(phaseKind.value),
   )
+
+  const canUpdate = computed(() => canInstall.value && hasCandidateUpdate.value)
 
   function setPhase(next: SystemUpdatePhase) {
     phase.value = next
@@ -359,6 +360,13 @@ export const useSystemUpdateStore = defineStore('system-update', () => {
       await refreshUpdateStatus()
       return updateInfo.value
     }
+    catch (error: unknown) {
+      if (generation !== detailGeneration)
+        return
+      updateInfo.value = null
+      updateError.value = errorMessage(error)
+      throw error
+    }
     finally {
       if (generation === detailGeneration && phaseKind.value === 'checking')
         settlePhase()
@@ -394,10 +402,12 @@ export const useSystemUpdateStore = defineStore('system-update', () => {
     }
   }
 
-  async function updateNow(targetVersion: string, channel: SystemUpdateChannel) {
+  async function updateNow(targetVersion: string, channel: SystemUpdateChannel, mode: SystemUpdateMode = 'upgrade') {
     const confirmedTargetVersion = normalizeSystemVersion(targetVersion)
-    if (!canUpdate.value || !confirmedTargetVersion || channel !== selectedChannel.value
-      || confirmedTargetVersion !== normalizeSystemVersion(updateInfo.value?.latestVersion)) {
+    const candidateAllowed = mode === 'downgrade'
+      ? updateInfo.value?.downgradeVersions.some(candidate => candidate.version === confirmedTargetVersion && !candidate.unsupportedReason)
+      : hasCandidateUpdate.value && confirmedTargetVersion === normalizeSystemVersion(updateInfo.value?.latestVersion)
+    if (!canInstall.value || !confirmedTargetVersion || channel !== selectedChannel.value || !candidateAllowed) {
       return null
     }
 
@@ -411,7 +421,7 @@ export const useSystemUpdateStore = defineStore('system-update', () => {
     setPhase({ kind: 'updating' })
     try {
       await connectUpdateEvents(true)
-      const result = await performSystemUpdate({ targetVersion: confirmedTargetVersion, channel }, { silent: true })
+      const result = await performSystemUpdate({ targetVersion: confirmedTargetVersion, channel, mode }, { silent: true })
       activeOperationId = result.operationId
       updateLogs.value = updateLogs.value.filter(event => event.operationId === result.operationId)
       return result
@@ -518,6 +528,7 @@ export const useSystemUpdateStore = defineStore('system-update', () => {
     hasUpdate,
     hasCandidateUpdate,
     canUpdate,
+    canInstall,
     loadVersion,
     loadSystem,
     checkUpdates,

@@ -20,6 +20,7 @@ import { checkSystemRestart } from '@/api'
 import { normalizeSystemVersion, useSystemUpdateStore } from '@/stores/modules/system-update'
 import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
+import DowngradeDialog from './DowngradeDialog.vue'
 import {
   resolveSystemUpdateLogClasses,
   resolveSystemUpdatePresentation,
@@ -42,15 +43,18 @@ const {
   updateError,
   lastFailedOperation,
   needRestart,
+  restartTargetVersion,
   updateLogs,
   updateStreaming,
   updateStreamError,
   hasCandidateUpdate: hasUpdate,
   canUpdate,
+  canInstall,
 } = storeToRefs(systemUpdateStore)
 const { loadSystem, checkUpdates, changeChannel, updateNow, restartNow } = systemUpdateStore
 
 const updateLogScrollbar = useTemplateRef<InstanceType<typeof ZScrollbar>>('updateLogScrollbar')
+const downgradeOpen = shallowRef(false)
 const updateConfirmOpen = shallowRef(false)
 const updateConfirmInfo = shallowRef<SystemUpdateDetail | null>(null)
 const updateConfirmPreviousTarget = shallowRef('')
@@ -198,6 +202,29 @@ async function handleConfirmUpdate() {
   await runConfirmedUpdate(targetVersion, channel)
 }
 
+async function refreshDowngradeVersions() {
+  try {
+    await checkUpdates(true)
+  }
+  catch {}
+}
+
+async function handleOpenDowngrade() {
+  downgradeOpen.value = true
+  await refreshDowngradeVersions()
+}
+
+async function handleDowngrade(targetVersion: string, channel: SystemUpdateChannel) {
+  downgradeOpen.value = false
+  await nextTick()
+  try {
+    const result = await updateNow(targetVersion, channel, 'downgrade')
+    if (result)
+      ZNotification.success({ message: '降级已开始' })
+  }
+  catch {}
+}
+
 async function handleRestart() {
   if (checkingRestart.value || restarting.value)
     return
@@ -330,6 +357,10 @@ watch(
           </div>
         </div>
 
+        <p v-if="needRestart && restartTargetVersion" class="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-cp-sm">
+          <span class="text-cp-text-secondary">待生效版本</span>
+          <strong class="wrap-anywhere font-mono font-heavy text-cp-text">v{{ restartTargetVersion }}</strong>
+        </p>
         <p v-if="updateInfo?.unsupportedReason" class="m-0 text-cp-sm text-cp-text-secondary">
           {{ updateInfo.unsupportedReason }}
         </p>
@@ -449,7 +480,7 @@ watch(
           :options="channelOptions"
           aria-label="更新通道"
           size="small"
-          :disabled="!canChangeChannel || preparingUpdate || updateConfirmOpen"
+          :disabled="!canChangeChannel || preparingUpdate || updateConfirmOpen || downgradeOpen"
           @update:model-value="handleChannelChange"
         />
         <ZPopover placement="top-start">
@@ -469,6 +500,15 @@ watch(
           </div>
         </ZPopover>
       </div>
+      <ZButton
+        :disabled="!canInstall || preparingUpdate || updateConfirmOpen || downgradeOpen"
+        @click="handleOpenDowngrade"
+      >
+        <template #icon>
+          <History class="size-3.5" />
+        </template>
+        版本降级
+      </ZButton>
       <ZButton
         :loading="checking"
         :disabled="loading || updating || restarting || changingChannel || preparingUpdate"
@@ -508,6 +548,17 @@ watch(
       </ZButton>
     </template>
   </ZDialog>
+
+  <DowngradeDialog
+    v-model="downgradeOpen"
+    :info="updateInfo"
+    :current-version="version?.version ?? updateInfo?.currentVersion ?? ''"
+    :error="updateError"
+    :loading="checking || changingChannel"
+    :can-install="canInstall"
+    @refresh="refreshDowngradeVersions"
+    @confirm="handleDowngrade"
+  />
 
   <ZConfirmDialog
     v-model="restartConfirmOpen"

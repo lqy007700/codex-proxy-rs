@@ -8,7 +8,7 @@ use futures::Stream;
 use crate::model::Revision;
 use crate::model::system::{
     SystemOperationAccepted, SystemUpdateChannel, SystemUpdateDetail, SystemUpdateEvent,
-    SystemUpdateStatus, SystemVersion,
+    SystemUpdateMode, SystemUpdateStatus, SystemVersion,
 };
 
 /// Host 已校验并解包的同一更新候选；字节只含发行清单，不含运行配置或凭据
@@ -115,6 +115,14 @@ pub trait SystemUpdatePreflight: Send + Sync {
         self.validate(candidate).await
     }
 
+    /// 历史版本可能没有重启风险确认能力，降级前必须确认插件兼容
+    async fn validate_downgrade(
+        &self,
+        candidate: SystemUpdateCandidate,
+    ) -> Result<Revision, SystemOperationError> {
+        self.validate_rollback(candidate).await
+    }
+
     /// 在文件交换临界点复核全局配置 CAS，不能用较早快照掩盖实例变更
     async fn confirm_revision(&self, expected: Revision) -> Result<(), SystemOperationError>;
 }
@@ -146,6 +154,7 @@ pub trait SystemOperations: Send + Sync {
         target_version: Option<String>,
         channel: Option<SystemUpdateChannel>,
         preflight: Arc<dyn SystemUpdatePreflight>,
+        mode: SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, SystemOperationError>;
 
     async fn update_status(&self) -> Result<SystemUpdateStatus, SystemOperationError>;

@@ -2605,7 +2605,7 @@ Provider metadata 分别保留 `requestedServiceTier` 与 `upstreamServiceTier` 
 | `GET` | `/api/admin/system/version` | 无 | 当前构建、部署模式和可用更新 |
 | `GET` | `/api/admin/system/update/detail` | `refresh=true\|false`、`channel?` | 按临时通道读取或刷新 Release 详情 |
 | `GET` | `/api/admin/system/update/events` | 无 | SSE 更新事件流 |
-| `POST` | `/api/admin/system/update` | `{ targetVersion, channel? }` | 受理后台在线更新，返回 `202` |
+| `POST` | `/api/admin/system/update` | `{ targetVersion, channel?, mode? }` | 受理后台在线升级或降级，返回 `202` |
 | `GET` | `/api/admin/system/update/status` | 无 | 查询当前更新或回滚状态 |
 | `POST` | `/api/admin/system/rollback` | 无 | 回滚到保留的上一版本 |
 | `GET` | `/api/admin/system/restart/check` | 无 | 只读检查重启目标与启用插件 |
@@ -2618,7 +2618,8 @@ Provider metadata 分别保留 `requestedServiceTier` 与 `upstreamServiceTier` 
 实验实例仅允许 `exp`。不可用通道返回 `40901`，未知枚举值返回参数错误。
 执行时应同时发送页面确认的 `channel` 与 `targetVersion`，服务端冻结该通道并重新复核远端目标；
 省略通道时按运行版本推导。版本摘要接口始终检查运行通道，不受临时查询影响。
-检查与执行使用同一规则，禁止的通道转换、跨实验线、跨大版本、降级或同版本重装均以 `40901` 拒绝。
+检查与执行使用同一规则，禁止的通道转换、跨实验线、跨大版本或同版本重装均以 `40901` 拒绝。
+`mode` 为 `upgrade`（默认）或 `downgrade`，升级模式拒绝旧版本，降级模式拒绝当前及更高版本。
 `hasUpdate=true` 仅表示当前构建支持在线更新，且存在允许的更高版本；`latestVersion`、`releaseUrl` 和
 `notes` 对应这个候选。没有可升级候选时，`hasUpdate=false`、`latestVersion` 为当前版本，
 `releaseUrl` 和 `notes` 保留当前版本的已发布 Release 信息；找不到匹配当前版本的 Release 时为空。
@@ -2627,13 +2628,22 @@ Provider metadata 分别保留 `requestedServiceTier` 与 `upstreamServiceTier` 
 强制检查失败时通过 `warning` 返回错误，`hasUpdate=false`，不以旧缓存或“没有更新”掩盖失败。
 普通查询可复用 20 分钟内的结果，缓存按通道隔离，较慢的旧检查不能覆盖新检查结果。下载时仍会校验目标资产、校验和及归档
 
+详情的 `downgradeVersions` 按版本从近到远返回当前版本之前、所选通道内的最近 5 个发行，
+同样限制大版本与实验线，并计入二开发行迭代号；草稿、无效和重复版本不参与计数。
+每项包含 `version`、`releaseUrl`、`notes` 和 `unsupportedReason`，缺少当前平台安装包或校验文件时
+保留该项并返回不可用原因，不用更早版本补位。无历史版本、不支持更新或查询失败时返回空数组。
+降级执行会重新查询并校验目标仍在这 5 个发行中，目标移出范围或被删除时任务失败，不替换为其他版本。
+降级在文件替换前检查启用插件与目标发行的兼容性，不能确认兼容时拒绝安装，不修改插件配置。
+程序降级不会回退数据库与配置，调用者须提示备份和数据兼容风险
+
 更新 POST 在本地校验目标版本并持久化任务后返回 `202`，数据包含 `operationId`、`targetVersion`、
 `deploymentMode` 和 `message`，只表示已受理。Release 查询、远端目标复核、下载、校验及文件替换在后台
 执行，结果通过 `/update/status` 的 `operation` 查询：`status` 为 `idle`、`running`、`succeeded` 或 `failed`，
 终态包含 `finishedAt`，失败原因在 `error` 中。SSE 的 `operationId` 用于关联进度；终态事件发出前状态已落盘。
 连接中断不取消已受理任务；响应丢失时先查询状态，不自动重复提交。打开更新页面时也会恢复最近一次任务。
-下载并解包后校验发行身份，插件版本不匹配不阻止更新或回滚，兼容性风险在重启前提示。
-两条路径在文件交换前后复核全局配置版本，文件替换失败或取消时成组恢复二进制、Web 资源和官方插件目录
+下载并解包后校验发行身份。升级与本地备份回滚的插件兼容性风险在重启前提示，
+历史发行降级按上述严格预检处理。安装与回滚在文件交换前后复核全局配置版本，
+文件替换失败或取消时成组恢复二进制、Web 资源和官方插件目录
 
 客户端重启前调用 `restart/check`，返回 `targetVersion`、`releaseManifestSha256`、`configRevision` 和 `incompatiblePlugins`，
 每项包含 `instanceId`、`name`、`reason`，检查不修改插件状态。源码运行的目标版本与发行摘要为空，检查当前宿主兼容性。

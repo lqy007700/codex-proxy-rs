@@ -1,6 +1,8 @@
 import type { RequestOptions } from '../../request'
 import request from '../../request'
 
+export type SystemUpdateMode = 'upgrade' | 'downgrade'
+
 export type SystemUpdateChannel = 'stable' | 'rc' | 'beta' | 'alpha' | 'exp'
 
 export interface SystemUpdatePolicy {
@@ -21,7 +23,15 @@ export interface SystemVersion {
   updateWarning: string | null
 }
 
+export interface SystemDowngradeVersion {
+  version: string
+  releaseUrl: string | null
+  notes: string | null
+  unsupportedReason: string | null
+}
+
 export interface SystemUpdateDetail {
+  downgradeVersions: SystemDowngradeVersion[]
   policy: SystemUpdatePolicy
   currentVersion: string
   latestVersion: string
@@ -82,6 +92,7 @@ interface SystemUpdateDetailQuery {
 }
 
 interface SystemUpdateTarget {
+  mode?: SystemUpdateMode
   targetVersion: string
   channel: SystemUpdateChannel
 }

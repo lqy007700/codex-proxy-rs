@@ -5,7 +5,7 @@ use std::{fs, path::Path, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use gateway_admin::model::system::{
     SystemOperationAccepted, SystemOperationKind, SystemUpdateChannel as UpdateChannel,
-    SystemUpdateDetail, SystemUpdateStatus, SystemVersion,
+    SystemUpdateDetail, SystemUpdateMode, SystemUpdateStatus, SystemVersion,
 };
 use gateway_admin::ports::system::{
     SystemOperationErrorKind, SystemOperations, SystemRestartPreflight, SystemUpdateCandidate,
@@ -24,7 +24,8 @@ use super::installation::{OFFICIAL_PLUGIN_MANIFEST, ReleaseFiles};
 use super::process::spawn_replacement;
 use super::release::{
     GitHubRelease, ReleaseCache, base_update_detail, confirmed_target, detail_from_release,
-    fetch_latest, select_archive, update_policy, validate_update_target, version_channel,
+    fetch_releases, select_archive, update_policy, validate_downgrade_target,
+    validate_update_target, version_channel,
 };
 use super::state::{
     OperationFileLock, UpdateOperation, UpdateTempDir, finish, operation_id, read_status,
@@ -93,6 +94,7 @@ impl ProcessSystemOperations {
         target_version: Option<String>,
         channel: Option<UpdateChannel>,
         preflight: Arc<dyn SystemUpdatePreflight>,
+        mode: SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, OperationError> {
         let operation_lock = self.lock_operation()?;
         if let Some(reason) = self.config.update_support_error() {
@@ -103,7 +105,15 @@ impl ProcessSystemOperations {
         let target = confirmed_target(target_version)?;
         let file_lock = OperationFileLock::acquire(&self.config.update_lock_file)?;
         let selected = self.resolve_channel(channel)?;
-        if let Err(error) = validate_update_target(&self.config.version, &target, selected) {
+        let validation = match mode {
+            SystemUpdateMode::Upgrade => {
+                validate_update_target(&self.config.version, &target, selected)
+            }
+            SystemUpdateMode::Downgrade => {
+                validate_downgrade_target(&self.config.version, &target, selected)
+            }
+        };
+        if let Err(error) = validation {
             self.events
                 .error_terminal(None, Some("preflight"), error.message().to_owned());
             return Err(error);
@@ -124,7 +134,11 @@ impl ProcessSystemOperations {
         let accepted = SystemOperationAccepted::Update {
             operation_id: operation_id.clone(),
             deployment_mode: self.config.deployment_mode.clone(),
-            message: "更新已开始".to_owned(),
+            message: match mode {
+                SystemUpdateMode::Upgrade => "更新已开始",
+                SystemUpdateMode::Downgrade => "降级已开始",
+            }
+            .to_owned(),
             target_version: target.clone(),
         };
         let service = self.clone();
@@ -134,7 +148,7 @@ impl ProcessSystemOperations {
             let result = tokio::select! {
                 biased;
                 () = service.cancellation.cancelled() => Err(conflict("服务关闭，更新已中断")),
-                result = service.perform_update_inner(&target, selected, &operation_id, preflight.as_ref()) => result,
+                result = service.perform_update_inner(&target, selected, &operation_id, preflight.as_ref(), mode) => result,
             };
             let completion = operation.complete(&result);
             if let Err(error) = &result {
@@ -173,38 +187,54 @@ impl ProcessSystemOperations {
         channel: UpdateChannel,
         operation_id: &str,
         preflight: &dyn SystemUpdatePreflight,
+        mode: SystemUpdateMode,
     ) -> Result<ReleaseFiles, OperationError> {
         let repository = self
             .config
             .update_repository
             .as_deref()
             .ok_or_else(|| conflict("未配置更新仓库 CPR_UPDATE_REPOSITORY"))?;
-        self.events.info(
-            Some(operation_id),
-            Some("release"),
-            "正在获取最新 Release 信息",
-        );
-        let release = fetch_latest(
+        self.events
+            .info(Some(operation_id), Some("release"), "正在获取发行版本信息");
+        let releases = fetch_releases(
             &self.config.github_api_base,
             repository,
             &self.config.version,
             channel,
         )
-        .await?
-        .ok_or_else(|| conflict("当前发行通道没有可用更新"))?;
-        let detail = detail_from_release(&self.config, &release, channel);
-        if detail.latest_version != target {
-            return Err(conflict("远端最新版本已变化，请重新确认"));
-        }
-        if !detail.has_update {
-            return Err(conflict("当前没有可用更新"));
-        }
+        .await?;
+        let release = match mode {
+            SystemUpdateMode::Upgrade => {
+                let release = releases
+                    .latest
+                    .ok_or_else(|| conflict("当前发行通道没有可用更新"))?;
+                let detail = detail_from_release(&self.config, &release, channel);
+                if detail.latest_version != target {
+                    return Err(conflict("远端最新版本已变化，请重新确认"));
+                }
+                if !detail.has_update {
+                    return Err(conflict("当前没有可用更新"));
+                }
+                release
+            }
+            SystemUpdateMode::Downgrade => releases
+                .downgrades
+                .into_iter()
+                .find(|release| release.tag_name.trim().trim_start_matches('v') == target)
+                .ok_or_else(|| conflict("目标不在当前可降级的前 5 个版本中，请重新检查"))?,
+        };
         self.events.info(
             Some(operation_id),
             Some("prepare"),
-            format!("准备更新到 v{target}"),
+            format!(
+                "准备{}到 v{target}",
+                match mode {
+                    SystemUpdateMode::Upgrade => "更新",
+                    SystemUpdateMode::Downgrade => "降级",
+                }
+            ),
         );
-        self.install_release(&release, target, operation_id, preflight)
+        self.install_release(&release, target, operation_id, preflight, mode)
             .await
     }
 
@@ -214,6 +244,7 @@ impl ProcessSystemOperations {
         version: &str,
         operation_id: &str,
         preflight: &dyn SystemUpdatePreflight,
+        mode: SystemUpdateMode,
     ) -> Result<ReleaseFiles, OperationError> {
         self.events.info(
             Some(operation_id),
@@ -291,12 +322,18 @@ impl ProcessSystemOperations {
             Some("preflight"),
             "正在校验目标发行信息",
         );
-        let plugin_revision = preflight.validate(candidate).await?;
+        let plugin_revision = match mode {
+            SystemUpdateMode::Upgrade => preflight.validate(candidate).await?,
+            SystemUpdateMode::Downgrade => preflight.validate_downgrade(candidate).await?,
+        };
         preflight.confirm_revision(plugin_revision).await?;
         self.events.success(
             Some(operation_id),
             Some("preflight"),
-            "目标发行信息校验通过，插件兼容性将在重启前检查",
+            match mode {
+                SystemUpdateMode::Upgrade => "目标发行信息校验通过，插件兼容性将在重启前检查",
+                SystemUpdateMode::Downgrade => "目标发行信息及插件兼容性校验通过",
+            },
         );
         self.events
             .info(Some(operation_id), Some("replace"), "正在替换应用文件");
@@ -426,8 +463,9 @@ impl SystemOperations for ProcessSystemOperations {
         target_version: Option<String>,
         channel: Option<UpdateChannel>,
         preflight: Arc<dyn SystemUpdatePreflight>,
+        mode: SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, OperationError> {
-        self.start_update(target_version, channel, preflight)
+        self.start_update(target_version, channel, preflight, mode)
     }
 
     async fn update_status(&self) -> Result<SystemUpdateStatus, OperationError> {

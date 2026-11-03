@@ -10,8 +10,8 @@ use crate::{
     model::{
         AdminError, AdminErrorKind,
         system::{
-            SystemOperationAccepted, SystemUpdateChannel, SystemUpdateDetail, SystemUpdateStatus,
-            SystemVersion,
+            SystemOperationAccepted, SystemUpdateChannel, SystemUpdateDetail, SystemUpdateMode,
+            SystemUpdateStatus, SystemVersion,
         },
     },
     ports::system::{
@@ -33,6 +33,7 @@ pub trait SystemService: Send + Sync {
         &self,
         target_version: Option<String>,
         channel: Option<SystemUpdateChannel>,
+        mode: SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, AdminError>;
     async fn update_status(&self) -> Result<SystemUpdateStatus, AdminError>;
     async fn rollback(&self) -> Result<SystemOperationAccepted, AdminError>;
@@ -88,12 +89,13 @@ impl SystemService for DefaultSystemService {
         &self,
         target_version: Option<String>,
         channel: Option<SystemUpdateChannel>,
+        mode: SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, AdminError> {
         let target_version = target_version
             .map(|version| version.trim().to_owned())
             .filter(|version| !version.is_empty());
         self.operations
-            .perform_update(target_version, channel, self.preflight.clone())
+            .perform_update(target_version, channel, self.preflight.clone(), mode)
             .await
             .map_err(map_system_error)
     }
