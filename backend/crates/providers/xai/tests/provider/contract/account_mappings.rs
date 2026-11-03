@@ -4,7 +4,7 @@ use super::*;
 use gateway_core::account::{AccountModelAccess, AccountModelAccessMode, AccountModelMappings};
 
 #[tokio::test]
-async fn account_mapping_uses_actual_target_for_policy_selection_and_wire() {
+async fn account_mapping_checks_selected_request_name_and_sends_actual_target() {
     let store = MemoryProviderAccountStore::shared();
     let repository = GrokCredentialRepository::new(store.clone());
     let kind = ProviderKind::new("xai").unwrap();
@@ -36,7 +36,7 @@ async fn account_mapping_uses_actual_target_for_policy_selection_and_wire() {
                 .with_model_access(
                     AccountModelAccess::new(
                         AccountModelAccessMode::Allowlist,
-                        vec![target.to_owned()],
+                        vec!["client-model".to_owned()],
                     )
                     .unwrap(),
                 ),

@@ -626,9 +626,11 @@ impl CodexCredentialSelector {
                             .allows_account(account)
                         && (diagnostic || {
                             let allowed = request.attempt.account_scope().is_some_and(|scope| {
-                                model
-                                    .for_account(request.attempt, account.id())
-                                    .allows(scope, account.id())
+                                model.for_account(request.attempt, account.id()).allows(
+                                    scope,
+                                    account.id(),
+                                    request.attempt,
+                                )
                             });
                             if !allowed {
                                 model_access_rejected += 1;

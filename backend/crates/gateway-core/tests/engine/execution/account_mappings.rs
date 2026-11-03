@@ -74,6 +74,12 @@ impl Provider for AccountCatalogProvider {
 }
 
 fn mapped_client_catalog() -> Vec<PublicModelDescriptor> {
+    mapped_client_catalog_with_access(gateway_core::account::AccountModelAccess::all())
+}
+
+fn mapped_client_catalog_with_access(
+    access: gateway_core::account::AccountModelAccess,
+) -> Vec<PublicModelDescriptor> {
     let provider = ProviderKind::new("openai").unwrap();
     let directory = Arc::new(RuntimeAccountDirectory::new(
         ["acct_a", "acct_b", "acct_other"]
@@ -81,13 +87,15 @@ fn mapped_client_catalog() -> Vec<PublicModelDescriptor> {
             .map(|id| {
                 (
                     ProviderAccountId::new(id).unwrap(),
-                    RuntimeAccount::new(provider.clone(), BTreeSet::new()).with_model_mappings(
-                        AccountModelMappings::new(BTreeMap::from([(
-                            "alias".to_owned(),
-                            "z-target".to_owned(),
-                        )]))
-                        .unwrap(),
-                    ),
+                    RuntimeAccount::new(provider.clone(), BTreeSet::new())
+                        .with_model_access(access.clone())
+                        .with_model_mappings(
+                            AccountModelMappings::new(BTreeMap::from([(
+                                "alias".to_owned(),
+                                "z-target".to_owned(),
+                            )]))
+                            .unwrap(),
+                        ),
                 )
             })
             .collect(),
@@ -172,4 +180,23 @@ fn account_mapping_catalog_prefers_complete_native_objects_and_keeps_alias_paylo
             .as_bool()
             .unwrap()
     );
+}
+
+#[test]
+fn selected_alias_catalog_uses_the_unselected_targets_complete_native_object() {
+    let models = mapped_client_catalog_with_access(
+        gateway_core::account::AccountModelAccess::new(
+            gateway_core::account::AccountModelAccessMode::Allowlist,
+            vec!["alias".to_owned()],
+        )
+        .unwrap(),
+    );
+    assert_eq!(models.len(), 1);
+    let PublicModelDescriptor::Native { model, payload } = &models[0] else {
+        panic!("映射别名必须保留完整原生对象");
+    };
+    assert_eq!(model.as_str(), "alias");
+    let object: Value = serde_json::from_slice(payload.body()).unwrap();
+    assert_eq!(object["slug"], "z-target");
+    assert_eq!(object["future"]["opaque"], true);
 }

@@ -135,9 +135,11 @@ impl GrokAccountSessionSelector {
                 accounts
                     .into_iter()
                     .filter(|account| {
-                        request
-                            .account_scope()
-                            .allows_model(account.id(), request.model_for_account(account.id()))
+                        let model = request.model_for_account(account.id());
+                        request.upstream_context.as_ref().map_or_else(
+                            || request.account_scope().allows_model(account.id(), model),
+                            |context| context.allows_account_model(account.id(), model),
+                        )
                     })
                     .collect()
             };

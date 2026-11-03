@@ -214,9 +214,9 @@ impl CodexProvider {
                 // 校验先于亲和变更和发送，不能在持有租约时重新选号
                 if !selection.allows_account(lease.account())
                     || (!context.is_diagnostic_required_account()
-                        && !context
-                            .account_scope()
-                            .is_some_and(|scope| selection.allows(scope, lease.account_id())))
+                        && !context.account_scope().is_some_and(|scope| {
+                            selection.allows(scope, lease.account_id(), &context)
+                        }))
                 {
                     return Err(provider_error(
                         ProviderErrorKind::NoEligibleAccount,

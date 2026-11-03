@@ -23,7 +23,7 @@ fn mapped_request(
                 .with_model_access(
                     AccountModelAccess::new(
                         AccountModelAccessMode::Allowlist,
-                        vec!["gpt-5.4".to_owned()],
+                        vec!["alias".to_owned()],
                     )
                     .unwrap(),
                 ),
@@ -41,7 +41,7 @@ fn mapped_request(
                 .with_model_access(
                     AccountModelAccess::new(
                         AccountModelAccessMode::Allowlist,
-                        vec!["gpt-5.5".to_owned()],
+                        vec!["alias".to_owned()],
                     )
                     .unwrap(),
                 ),

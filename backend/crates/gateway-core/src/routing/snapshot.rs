@@ -787,8 +787,9 @@ impl RuntimeSnapshot {
             || self
                 .model_alias(public.as_str())
                 .is_some_and(|alias| &alias.provider != provider)
-            || !scope.allows_model(
+            || !scope.allows_request_model(
                 account,
+                public.as_str(),
                 &self.upstream_model_for_account(public, scope, account),
             )
         {
@@ -1254,7 +1255,7 @@ impl RuntimeSnapshot {
         let Ok(upstream) = UpstreamModelId::from_client_wire(upstream) else {
             return false;
         };
-        if !scope.allows_model(account, upstream.as_str())
+        if !scope.allows_request_model(account, public_model.as_str(), upstream.as_str())
             || !self.contains_resolved_model_for_provider(contribution_id, &upstream, provider)
         {
             return false;
@@ -1316,8 +1317,9 @@ impl RuntimeSnapshot {
                     .model_override(account, public_model.as_str())
                     .unwrap_or(public_model.as_str());
                 scope.account_provider(account) == Some(provider)
-                    && scope.allows_model(
+                    && scope.allows_request_model(
                         account,
+                        public_model.as_str(),
                         &self.upstream_model_for_account(public_model, scope, account),
                     )
                     && self.contributed_models().iter().any(|model| {
@@ -1353,7 +1355,7 @@ impl RuntimeSnapshot {
         account: &ProviderAccountId,
     ) -> bool {
         let upstream = self.upstream_model_for_account(public_model, scope, account);
-        if !scope.allows_model(account, &upstream) {
+        if !scope.allows_request_model(account, public_model.as_str(), &upstream) {
             return false;
         }
         match self
@@ -1505,6 +1507,9 @@ impl RuntimeSnapshot {
         let mut groups = BTreeMap::<(ProviderKind, String), BTreeSet<ProviderAccountId>>::new();
         for account in account_scope.allowed_account_ids() {
             if let Some(target) = account_scope.model_override(account, public_model.as_str()) {
+                if !account_scope.allows_request_model(account, public_model.as_str(), target) {
+                    continue;
+                }
                 if let Some(provider) = account_scope.account_provider(account) {
                     if self
                         .model_alias(public_model.as_str())
@@ -1541,8 +1546,9 @@ impl RuntimeSnapshot {
             let scope = Arc::new(account_scope.restricted_to(&Default::default(), &accounts));
             let mut target_context = context.clone();
             target_context.required_provider = Some(provider);
+            // 账号已按左侧请求名通过政策检查，目标仅参与归属和能力编译
             if let Ok(plan) =
-                self.plan_inner(&target, operation, scope, &target_context, true, false)
+                self.plan_inner(&target, operation, scope, &target_context, false, false)
             {
                 plans.push((plan, true));
             }
@@ -1691,7 +1697,9 @@ impl RuntimeSnapshot {
                     .flat_map(|model| model.accounts.iter())
                     .filter(|account| {
                         account_scope.account_provider(account) == Some(provider)
-                            && account_scope.allows_model(account, upstream_model.as_str())
+                            && account_scope.allows(account)
+                            && (!resolve_global
+                                || account_scope.allows_model(account, upstream_model.as_str()))
                     })
                     .cloned()
                     .collect();
@@ -1713,7 +1721,9 @@ impl RuntimeSnapshot {
                         account_scope.restricted_to(&Default::default(), &capable_accounts),
                     );
                 }
-                if !candidate_scope.allows_provider_model(provider, upstream_model.as_str()) {
+                if resolve_global
+                    && !candidate_scope.allows_provider_model(provider, upstream_model.as_str())
+                {
                     continue;
                 }
                 native.unwrap_or_default()

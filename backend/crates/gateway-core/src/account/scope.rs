@@ -541,6 +541,21 @@ impl FrozenAccountScope {
                 .is_some_and(|account| account.model_access.allows(upstream_model))
     }
 
+    /// 账号映射的本地政策约束请求名，未命中时保留全局映射后的目标政策
+    pub(crate) fn allows_request_model(
+        &self,
+        account: &ProviderAccountId,
+        requested: &str,
+        upstream: &str,
+    ) -> bool {
+        let policy_model = if self.model_override(account, requested).is_some() {
+            requested
+        } else {
+            upstream
+        };
+        self.allows_model(account, policy_model)
+    }
+
     /// 只解析原始请求名的账号覆盖，调用方保留未命中时的全局映射语义
     #[must_use]
     pub fn model_override(&self, account: &ProviderAccountId, requested: &str) -> Option<&str> {

@@ -623,6 +623,18 @@ impl AttemptContext {
             .map(UpstreamModelId::as_str)
     }
 
+    /// 原生 Provider 复用路由已冻结的本地模型政策，不将映射目标当作另一条客户端权限
+    #[must_use]
+    pub fn allows_account_model(&self, account: &ProviderAccountId, model: &str) -> bool {
+        self.account_scope().is_some_and(|scope| {
+            scope.allows(account)
+                && self.account.routing_candidate.as_ref().map_or_else(
+                    || scope.allows_model(account, model),
+                    |candidate| candidate.allows_account_model(account, model),
+                )
+        })
+    }
+
     /// 从本次请求冻结的发布代次选择上游适配器；不建立连接、不重新选号
     pub fn upstream_adapter(
         &self,

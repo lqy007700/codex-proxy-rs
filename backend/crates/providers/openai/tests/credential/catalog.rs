@@ -196,6 +196,59 @@ async fn client_catalog_is_account_and_version_scoped_and_keeps_original_objects
 }
 
 #[tokio::test]
+async fn mapped_catalog_keeps_unselected_target_objects_for_core_alias_projection() {
+    use gateway_core::account::{AccountModelAccess, AccountModelAccessMode, AccountModelMappings};
+    let store = Arc::new(MemoryAccountStore::default());
+    let account = seed_account(&store, "acct_alias_catalog").await;
+    let provider = ProviderKind::new("openai").unwrap();
+    let scope = FrozenAccountScope::new(
+        Arc::new(RuntimeAccountDirectory::new(
+            std::collections::BTreeMap::from([(
+                account.id().clone(),
+                RuntimeAccount::new(provider, Default::default())
+                    .with_model_access(
+                        AccountModelAccess::new(
+                            AccountModelAccessMode::Allowlist,
+                            vec!["alias".to_owned()],
+                        )
+                        .unwrap(),
+                    )
+                    .with_model_mappings(
+                        AccountModelMappings::new(std::collections::BTreeMap::from([(
+                            "alias".to_owned(),
+                            "gpt-native".to_owned(),
+                        )]))
+                        .unwrap(),
+                    ),
+            )]),
+        )),
+        ClientRoutingScope::all_accounts(),
+    );
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/codex/models"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"models":[{
+                "slug":"gpt-native", "display_name":"Native", "future_field":{"opaque":true}
+            }]})),
+        )
+        .mount(&server)
+        .await;
+    let models = service_with_catalog_cache(&store, server.uri(), catalog_cache())
+        .client_model_catalog(&scope, "0.154.0")
+        .await
+        .unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].model.as_str(), "gpt-native");
+    assert_eq!(models[0].source_account.as_ref(), Some(account.id()));
+    let gateway_core::routing::ProviderModelContent::Native(payload) = &models[0].content else {
+        panic!("账号映射投影必须读取完整原生对象");
+    };
+    let object: serde_json::Value = serde_json::from_slice(payload.body()).unwrap();
+    assert_eq!(object["future_field"]["opaque"], true);
+}
+
+#[tokio::test]
 async fn client_catalog_coalesces_reads_and_invalidates_on_etag_expiry_and_explicit_reset() {
     let store = Arc::new(MemoryAccountStore::default());
     let account = seed_account(&store, "acct_client_cache").await;

@@ -358,7 +358,6 @@ impl CodexCredentialCatalogService {
                     Ok(models) => {
                         let models = models
                             .into_iter()
-                            .filter(|model| scope.allows_model(&account, model.model.as_str()))
                             .map(|mut model| {
                                 model.source_account = Some(account.clone());
                                 model

@@ -751,7 +751,7 @@ fn compiler_revision_retry_keeps_account_mapping_and_model_policy_from_the_same_
                     .with_model_access(
                         AccountModelAccess::new(
                             AccountModelAccessMode::Allowlist,
-                            vec![target.to_owned()],
+                            vec!["alias".to_owned()],
                         )
                         .unwrap(),
                     ),

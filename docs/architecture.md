@@ -736,7 +736,9 @@ OpenAI Provider 在选号时排除 Grok 模型的 ChatGPT OAuth 账号，API Key
 无限并发只跳过并发上限判断，保留在途租约计数及其他准入约束；含无限账号的容量不投影有限占用比例。
 `account::AccountModelAccess` 拥有管理员模型政策的校验与精确匹配语义，存入账号行的 `model_access_json`，
 由 `RuntimeAccountDirectory` / `FrozenAccountScope` 随配置快照冻结。账号模型映射与该政策独立持久化，
-由 Core 路由统一解析目标及能力；同 Provider 的不同目标合并选号，不按模型拆分账号调度顺序。
+由 Core 路由统一解析目标及能力；命中账号映射时，本地模型政策检查请求名，编译后的候选冻结已授权账号，
+Provider 复用该资格并按实际目标验证上游目录，不重新用目标名解释本地政策。
+未命中账号映射时保持全局映射后的目标政策；同 Provider 的不同目标合并选号，不按模型拆分账号调度顺序。
 `ProviderCandidate` 的账号目标事实随 attempt 上下文传递，Provider 在额度、亲和与租约之前
 按该冻结目标筛选账号，选定后以同一目标构造请求、记录元数据并查价；重试和 fallback 使用同一冻结政策。上游目录和凭据不承载或改写该政策。
 客户端目录的政策过滤判断范围内整个候选池，原生模型对象仍由 Provider 独占解释

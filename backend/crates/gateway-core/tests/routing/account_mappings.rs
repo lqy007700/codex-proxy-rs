@@ -94,7 +94,7 @@ fn account_mapping_overrides_global_without_chaining_or_splitting_provider_sched
 }
 
 #[test]
-fn account_mapping_policy_checks_the_final_target_and_freezes_existing_plans() {
+fn account_mapping_policy_checks_the_requested_name_and_freezes_existing_plans() {
     let snapshot = mapped_snapshot();
     let old_plan = plan(&snapshot);
     let mut accounts = snapshot
@@ -107,11 +107,8 @@ fn account_mapping_policy_checks_the_final_target_and_freezes_existing_plans() {
         .remove(&account("acct_a"))
         .unwrap()
         .with_model_access(
-            AccountModelAccess::new(
-                AccountModelAccessMode::Denylist,
-                vec!["target-a".to_owned()],
-            )
-            .unwrap(),
+            AccountModelAccess::new(AccountModelAccessMode::Denylist, vec!["alias".to_owned()])
+                .unwrap(),
         );
     accounts.insert(account("acct_a"), blocked);
     let changed = snapshot.with_account_directory(Arc::new(RuntimeAccountDirectory::new(accounts)));
@@ -131,6 +128,53 @@ fn account_mapping_policy_checks_the_final_target_and_freezes_existing_plans() {
             .unwrap()
             .as_str(),
         "target-a"
+    );
+}
+
+#[test]
+fn selected_request_name_can_route_to_an_unselected_target_without_exposing_it_directly() {
+    let original = mapped_snapshot();
+    let id = account("acct_a");
+    let configured = original
+        .all_account_scope()
+        .directory()
+        .account(&id)
+        .unwrap()
+        .clone()
+        .with_model_access(
+            AccountModelAccess::new(AccountModelAccessMode::Allowlist, vec!["alias".to_owned()])
+                .unwrap(),
+        );
+    let snapshot =
+        original.with_account_directory(Arc::new(RuntimeAccountDirectory::new(BTreeMap::from([
+            (id.clone(), configured),
+        ]))));
+    let plan = plan(&snapshot);
+    let candidate = &plan.candidates()[0];
+    assert!(candidate.account_scope().allows(&id));
+    assert_eq!(
+        candidate.upstream_model_for_account(&id).unwrap().as_str(),
+        "target-a"
+    );
+    assert!(
+        snapshot
+            .public_models_for_scope(&snapshot.all_account_scope())
+            .contains(&PublicModelId::new("alias").unwrap())
+    );
+    assert!(
+        !snapshot
+            .public_models_for_scope(&snapshot.all_account_scope())
+            .contains(&PublicModelId::new("target-a").unwrap())
+    );
+    assert!(
+        snapshot
+            .plan(
+                &PublicModelId::new("target-a").unwrap(),
+                &operation(),
+                snapshot.all_account_scope(),
+                &Default::default()
+            )
+            .is_err()
     );
 }
 

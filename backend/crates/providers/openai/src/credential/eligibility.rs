@@ -65,12 +65,17 @@ impl<'a> CodexSelectionModel<'a> {
                 .is_some_and(|plan| plan.trim().eq_ignore_ascii_case("free")))
     }
 
-    pub(crate) fn allows(self, scope: &FrozenAccountScope, account: &ProviderAccountId) -> bool {
+    pub(crate) fn allows(
+        self,
+        scope: &FrozenAccountScope,
+        account: &ProviderAccountId,
+        attempt: &gateway_core::engine::AttemptContext,
+    ) -> bool {
         match self {
-            Self::Requested(model)
-            | Self::Live(model)
-            | Self::Image(Some(model))
-            | Self::Search(Some(model)) => scope.allows_model(account, model),
+            Self::Requested(model) => attempt.allows_account_model(account, model),
+            Self::Live(model) | Self::Image(Some(model)) | Self::Search(Some(model)) => {
+                scope.allows_model(account, model)
+            }
             // 缺失、重复或不可解析的模型不能绕过黑白名单；不猜上游默认值
             Self::Image(None) | Self::Search(None) => {
                 scope.allows(account)

@@ -601,6 +601,15 @@ impl ProviderCandidate {
         selected
     }
 
+    /// 账号映射的请求名政策已在编译时收窄，实际目标不再次按本地模型名过滤
+    pub(crate) fn allows_account_model(&self, account: &ProviderAccountId, model: &str) -> bool {
+        self.account_scope.allows(account)
+            && (self
+                .account_model_override(account)
+                .is_some_and(|target| target.as_str() == model)
+                || self.account_scope.allows_model(account, model))
+    }
+
     #[must_use]
     pub fn has_scheduling_role(&self, role: crate::account::AccountSchedulingRole) -> bool {
         self.account_scope.allowed_account_ids().any(|account| {
@@ -608,7 +617,7 @@ impl ProviderCandidate {
                 && self.account_scope.scheduling_role(account) == Some(role)
                 && self
                     .upstream_model_for_account(account)
-                    .is_none_or(|model| self.account_scope.allows_model(account, model.as_str()))
+                    .is_none_or(|model| self.allows_account_model(account, model.as_str()))
         })
     }
 
