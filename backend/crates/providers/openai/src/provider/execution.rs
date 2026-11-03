@@ -397,6 +397,7 @@ pub(super) struct ColdResponse {
     pub(super) session_transport_key_hash: Option<String>,
     pub(super) session_transport_recovery: CodexSessionTransportRecovery,
     pub(super) guardian_routing: guardian::GuardianRouting,
+    pub(super) turn_state_scope: Option<turn_state::TurnStateScope>,
     pub(super) websocket_retry_count: u32,
     pub(super) stream_max_retries: u32,
     pub(super) session_capture: Option<OpenAiSessionCapture>,
@@ -792,6 +793,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
         session_transport_key_hash,
         session_transport_recovery,
         guardian_routing,
+        turn_state_scope,
         websocket_retry_count,
         stream_max_retries,
         mut session_capture,
@@ -881,6 +883,17 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                         },
                     );
                 }
+                if let Some(scope) = &turn_state_scope
+                    && let Some(response) = failure.error.client_visible_upstream_response()
+                {
+                    for header in response.headers() {
+                        if header.name().eq_ignore_ascii_case("x-codex-turn-state")
+                            && let Ok(token) = std::str::from_utf8(header.value().as_ref())
+                        {
+                            scope.remember(token);
+                        }
+                    }
+                }
                 if let Some(observation) = failure.observation.take() {
                     yield ProviderEvent::observation(observation);
                 }
@@ -904,6 +917,11 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             .await;
             Err(failure.error)?;
             return;
+        }
+        if let Some(scope) = &turn_state_scope
+            && let Some(token) = response.turn_state.as_deref()
+        {
+            scope.remember(token);
         }
         if let Some(capture) = session_capture.as_mut() {
             capture.continuation_scope = Some(if capture.response_store {
@@ -1050,6 +1068,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                         &mut session_capture,
                         &mut observation_state,
                         &mut decoder,
+                        turn_state_scope.as_ref(),
                     )
                     .await;
                     let observation_event = if rate_limits_changed || metadata_merge.is_some()
@@ -1128,6 +1147,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 &mut session_capture,
                 &mut observation_state,
                 &mut decoder,
+                turn_state_scope.as_ref(),
             )
             .await;
             let metadata_changed = metadata_merge.unwrap_or(false);
@@ -1334,6 +1354,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             &mut session_capture,
             &mut observation_state,
             &mut decoder,
+            turn_state_scope.as_ref(),
         )
         .await
         .unwrap_or(false);
@@ -1403,6 +1424,7 @@ async fn merge_response_metadata_updates(
     session_capture: &mut Option<OpenAiSessionCapture>,
     observation_state: &mut OpenAiResponseObservationState,
     decoder: &mut CodexCanonicalDecoder,
+    turn_state_scope: Option<&turn_state::TurnStateScope>,
 ) -> Option<bool> {
     let updates = updates?;
     let mut pending = updates.lock().await;
@@ -1414,6 +1436,9 @@ async fn merge_response_metadata_updates(
     }
     let mut changed = false;
     if let Some(turn_state) = turn_state {
+        if let Some(scope) = turn_state_scope {
+            scope.remember(&turn_state);
+        }
         if let Some(capture) = session_capture.as_mut() {
             capture.turn_state = Some(turn_state.clone());
         }

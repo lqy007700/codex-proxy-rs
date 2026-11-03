@@ -109,6 +109,7 @@ mod guardian;
 mod live;
 mod observation;
 mod portable_history;
+mod turn_state;
 mod upstream_adapter;
 mod workers;
 pub(crate) use live::{CodexLiveGateway, CodexLiveRegistry};
@@ -158,6 +159,7 @@ pub struct CodexProvider {
     session_identity: Option<CodexSessionIdentity>,
     session_transport_recovery: CodexSessionTransportRecovery,
     guardian_routing: guardian::GuardianRouting,
+    turn_state_ownership: turn_state::TurnStateOwnership,
     stream_max_retries: u32,
     history_exclusions: Arc<dyn gateway_core::provider_ports::ProviderHistoryExclusionPort>,
     live_registry: Arc<CodexLiveRegistry>,
@@ -394,6 +396,7 @@ impl CodexProvider {
             session_identity: None,
             session_transport_recovery: CodexSessionTransportRecovery::default(),
             guardian_routing: guardian::GuardianRouting::default(),
+            turn_state_ownership: turn_state::TurnStateOwnership::default(),
             stream_max_retries,
             live_registry: Arc::new(CodexLiveRegistry::default()),
             live_gateway: None,
@@ -1021,10 +1024,25 @@ impl CodexProvider {
                 )
                 .map(|affinity| (response_id.to_owned(), affinity))
         });
+        let turn_state_scope = self
+            .turn_state_ownership
+            .scope(&context, &lease, &upstream_request);
+        // 全量请求的 token 证明不能用于放行 response ID 或其他账号状态
+        let verified_turn_state = upstream_request
+            .turn_state
+            .as_ref()
+            .filter(|token| {
+                matches!(account_scope, RequestAccountScope::Unknown)
+                    && turn_state_scope
+                        .as_ref()
+                        .is_some_and(|scope| scope.owns(token))
+            })
+            .cloned();
         scope_request_to_account(
             &mut upstream_request,
             lease.installation_id(),
             account_scope,
+            verified_turn_state.as_deref(),
         );
         // 父响应的可信关联只恢复此字段，不把首次 Guardian 请求的其他账号状态视为可信
         if let Some((response_id, _)) = &guardian_parent
@@ -1047,6 +1065,7 @@ impl CodexProvider {
                 "ownerCrossAccount": state_owner_cross_account,
                 "accountSwitch": lease.account_switch(),
                 "accountStateReusable": account_scope.can_reuse_account_state(),
+                "verifiedTurnStateEcho": verified_turn_state.is_some(),
                 "before": before,
                 "after": crate::transport::diagnostics::evidence::request_state(&upstream_request),
             }));
@@ -1240,6 +1259,7 @@ impl CodexProvider {
             session_transport_key_hash,
             session_transport_recovery: self.session_transport_recovery.clone(),
             guardian_routing: self.guardian_routing.clone(),
+            turn_state_scope,
             websocket_retry_count,
             stream_max_retries: self.stream_max_retries,
             session_capture,

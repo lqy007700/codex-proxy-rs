@@ -700,12 +700,180 @@ impl ProviderCatalogPort for PublishingCatalog {
 
 #[test]
 fn compiler_should_reject_revision_changed_during_consistent_read() {
-    let facts = facts(1, 2);
-    let compiler = compiler(Arc::new(TestSnapshotStore::new(Ok(facts))));
+    let store = Arc::new(SequencedSnapshotStore {
+        facts: vec![facts(1, 2)],
+        loads: AtomicUsize::new(0),
+        current_revision: revision(2),
+    });
+    let compiler = compiler(store.clone());
 
     let error = block_on(compiler.compile()).expect_err("revision drift must fail closed");
 
     assert_eq!(error, RuntimeSnapshotCompileError::RevisionChanged);
+    assert_eq!(store.loads.load(Ordering::SeqCst), 4);
+}
+
+#[test]
+fn compiler_reloads_complete_facts_after_revision_changes_during_read() {
+    let store = Arc::new(SequencedSnapshotStore {
+        facts: vec![facts(1, 2), facts(2, 2)],
+        loads: AtomicUsize::new(0),
+        current_revision: revision(2),
+    });
+
+    let snapshot = block_on(compiler(store.clone()).compile()).expect("latest consistent facts");
+
+    assert_eq!(snapshot.revision(), revision(2));
+    assert_eq!(store.loads.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn compiler_revision_retry_keeps_account_mapping_and_model_policy_from_the_same_facts() {
+    use gateway_core::account::{AccountModelAccess, AccountModelAccessMode, AccountModelMappings};
+
+    let account = gateway_core::account::ProviderAccountId::new("acct_mapping").unwrap();
+    let mapped_facts = |config, observed, target: &str| {
+        SnapshotFacts::new(
+            revision(config),
+            revision(observed),
+            super::settings(),
+            vec![],
+            vec![],
+            vec![
+                SnapshotProviderAccountFacts::new(account.clone(), "alpha")
+                    .with_model_mappings(
+                        AccountModelMappings::new(BTreeMap::from([(
+                            "alias".to_owned(),
+                            target.to_owned(),
+                        )]))
+                        .unwrap(),
+                    )
+                    .with_model_access(
+                        AccountModelAccess::new(
+                            AccountModelAccessMode::Allowlist,
+                            vec![target.to_owned()],
+                        )
+                        .unwrap(),
+                    ),
+            ],
+            vec![],
+        )
+    };
+    let store = Arc::new(SequencedSnapshotStore {
+        facts: vec![
+            mapped_facts(1, 2, "old-target"),
+            mapped_facts(2, 2, "listed-model"),
+        ],
+        loads: AtomicUsize::new(0),
+        current_revision: revision(2),
+    });
+    let snapshot =
+        block_on(RuntimeSnapshotCompiler::new(store, Arc::new(TestCatalog::Discovery)).compile())
+            .unwrap();
+    let plan = snapshot
+        .plan(
+            &PublicModelId::new("alias").unwrap(),
+            &super::operation(),
+            snapshot.all_account_scope(),
+            &Default::default(),
+        )
+        .unwrap();
+
+    assert_eq!(snapshot.revision(), revision(2));
+    assert_eq!(plan.candidates().len(), 1);
+    assert!(plan.candidates()[0].account_scope().allows(&account));
+    assert_eq!(
+        plan.candidates()[0]
+            .upstream_model_for_account(&account)
+            .unwrap()
+            .as_str(),
+        "listed-model"
+    );
+}
+
+#[test]
+fn compiler_reloads_revision_changed_after_extension_preparation() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let extensions = Arc::new(CountingExtensionPreparation {
+        prepares: AtomicUsize::new(0),
+        drops: Arc::clone(&drops),
+    });
+    let compiler = RuntimeSnapshotCompiler::new(
+        Arc::new(SequencedSnapshotStore {
+            facts: vec![facts(1, 1), facts(2, 2)],
+            loads: AtomicUsize::new(0),
+            current_revision: revision(2),
+        }),
+        Arc::new(TestCatalog::Empty),
+    )
+    .with_extensions(extensions.clone());
+
+    let snapshot = block_on(compiler.compile()).expect("latest prepared snapshot");
+
+    assert_eq!(snapshot.revision(), revision(2));
+    assert_eq!(snapshot.extensions().unwrap().id().as_str(), "prepared-2");
+    assert_eq!(extensions.prepares.load(Ordering::SeqCst), 2);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    drop(snapshot);
+    assert_eq!(drops.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn compiler_rechecks_revision_when_extension_preparation_rejects_stale_facts() {
+    struct RacingPreparation {
+        store: Arc<TestSnapshotStore>,
+        changes: usize,
+        calls: AtomicUsize,
+    }
+
+    impl ExtensionPreparationPort for RacingPreparation {
+        fn prepare(
+            &self,
+            _: ConfigRevision,
+        ) -> BoxFuture<'_, Result<ExtensionSetReference, ExtensionPreparationError>> {
+            Box::pin(async move {
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                if self.changes == 0 || call < self.changes {
+                    if self.changes != 0 {
+                        let next = u64::try_from(call).unwrap() + 2;
+                        *self.store.facts.lock().unwrap() = Ok(facts(next, next));
+                        *self.store.current_revision.lock().unwrap() = Ok(revision(next));
+                    }
+                    return Err(ExtensionPreparationError);
+                }
+                Ok(ExtensionSetReference::new(
+                    ExtensionSetId::new("ready".to_owned()).unwrap(),
+                    Arc::new(AliasLease(vec![])),
+                ))
+            })
+        }
+    }
+
+    for (changes, expected_calls) in [(0, 1), (1, 2), (4, 4)] {
+        let store = Arc::new(TestSnapshotStore::new(Ok(facts(1, 1))));
+        let extensions = Arc::new(RacingPreparation {
+            store: store.clone(),
+            changes,
+            calls: AtomicUsize::new(0),
+        });
+        let compiler = RuntimeSnapshotCompiler::new(store, Arc::new(TestCatalog::Empty))
+            .with_extensions(extensions.clone());
+
+        let result = block_on(compiler.compile());
+
+        match changes {
+            0 => assert_eq!(
+                result.unwrap_err(),
+                RuntimeSnapshotCompileError::ExtensionsUnavailable
+            ),
+            1 => assert_eq!(result.unwrap().revision(), revision(2)),
+            _ => assert_eq!(
+                result.unwrap_err(),
+                RuntimeSnapshotCompileError::RevisionChanged
+            ),
+        }
+        assert_eq!(extensions.calls.load(Ordering::SeqCst), expected_calls);
+    }
 }
 
 #[test]
