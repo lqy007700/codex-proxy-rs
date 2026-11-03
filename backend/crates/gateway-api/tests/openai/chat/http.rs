@@ -208,6 +208,46 @@ fn events() -> Vec<Result<ProviderEvent, EngineError>> {
     ]
 }
 
+#[tokio::test]
+async fn client_model_is_frozen_before_request_middleware_rewrites_execution_model() {
+    for stream in [false, true] {
+        let trace = Arc::new(Trace::default());
+        let middleware = Arc::new(RequestMiddleware {
+            expected_operation: Some(OperationKind::Generate),
+            request_model: Some("middleware-target"),
+            ..Default::default()
+        });
+        let mut body = request(stream);
+        body["model"] = json!("client-alias");
+        let response = app(session(trace.clone(), stream, events()), Some(middleware))
+            .await
+            .oneshot(http_request(body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = text(response).await;
+        if stream {
+            for frame in parse_sse_events(&body).unwrap() {
+                if frame.data != "[DONE]" {
+                    let value: Value = serde_json::from_str(&frame.data).unwrap();
+                    assert_eq!(value["model"], "client-alias", "{value}; full body: {body}");
+                }
+            }
+        } else {
+            assert_eq!(
+                serde_json::from_str::<Value>(&body).unwrap()["model"],
+                "client-alias"
+            );
+        }
+        assert_eq!(
+            trace.observed.lock().unwrap().as_ref().unwrap().1["model"],
+            "middleware-target"
+        );
+        assert_eq!(trace.commits.load(Ordering::SeqCst), 1);
+        assert_eq!(trace.cancellations.load(Ordering::SeqCst), 0);
+    }
+}
+
 fn session(
     trace: Arc<Trace>,
     stream: bool,
@@ -307,6 +347,7 @@ async fn streaming_delivers_chat_chunks_usage_and_one_done_after_finalization() 
         .filter(|frame| frame.data != "[DONE]")
         .map(|frame| serde_json::from_str(&frame.data).unwrap())
         .collect();
+    assert_eq!(values.len(), 4, "unexpected Chat SSE output: {body}");
     assert_eq!(values[0]["choices"][0]["delta"]["role"], "assistant");
     assert_eq!(values[1]["choices"][0]["delta"]["content"], "hello");
     assert_eq!(values[2]["choices"][0]["finish_reason"], "stop");
@@ -590,6 +631,49 @@ async fn dropping_finish_chunk_produces_stream_error_and_releases_session() {
     assert!(!body.contains("\"finish_reason\":\"stop\""));
     assert_eq!(body.matches("data: [DONE]").count(), 1);
     assert!(trace.finalized.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn middleware_cannot_deliver_early_missing_or_duplicate_done() {
+    for actions in [
+        vec![ResponseFrameAction::Replace(Bytes::from_static(
+            b"data: [DONE]\n\n",
+        ))],
+        vec![
+            ResponseFrameAction::Continue,
+            ResponseFrameAction::Continue,
+            ResponseFrameAction::Continue,
+            ResponseFrameAction::Continue,
+            ResponseFrameAction::Drop,
+        ],
+        vec![
+            ResponseFrameAction::Continue,
+            ResponseFrameAction::Continue,
+            ResponseFrameAction::Continue,
+            ResponseFrameAction::Replace(Bytes::from_static(b"data: [DONE]\n\n")),
+        ],
+    ] {
+        let trace = Arc::new(Trace::default());
+        let middleware = Arc::new(
+            RequestMiddleware {
+                expected_operation: Some(OperationKind::Generate),
+                ..RequestMiddleware::default()
+            }
+            .with_response_actions(actions),
+        );
+        let response = app(session(trace.clone(), true, events()), Some(middleware))
+            .await
+            .oneshot(http_request(request(true)))
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = text(response).await;
+        assert!(
+            status == StatusCode::BAD_GATEWAY || body.contains("chat_delivery_invalid"),
+            "{body}"
+        );
+        assert!(trace.finalized.load(Ordering::SeqCst));
+    }
 }
 
 #[tokio::test]

@@ -98,7 +98,7 @@ pub(in crate::openai) async fn chat_completions(
         protocol: "openai".to_owned(),
         operation: Some(OperationKind::Generate),
         transport,
-        model_hint: model,
+        model_hint: model.clone(),
         headers: encode_headers(&headers),
         body,
     };
@@ -132,10 +132,7 @@ pub(in crate::openai) async fn chat_completions(
                     if chat.stream != stream {
                         return Err(MiddlewareError::Rejected);
                     }
-                    let model = chat.responses["model"]
-                        .as_str()
-                        .ok_or(MiddlewareError::InvalidState)?
-                        .to_owned();
+                    let model = model.ok_or(MiddlewareError::InvalidState)?;
                     let responses_body = serde_json::to_vec(&chat.responses)
                         .map_err(|_| MiddlewareError::InvalidState)?;
                     let decoded = decode_request_with_headers(

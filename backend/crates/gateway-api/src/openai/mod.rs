@@ -9,6 +9,7 @@ pub(crate) mod live;
 pub(crate) mod middleware;
 pub mod models;
 mod peer_link;
+mod response_model;
 pub mod responses;
 pub mod router;
 pub mod search;

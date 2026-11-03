@@ -39,6 +39,7 @@ use crate::openai::middleware::{
     ExpectedBody, PendingExecution, RequestInput, error_response, finalize_session,
     into_http_response, invoke_request, pending_execution_response, request_parts,
 };
+use crate::openai::response_model::ClientResponseModel;
 use crate::openai::service::OpenAiService;
 use crate::openai::{
     auth::{authenticate_client, client_access_error_response},
@@ -135,7 +136,8 @@ pub(crate) async fn execute_prepared_responses(
     } else {
         ClientTransport::HttpJson
     };
-    let model_hint = Some(decoded.metadata().requested_model().to_owned());
+    let client_model = ClientResponseModel::new(decoded.metadata().requested_model().to_owned());
+    let model_hint = Some(client_model.as_str().to_owned());
     // 终端会重新校验中间件改写后的正文，初步解码不必保留到响应交付
     drop(decoded);
     let execution = service.execution();
@@ -217,7 +219,13 @@ pub(crate) async fn execute_prepared_responses(
                     .trace()
                     .capture("client.request.body", &request_body);
                 let _ = admitted.send(started.session.response_commit());
-                execution_middleware_response(started, connection_guard, terminal_validation).await
+                execution_middleware_response(
+                    started,
+                    connection_guard,
+                    terminal_validation,
+                    Some(client_model),
+                )
+                .await
             })
         }),
     );
@@ -380,16 +388,27 @@ async fn execution_middleware_response(
     started: StartedExecution,
     connection_guard: Option<Box<dyn ConnectionGuard>>,
     validation: ResponseValidationFacts,
+    client_model: Option<ClientResponseModel>,
 ) -> Result<MiddlewareResponse, MiddlewareError> {
     let StartedExecution {
         stream, session, ..
     } = started;
-    if stream {
-        streaming_execution_middleware_response(session, connection_guard, validation).await
+    let response = if stream {
+        streaming_execution_middleware_response(
+            session,
+            connection_guard,
+            validation,
+            client_model.as_ref(),
+        )
+        .await
     } else {
         drop(connection_guard);
-        buffered_execution_middleware_response(session, validation).await
-    }
+        buffered_execution_middleware_response(session, validation, client_model.as_ref()).await
+    }?;
+    Ok(match client_model {
+        Some(model) => model.project_response_headers(response),
+        None => response,
+    })
 }
 
 /// 共享执行交付守卫；调用方在外层转换并校验自己的客户端协议
@@ -401,6 +420,7 @@ pub(crate) async fn execution_response(
         started,
         connection_guard,
         ResponseValidationFacts::default(),
+        None,
     )
     .await
 }
@@ -408,6 +428,7 @@ pub(crate) async fn execution_response(
 async fn buffered_execution_middleware_response(
     session: Box<dyn ExecutionSession>,
     validation: ResponseValidationFacts,
+    client_model: Option<&ClientResponseModel>,
 ) -> Result<MiddlewareResponse, MiddlewareError> {
     let mut execution = PendingExecution::new(session);
     let collected = execution
@@ -427,7 +448,7 @@ async fn buffered_execution_middleware_response(
         }
     };
     let transformed = events.iter().any(ProviderEvent::middleware_transformed);
-    let encoded = match encode_collected_events(&events) {
+    let encoded = match encode_collected_events(&events, client_model) {
         Ok(encoded) => Bytes::from(encoded),
         Err(error) => {
             let response =
@@ -459,8 +480,13 @@ async fn streaming_execution_middleware_response(
     session: Box<dyn ExecutionSession>,
     connection_guard: Option<Box<dyn ConnectionGuard>>,
     validation: ResponseValidationFacts,
+    client_model: Option<&ClientResponseModel>,
 ) -> Result<MiddlewareResponse, MiddlewareError> {
     let mut body = StreamingExecutionBody::new(session, connection_guard, validation);
+    if let Some(model) = client_model {
+        body.encoder =
+            OpenAiResponsesEncoder::new().with_requested_model(model.as_str().to_owned());
+    }
     if let Err(error) = body.prime().await {
         let headers = body.response_headers().to_vec();
         let execution = body.take_pending_execution()?;
@@ -482,7 +508,8 @@ async fn streaming_execution_middleware_response(
 
 /// 直接驱动测试 session 的非流式交付；生产入口通过同一 MiddlewareResponse 路径
 pub async fn collect_execution_response(session: Box<dyn ExecutionSession>) -> Response {
-    match buffered_execution_middleware_response(session, ResponseValidationFacts::default()).await
+    match buffered_execution_middleware_response(session, ResponseValidationFacts::default(), None)
+        .await
     {
         Ok(response) => into_http_response(response, ExpectedBody::SingleJson).await,
         Err(error) => error_response(error),
@@ -502,6 +529,7 @@ pub async fn stream_execution_response(
                 session,
                 connection_guard,
                 ResponseValidationFacts::default(),
+                None,
             )
             .await
             {
@@ -661,8 +689,14 @@ impl MiddlewareBody for ValidatedResponsesBody {
     }
 }
 
-fn encode_collected_events(events: &[ProviderEvent]) -> Result<Vec<u8>, ResponseEncodeError> {
-    let response = super::response::collect_response(events)?;
+fn encode_collected_events(
+    events: &[ProviderEvent],
+    client_model: Option<&ClientResponseModel>,
+) -> Result<Vec<u8>, ResponseEncodeError> {
+    let mut response = super::response::collect_response(events)?;
+    if let Some(model) = client_model {
+        model.project_response(&mut response);
+    }
     serde_json::to_vec(&response).map_err(|_| ResponseEncodeError::Serialization)
 }
 

@@ -10,7 +10,7 @@ use futures::future::BoxFuture;
 use gateway_core::engine::middleware::{
     MiddlewareBody, MiddlewareError, MiddlewareFrame, MiddlewareFraming, MiddlewareResponse,
 };
-use gateway_protocol::openai::sse::{DONE_SSE_FRAME, SseEventDecoder};
+use gateway_protocol::openai::sse::{DONE_SSE_FRAME, SseEventDecoder, sse_frame_is_done};
 use serde_json::{Value, json};
 
 #[derive(Default)]
@@ -180,6 +180,14 @@ impl ValidatedBody {
                 serde_json::from_slice(frame.bytes()).map_err(|_| MiddlewareError::InvalidState)?;
             return self.validate(&value);
         }
+        // 结束标记不属于通用解码器返回的业务事件
+        if std::str::from_utf8(frame.bytes()).is_ok_and(sse_frame_is_done) {
+            if self.done || !self.terminal {
+                return Err(MiddlewareError::InvalidState);
+            }
+            self.done = true;
+            return Ok(());
+        }
         for event in self
             .decoder
             .push(frame.bytes())
@@ -188,16 +196,9 @@ impl ValidatedBody {
             if self.done {
                 return Err(MiddlewareError::InvalidState);
             }
-            if event.data == "[DONE]" {
-                if !self.terminal {
-                    return Err(MiddlewareError::InvalidState);
-                }
-                self.done = true;
-            } else {
-                let value =
-                    serde_json::from_str(&event.data).map_err(|_| MiddlewareError::InvalidState)?;
-                self.validate(&value)?;
-            }
+            let value =
+                serde_json::from_str(&event.data).map_err(|_| MiddlewareError::InvalidState)?;
+            self.validate(&value)?;
         }
         if frame.terminal() && !self.done {
             return Err(MiddlewareError::InvalidState);

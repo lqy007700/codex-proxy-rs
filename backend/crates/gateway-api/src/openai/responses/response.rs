@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use super::error::ResponseEncodeError;
 use crate::client_error::capacity_error_for_client;
+use crate::openai::response_model::ClientResponseModel;
 
 const OPENAI_PROTOCOL: &str = "openai";
 
@@ -19,9 +20,10 @@ const OPENAI_PROTOCOL: &str = "openai";
 /// OpenAI Provider 与 xAI adapter 都必须交付 OpenAI wire
 /// wire 是客户端交付
 /// 与终态判断的事实来源；canonical facts 只在 wire 暂未携带 ID 时提供旁路观测，
-/// 不得反过来拒绝或改写上游事件；客户端错误兼容投影只发生在编码出口
+/// 不得反过来拒绝或改写上游事件；客户端错误兼容和模型名称投影只发生在编码出口
 #[derive(Debug, Default)]
 pub struct OpenAiResponsesEncoder {
+    client_model: Option<ClientResponseModel>,
     response_id: Option<String>,
     response_snapshot: Option<Value>,
     wire_terminal: Option<Value>,
@@ -33,11 +35,19 @@ impl OpenAiResponsesEncoder {
     #[must_use]
     pub const fn new() -> Self {
         Self {
+            client_model: None,
             response_id: None,
             response_snapshot: None,
             wire_terminal: None,
             wire_failure: false,
         }
+    }
+
+    /// 使用本轮入口的模型名投影客户端响应，不改变原始 wire 和观测
+    #[must_use]
+    pub fn with_requested_model(mut self, model: String) -> Self {
+        self.client_model = Some(ClientResponseModel::new(model));
+        self
     }
 
     /// 消费一个 Provider event，并返回 SSE frames
@@ -52,12 +62,15 @@ impl OpenAiResponsesEncoder {
         // 当前 Codex 不消费 Responses `error` event，会在 EOF 时丢失失败原因
         // 在客户端 SSE 边界统一投影成它能识别的 `response.failed`
         if effective_event_type(wire) == Some("error")
-            && let Some(data) = response_failed_sse_data_from_error_event(
+            && let Some(mut data) = response_failed_sse_data_from_error_event(
                 self.response_snapshot.as_ref(),
                 self.response_id.as_deref(),
                 data,
             )
         {
+            if let Some(model) = &self.client_model {
+                model.project_event("response.failed", &mut data);
+            }
             return vec![Bytes::from(encode_sse_event_with_metadata(
                 "response.failed",
                 &data.to_string(),
@@ -68,15 +81,19 @@ impl OpenAiResponsesEncoder {
         if projected.is_none()
             && let Some(raw_sse_frame) = wire.raw_sse_frame()
         {
-            return vec![raw_sse_frame.clone()];
+            return vec![
+                self.client_model
+                    .as_ref()
+                    .and_then(|model| {
+                        model.project_sse(
+                            raw_sse_frame,
+                            effective_event_type(wire).unwrap_or_default(),
+                        )
+                    })
+                    .unwrap_or_else(|| raw_sse_frame.clone()),
+            ];
         }
-        let data = if projected.is_none() {
-            wire.raw_websocket_message()
-                .map(str::to_owned)
-                .unwrap_or_else(|| data.to_string())
-        } else {
-            data.to_string()
-        };
+        let data = self.client_data(wire, projected);
         vec![Bytes::from(encode_sse_event_with_metadata(
             effective_event_type(wire).unwrap_or_default(),
             &data,
@@ -103,23 +120,29 @@ impl OpenAiResponsesEncoder {
         // 或特殊错误码）保留 envelope，容量码已由共享客户端投影处理
         if effective_event_type(wire) == Some("error")
             && !ws_client_consumable_error(data)
-            && let Some(data) = response_failed_sse_data_from_error_event(
+            && let Some(mut data) = response_failed_sse_data_from_error_event(
                 self.response_snapshot.as_ref(),
                 self.response_id.as_deref(),
                 data,
             )
         {
+            if let Some(model) = &self.client_model {
+                model.project_event("response.failed", &mut data);
+            }
             return vec![data.to_string()];
         }
         if projected.is_none()
             && let Some(raw) = wire.raw_websocket_message()
         {
-            return vec![raw.to_owned()];
+            let projected = self.client_model.as_ref().and_then(|model| {
+                model.project_json(raw, effective_event_type(wire).unwrap_or_default())
+            });
+            return vec![projected.unwrap_or_else(|| raw.to_owned())];
         }
         if !wire.has_json_data() {
             return Vec::new();
         }
-        vec![data.to_string()]
+        vec![self.client_data(wire, projected)]
     }
 
     /// 返回是否已经看到客户端可见的 wire 终态
@@ -146,8 +169,31 @@ impl OpenAiResponsesEncoder {
     ///
     /// 缺少可转换为非流式响应的 wire 终态时返回错误
     pub fn finish(self) -> Result<Value, ResponseEncodeError> {
-        self.wire_terminal
-            .ok_or(ResponseEncodeError::MissingWireTerminal)
+        let mut response = self
+            .wire_terminal
+            .ok_or(ResponseEncodeError::MissingWireTerminal)?;
+        if let Some(model) = self.client_model {
+            model.project_response(&mut response);
+        }
+        Ok(response)
+    }
+
+    fn client_data(&self, wire: &ProtocolWireEvent, projected: Option<Value>) -> String {
+        let kind = effective_event_type(wire).unwrap_or_default();
+        if let Some(mut data) = projected {
+            if let Some(model) = &self.client_model {
+                model.project_event(kind, &mut data);
+            }
+            return data.to_string();
+        }
+        let data = wire
+            .raw_websocket_message()
+            .map(str::to_owned)
+            .unwrap_or_else(|| wire.data().to_string());
+        self.client_model
+            .as_ref()
+            .and_then(|model| model.project_json(&data, kind))
+            .unwrap_or(data)
     }
 
     fn observe_canonical_identity(&mut self, event: &ProviderEvent) {

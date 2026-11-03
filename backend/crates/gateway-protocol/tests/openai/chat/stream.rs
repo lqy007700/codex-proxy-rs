@@ -18,6 +18,33 @@ fn encoder(include_usage: bool) -> ChatStreamEncoder {
 }
 
 #[test]
+fn every_chunk_keeps_requested_model_including_terminal_usage() {
+    let mut encoder = ChatStreamEncoder::new("client-alias".into(), 0, true);
+    let mut chunks = encoder
+        .push("response.created", &json!({"response":{"id":"resp_synthetic","model":"upstream-created","created_at":123}}))
+        .unwrap();
+    chunks.extend(
+        encoder
+            .push(
+                "response.output_text.delta",
+                &json!({"output_index":0,"content_index":0,"delta":"hello"}),
+            )
+            .unwrap(),
+    );
+    chunks.extend(
+        encoder
+            .push(
+                "response.completed",
+                &json!({"response":response(json!([]))}),
+            )
+            .unwrap(),
+    );
+    assert_eq!(chunks.len(), 4);
+    assert!(chunks.iter().all(|chunk| chunk["model"] == "client-alias"));
+    assert_eq!(chunks.last().unwrap()["usage"]["total_tokens"], 17);
+}
+
+#[test]
 fn interleaved_tools_keep_stable_indices_and_do_not_repeat_arguments() {
     let mut encoder = encoder(true);
     let a =

@@ -2,6 +2,7 @@
 
 mod http;
 mod request;
+mod response_model;
 mod websocket;
 
 use axum::http::{HeaderMap, HeaderValue};

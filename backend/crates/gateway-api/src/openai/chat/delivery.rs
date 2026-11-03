@@ -12,11 +12,12 @@ use gateway_core::{
 };
 use gateway_protocol::openai::{
     chat::{ChatStreamEncoder, chat_completion},
-    sse::{DONE_SSE_FRAME, SseEventDecoder},
+    sse::{DONE_SSE_FRAME, SseEventDecoder, sse_frame_is_done},
 };
 use serde_json::{Value, json};
 
 use super::validation::ChatValidationFacts;
+use crate::openai::response_model::ClientResponseModel;
 
 pub(super) async fn stream_failure(response: axum::response::Response) -> axum::body::Body {
     let retry = response
@@ -43,6 +44,7 @@ pub(super) fn chat_response(
     facts: ChatValidationFacts,
 ) -> MiddlewareResponse {
     let (protocol, status, mut headers, body, envelope) = response.into_parts();
+    ClientResponseModel::new(model.clone()).project_headers(&mut headers);
     if (200..300).contains(&status) {
         headers.retain(|header| !header.name().eq_ignore_ascii_case("content-length"));
     }
@@ -108,22 +110,20 @@ impl ChatBody {
                 self.done = true;
                 return Ok(());
             }
+            // 通用事件解码器会消费结束标记，须在完整帧边界单独处理
+            if std::str::from_utf8(frame.bytes()).is_ok_and(sse_frame_is_done) {
+                if !self.encoder.is_terminal() {
+                    return Err(invalid_response());
+                }
+                self.pending.push_back(done_frame());
+                self.done = true;
+                continue;
+            }
             let events = self
                 .decoder
                 .push(frame.bytes())
                 .map_err(|_| invalid_response())?;
             for event in events {
-                if self.done {
-                    return Err(invalid_response());
-                }
-                if event.data == "[DONE]" {
-                    if !self.encoder.is_terminal() {
-                        return Err(invalid_response());
-                    }
-                    self.pending.push_back(done_frame());
-                    self.done = true;
-                    continue;
-                }
                 let value: Value =
                     serde_json::from_str(&event.data).map_err(|_| invalid_response())?;
                 let kind = event

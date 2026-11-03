@@ -516,13 +516,24 @@ Codex 专用目录中的 `context_window` 与 `max_context_window` 分别表示�
 #### OpenAI 透传
 
 OpenAI 路径保留客户端 Responses wire 语义：请求 body 的未知字段和字段顺序保持不变（受控模型
-映射除外），HTTP SSE 与 WebSocket 的上游业务事件除下述客户端错误兼容及响应头隔离外按原始字节转发，
+映射除外），HTTP SSE 与 WebSocket 的上游业务事件除下述模型名称投影、客户端错误兼容及响应头隔离外按原始字节转发，
 response ID 按 opaque 值处理而不假设 UUID 或固定长度；除客户端错误兼容与原生续写额度恢复外，
 OpenAI 上游错误 envelope 和允许下发的 opaque header 值也不由 canonical 观测结果重写。
 `reasoning.effort` 的数字和未知扩展值保留给上游判断，本地观测不限制参数形态。
 `response.metadata` 的业务内容继续交付，仅其中的响应头沿用凭据、账号身份和逐跳头隔离规则。
 未改写的 WebSocket 文本不依赖 JSON 旁路解析成功；插件改写后的响应仍复核必要关联，原始 SSE 心跳
 和无法提取事实的未改写内容不构成协议失败。
+
+文本生成的客户端模型名取自原生协议入口首次校验通过的请求，在请求中间件和模型映射前冻结，
+重试、换号和保底不改变该名称；WebSocket 每轮 `response.create` 独立冻结。
+Responses JSON 顶层及标准响应生命周期事件中的已有字符串 `model` 使用该名称，
+HTTP 和标准响应、metadata 事件 headers 中已有的 `openai-model` / `x-openai-model` 同步投影，
+头名称匹配不区分大小写。请求名无法表示成合法 HTTP 头值时移除相应 HTTP 模型头，不拒绝正文请求。
+Responses 缺失的模型字段不补造，Chat JSON 与全部流式块统一使用入口请求名。
+正文、工具参数、普通错误内容和未知业务扩展不参与替换；未发生改写的帧保持原始字节。
+Provider 原始模型观测、实际发送目标与计费保持原值，记录字段见[请求字段与筛选](#请求字段与筛选)。
+响应中间件仍可显式改写最终输出；Images、Search、Live 与模型目录不使用该投影
+
 Images 固定使用 OpenAI Provider，不重建正文或映射模型字段；Provider 从原始 JSON 旁路提取图片模型，
 按[账号模型限制](#账号模型限制)选号，并复核插件改写后的模型。账号选择、鉴权头替换和端点路由
 不改变请求正文，成功与非容量失败响应正文保持原始字节。

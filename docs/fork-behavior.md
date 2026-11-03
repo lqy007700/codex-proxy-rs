@@ -114,6 +114,16 @@ OpenAI 临时传输恢复状态按“账号 + 逻辑会话”隔离，同一个�
 
 ## 协议与模型目录
 
+### 客户端模型名称
+
+Responses 与 Chat 文本生成统一向客户端投影入口请求模型名，内部仍保留实际发送模型和上游报告。
+字段范围、中间件优先级与不透明帧边界见 [OpenAI 透传](api.md#openai-透传)
+
+| 职责 | 代码与回归入口 |
+| --- | --- |
+| 模型字段、响应头与原文跨度投影 | [response_model.rs](../backend/crates/gateway-api/src/openai/response_model.rs)、[投影回归](../backend/crates/gateway-api/tests/openai/responses/response_model.rs) |
+| HTTP、SSE 与逐轮 WS 交付 | [Responses HTTP](../backend/crates/gateway-api/src/openai/responses/http.rs)、[WS forward](../backend/crates/gateway-api/src/openai/responses/websocket/forward.rs) |
+
 ### Chat Completions
 
 `POST /v1/chat/completions` 在 API 层转为已有 Responses 执行，支持 JSON 与流式 Chat 输出，

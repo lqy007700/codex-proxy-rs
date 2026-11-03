@@ -50,3 +50,11 @@ fn preserves_refusal_and_incomplete_reasons_without_turning_failures_into_succes
     wire["status"] = json!("failed");
     assert!(chat_completion(&wire, "fallback").is_err());
 }
+
+#[test]
+fn returns_requested_model_without_changing_upstream_response() {
+    let upstream = response(json!([]));
+    let result = chat_completion(&upstream, "client-alias").unwrap();
+    assert_eq!(result["model"], "client-alias");
+    assert_eq!(upstream["model"], "model-a");
+}

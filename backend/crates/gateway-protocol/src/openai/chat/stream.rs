@@ -62,9 +62,6 @@ impl ChatStreamEncoder {
                 if let Some(created) = response.get("created_at").and_then(Value::as_u64) {
                     self.created = created;
                 }
-                if let Some(model) = response.get("model").and_then(Value::as_str) {
-                    self.model = model.to_owned();
-                }
                 chunks.push(self.chunk(json!({"role": "assistant", "content": ""}), Value::Null)?);
             }
         }

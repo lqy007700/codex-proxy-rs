@@ -321,6 +321,7 @@ async fn serve_responses_websocket(socket: Socket, session: ResponsesWebSocketSe
         response_control = prepared.response_control();
         let capture = new_replay_capture();
         let validation = ResponseValidationFacts::default();
+        let client_model = model_hint.clone();
         let input = RequestInput {
             endpoint: crate::openai::router::RESPONSES_PATH.to_owned(),
             protocol: "openai".to_owned(),
@@ -381,7 +382,13 @@ async fn serve_responses_websocket(socket: Socket, session: ResponsesWebSocketSe
                         .session
                         .trace()
                         .capture("client.request.body", &body);
-                    execution_response(started, capture_for_terminal, validation_for_terminal).await
+                    execution_response(
+                        started,
+                        capture_for_terminal,
+                        validation_for_terminal,
+                        client_model.ok_or(MiddlewareError::InvalidState)?,
+                    )
+                    .await
                 })
             }),
         );

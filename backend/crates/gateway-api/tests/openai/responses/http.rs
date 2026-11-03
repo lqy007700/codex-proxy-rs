@@ -595,12 +595,102 @@ async fn http_requests_should_honor_stream_preference() {
             assert_eq!(
                 serde_json::from_slice::<Value>(&body).unwrap(),
                 json!({
-                    "id": "resp_test", "model": "public-model", "status": "completed", "output": []
+                    "id": "resp_test", "model": "model-a", "status": "completed", "output": []
                 }),
             );
             assert_eq!(trace.snapshot(), vec!["collect", "commit"]);
         }
         assert!(!trace.is_cancelled());
+    }
+}
+
+#[tokio::test]
+async fn request_model_projection_keeps_opaque_names_and_response_header_contract() {
+    let admin = crate::admin::AdminTestFixture::new().await.services;
+    for streaming in [false, true] {
+        for model in ["client-alias", "opaque\0model", "客户端模型"] {
+            let trace = Arc::new(Trace::default());
+            let session = if streaming {
+                FakeSession::streaming(
+                    Arc::clone(&trace),
+                    vec![
+                        NextStep::Event(delivery(
+                            started(),
+                            CommitRequirement::CommitBeforeDelivery,
+                        )),
+                        NextStep::Event(delivery(completed(), CommitRequirement::AlreadyCommitted)),
+                        NextStep::FinalizeSuccess,
+                    ],
+                )
+            } else {
+                FakeSession::buffered(Arc::clone(&trace), vec![started(), completed()])
+            }
+            .with_response_headers(vec![
+                ProviderResponseHeader::new("OpenAI-Model", Bytes::from_static(b"reported-model")),
+                ProviderResponseHeader::new(
+                    "x-openai-model",
+                    Bytes::from_static(b"reported-alias"),
+                ),
+                ProviderResponseHeader::new("x-opaque", Bytes::from_static(b"original")),
+                ProviderResponseHeader::new("x-opaque", Bytes::from_static(b"second")),
+            ]);
+            let middleware = Arc::new(RequestMiddleware {
+                expected_operation: Some(OperationKind::Generate),
+                request_model: Some("middleware-target"),
+                ..Default::default()
+            });
+            let execution = Arc::new(SessionExecution {
+                client: authenticated_client_for_provider("sk_projection_test", "openai"),
+                session: Mutex::new(Some(Box::new(session))),
+                middleware: Some(middleware.frozen()),
+            });
+            let response =
+                crate::openai::api_router_with_admin_and_execution(admin.clone(), execution)
+                    .oneshot(
+                        Request::post("/v1/responses")
+                            .header(AUTHORIZATION, "Bearer sk_projection_test")
+                            .body(Body::from(
+                                json!({"model":model,"input":"synthetic","stream":streaming})
+                                    .to_string(),
+                            ))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            for name in ["openai-model", "x-openai-model"] {
+                if HeaderValue::from_str(model).is_ok() {
+                    assert_eq!(response.headers()[name].as_bytes(), model.as_bytes());
+                } else {
+                    assert!(!response.headers().contains_key(name));
+                }
+            }
+            assert_eq!(
+                response
+                    .headers()
+                    .get_all("x-opaque")
+                    .iter()
+                    .map(|v| v.as_bytes())
+                    .collect::<Vec<_>>(),
+                vec![b"original".as_slice(), b"second".as_slice()]
+            );
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            if streaming {
+                for frame in parse_sse_events(std::str::from_utf8(&body).unwrap()).unwrap() {
+                    if frame.data == "[DONE]" {
+                        continue;
+                    }
+                    let value: Value = serde_json::from_str(&frame.data).unwrap();
+                    assert_eq!(value["response"]["model"], model);
+                }
+            } else {
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&body).unwrap()["model"],
+                    model
+                );
+            }
+            assert!(!trace.is_cancelled());
+        }
     }
 }
 
@@ -2647,7 +2737,12 @@ async fn native_responses_route_preserves_images_and_encrypted_reasoning_in_json
             let raw = Bytes::from(format!(
                 "id: {id}\r\nevent: {kind}\r\nretry: 1234\r\ndata: {data} \r\n\r\n"
             ));
-            expected_sse.extend_from_slice(&raw);
+            let expected = if matches!(kind, "response.created" | "response.completed") {
+                String::from_utf8(raw.to_vec()).unwrap().replace("\"model\":\"public-model\"", "\"model\":\"model-a\"").into_bytes()
+            } else {
+                raw.to_vec()
+            };
+            expected_sse.extend_from_slice(&expected);
             events.push(ProviderEvent::canonical_with_wire(
                 facts,
                 ProtocolWireEvent::json_with_raw_sse_metadata(
@@ -2678,7 +2773,7 @@ async fn native_responses_route_preserves_images_and_encrypted_reasoning_in_json
         } else {
             FakeSession::buffered_provider(Arc::clone(&trace), events)
         };
-        // 使用真实 /v1/responses 入口，覆盖共享执行函数的可选适配器为空分支
+        // 真实入口只投影模型名称，推理密文、生图结果和其余 SSE 字节仍完整保留
         let response = response(&admin, "openai", session, streaming).await;
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -2687,7 +2782,9 @@ async fn native_responses_route_preserves_images_and_encrypted_reasoning_in_json
             assert_eq!(body.as_ref(), expected_sse.as_slice());
             assert_eq!(trace.snapshot(), ["next_event", "commit", "next_end"]);
         } else {
-            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), terminal);
+            let mut expected = terminal.clone();
+            expected["model"] = json!("model-a");
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), expected);
             assert_eq!(trace.snapshot(), ["collect", "commit"]);
         }
         assert!(!trace.is_cancelled());
@@ -2816,12 +2913,13 @@ async fn buffered_response_middleware_replaces_body_and_preserves_explicit_heade
         responses_middleware()
             .with_response_actions(vec![ResponseFrameAction::Replace(
             Bytes::from_static(
-                b"{\"id\":\"resp_test\",\"status\":\"completed\",\"output\":[],\"future_policy_field\":true}",
+                b"{\"id\":\"resp_test\",\"status\":\"completed\",\"model\":\"plugin-display\",\"output\":[],\"future_policy_field\":true}",
             ),
             )])
             .with_response_headers(vec![
                 MiddlewareHeader::new("x-policy-result", Bytes::from_static(b"replaced")),
                 MiddlewareHeader::new("authorization", Bytes::from_static(b"plugin-value")),
+                MiddlewareHeader::new("openai-model", Bytes::from_static(b"plugin-display")),
             ]),
     );
 
@@ -2830,6 +2928,7 @@ async fn buffered_response_middleware_replaces_body_and_preserves_explicit_heade
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["x-policy-result"], "replaced");
     assert_eq!(response.headers()[AUTHORIZATION], "plugin-value");
+    assert_eq!(response.headers()["openai-model"], "plugin-display");
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("read policy JSON body");
@@ -2837,6 +2936,7 @@ async fn buffered_response_middleware_replaces_body_and_preserves_explicit_heade
         serde_json::from_slice::<Value>(&body).expect("policy response JSON"),
         json!({
             "id": "resp_test", "status": "completed", "output": [],
+            "model": "plugin-display",
             "future_policy_field": true
         })
     );
@@ -3448,6 +3548,7 @@ async fn streaming_middleware_preserves_heartbeats_before_and_after_rewriting() 
         b": ping\n\n".as_slice(),
         b"id: next\nretry: 1000\n\n".as_slice(),
         b"event: vendor.future\ndata: future non-JSON payload\n\n".as_slice(),
+        b"event: response.created\ndata: future non-JSON payload\n\n".as_slice(),
     ] {
         let admin = crate::admin::AdminTestFixture::new().await.services;
         let trace = Arc::new(Trace::default());

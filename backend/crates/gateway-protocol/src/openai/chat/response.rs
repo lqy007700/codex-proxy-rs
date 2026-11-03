@@ -71,7 +71,7 @@ pub fn chat_completion(response: &Value, model: &str) -> Result<Value, ChatRespo
         "id": id,
         "object": "chat.completion",
         "created": response.get("created_at").and_then(Value::as_u64).ok_or(ChatResponseError)?,
-        "model": response.get("model").and_then(Value::as_str).unwrap_or(model),
+        "model": model,
         "choices": [{"index": 0, "message": message, "finish_reason": reason, "logprobs": null}],
     });
     if let Some(usage) = response.get("usage").filter(|v| !v.is_null()) {

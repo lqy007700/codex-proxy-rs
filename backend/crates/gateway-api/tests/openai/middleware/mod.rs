@@ -37,6 +37,7 @@ pub(super) struct RequestMiddleware {
     pub(super) response_actions: Mutex<VecDeque<ResponseFrameAction>>,
     pub(super) response_headers: Vec<MiddlewareHeader>,
     pub(super) short_circuit_json: Option<Bytes>,
+    pub(super) request_model: Option<&'static str>,
     pub(super) settings:
         Option<fn(&mut gateway_core::routing::request_settings::ExecutionSettings)>,
 }
@@ -118,6 +119,7 @@ impl MiddlewarePlan for RequestMiddleware {
         let actions = std::mem::take(&mut *self.response_actions.lock().unwrap());
         let response_headers = self.response_headers.clone();
         let short_circuit_json = self.short_circuit_json.clone();
+        let request_model = self.request_model;
         if let Some(update) = self.settings {
             let settings = request.settings().expect("effective request settings");
             let mut values = settings.execution_values().expect("execution scope");
@@ -131,6 +133,19 @@ impl MiddlewarePlan for RequestMiddleware {
             };
         }
         Box::pin(async move {
+            if let Some(model) = request_model {
+                let mut body: serde_json::Value = serde_json::from_slice(request.body())
+                    .map_err(|_| MiddlewareError::InvalidState)?;
+                body["model"] = serde_json::Value::String(model.to_owned());
+                let protocol = request.protocol().to_owned();
+                let headers = request.headers().to_vec();
+                request = request.replace_parts(
+                    protocol,
+                    headers,
+                    Bytes::from(body.to_string()),
+                    None,
+                )?;
+            }
             if let Some(body) = short_circuit_json {
                 return Ok(MiddlewareResponse::new(
                     "openai".to_owned(),

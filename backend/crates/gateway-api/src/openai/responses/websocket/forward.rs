@@ -19,6 +19,7 @@ use gateway_core::operation::ProviderSessionState;
 
 use crate::openai::error::{gateway_error_contract, gateway_error_from_engine};
 use crate::openai::middleware::{PendingExecution, pending_execution_response};
+use crate::openai::response_model::ClientResponseModel;
 use crate::openai::responses::validation::{ResponseValidationFacts, ResponsesDeliveryValidator};
 
 use super::{
@@ -77,17 +78,21 @@ pub(super) async fn execution_response(
     started: StartedExecution,
     capture: ReplayCaptureHandle,
     validation: ResponseValidationFacts,
+    client_model: String,
 ) -> Result<MiddlewareResponse, MiddlewareError> {
     if !started.stream {
         return Err(MiddlewareError::InvalidState);
     }
     let request_id = Arc::<str>::from(started.request_id.to_string());
+    let client_model = ClientResponseModel::new(client_model);
     let mut body = WebSocketExecutionBody::new(
         started.session,
         Arc::clone(&request_id),
         Arc::clone(&capture),
         validation,
     );
+    body.encoder =
+        OpenAiResponsesEncoder::new().with_requested_model(client_model.as_str().to_owned());
     if let Err(error) = body.prime().await {
         let headers = body.response_headers().to_vec();
         let status = middleware_error_status(&error);
@@ -98,21 +103,23 @@ pub(super) async fn execution_response(
                 .map(|header| MiddlewareHeader::new(header.name(), header.value().clone()))
                 .collect();
             // 失败也要保留会话到洋葱链返回，否则释放会话会取消仍在等待 next 的插件
-            return Ok(pending_execution_response(
-                "openai".to_owned(),
-                status,
-                response_headers,
-                MiddlewareFrame::new(
-                    Bytes::from(initial_engine_error_event(
-                        &error,
-                        request_id.as_ref(),
-                        &headers,
-                    )),
-                    MiddlewareFraming::JsonDocument,
-                    true,
-                ),
-                body.execution,
-            ));
+            return Ok(
+                client_model.project_response_headers(pending_execution_response(
+                    "openai".to_owned(),
+                    status,
+                    response_headers,
+                    MiddlewareFrame::new(
+                        Bytes::from(initial_engine_error_event(
+                            &error,
+                            request_id.as_ref(),
+                            &headers,
+                        )),
+                        MiddlewareFraming::JsonDocument,
+                        true,
+                    ),
+                    body.execution,
+                )),
+            );
         }
         Box::new(body).close().await;
         return Err(error);
@@ -122,12 +129,14 @@ pub(super) async fn execution_response(
         .iter()
         .map(|header| MiddlewareHeader::new(header.name(), header.value().clone()))
         .collect();
-    Ok(MiddlewareResponse::new(
-        "openai".to_owned(),
-        200,
-        headers,
-        Box::new(body),
-    ))
+    Ok(
+        client_model.project_response_headers(MiddlewareResponse::new(
+            "openai".to_owned(),
+            200,
+            headers,
+            Box::new(body),
+        )),
+    )
 }
 
 pub(super) async fn forward_response(
