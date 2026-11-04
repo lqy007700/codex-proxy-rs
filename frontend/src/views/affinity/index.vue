@@ -8,6 +8,7 @@ import { getAccounts } from '@/api'
 import { applyAffinity, getAffinityOperations, getAffinitySessions, getIdentitySources, previewAffinity, saveIdentitySource } from '@/api/modules/affinity'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
+import { accountIdentityLabel } from '@/utils/accountIdentity'
 import { generateRequestId } from '@/utils/operation'
 
 const route = useRoute()
@@ -188,7 +189,7 @@ function directiveLabel(directive: BindingDirective) {
 }
 function accountLabel(id: string) {
   const target = targetAccounts.value.find(account => account.id === id)
-  return accountNames.value.get(id) || target?.name?.trim() || target?.email?.trim() || id
+  return accountNames.value.get(id) || (target && accountIdentityLabel(target)) || id
 }
 async function loadAccountNames() {
   const requestId = accountNamesQuery.start()
@@ -199,13 +200,13 @@ async function loadAccountNames() {
       return
     const names = new Map<string, string>()
     for (const account of first.items)
-      names.set(account.id, account.name?.trim() || account.email?.trim() || account.id)
+      names.set(account.id, accountIdentityLabel(account))
     for (let page = 2; page <= first.page.totalPages; page += 1) {
       const result = await getAccounts({ page, pageSize: first.page.pageSize }, options)
       if (!accountNamesQuery.isCurrent(requestId))
         return
       for (const account of result.items)
-        names.set(account.id, account.name?.trim() || account.email?.trim() || account.id)
+        names.set(account.id, accountIdentityLabel(account))
     }
     accountNames.value = names
   }

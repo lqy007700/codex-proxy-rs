@@ -5,8 +5,8 @@ import { computed } from 'vue'
 
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import AccountUpstreamStatus from '@/components/account/AccountUpstreamStatus.vue'
+import { accountIdentityLabel } from '@/utils/accountIdentity'
 import { stablePresetVisualToneClass } from '@/utils/color'
-import { accountIdentityLabel } from '../utils/accountIdentity'
 import AccountFallbackIndicator from './AccountFallbackIndicator.vue'
 import AccountNotesPopover from './AccountNotesPopover.vue'
 
