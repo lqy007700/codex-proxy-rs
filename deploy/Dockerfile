@@ -89,9 +89,5 @@ ARG CPR_PREBUILT_DIR=dist/docker
 
 COPY --chown=cpr:cpr ${CPR_PREBUILT_DIR}/linux-${TARGETARCH}/codex-proxy-rs /app/bin/codex-proxy-rs
 COPY --chown=cpr:cpr ${CPR_PREBUILT_DIR}/web/dist ./web/dist
-COPY --chown=cpr:cpr ${CPR_PREBUILT_DIR}/linux-${TARGETARCH}/plugins/official /app/bin/plugins/official
-RUN chmod +x /app/bin/codex-proxy-rs \
-    && find /app/bin/plugins/official -type f -exec chmod 0444 '{}' + \
-    && chmod 0555 /app/bin/plugins/official \
-    && chmod 0755 /app/bin/plugins
+RUN chmod +x /app/bin/codex-proxy-rs
 USER cpr

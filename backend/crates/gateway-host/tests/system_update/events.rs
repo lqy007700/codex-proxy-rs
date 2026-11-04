@@ -83,7 +83,6 @@ async fn update_events_should_close_after_terminal_update_log() {
         .perform_test_update(Some(TARGET_VERSION.to_owned()))
         .await;
     let first = events.next().await.expect("terminal event");
-
     assert_eq!(first.level, SystemUpdateEventLevel::Error);
     assert!(events.next().await.is_none());
 }
@@ -131,24 +130,8 @@ async fn update_events_should_preserve_complete_release_stage_sequence() {
     assert_eq!(
         steps,
         [
-            "release",
-            "prepare",
-            "asset",
-            "asset",
-            "verify",
-            "prepare",
-            "download",
-            "download",
-            "download",
-            "checksum",
-            "checksum",
-            "extract",
-            "extract",
-            "preflight",
-            "preflight",
-            "replace",
-            "replace",
-            "done",
+            "release", "prepare", "asset", "asset", "verify", "prepare", "download", "download",
+            "download", "checksum", "checksum", "extract", "extract", "replace", "replace", "done",
         ]
     );
 }

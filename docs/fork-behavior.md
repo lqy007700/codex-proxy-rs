@@ -49,7 +49,7 @@ Core 统一负责退避、阶段推进和安全重放，Provider 负责错误分
 
 - 日常首次选号沿用既有调度策略、权重、账号范围和会话亲和；恢复轮询遍历其他合格普通池，不被日常权重层截断
 - 恢复和保底保留根会话主绑定，下一条普通请求继续使用原有亲和规则；会话关联依赖 Client Key 与逻辑会话，不依赖 User-Agent
-- 严格亲和跟随请求、原生增量续接、外部指定账号、已交付输出、外部副作用和插件约束继续限制跨账号重放
+- 严格亲和跟随请求、原生增量续接、外部指定账号、已交付输出、外部副作用约束继续限制跨账号重放
 - 发送结果不明、Provider 无法证明重放安全、取消、截止时间及连接和路由预算仍可终止恢复
 - `maxAccountRotations` 仅限制其他恢复路径的换号，业务重试与保底使用各自预算，见 [API 合同](api.md#账号亲和与换号)
 - 两个业务预算和账号用途按请求快照冻结，保存配置不改变执行中请求的恢复策略
@@ -60,7 +60,6 @@ Core 统一负责退避、阶段推进和安全重放，Provider 负责错误分
 | --- | --- |
 | 错误分类和重放资格 | [diagnostics.rs](../backend/crates/providers/openai/src/transport/diagnostics/mod.rs)、[failure.rs](../backend/crates/providers/openai/src/provider/failure.rs)、[Provider 恢复测试](../backend/crates/providers/openai/tests/provider/contract/selection_retry.rs) |
 | 共享预算、退避、换号和终态 | [coordinator.rs](../backend/crates/gateway-core/src/engine/coordinator.rs)、[recovery.rs](../backend/crates/gateway-core/src/engine/recovery.rs)、[协调器测试](../backend/crates/gateway-core/tests/engine/coordinator.rs) |
-| Provider 与插件的共同阶段约束 | [AttemptContext](../backend/crates/gateway-core/src/engine/mod.rs)、[插件错误投影](../backend/crates/gateway-plugin/runtime/src/callback/error.rs)、[插件设置快照](../backend/crates/gateway-plugin/sdk/src/call/services/settings.rs) |
 
 ## 账号调度与额度
 
@@ -70,7 +69,7 @@ Core 统一负责退避、阶段推进和安全重放，Provider 负责错误分
 保底账号不参与正常首次分配，只在恢复阶段使用；账号自身仍需满足启用、权限、模型、额度、冷却和并发条件。
 编辑和批量编辑均可设置用途，账号表显示保底标识，诊断指定账号测试沿用其显式目标
 
-角色属于账号配置，通过 Store、配置 revision 和 Core 冻结账号范围传递；OpenAI、xAI 和插件选号共用阶段过滤。
+角色属于账号配置，通过 Store、配置 revision 和 Core 冻结账号范围传递；OpenAI 与 xAI 选号共用阶段过滤。
 配置入口见[配置保底账号](../deploy/README.md#配置保底账号)，字段见[查询与账号字段](api.md#查询与账号字段)
 
 ### 点数支出开关

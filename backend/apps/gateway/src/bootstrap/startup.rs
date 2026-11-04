@@ -1,63 +1,33 @@
 //! 启动模式共享的基础设施与 Provider 组装，不启动 HTTP 或 Worker
 
-use std::{path::PathBuf, sync::Arc};
-
 use gateway_admin::ports::provider::ProviderAdminRegistry;
 use gateway_core::{engine::provider::ProviderRegistry, time::DeploymentTimeZone};
-use gateway_host::{ConfigError, HostBundle, HostConfig, outbound::HttpClient};
+use gateway_host::{HostBundle, HostConfig};
 use gateway_store::{StoreBundle, StoreConfig};
 
 use super::BootstrapError;
-
-pub(super) enum Mode {
-    Server,
-    Command,
-    Help,
-}
 
 pub(super) struct Environment {
     pub(super) host: HostBundle,
     pub(super) store: StoreBundle,
     pub(super) timezone: DeploymentTimeZone,
-    pub(super) plugin_cache: PathBuf,
-    pub(super) version: String,
-    pub(super) plugin_http: Arc<HttpClient>,
 }
 
 impl Environment {
     pub(super) async fn initialize(
         host: HostConfig,
         store: StoreConfig,
-        mode: Mode,
     ) -> Result<Self, BootstrapError> {
         let timezone = host.timezone;
         let store = store.with_timezone(timezone);
-        let plugin_cache = host.runtime_data_dir().join("plugins");
-        let host = match mode {
-            Mode::Server => gateway_host::initialize(host).await?,
-            Mode::Command | Mode::Help => gateway_host::initialize_command_line(host).await?,
-        };
+        let host = gateway_host::initialize(host).await?;
         host.report_startup_ready("Host");
-        let store = match mode {
-            Mode::Server => gateway_store::initialize(store).await?,
-            Mode::Command => gateway_store::initialize_command_line(store).await?,
-            Mode::Help => gateway_store::initialize_read_only(store).await?,
-        };
+        let store = gateway_store::initialize(store).await?;
         host.report_startup_ready("Store");
-        let version = host
-            .system_operations()
-            .version()
-            .await
-            .map_err(|_| ConfigError::InvalidField("host.version"))?
-            .version;
-        let plugin_http = Arc::new(HttpClient::new()?);
         Ok(Self {
             host,
             store,
             timezone,
-            plugin_cache,
-            version,
-            plugin_http,
         })
     }
 }

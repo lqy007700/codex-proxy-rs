@@ -10,13 +10,7 @@ async fn restart_should_not_shutdown_when_replacement_spawn_fails() {
     config.executable_path = Some(fixture.root.path().join("missing"));
     let shutdown = CancellationToken::new();
     let service = ProcessSystemOperations::new(shutdown.clone(), config);
-
-    assert!(
-        service
-            .restart(Arc::new(AllowingUpdatePreflight))
-            .await
-            .is_err()
-    );
+    assert!(service.restart().await.is_err());
     assert!(!shutdown.is_cancelled());
 }
 
@@ -28,11 +22,7 @@ async fn restart_should_request_process_restart_inside_docker() {
     config.deployment_mode = "docker".to_owned();
     let shutdown = CancellationToken::new();
     let service = ProcessSystemOperations::new(shutdown.clone(), config);
-    service
-        .restart(Arc::new(AllowingUpdatePreflight))
-        .await
-        .expect("restart accepted");
-
+    service.restart().await.expect("restart accepted");
     tokio::time::timeout(Duration::from_secs(2), shutdown.cancelled())
         .await
         .expect("shutdown requested");
@@ -46,18 +36,14 @@ async fn accepted_restart_excludes_system_operations_until_service_release() {
     config.deployment_mode = "docker".to_owned();
     let shutdown = CancellationToken::new();
     let service = ProcessSystemOperations::new(shutdown.clone(), config.clone());
-    service
-        .restart(Arc::new(AllowingUpdatePreflight))
-        .await
-        .expect("restart accepted");
-
+    service.restart().await.expect("restart accepted");
     assert!(!shutdown.is_cancelled(), "response delivery still has time");
     assert_system_operations_rejected(&service, "服务正在重启").await;
     assert!(fixture.lock().exists());
     let competing = ProcessSystemOperations::new(CancellationToken::new(), config);
     assert_eq!(
         competing
-            .restart(Arc::new(AllowingUpdatePreflight))
+            .restart()
             .await
             .expect_err("another service cannot replace files during restart")
             .kind(),
@@ -71,7 +57,6 @@ async fn accepted_restart_excludes_system_operations_until_service_release() {
         .await
         .expect("status remains readable");
     assert!(fixture.lock().exists(), "draining retains the file lock");
-
     drop(service);
     assert!(
         !fixture.lock().exists(),
@@ -88,45 +73,14 @@ async fn shutdown_rejects_new_system_operations() {
     let shutdown = CancellationToken::new();
     let service = ProcessSystemOperations::new(shutdown.clone(), config);
     shutdown.cancel();
-
     assert_system_operations_rejected(&service, "服务正在关闭").await;
-    assert!(!fixture.lock().exists());
-}
-
-#[tokio::test]
-async fn shutdown_during_restart_preflight_does_not_schedule_replacement() {
-    struct CancellingPreflight(CancellationToken);
-    #[async_trait::async_trait]
-    impl gateway_admin::ports::system::SystemRestartPreflight for CancellingPreflight {
-        async fn prepare(
-            &self,
-            _: Option<SystemUpdateCandidate>,
-        ) -> Result<(), SystemOperationError> {
-            self.0.cancel();
-            Ok(())
-        }
-    }
-
-    let fixture = Fixture::new();
-    let mut config = fixture.config("http://127.0.0.1:1/repos");
-    config.self_restart_enabled = true;
-    config.deployment_mode = "docker".to_owned();
-    let shutdown = CancellationToken::new();
-    let service = ProcessSystemOperations::new(shutdown.clone(), config);
-    let error = service
-        .restart(Arc::new(CancellingPreflight(shutdown)))
-        .await
-        .expect_err("shutdown won during preflight");
-
-    assert_eq!(error.kind(), SystemOperationErrorKind::Conflict);
-    assert_eq!(error.message(), "服务正在关闭");
     assert!(!fixture.lock().exists());
 }
 
 async fn assert_system_operations_rejected(service: &ProcessSystemOperations, reason: &str) {
     for result in [
-        service.restart(Arc::new(AllowingUpdatePreflight)).await,
-        service.rollback(Arc::new(AllowingUpdatePreflight)).await,
+        service.restart().await,
+        service.rollback().await,
         service
             .perform_test_update(Some(TARGET_VERSION.to_owned()))
             .await,
@@ -135,14 +89,6 @@ async fn assert_system_operations_rejected(service: &ProcessSystemOperations, re
         assert_eq!(error.kind(), SystemOperationErrorKind::Conflict);
         assert_eq!(error.message(), reason);
     }
-    assert_eq!(
-        service
-            .restart_candidate()
-            .await
-            .expect_err("no restart plan")
-            .message(),
-        reason
-    );
 }
 
 #[tokio::test]
@@ -154,10 +100,9 @@ async fn restart_should_spawn_replacement_before_shutdown_outside_docker() {
     config.self_restart_enabled = true;
     let shutdown = CancellationToken::new();
     let service = ProcessSystemOperations::new(shutdown.clone(), config);
-
     assert_eq!(
         service
-            .restart(Arc::new(AllowingUpdatePreflight))
+            .restart()
             .await
             .expect("replacement scheduled")
             .kind(),
@@ -222,16 +167,11 @@ async fn restart_should_use_startup_path_after_running_executable_is_renamed() {
     config.executable_path = None;
     config.self_restart_enabled = true;
     let service = ProcessSystemOperations::new(CancellationToken::new(), config);
-
     let backup = fixture.root.path().join("codex-proxy-rs.backup");
     fs::rename(fixture.executable(), &backup).expect("back up running executable");
     fixture.write_executable("#!/bin/sh\nprintf new > \"${0%/*}/replacement-version\"\n");
     assert_eq!(std::env::current_exe().expect("renamed executable"), backup);
-
-    service
-        .restart(Arc::new(AllowingUpdatePreflight))
-        .await
-        .expect("restart accepted");
+    service.restart().await.expect("restart accepted");
     let marker = fixture.root.path().join("replacement-version");
     tokio::time::timeout(Duration::from_secs(5), async {
         while !marker.is_file() {
@@ -279,14 +219,9 @@ async fn restart_should_conflict_while_another_system_operation_is_running() {
         .await
         .expect("update reaches release fetch while holding the operation lock")
         .expect("connected signal");
-
-    let error = service
-        .restart(Arc::new(AllowingUpdatePreflight))
-        .await
-        .expect_err("restart during update");
+    let error = service.restart().await.expect_err("restart during update");
     assert_eq!(error.kind(), SystemOperationErrorKind::Conflict);
     assert!(!shutdown.is_cancelled());
-
     update.await.expect("request").expect("accepted");
     assert!(fixture.lock().exists());
     upstream.abort();
@@ -294,10 +229,7 @@ async fn restart_should_conflict_while_another_system_operation_is_running() {
         wait_for_update(&service).await.operation.status,
         SystemOperationStatus::Failed
     );
-    service
-        .restart(Arc::new(AllowingUpdatePreflight))
-        .await
-        .expect("restart after lock release");
+    service.restart().await.expect("restart after lock release");
 }
 
 #[tokio::test]
@@ -319,30 +251,8 @@ async fn rollback_should_restore_binary_web_and_version_state() {
         SystemOperationStatus::Succeeded,
         "{updated:?}"
     );
-    assert_eq!(
-        fs::read(fixture.official().join("plugin-release-manifest.json")).expect("manifest"),
-        b"new-manifest"
-    );
-    assert!(fixture.official().join("new-plugin.tar.gz").is_file());
-    assert!(!fixture.official().join("old-plugin.tar.gz").exists());
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
 
-        assert_eq!(
-            fs::metadata(fixture.official())
-                .expect("official directory")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o555
-        );
-    }
-    service
-        .rollback(Arc::new(AllowingUpdatePreflight))
-        .await
-        .expect("rollback");
-
+    service.rollback().await.expect("rollback");
     assert_eq!(
         fs::read(fixture.executable()).expect("binary"),
         b"old-binary"
@@ -351,15 +261,7 @@ async fn rollback_should_restore_binary_web_and_version_state() {
         fs::read(fixture.web().join("index.html")).expect("web"),
         b"old-web"
     );
-    assert_eq!(
-        fs::read(fixture.official().join("plugin-release-manifest.json")).expect("manifest"),
-        OLD_RELEASE_MANIFEST.as_bytes()
-    );
-    assert_eq!(
-        fs::read(fixture.official().join("old-plugin.tar.gz")).expect("old plugin"),
-        b"old-plugin"
-    );
-    assert!(!fixture.official().join("new-plugin.tar.gz").exists());
+
     assert_eq!(
         service
             .update_status()
@@ -376,169 +278,6 @@ async fn rollback_should_restore_binary_web_and_version_state() {
             .status,
         SystemOperationStatus::Succeeded,
         "第二次更新必须能清理只读的官方目录备份"
-    );
-    assert_eq!(
-        fs::read(fixture.official().join("plugin-release-manifest.json")).expect("manifest"),
-        b"new-manifest"
-    );
-}
-
-#[tokio::test]
-async fn update_should_restore_all_files_when_plugin_revision_changes_during_swap() {
-    let server = MockServer::start().await;
-    let fixture = Fixture::new();
-    fixture
-        .mount_release(
-            &server,
-            TARGET_VERSION,
-            ArchiveKind::Safe,
-            ChecksumKind::Valid,
-        )
-        .await;
-    let service = fixture.service(&server);
-    SystemOperations::perform_update(
-        &service,
-        Some(TARGET_VERSION.to_owned()),
-        None,
-        Arc::new(ChangingRevisionPreflight {
-            confirmations: AtomicUsize::new(0),
-        }),
-        gateway_admin::model::system::SystemUpdateMode::Upgrade,
-    )
-    .await
-    .expect("update accepted");
-
-    let status = wait_for_update(&service).await;
-    assert_eq!(status.operation.status, SystemOperationStatus::Failed);
-    assert_eq!(
-        fs::read(fixture.executable()).expect("binary"),
-        b"old-binary"
-    );
-    assert_eq!(
-        fs::read(fixture.web().join("index.html")).expect("web"),
-        b"old-web"
-    );
-    assert_eq!(
-        fs::read(fixture.official().join("plugin-release-manifest.json")).expect("manifest"),
-        OLD_RELEASE_MANIFEST.as_bytes()
-    );
-    assert!(fixture.official().join("old-plugin.tar.gz").is_file());
-    assert!(!fixture.official().join("new-plugin.tar.gz").exists());
-}
-
-#[tokio::test]
-async fn rollback_should_restore_current_release_when_plugin_revision_changes_during_swap() {
-    let server = MockServer::start().await;
-    let fixture = Fixture::new();
-    fixture
-        .mount_release(
-            &server,
-            TARGET_VERSION,
-            ArchiveKind::Safe,
-            ChecksumKind::Valid,
-        )
-        .await;
-    let service = fixture.service(&server);
-    assert_eq!(
-        complete_update(&service, TARGET_VERSION)
-            .await
-            .operation
-            .status,
-        SystemOperationStatus::Succeeded
-    );
-
-    let error = service
-        .rollback(Arc::new(ChangingRollbackRevisionPreflight {
-            confirmations: AtomicUsize::new(0),
-        }))
-        .await
-        .expect_err("revision changed after rollback swap");
-
-    assert_eq!(error.kind(), SystemOperationErrorKind::Conflict);
-    assert_eq!(
-        fs::read(fixture.executable()).expect("binary"),
-        b"new-binary"
-    );
-    assert_eq!(
-        fs::read(fixture.web().join("index.html")).expect("web"),
-        b"new-web"
-    );
-    assert_eq!(
-        fs::read(fixture.official().join("plugin-release-manifest.json")).expect("manifest"),
-        b"new-manifest"
-    );
-    assert_eq!(
-        service
-            .update_status()
-            .await
-            .expect("status")
-            .operation
-            .status,
-        SystemOperationStatus::Failed
-    );
-}
-
-#[tokio::test]
-async fn cancelled_rollback_should_restore_current_release_after_the_swap() {
-    let server = MockServer::start().await;
-    let fixture = Fixture::new();
-    fixture
-        .mount_release(
-            &server,
-            TARGET_VERSION,
-            ArchiveKind::Safe,
-            ChecksumKind::Valid,
-        )
-        .await;
-    let service = fixture.service(&server);
-    assert_eq!(
-        complete_update(&service, TARGET_VERSION)
-            .await
-            .operation
-            .status,
-        SystemOperationStatus::Succeeded
-    );
-    let reached_after_swap = Arc::new(tokio::sync::Notify::new());
-    let task_service = service.clone();
-    let task_reached = Arc::clone(&reached_after_swap);
-    let task = tokio::spawn(async move {
-        task_service
-            .rollback(Arc::new(BlockingRollbackPreflight {
-                confirmations: AtomicUsize::new(0),
-                reached_after_swap: task_reached,
-            }))
-            .await
-    });
-    tokio::time::timeout(Duration::from_secs(5), reached_after_swap.notified())
-        .await
-        .expect("post-swap confirmation reached");
-    task.abort();
-    assert!(
-        task.await
-            .expect_err("rollback task cancelled")
-            .is_cancelled()
-    );
-
-    assert_eq!(
-        fs::read(fixture.executable()).expect("binary"),
-        b"new-binary"
-    );
-    assert_eq!(
-        fs::read(fixture.web().join("index.html")).expect("web"),
-        b"new-web"
-    );
-    assert_eq!(
-        fs::read(fixture.official().join("plugin-release-manifest.json")).expect("manifest"),
-        b"new-manifest"
-    );
-    assert_eq!(
-        service
-            .update_status()
-            .await
-            .expect("recovered status")
-            .operation
-            .status,
-        SystemOperationStatus::Failed
     );
 }
 
@@ -558,7 +297,6 @@ async fn experimental_update_should_install_same_channel_release() {
     config.version = "3.10.0-exp.2".to_owned();
     config.build_type = "experimental".to_owned();
     let service = ProcessSystemOperations::new(CancellationToken::new(), config);
-
     assert_eq!(
         complete_update(&service, "3.10.0-exp.3")
             .await
@@ -606,7 +344,6 @@ async fn update_should_reject_cross_channel_targets_before_fetching_or_replacing
         config.version = current.to_owned();
         config.build_type = build_type.to_owned();
         let service = ProcessSystemOperations::new(CancellationToken::new(), config);
-
         let error = service
             .perform_test_update(Some(target.to_owned()))
             .await
@@ -799,29 +536,6 @@ async fn update_should_reject_release_archive_with_unsafe_path() {
 }
 
 #[tokio::test]
-async fn update_should_require_a_flat_regular_official_plugin_bundle() {
-    for archive_kind in [
-        ArchiveKind::MissingOfficialManifest,
-        ArchiveKind::NestedOfficialAsset,
-        ArchiveKind::OfficialSymlink,
-    ] {
-        let server = MockServer::start().await;
-        let fixture = Fixture::new();
-        fixture
-            .mount_release(&server, TARGET_VERSION, archive_kind, ChecksumKind::Valid)
-            .await;
-
-        assert_eq!(
-            complete_update(&fixture.service(&server), TARGET_VERSION)
-                .await
-                .operation
-                .status,
-            SystemOperationStatus::Failed,
-        );
-    }
-}
-
-#[tokio::test]
 async fn update_should_reject_untrusted_github_api_base() {
     let fixture = Fixture::new();
     let service = ProcessSystemOperations::new(
@@ -832,7 +546,6 @@ async fn update_should_reject_untrusted_github_api_base() {
         .perform_test_update(Some(TARGET_VERSION.to_owned()))
         .await
         .expect_err("untrusted API rejected");
-
     assert_eq!(error.kind(), SystemOperationErrorKind::Conflict);
 }
 
@@ -867,7 +580,6 @@ async fn update_should_remove_stale_file_lock_and_continue() {
         .await;
     fs::write(fixture.lock(), "stale").expect("lock");
     filetime::set_file_mtime(fixture.lock(), FileTime::from_unix_time(1, 0)).expect("old mtime");
-
     assert_eq!(
         complete_update(&fixture.service(&server), TARGET_VERSION)
             .await
@@ -920,10 +632,7 @@ async fn update_and_rollback_should_use_the_default_api_asset_directory() {
         b"new-web"
     );
 
-    service
-        .rollback(Arc::new(AllowingUpdatePreflight))
-        .await
-        .expect("rollback");
+    service.rollback().await.expect("rollback");
     assert_eq!(
         fs::read(fixture.executable()).expect("binary"),
         b"old-binary"
@@ -982,7 +691,6 @@ async fn update_should_restore_web_assets_when_binary_backup_fails() {
         )
         .await;
     fs::create_dir(fixture.executable().with_extension("backup")).expect("blocking backup dir");
-
     assert_eq!(
         complete_update(&fixture.service(&server), TARGET_VERSION)
             .await
@@ -994,12 +702,6 @@ async fn update_should_restore_web_assets_when_binary_backup_fails() {
         fs::read(fixture.web().join("index.html")).expect("web"),
         b"old-web"
     );
-    assert_eq!(
-        fs::read(fixture.official().join("plugin-release-manifest.json")).expect("manifest"),
-        OLD_RELEASE_MANIFEST.as_bytes()
-    );
-    assert!(fixture.official().join("old-plugin.tar.gz").is_file());
-    assert!(!fixture.official().join("new-plugin.tar.gz").exists());
 }
 
 #[tokio::test]
@@ -1011,7 +713,6 @@ async fn version_should_return_backend_build_metadata() {
     config.update_repository = None;
     let service = ProcessSystemOperations::new(CancellationToken::new(), config);
     let version = service.version().await.expect("version");
-
     assert_eq!(
         (version.version.as_str(), version.git_sha.as_str()),
         ("2.3.4", "abc123")
@@ -1097,7 +798,7 @@ async fn accepted_update_should_survive_a_lost_http_response() {
     );
     assert_eq!(
         service
-            .rollback(Arc::new(AllowingUpdatePreflight))
+            .rollback()
             .await
             .expect_err("rollback during update")
             .kind(),
@@ -1163,29 +864,4 @@ async fn host_shutdown_should_finish_an_accepted_update_and_release_its_lock() {
         fs::read(fixture.executable()).expect("binary"),
         b"old-binary"
     );
-}
-
-#[tokio::test]
-async fn restart_checks_plugins_before_shutdown_and_releases_locks_on_rejection() {
-    let fixture = Fixture::new();
-    let mut config = fixture.config("http://127.0.0.1:1/repos");
-    config.self_restart_enabled = true;
-    config.deployment_mode = "docker".into();
-    let shutdown = CancellationToken::new();
-    let service = ProcessSystemOperations::new(shutdown.clone(), config);
-    assert!(
-        service
-            .restart(Arc::new(RejectingRestartPreflight))
-            .await
-            .is_err()
-    );
-    assert!(!shutdown.is_cancelled());
-    assert!(service.restart_candidate().await.unwrap().is_some());
-    service
-        .restart(Arc::new(AllowingUpdatePreflight))
-        .await
-        .unwrap();
-    tokio::time::timeout(Duration::from_secs(2), shutdown.cancelled())
-        .await
-        .unwrap();
 }

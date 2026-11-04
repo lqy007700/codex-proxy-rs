@@ -1,4 +1,4 @@
-//! 公开原生用量读写与纯计价，插件拥有跨调用流程和恢复策略
+//! 原生用量读写与纯计价
 
 mod pricing;
 mod validation;
@@ -159,12 +159,6 @@ fn audit_event(
     changed_fields: Vec<String>,
 ) -> AdminAuditEvent {
     let actor_ref = match actor {
-        UsageActor::Plugin {
-            instance_id,
-            publisher,
-            name,
-            ..
-        } => format!("plugin:{publisher}/{name}:{instance_id}"),
         UsageActor::Admin { subject } => format!("admin:{subject}"),
         UsageActor::System => "system".into(),
     };

@@ -716,9 +716,7 @@ fn provider_event_to_middleware_frame(
                 .map_err(|_| middleware_protocol_error(UpstreamSendState::Sent))?,
             MiddlewareFraming::JsonDocument,
         ),
-        ClientTransport::WebSocket
-        | ClientTransport::InternalProbe
-        | ClientTransport::InternalPlugin => (
+        ClientTransport::WebSocket | ClientTransport::InternalProbe => (
             wire.raw_websocket_message()
                 .map(|raw| Bytes::copy_from_slice(raw.as_bytes()))
                 .map_or_else(|| serde_json::to_vec(wire.data()).map(Bytes::from), Ok)

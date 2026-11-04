@@ -3,10 +3,8 @@
 use crate::request_context::request_client_context;
 
 use std::collections::VecDeque;
-use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
 
 use axum::{
     body::Bytes,
@@ -28,10 +26,9 @@ use gateway_core::engine::{
 };
 use gateway_core::error::{GatewayError, GatewayErrorKind};
 use gateway_core::event::{ProviderEvent, ProviderResponseHeader};
-use gateway_core::lifecycle::{CancellationToken, ConnectionGuard};
+use gateway_core::lifecycle::ConnectionGuard;
 use gateway_core::operation::OperationKind;
 use gateway_protocol::openai::sse::{DONE_SSE_FRAME, response_failed_sse_event_with_id};
-use tokio::time::Instant;
 
 use crate::ApiState;
 use crate::middleware::headers::encode_headers;
@@ -56,12 +53,6 @@ use super::{
 };
 
 const OPENAI_PROTOCOL: &str = "openai";
-const AUTHORIZATION_RECHECK_INTERVAL: Duration = Duration::from_secs(1);
-
-/// 管理页面模型桥在等待首帧和交付响应期间复核不可变插件目标
-pub(crate) trait ResponseAuthorization: Send + Sync {
-    fn authorize(&self) -> BoxFuture<'_, Result<(), GatewayError>>;
-}
 
 /// `POST /v1/responses`
 pub(crate) async fn responses(
@@ -102,12 +93,11 @@ pub(crate) async fn responses(
             decoded,
             middleware_body,
         },
-        None,
     )
     .await
 }
 
-/// 两个 Responses 入口共享解码后的 HTTP 交付上下文，不携带认证策略
+/// Responses 解码后的 HTTP 交付上下文
 pub(crate) struct ResponsesHttpRequest {
     pub peer_address: Option<SocketAddr>,
     pub ingress_id: Option<Extension<tower_http::request_id::RequestId>>,
@@ -120,7 +110,6 @@ pub(crate) async fn execute_prepared_responses(
     service: OpenAiService,
     prepared: PreparedRootExecution,
     request: ResponsesHttpRequest,
-    authorization: Option<Arc<dyn ResponseAuthorization>>,
 ) -> Response {
     let ResponsesHttpRequest {
         peer_address,
@@ -142,7 +131,6 @@ pub(crate) async fn execute_prepared_responses(
     drop(decoded);
     let execution = service.execution();
     let request_id = prepared.request_id().clone();
-    let cancellation = prepared.cancellation();
     let started_request_id = Arc::new(OnceLock::new());
     let terminal_request_id = Arc::clone(&started_request_id);
     let (admitted, keepalive) = tokio::sync::oneshot::channel();
@@ -230,26 +218,13 @@ pub(crate) async fn execute_prepared_responses(
         }),
     );
     let response = async move {
-        let middleware = if let Some(authorization) = authorization.as_ref() {
-            match await_with_authorization(middleware, authorization, &cancellation).await {
-                Ok(result) => result,
-                Err(error) => Err(MiddlewareError::Gateway(error)),
-            }
-        } else {
-            middleware.await
-        };
         let expected = if stream {
             ExpectedBody::Sse
         } else {
             ExpectedBody::SingleJson
         };
-        match middleware {
+        match middleware.await {
             Ok(response) => {
-                let response = if let Some(authorization) = authorization {
-                    authorized_middleware_response(response, authorization, cancellation)
-                } else {
-                    response
-                };
                 into_http_response(
                     validated_middleware_response(response, validation, stream),
                     expected,
@@ -265,123 +240,6 @@ pub(crate) async fn execute_prepared_responses(
         response.await
     };
     super::super::with_model_request_id(response, started_request_id.get().unwrap_or(&request_id))
-}
-
-async fn await_with_authorization<T>(
-    future: impl Future<Output = T>,
-    authorization: &Arc<dyn ResponseAuthorization>,
-    cancellation: &CancellationToken,
-) -> Result<T, GatewayError> {
-    tokio::pin!(future);
-    loop {
-        tokio::select! {
-            output = &mut future => return Ok(output),
-            () = tokio::time::sleep(AUTHORIZATION_RECHECK_INTERVAL) => {
-                if let Err(error) = authorization.authorize().await {
-                    cancellation.cancel();
-                    return Err(error);
-                }
-            }
-        }
-    }
-}
-
-fn authorized_middleware_response(
-    response: MiddlewareResponse,
-    authorization: Arc<dyn ResponseAuthorization>,
-    cancellation: CancellationToken,
-) -> MiddlewareResponse {
-    let (protocol, status, headers, body, envelope) = response.into_parts();
-    let mut response = MiddlewareResponse::new(
-        protocol,
-        status,
-        headers,
-        Box::new(AuthorizedResponseBody {
-            inner: Some(body),
-            authorization,
-            cancellation,
-            last_authorized_at: Instant::now(),
-        }),
-    );
-    if let Some(envelope) = envelope {
-        response = response.with_envelope(envelope);
-    }
-    response
-}
-
-struct AuthorizedResponseBody {
-    inner: Option<Box<dyn MiddlewareBody>>,
-    authorization: Arc<dyn ResponseAuthorization>,
-    cancellation: CancellationToken,
-    last_authorized_at: Instant,
-}
-
-impl AuthorizedResponseBody {
-    async fn revoke(&mut self, error: GatewayError) -> MiddlewareError {
-        self.cancellation.cancel();
-        if let Some(inner) = self.inner.take() {
-            inner.close().await;
-        }
-        MiddlewareError::Gateway(error)
-    }
-}
-
-impl MiddlewareBody for AuthorizedResponseBody {
-    fn next_frame(&mut self) -> BoxFuture<'_, Result<Option<MiddlewareFrame>, MiddlewareError>> {
-        Box::pin(async move {
-            loop {
-                let elapsed = self.last_authorized_at.elapsed();
-                if elapsed >= AUTHORIZATION_RECHECK_INTERVAL {
-                    if let Err(error) = self.authorization.authorize().await {
-                        return Err(self.revoke(error).await);
-                    }
-                    self.last_authorized_at = Instant::now();
-                    continue;
-                }
-                let Some(inner) = self.inner.as_mut() else {
-                    return Ok(None);
-                };
-                let wait = AUTHORIZATION_RECHECK_INTERVAL - elapsed;
-                tokio::select! {
-                    frame = inner.next_frame() => return frame,
-                    () = tokio::time::sleep(wait) => {}
-                }
-            }
-        })
-    }
-
-    fn commit_downstream(
-        &mut self,
-        client_status_code: Option<u16>,
-    ) -> BoxFuture<'_, Result<(), MiddlewareError>> {
-        let Some(inner) = self.inner.as_mut() else {
-            return Box::pin(async { Err(MiddlewareError::InvalidState) });
-        };
-        inner.commit_downstream(client_status_code)
-    }
-
-    fn record_client_status(
-        &mut self,
-        client_status_code: u16,
-    ) -> BoxFuture<'_, Result<(), MiddlewareError>> {
-        let Some(inner) = self.inner.as_mut() else {
-            return Box::pin(async { Ok(()) });
-        };
-        inner.record_client_status(client_status_code)
-    }
-
-    fn is_finalized(&self) -> bool {
-        self.inner.as_ref().is_none_or(|inner| inner.is_finalized())
-    }
-
-    fn close(mut self: Box<Self>) -> BoxFuture<'static, ()> {
-        let inner = self.inner.take();
-        Box::pin(async move {
-            if let Some(inner) = inner {
-                inner.close().await;
-            }
-        })
-    }
 }
 
 async fn execution_middleware_response(

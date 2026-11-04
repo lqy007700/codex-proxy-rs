@@ -1,6 +1,6 @@
 //! 系统更新、回滚与重启的受理、互斥和文件交换生命周期
 
-use std::{fs, path::Path, sync::Arc, time::Duration};
+use std::{fs, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use gateway_admin::model::system::{
@@ -8,11 +8,9 @@ use gateway_admin::model::system::{
     SystemUpdateDetail, SystemUpdateMode, SystemUpdateStatus, SystemVersion,
 };
 use gateway_admin::ports::system::{
-    SystemOperationErrorKind, SystemOperations, SystemRestartPreflight, SystemUpdateCandidate,
-    SystemUpdateEventStream, SystemUpdatePreflight,
+    SystemOperationErrorKind, SystemOperations, SystemUpdateEventStream,
 };
 use gateway_core::lifecycle::CancellationToken;
-use serde::Deserialize;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, broadcast};
 
 use super::archive::extract_release;
@@ -20,7 +18,7 @@ use super::download::{
     MAX_CHECKSUM_SIZE, MAX_DOWNLOAD_SIZE, download_file, format_bytes, verify_checksum,
 };
 use super::events::UpdateEvents;
-use super::installation::{OFFICIAL_PLUGIN_MANIFEST, ReleaseFiles};
+use super::installation::ReleaseFiles;
 use super::process::spawn_replacement;
 use super::release::{
     GitHubRelease, ReleaseCache, base_update_detail, confirmed_target, detail_from_release,
@@ -31,10 +29,8 @@ use super::state::{
     OperationFileLock, UpdateOperation, UpdateTempDir, finish, operation_id, read_status,
     reconcile_installation, recover_interrupted, set_running,
 };
-use super::swap::{replace_release_files, rollback_official_plugins_dir, rollback_release};
+use super::swap::{replace_release_files, rollback_release};
 use super::{OperationError, SystemUpdateConfig, conflict, internal, invalid, upstream};
-
-const MAX_OFFICIAL_PLUGIN_MANIFEST_SIZE: u64 = 256 * 1024;
 
 /// gateway-admin 消费的真实进程/文件系统操作实现
 #[derive(Clone)]
@@ -93,7 +89,6 @@ impl ProcessSystemOperations {
         &self,
         target_version: Option<String>,
         channel: Option<UpdateChannel>,
-        preflight: Arc<dyn SystemUpdatePreflight>,
         mode: SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, OperationError> {
         let operation_lock = self.lock_operation()?;
@@ -148,7 +143,7 @@ impl ProcessSystemOperations {
             let result = tokio::select! {
                 biased;
                 () = service.cancellation.cancelled() => Err(conflict("服务关闭，更新已中断")),
-                result = service.perform_update_inner(&target, selected, &operation_id, preflight.as_ref(), mode) => result,
+                result = service.perform_update_inner(&target, selected, &operation_id, mode) => result,
             };
             let completion = operation.complete(&result);
             if let Err(error) = &result {
@@ -186,7 +181,6 @@ impl ProcessSystemOperations {
         target: &str,
         channel: UpdateChannel,
         operation_id: &str,
-        preflight: &dyn SystemUpdatePreflight,
         mode: SystemUpdateMode,
     ) -> Result<ReleaseFiles, OperationError> {
         let repository = self
@@ -234,8 +228,7 @@ impl ProcessSystemOperations {
                 }
             ),
         );
-        self.install_release(&release, target, operation_id, preflight, mode)
-            .await
+        self.install_release(&release, target, operation_id).await
     }
 
     async fn install_release(
@@ -243,8 +236,6 @@ impl ProcessSystemOperations {
         release: &GitHubRelease,
         version: &str,
         operation_id: &str,
-        preflight: &dyn SystemUpdatePreflight,
-        mode: SystemUpdateMode,
     ) -> Result<ReleaseFiles, OperationError> {
         self.events.info(
             Some(operation_id),
@@ -312,29 +303,6 @@ impl ProcessSystemOperations {
         let extracted = extract_release(&archive_path, temp.path())?;
         self.events
             .success(Some(operation_id), Some("extract"), "更新包解压完成");
-        let release_manifest = read_release_manifest(&extracted.official_plugins_dir)?;
-        let candidate = SystemUpdateCandidate {
-            target_version: version.to_owned(),
-            release_manifest: release_manifest.clone(),
-        };
-        self.events.info(
-            Some(operation_id),
-            Some("preflight"),
-            "正在校验目标发行信息",
-        );
-        let plugin_revision = match mode {
-            SystemUpdateMode::Upgrade => preflight.validate(candidate).await?,
-            SystemUpdateMode::Downgrade => preflight.validate_downgrade(candidate).await?,
-        };
-        preflight.confirm_revision(plugin_revision).await?;
-        self.events.success(
-            Some(operation_id),
-            Some("preflight"),
-            match mode {
-                SystemUpdateMode::Upgrade => "目标发行信息校验通过，插件兼容性将在重启前检查",
-                SystemUpdateMode::Downgrade => "目标发行信息及插件兼容性校验通过",
-            },
-        );
         self.events
             .info(Some(operation_id), Some("replace"), "正在替换应用文件");
         replace_release_files(
@@ -343,13 +311,6 @@ impl ProcessSystemOperations {
             extracted,
         )?;
         let mut applied = AppliedReleaseGuard::new(&self.config, &self.diagnostics);
-        let applied_manifest = read_release_manifest(&self.config.official_plugins_dir()?)?;
-        if applied_manifest.as_ref() != release_manifest.as_ref() {
-            return Err(applied.rollback(conflict("已应用的更新候选与预检候选不一致")));
-        }
-        if let Err(error) = preflight.confirm_revision(plugin_revision).await {
-            return Err(applied.rollback(error));
-        }
         let files = ReleaseFiles::installed(&self.config)?;
         applied.commit();
         self.events
@@ -371,23 +332,6 @@ impl ProcessSystemOperations {
             return Err(conflict("当前发行版本不支持此更新通道"));
         }
         Ok(channel)
-    }
-
-    fn installed_restart_candidate(&self) -> Result<Option<SystemUpdateCandidate>, OperationError> {
-        if self.config.build_type == "source" {
-            return Ok(None);
-        }
-        let release_manifest = read_release_manifest(&self.config.official_plugins_dir()?)?;
-        #[derive(Deserialize)]
-        struct ReleaseIdentity {
-            gateway_version: String,
-        }
-        let identity: ReleaseIdentity = serde_json::from_slice(&release_manifest)
-            .map_err(|_| invalid("已安装发行清单缺少目标版本"))?;
-        Ok(Some(SystemUpdateCandidate {
-            target_version: identity.gateway_version,
-            release_manifest,
-        }))
     }
 
     fn reconcile_installation(&self) -> Result<SystemUpdateStatus, OperationError> {
@@ -462,10 +406,9 @@ impl SystemOperations for ProcessSystemOperations {
         &self,
         target_version: Option<String>,
         channel: Option<UpdateChannel>,
-        preflight: Arc<dyn SystemUpdatePreflight>,
         mode: SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, OperationError> {
-        self.start_update(target_version, channel, preflight, mode)
+        self.start_update(target_version, channel, mode)
     }
 
     async fn update_status(&self) -> Result<SystemUpdateStatus, OperationError> {
@@ -485,29 +428,16 @@ impl SystemOperations for ProcessSystemOperations {
         read_status(&self.config.update_state_file, false)
     }
 
-    async fn rollback(
-        &self,
-        preflight: Arc<dyn SystemUpdatePreflight>,
-    ) -> Result<SystemOperationAccepted, OperationError> {
+    async fn rollback(&self) -> Result<SystemOperationAccepted, OperationError> {
         let _operation = self.lock_operation()?;
         if let Some(reason) = self.config.update_support_error() {
             return Err(conflict(reason));
         }
         let operation_id = operation_id("rollback");
         let file_lock = OperationFileLock::acquire(&self.config.update_lock_file)?;
-        let target_version = self
-            .reconcile_installation()?
+        self.reconcile_installation()?
             .previous_version
             .ok_or_else(|| conflict("没有可用于回滚的上一版本"))?;
-        let release_manifest =
-            read_release_manifest(&rollback_official_plugins_dir(&self.config)?)?;
-        let plugin_revision = preflight
-            .validate_rollback(SystemUpdateCandidate {
-                target_version,
-                release_manifest: Arc::clone(&release_manifest),
-            })
-            .await?;
-        preflight.confirm_revision(plugin_revision).await?;
         set_running(
             &self.config.update_state_file,
             &operation_id,
@@ -518,15 +448,8 @@ impl SystemOperations for ProcessSystemOperations {
         let result = match rollback_release(&self.config) {
             Ok(()) => {
                 let mut applied = AppliedReleaseGuard::new(&self.config, &self.diagnostics);
-                let result = match read_release_manifest(&self.config.official_plugins_dir()?) {
-                    Ok(manifest) if manifest.as_ref() == release_manifest.as_ref() => {
-                        preflight.confirm_revision(plugin_revision).await
-                    }
-                    Ok(_) => Err(conflict("已应用的回滚候选与预检候选不一致")),
-                    Err(error) => Err(error),
-                };
-                match result {
-                    Ok(()) => {
+                match ReleaseFiles::installed(&self.config) {
+                    Ok(_) => {
                         applied.commit();
                         Ok(())
                     }
@@ -567,15 +490,7 @@ impl SystemOperations for ProcessSystemOperations {
         })
     }
 
-    async fn restart_candidate(&self) -> Result<Option<SystemUpdateCandidate>, OperationError> {
-        let _operation = self.lock_operation()?;
-        self.installed_restart_candidate()
-    }
-
-    async fn restart(
-        &self,
-        preflight: Arc<dyn SystemRestartPreflight>,
-    ) -> Result<SystemOperationAccepted, OperationError> {
+    async fn restart(&self) -> Result<SystemOperationAccepted, OperationError> {
         // 与 update/rollback 互斥：更新替换文件期间触发自重启会让新进程
         // 载入半成品产物
         let mut operation = self.lock_operation()?;
@@ -583,12 +498,9 @@ impl SystemOperations for ProcessSystemOperations {
             return Err(conflict("当前部署未启用在线重启"));
         }
         let file_lock = OperationFileLock::acquire(&self.config.update_lock_file)?;
-        let candidate = self.installed_restart_candidate()?;
-        let files = candidate
-            .as_ref()
-            .map(|_| ReleaseFiles::installed(&self.config))
+        let files = (self.config.build_type != "source")
+            .then(|| ReleaseFiles::installed(&self.config))
             .transpose()?;
-        preflight.prepare(candidate).await?;
         if self.cancellation.is_cancelled() {
             return Err(conflict("服务正在关闭"));
         }
@@ -617,21 +529,6 @@ impl SystemOperations for ProcessSystemOperations {
             message: message.to_owned(),
         })
     }
-}
-
-fn read_release_manifest(directory: &Path) -> Result<Arc<[u8]>, OperationError> {
-    let path = directory.join(OFFICIAL_PLUGIN_MANIFEST);
-    let metadata = fs::symlink_metadata(&path)
-        .map_err(|error| invalid("无法访问官方插件发行清单").with_source(error))?;
-    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-        return Err(invalid("官方插件发行清单必须是普通文件"));
-    }
-    if metadata.len() == 0 || metadata.len() > MAX_OFFICIAL_PLUGIN_MANIFEST_SIZE {
-        return Err(invalid("官方插件发行清单大小无效或超出限制"));
-    }
-    fs::read(path)
-        .map(Arc::<[u8]>::from)
-        .map_err(|error| invalid("无法读取官方插件发行清单").with_source(error))
 }
 
 fn restore_applied_release(config: &SystemUpdateConfig, cause: OperationError) -> OperationError {

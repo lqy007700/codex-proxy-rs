@@ -2,7 +2,6 @@
 
 pub(crate) mod headers;
 pub(crate) mod websocket;
-
 use std::{
     convert::Infallible,
     pin::Pin,
@@ -52,61 +51,8 @@ pub(crate) async fn scope<T>(
 
 pub(crate) type SettingsSource =
     Arc<dyn Fn() -> Option<gateway_core::routing::request_settings::RequestSettings> + Send + Sync>;
-
-pub(crate) struct RouterDispatcher {
-    pub(crate) router: Router,
-    pub(crate) settings: SettingsSource,
-}
-
-impl contract::Dispatcher for RouterDispatcher {
-    fn request_settings(&self) -> Option<gateway_core::routing::request_settings::RequestSettings> {
-        (self.settings)()
-    }
-
-    fn dispatch(
-        &self,
-        context: contract::Context,
-        mut request: contract::Request,
-    ) -> futures::future::BoxFuture<
-        'static,
-        Result<contract::Response, gateway_core::engine::middleware::MiddlewareError>,
-    > {
-        let router = self.router.clone();
-        let cancellation = context.cancellation.clone();
-        if let Some(instance_id) = &context.plugin_instance_id {
-            request
-                .extensions_mut()
-                .insert(gateway_admin::model::auth::AdminRequestContext {
-                    principal: gateway_admin::model::auth::AdminPrincipal::Plugin {
-                        instance_id: instance_id.clone(),
-                    },
-                    request_id: format!(
-                        "plugin:{instance_id}:call:{}:request:{}",
-                        context.call_id, context.request_id
-                    ),
-                });
-        }
-        request.extensions_mut().insert(context);
-        Box::pin(async move {
-            let response = tokio::select! {
-                biased;
-                () = cancellation.cancelled() => return Err(gateway_core::engine::middleware::MiddlewareError::Gateway(gateway_core::error::GatewayError::new(gateway_core::error::GatewayErrorKind::Cancelled, "HTTP child cancelled"))),
-                result = router.oneshot(request.map(Body::new)) => match result { Ok(response) => response, Err(never) => match never {} },
-            };
-            Ok(response.map(|body| body.map_err(|error| Box::new(error) as _).boxed_unsync()))
-        })
-    }
-}
-
-pub(crate) type PlanSource = Arc<
-    dyn Fn(Option<&gateway_core::routing::RuntimeSnapshot>) -> Option<FrozenMiddlewarePlan>
-        + Send
-        + Sync,
->;
-
 pub(crate) fn wrap(
     router: Router,
-    source: Option<PlanSource>,
     timeout: Option<Duration>,
     request_id_header: HeaderName,
     settings: SettingsSource,
@@ -119,22 +65,13 @@ pub(crate) fn wrap(
             timeout,
             runtime: None,
         });
-        if configuration.runtime.is_none() && (source.is_some() || inherited) {
+        if configuration.runtime.is_none() && inherited {
             configuration.runtime = settings();
         }
-        let snapshot = configuration
-            .runtime
-            .as_ref()
-            .map(|settings| settings.snapshot());
         let plan = request
             .extensions()
             .get::<contract::Context>()
-            .and_then(|context| context.plan.clone())
-            .or_else(|| {
-                source
-                    .as_ref()
-                    .and_then(|source| source(snapshot.as_deref()))
-            });
+            .and_then(|context| context.plan.clone());
         let request_id_header = request_id_header.clone();
         async move { Ok::<_, Infallible>(handle(router, request, plan, request_id_header).await) }
     }))
@@ -182,13 +119,6 @@ async fn handle(
     });
     request.extensions_mut().insert(guard.clone());
     request.extensions_mut().insert(context.clone());
-    let service_context = gateway_admin::public_service::Origin {
-        request_id: context.request_id.clone(),
-        call_id: context.call_id.clone(),
-        cancellation: context.cancellation.clone(),
-        extensions: context.extensions.clone(),
-        plan: gateway_admin::public_service::Plan::Frozen(plan.clone()),
-    };
     request
         .extensions_mut()
         .insert(Arc::new(websocket::Upgrade {
@@ -205,13 +135,7 @@ async fn handle(
             let response = CURRENT
                 .scope(
                     terminal_context,
-                    SETTINGS.scope(
-                        settings,
-                        gateway_admin::public_service::scope(
-                            service_context,
-                            dispatch(router, request.map(Body::new), started),
-                        ),
-                    ),
+                    SETTINGS.scope(settings, dispatch(router, request.map(Body::new), started)),
                 )
                 .await;
             Ok(response.map(|body| body.map_err(|error| Box::new(error) as _).boxed_unsync()))

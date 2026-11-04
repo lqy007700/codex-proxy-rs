@@ -31,7 +31,6 @@ impl SystemOperations for RecordingSystemOperations {
             build_time: "unknown".to_owned(),
             deployment_mode: "source".to_owned(),
             update_channel: "stable".to_owned(),
-
             latest_version: "1.0.0".to_owned(),
             has_update: false,
             update_cached: false,
@@ -72,7 +71,6 @@ impl SystemOperations for RecordingSystemOperations {
         &self,
         target_version: Option<String>,
         channel: Option<gateway_admin::model::system::SystemUpdateChannel>,
-        _: std::sync::Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
         _mode: gateway_admin::model::system::SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
         *self.target.lock().expect("target") = Some(target_version.clone());
@@ -103,10 +101,7 @@ impl SystemOperations for RecordingSystemOperations {
         })
     }
 
-    async fn rollback(
-        &self,
-        _: std::sync::Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
-    ) -> Result<SystemOperationAccepted, SystemOperationError> {
+    async fn rollback(&self) -> Result<SystemOperationAccepted, SystemOperationError> {
         Ok(SystemOperationAccepted::Rollback {
             operation_id: "operation-rollback".to_owned(),
             message: "accepted".to_owned(),
@@ -114,10 +109,7 @@ impl SystemOperations for RecordingSystemOperations {
         })
     }
 
-    async fn restart(
-        &self,
-        _preflight: std::sync::Arc<dyn gateway_admin::ports::system::SystemRestartPreflight>,
-    ) -> Result<SystemOperationAccepted, SystemOperationError> {
+    async fn restart(&self) -> Result<SystemOperationAccepted, SystemOperationError> {
         Ok(SystemOperationAccepted::Restart {
             operation_id: "operation-restart".to_owned(),
             message: "accepted".to_owned(),
@@ -168,7 +160,6 @@ async fn system_update_should_normalize_blank_target_to_latest() {
         )
         .await
         .expect("perform update");
-
     assert_eq!(*operations.target.lock().expect("target"), Some(None));
 }
 

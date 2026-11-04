@@ -6,7 +6,6 @@ const { test } = require('node:test');
 const fixtures = require('./fixtures/fork-versions.json');
 
 const script = path.resolve(__dirname, '../../.github/scripts/publish-release.rb');
-const lifecycle = path.resolve(__dirname, '../../backend/crates/gateway-plugin/runtime/plugin-api-lifecycle.rb');
 function invoke(method, input) {
   return JSON.parse(execFileSync('ruby', ['-r', script, '-e', `
     input = JSON.parse(STDIN.read)
@@ -28,28 +27,6 @@ function invoke(method, input) {
   `, method], { input: JSON.stringify(input), encoding: 'utf8' }));
 }
 
-test('兼容窗口按二开正式发行计数，同版本重试不重复消耗', () => {
-  const result = JSON.parse(execFileSync('ruby', ['-r', lifecycle, '-e', `
-    host = {'capabilities' => [{'capability' => 'middleware', 'versions' => [5, 6]}]}
-    entries = [{'capability' => 'middleware', 'version' => 5, 'replacement_version' => 6,
-      'remaining_releases' => 3, 'introduced_in' => nil, 'last_counted_in' => nil}]
-    first = PluginApiLifecycle.advance(entries, host, '3.33.0+lqy007700.v1')
-    retry_first = PluginApiLifecycle.advance(first, host, '3.33.0+lqy007700.v1')
-    second = PluginApiLifecycle.advance(first, host, '3.33.0+lqy007700.v2')
-    beta = PluginApiLifecycle.advance(second, host, '3.33.0-beta.1+lqy007700.v3')
-    ordinary = PluginApiLifecycle.advance(entries, host, '3.33.0+ordinary-a')
-    ordinary_retry = PluginApiLifecycle.advance(ordinary, host, '3.33.0+ordinary-b')
-    puts JSON.generate([first, retry_first, second, beta, ordinary, ordinary_retry])
-  `], { encoding: 'utf8' }));
-  const [first, retry, second, beta, ordinary, ordinaryRetry] = result.map(entries => entries[0]);
-  assert.equal(first.introduced_in, '3.33.0+lqy007700.v1');
-  assert.equal(first.remaining_releases, 3);
-  assert.deepEqual(first, retry);
-  assert.equal(second.last_counted_in, '3.33.0+lqy007700.v2');
-  assert.equal(second.remaining_releases, 2);
-  assert.deepEqual(second, beta);
-  assert.deepEqual(ordinary, ordinaryRetry);
-});
 
 for (const fixture of fixtures.comparisons) {
   test(`版本排序 ${fixture.current} -> ${fixture.target}`, () => {

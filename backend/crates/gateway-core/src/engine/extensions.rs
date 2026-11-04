@@ -70,7 +70,7 @@ pub struct InvocationOrigin {
     pub cancellation: crate::lifecycle::CancellationToken,
     pub extensions: ExtensionCallScope,
     pub plan: Option<super::middleware::FrozenMiddlewarePlan>,
-    pub effects: Option<Arc<super::nested::ExecutionEffects>>,
+    pub effects: Option<Arc<super::effects::ExecutionEffects>>,
 }
 
 /// 同一代次的具体执行计划；不拥有发布状态，运行资源由对应发布集合保活

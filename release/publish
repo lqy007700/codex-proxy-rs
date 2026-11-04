@@ -4,8 +4,6 @@ set -euo pipefail
 APP_NAME="codex-proxy-rs"
 VERSION_FILE="release/version.yaml"
 NOTES_FILE="release/notes.md"
-PLUGIN_DEPRECATIONS_FILE="backend/crates/gateway-plugin/runtime/plugin-api-deprecations.json"
-PLUGIN_COMPATIBILITY_FILE="backend/crates/gateway-plugin/runtime/plugin-host-compatibility.json"
 TAG_PREFIX="v"
 SIGNATURE="Co-authored-by: Codex <noreply@openai.com>"
 
@@ -135,10 +133,9 @@ if git ls-remote --exit-code --tags "$remote" "refs/tags/$tag" >/dev/null 2>&1; 
   die "remote tag already exists: $tag"
 fi
 
-ruby backend/crates/gateway-plugin/runtime/plugin-api-lifecycle.rb "$PLUGIN_DEPRECATIONS_FILE" "$PLUGIN_COMPATIBILITY_FILE" "$version"
 update_version_file "$version"
 
-git add -- "$VERSION_FILE" "$NOTES_FILE" "$PLUGIN_DEPRECATIONS_FILE"
+git add -- "$VERSION_FILE" "$NOTES_FILE"
 git commit \
   -m "chore(release): $tag" \
   -m "$SIGNATURE"

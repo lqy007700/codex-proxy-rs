@@ -17,11 +17,9 @@ mod bootstrap;
 pub mod freeze_recovery;
 pub mod model;
 pub mod ports;
-pub mod public_service;
 mod reset_credit_worker;
 mod use_case;
 pub use use_case::affinity::AffinityService;
-pub use use_case::plugins::{PluginDistributionPorts, PluginManagementService, PluginsService};
 
 pub use use_case::key_usage::KeyUsageService;
 
@@ -41,15 +39,11 @@ pub use use_case::{
     usage_data::UsageDataService,
 };
 
-pub use bootstrap::{
-    initialize, initialize_accounts, initialize_plugin_accounts, initialize_plugin_client_keys,
-    initialize_plugin_resources, initialize_settings, initialize_usage_data,
-    initialize_with_plugin_accounts,
-};
+pub use bootstrap::{initialize, initialize_accounts, initialize_settings, initialize_usage_data};
 
 use ports::{
-    client_distribution::ClientDistributionResolver, plugin_accounts::PluginAccountAccess,
-    provider::ProviderAdminRegistry, system::SystemOperations,
+    client_distribution::ClientDistributionResolver, provider::ProviderAdminRegistry,
+    system::SystemOperations,
 };
 
 const MINIMUM_INITIAL_PASSWORD_BYTES: usize = 12;
@@ -70,7 +64,6 @@ const DEFAULT_CLIENT_SESSION_TTL_MINUTES: u64 = 24 * 60;
 #[derive(Clone, Deserialize)]
 #[serde(transparent)]
 pub struct InitialAdminPassword(SecretString);
-
 impl InitialAdminPassword {
     #[must_use]
     pub fn new(value: impl Into<String>) -> Self {
@@ -202,9 +195,6 @@ pub enum AdminConfigError {
 pub struct AdminServices {
     affinity: Option<use_case::affinity::AffinityService>,
     timezone: gateway_core::time::DeploymentTimeZone,
-    public_services: Arc<public_service::Registry>,
-    plugins: Arc<PluginsService>,
-    plugin_management: Arc<PluginManagementService>,
     proxies: Arc<dyn ProxiesService>,
     auth: Arc<dyn AuthService>,
     key_usage: Arc<dyn KeyUsageService>,
@@ -218,8 +208,6 @@ pub struct AdminServices {
     usage_data: Arc<dyn UsageDataService>,
     system: Arc<dyn SystemService>,
     credentials: Arc<CredentialsService>,
-    // Runtime 只持有 Weak，这个强引用保障账号端口与 Admin 服务同寿命
-    _plugin_accounts: Arc<dyn PluginAccountAccess>,
     backups: Arc<dyn BackupService>,
     import_tasks: Arc<dyn ImportTasksService>,
 }
@@ -233,20 +221,6 @@ impl AdminServices {
     #[must_use]
     pub const fn timezone(&self) -> gateway_core::time::DeploymentTimeZone {
         self.timezone
-    }
-
-    pub fn public_services(&self) -> Arc<public_service::Registry> {
-        self.public_services.clone()
-    }
-
-    #[must_use]
-    pub fn plugin_management(&self) -> &PluginManagementService {
-        &self.plugin_management
-    }
-
-    #[must_use]
-    pub fn plugins(&self) -> &PluginsService {
-        &self.plugins
     }
 
     #[must_use]
@@ -345,12 +319,6 @@ impl AdminBundle {
 /// 组合根提供给控制面的运行能力；与配置和存储端口分别传入
 pub struct AdminRuntimePorts {
     pub timezone: gateway_core::time::DeploymentTimeZone,
-    pub service_middleware: public_service::PlanSource,
-    pub plugin_preparation: Arc<dyn ports::plugins::PluginPreparation>,
-    pub plugin_management: Arc<dyn ports::plugin_management::PluginManagement>,
-    pub published_snapshot: gateway_core::runtime::RuntimeSnapshotHandle,
-    pub plugin_distribution: Arc<dyn ports::plugins::PluginDistribution>,
-    pub plugin_inspector: Arc<dyn ports::plugins::PluginPackageInspector>,
     pub pricing_source: Arc<dyn ports::pricing::PricingSource>,
     pub email_sender: Arc<dyn ports::alerts::EmailSender>,
     pub providers: ProviderAdminRegistry,

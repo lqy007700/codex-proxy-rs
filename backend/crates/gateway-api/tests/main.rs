@@ -5,7 +5,6 @@ mod architecture;
 mod auth;
 mod health;
 mod key_usage;
-mod middleware;
 mod openai;
 mod provider;
 mod support;

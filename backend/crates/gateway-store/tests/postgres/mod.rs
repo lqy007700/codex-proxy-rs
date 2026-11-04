@@ -32,7 +32,7 @@ mod execution_buffer;
 mod health;
 mod observability;
 mod ops_events;
-mod plugins;
+
 mod pricing;
 mod provider_accounts;
 mod proxies;
@@ -46,7 +46,6 @@ mod usage_data;
 mod usage_paging;
 
 static TEST_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
-
 pub(super) struct TestDatabase {
     admin: PgPool,
     pub(super) pool: PgPool,

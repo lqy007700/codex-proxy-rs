@@ -51,12 +51,11 @@ jobs:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
 
-      - name: Read release metadata and seal plugin manifest
+      - name: Read release metadata and write identity
         id: version
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: ruby .github/scripts/release-metadata.rb outputs "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-
 
       - name: Read build toolchains
         id: toolchains
@@ -104,7 +103,7 @@ jobs:
               ...params, per_page: 100,
             });
             const requiredArtifacts = [
-              'frontend-dist', 'plugin-release-assets',
+              'frontend-dist', 'release-identity',
               ...platforms.map(p => `codex-proxy-rs-${p.os}-${p.arch}`),
               ...platforms.map(p => `image-digest-${p.os}-${p.arch}`),
             ];
@@ -120,7 +119,7 @@ jobs:
         if: inputs.reuse_run_id != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: plugin-release-assets
+          name: release-identity
           path: ${{ runner.temp }}/reuse-manifest
           run-id: ${{ inputs.reuse_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -136,7 +135,7 @@ jobs:
           import os
           from pathlib import Path
 
-          manifest = json.loads((Path(os.environ['RUNNER_TEMP']) / 'reuse-manifest/plugin-release-manifest.json').read_text())
+          manifest = json.loads((Path(os.environ['RUNNER_TEMP']) / 'reuse-manifest/release-manifest.json').read_text())
           # 封口清单将原始运行产物绑定到 tag 对应的版本与提交，拒绝跨版本复用
           if (manifest.get('schema_version') != 1 or manifest.get('sealed') is not True
                   or manifest.get('gateway_version') != os.environ['RELEASE_VERSION']
@@ -144,12 +143,12 @@ jobs:
               raise SystemExit('Recovery artifacts do not match the release version and commit')
           PY
 
-      - name: Upload sealed plugin assets
+      - name: Upload release identity
         if: inputs.reuse_run_id == ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: plugin-release-assets
-          path: dist/plugin-release-assets
+          name: release-identity
+          path: dist/release-identity
           if-no-files-found: error
           retention-days: 1
 
@@ -280,14 +279,6 @@ jobs:
           run-id: ${{ inputs.reuse_run_id || github.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download sealed plugin assets
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: plugin-release-assets
-          path: dist/plugin-release-assets
-          run-id: ${{ inputs.reuse_run_id || github.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Package release assets
         shell: bash
         env:
@@ -346,12 +337,6 @@ jobs:
         with:
           name: codex-proxy-rs-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/docker-artifacts/codex-proxy-rs-${{ matrix.os }}-${{ matrix.arch }}
-
-      - name: Download sealed plugin assets
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: plugin-release-assets
-          path: dist/plugin-release-assets
 
       - name: Prepare Docker prebuilt assets
         shell: bash
@@ -562,9 +547,6 @@ jobs:
 
             **手动下载：**
             请从下方附件中下载适合当前平台的归档包。
-
-            附件包含与当前宿主版本及提交绑定的 `plugin-release-manifest.json`，当前没有默认内置插件。
-            教学示例由独立的 `codex-proxy-plugins` 仓库维护和发布，不随宿主发行物分发。
 
             发布归档提供 GitHub 构建产物证明。Docker 镜像附带软件物料清单（SBOM）、构建来源证明和 cosign 无密钥签名。
 

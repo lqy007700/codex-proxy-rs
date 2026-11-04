@@ -717,7 +717,7 @@ fn unavailable(
     postgres_unavailable(message, source)
 }
 
-/// 原生管理与插件自有分组共用字段校验和写入规则
+/// 分组创建与更新共用字段校验和写入规则
 pub(crate) async fn insert_account_group_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     command: &NewAccountGroup,

@@ -114,29 +114,10 @@ export function performSystemUpdate(data: SystemUpdateTarget, options: RequestOp
   })
 }
 
-export interface SystemRestartPlan {
-  targetVersion: string | null
-  releaseManifestSha256: string | null
-  configRevision: number
-  incompatiblePlugins: { instanceId: string, name: string, reason: string }[]
-}
-
-export function checkSystemRestart() {
-  return request<SystemRestartPlan>({
-    url: '/api/admin/system/restart/check',
-    method: 'GET',
-  })
-}
-
-interface SystemRestartParam {
-  confirmation?: SystemRestartPlan
-}
-
-export function restartSystem(data: SystemRestartParam = {}, options: RequestOptions = {}) {
+export function restartSystem(options: RequestOptions = {}) {
   return request<SystemRestartAccepted>({
     url: '/api/admin/system/restart',
     method: 'POST',
-    data,
     ...options,
   })
 }

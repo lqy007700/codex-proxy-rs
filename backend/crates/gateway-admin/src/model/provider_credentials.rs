@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use super::{
-    AdminError, MutationActor, MutationContext, PageSize, Revision,
+    AdminError, MutationActor, MutationContext, Revision,
     accounts::{
         AccountImportSettings, AccountRecord, AccountSummary, AccountUsage, CredentialState,
     },
@@ -25,7 +25,6 @@ use super::{
 /// Provider-owned JSON；公共层只搬运且 Debug 不输出值
 #[derive(Clone, PartialEq)]
 pub struct ProviderDocument(OpaqueProviderData);
-
 impl ProviderDocument {
     #[must_use]
     pub const fn new(data: OpaqueProviderData) -> Self {
@@ -421,7 +420,6 @@ pub trait CredentialCommitGuard: Send + 'static {
 pub trait AuthorizationCommitGuard: Send + 'static {
     /// Store 已提交 OAuth credential 后消费对应的一次性 flow
     async fn commit(self: Box<Self>) -> Result<(), AdminError>;
-
     /// Store 未提交 OAuth credential 时释放 claim，允许同一 flow 重试
     async fn abort(self: Box<Self>) -> Result<(), AdminError>;
 }
@@ -1162,54 +1160,6 @@ pub struct ProviderModelCatalogDocument {
     pub document: RawJsonPayload,
     pub model_count: usize,
     pub observed_at: DateTime<Utc>,
-}
-
-/// 插件账号回调的服务端过滤条件；Provider 缺省时跨全部已注册类型分页
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginAccountListQuery {
-    pub provider_kind: Option<ProviderKind>,
-    pub cursor: Option<ProviderAccountId>,
-    pub limit: PageSize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginAccountPage {
-    pub accounts: Vec<AccountRecord>,
-    pub next_cursor: Option<ProviderAccountId>,
-}
-
-/// 原始凭据与当前账号 revision 的同一读取结果
-#[derive(Clone, PartialEq)]
-pub struct PluginAccountCredential {
-    pub account: AccountRecord,
-    pub provider_material: ProviderDocument,
-}
-
-impl fmt::Debug for PluginAccountCredential {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("PluginAccountCredential")
-            .field("account", &self.account)
-            .field("provider_material", &self.provider_material)
-            .finish()
-    }
-}
-
-/// Runtime 已完成 wire 校验、Admin 仍需绑定当前账号和 revision 的 prepared facts
-#[derive(Debug, Clone, PartialEq)]
-pub enum PreparedPluginAccountSave {
-    Create(PreparedCredentialCreate),
-    Replace {
-        facts: PreparedCredentialRotationFacts,
-        authentication_kind: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginAccountSaveResult {
-    pub config_revision: Revision,
-    pub account_id: ProviderAccountId,
-    pub credential_revision: Revision,
 }
 
 /// Provider 执行 refresh 时所需的当前公共账号事实

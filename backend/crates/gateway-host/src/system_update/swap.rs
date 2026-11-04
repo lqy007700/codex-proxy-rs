@@ -15,44 +15,10 @@ pub(crate) fn replace_release_files(
     web_dist: &Path,
     extracted: ExtractedRelease,
 ) -> Result<(), OperationError> {
-    let official_plugins = official_plugins_dir(executable)?;
-    if !official_plugins.exists() {
-        fs::create_dir_all(&official_plugins)
-            .map_err(|error| internal("无法创建官方插件备份目录").with_source(error))?;
-    }
-    let official_backup = backup_path_for(&official_plugins);
-    replace_dir(
-        &official_plugins,
-        &official_backup,
-        &extracted.official_plugins_dir,
-        "官方插件文件",
-    )?;
-    if let Err(error) = protect_official_plugins(&official_plugins) {
-        let mut rollback = Vec::new();
-        collect_rollback_error(
-            &mut rollback,
-            "restore official plugin assets",
-            restore_dir(&official_plugins, &official_backup),
-        );
-        return Err(error_with_rollback(
-            "无法设置官方插件文件权限",
-            error,
-            rollback,
-        ));
-    }
-
     let web_backup = backup_path_for(web_dist);
     let web_replaced = match extracted.web_dist_dir {
         Some(new_web) => {
-            if let Err(error) = replace_dir(web_dist, &web_backup, &new_web, "管理页面文件") {
-                let mut rollback = Vec::new();
-                collect_rollback_error(
-                    &mut rollback,
-                    "restore official plugin assets",
-                    restore_dir(&official_plugins, &official_backup),
-                );
-                return Err(error_with_rollback("无法替换管理页面文件", error, rollback));
-            }
+            replace_dir(web_dist, &web_backup, &new_web, "管理页面文件")?;
             true
         }
         None => false,
@@ -70,11 +36,6 @@ pub(crate) fn replace_release_files(
                 restore_dir(web_dist, &web_backup),
             );
         }
-        collect_rollback_error(
-            &mut rollback,
-            "restore official plugin assets",
-            restore_dir(&official_plugins, &official_backup),
-        );
         return Err(error_with_rollback("无法移除旧的程序备份", error, rollback));
     }
     if let Err(error) = move_file(executable, &binary_backup) {
@@ -86,11 +47,6 @@ pub(crate) fn replace_release_files(
                 restore_dir(web_dist, &web_backup),
             );
         }
-        collect_rollback_error(
-            &mut rollback,
-            "restore official plugin assets",
-            restore_dir(&official_plugins, &official_backup),
-        );
         return Err(error_with_rollback("无法备份程序文件", error, rollback));
     }
     if let Err(error) = move_file(&extracted.binary_path, executable) {
@@ -114,11 +70,6 @@ pub(crate) fn replace_release_files(
                 restore_dir(web_dist, &web_backup),
             );
         }
-        collect_rollback_error(
-            &mut rollback,
-            "restore official plugin assets",
-            restore_dir(&official_plugins, &official_backup),
-        );
         return Err(error_with_rollback("无法替换程序文件", error, rollback));
     }
     Ok(())
@@ -133,7 +84,6 @@ pub(crate) fn rollback_release(config: &SystemUpdateConfig) -> Result<(), Operat
     }
     swap_file(&executable, &binary_backup)
         .map_err(|error| internal("程序文件回滚失败").with_source(error))?;
-
     let web_backup = backup_path_for(web_dist);
     if web_backup.exists()
         && let Err(error) = swap_dir(web_dist, &web_backup)
@@ -146,43 +96,7 @@ pub(crate) fn rollback_release(config: &SystemUpdateConfig) -> Result<(), Operat
         );
         return Err(error_with_rollback("管理页面文件回滚失败", error, rollback));
     }
-    let official_plugins = config.official_plugins_dir()?;
-    let official_backup = backup_path_for(&official_plugins);
-    if official_backup.exists()
-        && let Err(error) = swap_dir(&official_plugins, &official_backup)
-    {
-        let mut rollback = Vec::new();
-        if web_backup.exists() {
-            collect_rollback_error(
-                &mut rollback,
-                "restore web assets after official plugin rollback failure",
-                swap_dir(web_dist, &web_backup),
-            );
-        }
-        collect_rollback_error(
-            &mut rollback,
-            "restore binary after official plugin rollback failure",
-            swap_file(&executable, &binary_backup),
-        );
-        return Err(error_with_rollback("官方插件文件回滚失败", error, rollback));
-    }
     Ok(())
-}
-
-pub(crate) fn rollback_official_plugins_dir(
-    config: &SystemUpdateConfig,
-) -> Result<PathBuf, OperationError> {
-    config
-        .official_plugins_dir()
-        .map(|directory| backup_path_for(&directory))
-}
-
-fn official_plugins_dir(executable: &Path) -> Result<PathBuf, OperationError> {
-    executable
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .map(|path| path.join("plugins").join("official"))
-        .ok_or_else(|| internal("无法确定官方插件安装目录"))
 }
 
 fn replace_dir(
@@ -280,18 +194,6 @@ fn move_dir(from: &Path, to: &Path) -> io::Result<()> {
             format!("directory rename failed: {error}"),
         )),
     }
-}
-
-#[cfg(unix)]
-fn protect_official_plugins(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o555))
-}
-
-#[cfg(not(unix))]
-fn protect_official_plugins(_path: &Path) -> io::Result<()> {
-    Ok(())
 }
 
 fn remove_dir_all(path: &Path) -> io::Result<()> {

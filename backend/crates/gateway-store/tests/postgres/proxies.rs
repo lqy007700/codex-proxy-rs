@@ -474,7 +474,6 @@ async fn proxy_account_removal_preserves_settings_and_rejects_changed_bindings()
         .fetch_one(&database.pool)
         .await
         .unwrap();
-
     assert_eq!(
         store
             .remove_account("proxy_previous", &account_id, &context)
@@ -500,7 +499,6 @@ async fn proxy_account_removal_preserves_settings_and_rejects_changed_bindings()
             .await
             .unwrap();
     assert_eq!(current_revision, revision);
-
     let committed = store
         .remove_account(&saved.id, &account_id, &context)
         .await
@@ -1106,7 +1104,6 @@ async fn managed_proxies_persist_bind_update_all_accounts_and_protect_stale_test
         .record_test(&created.id, edited.revision, success(), &context)
         .await
         .unwrap();
-
     assert_eq!(
         store
             .delete(&created.id, created.revision, &context)
@@ -1494,4 +1491,52 @@ async fn proxy_websocket_capacity_is_shared_by_bound_accounts_and_updates_withou
             0
         );
     }
+}
+
+#[tokio::test]
+async fn retired_plugin_archives_do_not_block_native_proxy_deletion() {
+    let Some(database) = TestDatabase::create("retired_plugin_proxy").await else {
+        return;
+    };
+    let proxies = PgProxyRepository::new(database.pool.clone());
+    let saved = proxies
+        .create(
+            NewProxy {
+                auto_location: false,
+                test: None,
+                name: "Archive reference".to_owned(),
+                proxy: OutboundProxy::parse("http://127.0.0.1:18080").unwrap(),
+                location: None,
+            },
+            &context(),
+        )
+        .await
+        .unwrap()
+        .record;
+    sqlx::query("INSERT INTO plugin_update_sources (plugin_id, source_json, outbound_proxy_id) VALUES ('test.archive', '{}'::jsonb, $1)")
+        .bind(saved.id.as_str()).execute(&database.pool).await.unwrap();
+    sqlx::query("INSERT INTO plugin_artifacts (sha256, plugin_id, version, metadata_json, source_json, archive, outbound_proxy_id) VALUES ($1, 'test.archive', '1.0.0', '{}'::jsonb, '{}'::jsonb, $2, $3)")
+        .bind("a".repeat(64)).bind(vec![1_u8]).bind(saved.id.as_str())
+        .execute(&database.pool).await.unwrap();
+    proxies
+        .delete(&saved.id, saved.revision, &context())
+        .await
+        .unwrap();
+    let source: (Option<String>,) = sqlx::query_as(
+        "SELECT outbound_proxy_id FROM plugin_update_sources WHERE plugin_id = 'test.archive'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    let artifact: (Option<String>, Vec<u8>) = sqlx::query_as(
+        "SELECT outbound_proxy_id, archive FROM plugin_artifacts WHERE plugin_id = 'test.archive'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    assert!(source.0.is_none());
+    assert!(artifact.0.is_none());
+    assert_eq!(artifact.1, vec![1_u8]);
+    assert!(proxies.get(&saved.id).await.is_err());
+    database.close().await;
 }

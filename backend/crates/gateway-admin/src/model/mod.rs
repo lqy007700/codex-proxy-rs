@@ -16,9 +16,6 @@ pub mod diagnostics;
 pub mod import_tasks;
 pub mod key_usage;
 pub mod observability;
-pub mod plugin_client_keys;
-pub mod plugin_resources;
-pub mod plugins;
 pub mod pricing;
 pub mod provider_credentials;
 pub mod proxies;
@@ -163,7 +160,6 @@ impl AdminError {
 )]
 #[serde(transparent)]
 pub struct Revision(NonZeroU64);
-
 impl Revision {
     /// 创建正整数 revision
     ///
@@ -185,7 +181,6 @@ impl Revision {
 /// 管理列表统一使用的受限页大小
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PageSize(NonZeroU16);
-
 impl PageSize {
     pub const MAX: u16 = 200;
 

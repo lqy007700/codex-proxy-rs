@@ -20,9 +20,9 @@ use axum::{
 use futures::{Stream, StreamExt};
 use gateway_admin::model::system::{
     SystemDowngradeVersion, SystemOperationAccepted, SystemOperationKind, SystemOperationState,
-    SystemOperationStatus, SystemRestartPlan, SystemUpdateChannel, SystemUpdateDetail,
-    SystemUpdateEvent, SystemUpdateEventLevel, SystemUpdateMode, SystemUpdatePolicy,
-    SystemUpdateStatus, SystemVersion,
+    SystemOperationStatus, SystemUpdateChannel, SystemUpdateDetail, SystemUpdateEvent,
+    SystemUpdateEventLevel, SystemUpdateMode, SystemUpdatePolicy, SystemUpdateStatus,
+    SystemVersion,
 };
 use serde::{Deserialize, Serialize};
 
@@ -255,7 +255,6 @@ where
         .route("/api/admin/system/update", post(perform_update::<S>))
         .route("/api/admin/system/update/status", get(update_status::<S>))
         .route("/api/admin/system/rollback", post(rollback::<S>))
-        .route("/api/admin/system/restart/check", get(restart_plan::<S>))
         .route("/api/admin/system/restart", post(restart::<S>))
 }
 
@@ -409,32 +408,9 @@ where
     ))
 }
 
-async fn restart_plan<S>(
-    _auth: AdminAuth,
-    State(state): State<S>,
-) -> Result<impl IntoResponse, AdminError>
-where
-    S: SessionState + Send + Sync,
-{
-    let plan = state
-        .admin_services()
-        .system()
-        .restart_plan()
-        .await
-        .map_err(map_system_error)?;
-    Ok(AdminResponse::new(StatusCode::OK, AdminEnvelope::ok(plan)))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RestartRequest {
-    confirmation: Option<SystemRestartPlan>,
-}
-
 async fn restart<S>(
     auth: AdminAuth,
     State(state): State<S>,
-    payload: Option<AdminJson<RestartRequest>>,
 ) -> Result<impl IntoResponse, AdminError>
 where
     S: SessionState + Send + Sync,
@@ -442,10 +418,7 @@ where
     let result = state
         .admin_services()
         .system()
-        .restart(
-            payload.and_then(|AdminJson(request)| request.confirmation),
-            &auth.context().mutation_context(),
-        )
+        .restart(&auth.context().mutation_context())
         .await
         .map_err(map_system_error)?;
     let SystemOperationAccepted::Restart {

@@ -6,9 +6,6 @@ use std::time::Duration;
 
 use axum::{Router, routing::get};
 use futures::future::BoxFuture;
-use gateway_admin::ports::system::{
-    SystemOperationError, SystemRestartPreflight, SystemUpdateCandidate,
-};
 use gateway_core::diagnostics::{OperationalDiagnostics, OperationalFailure};
 use gateway_core::lifecycle::CancellationToken;
 use gateway_core::task::{
@@ -45,7 +42,6 @@ async fn bind_listener_should_retry_until_previous_listener_releases_port() {
         .await
         .expect("bound within the retry window")
         .expect("bound after the previous listener released the port");
-
     assert_eq!(
         listener.local_addr().expect("bound address").to_string(),
         address
@@ -116,11 +112,10 @@ async fn shutdown_with_pending_request(trigger: ShutdownTrigger) {
     let client = connect_request(address).await;
     entered.cancelled().await;
     probe.sender.send(7).unwrap();
-
     match trigger {
         ShutdownTrigger::Cancellation => cancellation.cancel(),
         ShutdownTrigger::SelfRestart => {
-            system.restart(Arc::new(AllowRestart)).await.unwrap();
+            system.restart().await.unwrap();
         }
         #[cfg(unix)]
         ShutdownTrigger::Signal(signal) => {
@@ -172,7 +167,6 @@ fn shutdown_aborts_workers_that_exceed_the_cleanup_budget() {
             let client = connect_request(address).await;
             entered.cancelled().await;
             cancellation.cancel();
-
             tokio::time::timeout(Duration::from_secs(3), server)
                 .await
                 .expect("worker cleanup budget must bound process shutdown")
@@ -184,15 +178,6 @@ fn shutdown_aborts_workers_that_exceed_the_cleanup_budget() {
             drop(client);
         },
     );
-}
-
-struct AllowRestart;
-
-#[async_trait::async_trait]
-impl SystemRestartPreflight for AllowRestart {
-    async fn prepare(&self, _: Option<SystemUpdateCandidate>) -> Result<(), SystemOperationError> {
-        Ok(())
-    }
 }
 
 #[test]
@@ -207,9 +192,7 @@ fn bind_failure_cancels_and_joins_workers_before_returning() {
             let cancellation = host.cancellation();
             let probe = start_workers(&host, false);
             probe.started.cancelled().await;
-
             let result = host.serve(Router::new()).await;
-
             assert!(matches!(
                 result,
                 Err(gateway_host::HostError::Serve(
@@ -234,11 +217,9 @@ fn dropping_serve_cancels_public_operations_and_aborts_workers() {
             probe.started.cancelled().await;
             let server = tokio::spawn(host.serve(Router::new()));
             let client = connect_request(address).await;
-
             server.abort();
             assert!(server.await.unwrap_err().is_cancelled());
             probe.dropped.cancelled().await;
-
             assert!(cancellation.is_cancelled());
             assert!(!probe.finished.is_cancelled());
             drop(client);
@@ -258,7 +239,6 @@ fn dropping_serve_during_worker_shutdown_aborts_the_joined_worker() {
             probe.started.cancelled().await;
             let server = tokio::spawn(host.serve(Router::new()));
             let client = connect_request(address).await;
-
             cancellation.cancel();
             probe.cancelled.cancelled().await;
             assert!(!probe.finished.is_cancelled());
@@ -272,7 +252,6 @@ fn dropping_serve_during_worker_shutdown_aborts_the_joined_worker() {
             tokio::time::timeout(Duration::from_secs(1), probe.dropped.cancelled())
                 .await
                 .expect("aborting shutdown must not detach the worker");
-
             assert!(!probe.finished.is_cancelled());
             drop(client);
         },
@@ -357,7 +336,6 @@ struct WriterTask {
 }
 
 struct TaskLifetime(CancellationToken);
-
 impl Drop for TaskLifetime {
     fn drop(&mut self) {
         self.0.cancel();

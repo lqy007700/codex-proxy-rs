@@ -10,35 +10,27 @@ use sha2::{Digest as _, Sha256};
 use super::swap::backup_path_for;
 use super::{OperationError, SystemUpdateConfig, conflict, internal};
 
-pub(super) const OFFICIAL_PLUGIN_MANIFEST: &str = "plugin-release-manifest.json";
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ReleaseFiles {
     binary: String,
     web: String,
-    official_plugins: String,
 }
 
 impl ReleaseFiles {
     pub(crate) fn installed(config: &SystemUpdateConfig) -> Result<Self, OperationError> {
-        Self::read(
-            &config.executable_path()?,
-            config.web_dist_dir()?,
-            &config.official_plugins_dir()?,
-        )
+        Self::read(&config.executable_path()?, config.web_dist_dir()?)
     }
 
     pub(crate) fn backup(config: &SystemUpdateConfig) -> Result<Self, OperationError> {
         Self::read(
             &backup_path_for(&config.executable_path()?),
             &backup_path_for(config.web_dist_dir()?),
-            &backup_path_for(&config.official_plugins_dir()?),
         )
     }
 
-    fn read(binary: &Path, web: &Path, plugins: &Path) -> Result<Self, OperationError> {
-        if !web.join("index.html").is_file() || !plugins.join(OFFICIAL_PLUGIN_MANIFEST).is_file() {
+    fn read(binary: &Path, web: &Path) -> Result<Self, OperationError> {
+        if !web.join("index.html").is_file() {
             return Err(conflict("安装文件不完整，请核对部署后重试"));
         }
         let mut binary_hash = Sha256::new();
@@ -46,7 +38,6 @@ impl ReleaseFiles {
         Ok(Self {
             binary: hex::encode(binary_hash.finalize()),
             web: hash_directory(web).map_err(read_error)?,
-            official_plugins: hash_directory(plugins).map_err(read_error)?,
         })
     }
 }

@@ -5,11 +5,8 @@ mod command_line;
 mod config;
 mod email;
 mod logging;
-mod official_plugins;
-mod outbound;
-mod plugin_distribution;
+
 mod pricing;
-mod process;
 mod proxy_probe;
 mod retention;
 mod serve;

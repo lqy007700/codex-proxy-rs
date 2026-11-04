@@ -15,7 +15,7 @@ use crate::{
         AccountCandidate, AccountSelection, AccountSelectionContext, AccountSelector,
         ProviderAccountId,
     },
-    engine::{extensions::ExtensionCallScope, nested::ExecutionEffects},
+    engine::{effects::ExecutionEffects, extensions::ExtensionCallScope},
     identity::ProviderKind,
     operation::Operation,
     policy::ClientApiKeyId,

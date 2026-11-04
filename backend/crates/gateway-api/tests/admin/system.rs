@@ -74,7 +74,6 @@ async fn update_event_stream_should_preserve_event_id_and_download_progress_perc
         .expect("event body");
     let body = String::from_utf8(frame.into_data().expect("event data").to_vec())
         .expect("UTF-8 event stream");
-
     assert!(
         body.contains(r#""id":"update-progress-1""#),
         "unexpected update event stream: {body}"
@@ -241,7 +240,6 @@ impl SystemOperations for ProgressSystem {
         &self,
         target: Option<String>,
         _: Option<gateway_admin::model::system::SystemUpdateChannel>,
-        _: Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
         mode: gateway_admin::model::system::SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
         assert_eq!(mode, self.expected_mode);
@@ -271,17 +269,11 @@ impl SystemOperations for ProgressSystem {
         })
     }
 
-    async fn rollback(
-        &self,
-        _: Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
-    ) -> Result<SystemOperationAccepted, SystemOperationError> {
+    async fn rollback(&self) -> Result<SystemOperationAccepted, SystemOperationError> {
         Err(unavailable_system())
     }
 
-    async fn restart(
-        &self,
-        _preflight: Arc<dyn gateway_admin::ports::system::SystemRestartPreflight>,
-    ) -> Result<SystemOperationAccepted, SystemOperationError> {
+    async fn restart(&self) -> Result<SystemOperationAccepted, SystemOperationError> {
         Err(unavailable_system())
     }
 }

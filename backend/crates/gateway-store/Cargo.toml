@@ -12,7 +12,6 @@ name = "main"
 path = "tests/main.rs"
 
 [dependencies]
-async-stream = "0.3.6"
 async-trait = "0.1.89"
 async-compression = { version = "0.4.50", default-features = false, features = ["tokio", "gzip"] }
 aws-credential-types = "1.2"

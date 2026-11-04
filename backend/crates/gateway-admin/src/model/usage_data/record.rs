@@ -1,4 +1,4 @@
-//! 既有请求明细的用量读写合同，不承载插件任务或来源状态
+//! 既有请求明细的用量读写合同
 
 use super::UsageCount;
 use serde::{Deserialize, Serialize};

@@ -3,7 +3,7 @@
 use super::COORDINATION_TIMEOUT;
 use super::admission::settle_budget;
 use super::contract::ExecutionSession;
-use super::scope::{ActiveRequestLease, ExecutionAdmission};
+use super::scope::ExecutionAdmission;
 use crate::{
     engine::{
         CoordinatedEvent, EngineError, ExecutionStore,
@@ -21,7 +21,6 @@ use std::sync::Arc;
 pub(super) struct DefaultExecutionSession {
     pub(super) core: ResponseExecutionSession<dyn ExecutionStore>,
     pub(super) admission: Option<ExecutionAdmission>,
-    pub(super) active_request: Option<ActiveRequestLease>,
     pub(super) cleanup: Option<BoxFuture<'static, ()>>,
     pub(super) continuation: Arc<dyn NativeContinuationPort>,
     pub(super) continuation_recorded: bool,
@@ -33,7 +32,6 @@ impl DefaultExecutionSession {
     pub(super) fn new(
         core: ResponseExecutionSession<dyn ExecutionStore>,
         admission: ExecutionAdmission,
-        active_request: Option<ActiveRequestLease>,
         continuation: Arc<dyn NativeContinuationPort>,
         budget: Option<Arc<dyn ClientBudgetPort>>,
         diagnostics: Arc<dyn crate::diagnostics::OperationalDiagnostics>,
@@ -41,7 +39,6 @@ impl DefaultExecutionSession {
         Self {
             core,
             admission: Some(admission),
-            active_request,
             cleanup: None,
             continuation,
             continuation_recorded: false,
@@ -54,9 +51,6 @@ impl DefaultExecutionSession {
         if self.core.is_finalized()
             && let Some(admission) = self.admission.take()
         {
-            if let Some(active_request) = self.active_request.take() {
-                active_request.release();
-            }
             let budget = self.budget.take();
             let charge = self.core.budget_charge();
             let diagnostics = self.diagnostics.clone();
@@ -101,7 +95,6 @@ impl DefaultExecutionSession {
 impl Drop for DefaultExecutionSession {
     fn drop(&mut self) {
         self.core.cancel();
-        drop(self.active_request.take());
     }
 }
 
@@ -171,10 +164,7 @@ impl ExecutionSession for DefaultExecutionSession {
     }
 
     fn is_finalized(&self) -> bool {
-        self.core.is_finalized()
-            && self.admission.is_none()
-            && self.active_request.is_none()
-            && self.cleanup.is_none()
+        self.core.is_finalized() && self.admission.is_none() && self.cleanup.is_none()
     }
 
     fn cancel(&self) {

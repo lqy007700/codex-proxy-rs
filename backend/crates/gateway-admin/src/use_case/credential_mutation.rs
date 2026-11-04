@@ -28,7 +28,6 @@ pub(super) async fn publish_credentials_and_observe_quota(
 ) -> Result<(), AdminError> {
     provider.account_facts_changed(account_ids).await;
     publish_committed(snapshot, revision).await?;
-
     // 凭据已经提交；额度只是可重建的观察，不能拖住管理请求或回滚提交结果
     let provider = provider.clone();
     let accounts = accounts.clone();
@@ -80,18 +79,6 @@ pub(super) async fn required_credential(
 ) -> Result<CredentialDetails, AdminError> {
     accounts
         .credential_details(provider_kind, account_id)
-        .await
-        .map_err(|error| map_store_error(error, resource))?
-        .ok_or_else(|| AdminError::not_found("服务商凭据不存在"))
-}
-
-pub(super) async fn required_plugin_credential(
-    accounts: &dyn AccountStore,
-    account_id: &ProviderAccountId,
-    resource: &'static str,
-) -> Result<CredentialDetails, AdminError> {
-    accounts
-        .credential_details_by_id(account_id)
         .await
         .map_err(|error| map_store_error(error, resource))?
         .ok_or_else(|| AdminError::not_found("服务商凭据不存在"))

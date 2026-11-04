@@ -21,5 +21,3 @@ mod session;
 use std::time::Duration;
 const DIAGNOSTIC_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const COORDINATION_TIMEOUT: Duration = Duration::from_millis(100);
-const MAX_NESTED_EXECUTIONS: usize = 16;
-const MAX_CONCURRENT_NESTED_EXECUTIONS: usize = 4;

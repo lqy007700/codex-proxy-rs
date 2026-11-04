@@ -12,13 +12,10 @@ use syn::{Item, visit::Visit};
 /// workspace 成员冻结清单;新增 crate 必须同步扩展本文件的依赖规则
 pub(super) const WORKSPACE_MEMBERS: &[&str] = &[
     "apps/gateway",
-    "apps/plugin-cli",
     "crates/gateway-admin",
     "crates/gateway-api",
     "crates/gateway-core",
     "crates/gateway-host",
-    "crates/gateway-plugin/runtime",
-    "crates/gateway-plugin/sdk",
     "crates/gateway-protocol",
     "crates/gateway-store",
     "crates/providers/openai",
@@ -163,7 +160,6 @@ fn shared_owners_do_not_depend_on_their_callers() {
         ),
         ("crates/gateway-api", "middleware", &["openai"]),
         ("crates/gateway-host", "system_update", &["config"]),
-        ("crates/gateway-plugin/runtime", "package", &["callback"]),
     ];
     for &(member, owner, forbidden) in boundaries {
         let root = backend_root().join(member).join("src");
@@ -420,13 +416,6 @@ fn gateway_protocol_has_no_workspace_dependencies() {
 }
 
 #[test]
-fn plugin_sdk_has_no_workspace_dependencies() {
-    for name in dependency_names("crates/gateway-plugin/sdk") {
-        assert!(!name.starts_with("gateway-") && !name.starts_with("provider-"));
-    }
-}
-
-#[test]
 fn provider_crates_do_not_depend_on_each_other() {
     assert_no_dependency("crates/providers/openai", &["provider-xai"]);
     assert_no_dependency("crates/providers/xai", &["provider-openai"]);
@@ -443,13 +432,10 @@ fn gateway_admin_stays_free_of_infrastructure_dependencies() {
 /// workspace 包名到冻结成员路径的映射
 const PACKAGE_TO_MEMBER: &[(&str, &str)] = &[
     ("codex-proxy-rs", "apps/gateway"),
-    ("codex-proxy-plugin-cli", "apps/plugin-cli"),
     ("gateway-admin", "crates/gateway-admin"),
     ("gateway-api", "crates/gateway-api"),
     ("gateway-core", "crates/gateway-core"),
     ("gateway-host", "crates/gateway-host"),
-    ("gateway-plugin-runtime", "crates/gateway-plugin/runtime"),
-    ("gateway-plugin-sdk", "crates/gateway-plugin/sdk"),
     ("gateway-protocol", "crates/gateway-protocol"),
     ("gateway-store", "crates/gateway-store"),
     ("provider-openai", "crates/providers/openai"),
@@ -458,8 +444,6 @@ const PACKAGE_TO_MEMBER: &[(&str, &str)] = &[
 
 /// SDK 与 Adapter/provider 根门面的稳定合同模块；任何增减都必须同步完成边界审计
 const ADAPTER_PUBLIC_MODULES: &[(&str, &[&str])] = &[
-    ("crates/gateway-plugin/sdk", &["call", "client"]),
-    ("crates/gateway-plugin/runtime", &[]),
     ("crates/gateway-api", &["admin", "auth", "openai"]),
     (
         "crates/gateway-host",
@@ -467,11 +451,7 @@ const ADAPTER_PUBLIC_MODULES: &[(&str, &[&str])] = &[
             "client_distribution",
             "config",
             "email",
-            "outbound",
-            "official_plugins",
             "pricing",
-            "plugin_distribution",
-            "process",
             "proxy_probe",
             "retention",
             "serve",
@@ -495,12 +475,10 @@ const ROOT_TEST_SCENARIOS: &[(&str, &[&str])] = &[
 
 /// 冻结的 workspace 内部运行时依赖边；新增/删除任何边都必须同步本表
 const ALLOWED_INTERNAL_EDGES: &[(&str, &str)] = &[
-    ("codex-proxy-plugin-cli", "gateway-plugin-sdk"),
     ("codex-proxy-rs", "gateway-admin"),
     ("codex-proxy-rs", "gateway-api"),
     ("codex-proxy-rs", "gateway-core"),
     ("codex-proxy-rs", "gateway-host"),
-    ("codex-proxy-rs", "gateway-plugin-runtime"),
     ("codex-proxy-rs", "gateway-store"),
     ("codex-proxy-rs", "provider-openai"),
     ("codex-proxy-rs", "provider-xai"),
@@ -510,11 +488,6 @@ const ALLOWED_INTERNAL_EDGES: &[(&str, &str)] = &[
     ("gateway-api", "gateway-protocol"),
     ("gateway-host", "gateway-admin"),
     ("gateway-host", "gateway-core"),
-    ("gateway-plugin-runtime", "gateway-host"),
-    ("gateway-plugin-runtime", "gateway-core"),
-    ("gateway-plugin-runtime", "gateway-admin"),
-    ("gateway-plugin-runtime", "gateway-plugin-sdk"),
-    ("gateway-plugin-runtime", "gateway-protocol"),
     ("gateway-store", "gateway-admin"),
     ("gateway-store", "gateway-core"),
     ("provider-openai", "gateway-admin"),
@@ -534,7 +507,6 @@ fn workspace_internal_dependency_edges_match_frozen_dag() {
         .map(|(from, to)| ((*from).to_owned(), (*to).to_owned()))
         .collect();
     expected.sort();
-
     assert_eq!(
         actual, expected,
         "workspace internal dependency edges diverged from the frozen DAG"
@@ -573,7 +545,6 @@ fn workspace_runtime_dependency_edges(metadata: &serde_json::Value) -> Vec<(Stri
         .expect("cargo metadata packages");
     let internal_names: std::collections::BTreeSet<&str> =
         PACKAGE_TO_MEMBER.iter().map(|(name, _)| *name).collect();
-
     let mut actual: Vec<(String, String)> = Vec::new();
     for package in packages {
         let name = package["name"].as_str().expect("package name");
@@ -632,7 +603,6 @@ fn workspace_modules_follow_conventional_file_layout() {
         let src = member_root.join("src");
         assert_module_tree(&src, &["lib.rs", "main.rs"]);
         assert_directory_modules_have_children(&src, &["lib.rs", "main.rs"]);
-
         let tests = member_root.join("tests");
         if tests.is_dir() {
             let roots = targets.get(&tests).expect("Cargo test source roots");

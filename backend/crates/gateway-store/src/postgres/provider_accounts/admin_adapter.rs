@@ -255,45 +255,6 @@ impl AccountStore for PgAdminAccountStore {
             })
     }
 
-    async fn list_plugin_accounts(
-        &self,
-        query: PluginAccountListQuery,
-    ) -> AdminStoreResult<PluginAccountPage> {
-        let limit = i64::from(query.limit.get());
-        let mut accounts = self
-            .accounts
-            .list_plugin_accounts(
-                query.provider_kind.as_ref().map(ProviderKind::as_str),
-                query.cursor.as_ref().map(CoreProviderAccountId::as_str),
-                limit + 1,
-            )
-            .await
-            .map_err(|error| admin_store_error(ENTITY, error))?;
-        let has_more = accounts.len() > usize::from(query.limit.get());
-        if has_more {
-            accounts.pop();
-        }
-        let next_cursor = has_more
-            .then(|| accounts.last().map(|account| account.id.clone()))
-            .flatten()
-            .map(CoreProviderAccountId::new)
-            .transpose()
-            .map_err(|_| {
-                AdminStoreError::new(
-                    AdminStoreErrorKind::Invalid,
-                    ENTITY,
-                    "plugin account cursor is invalid",
-                )
-            })?;
-        Ok(PluginAccountPage {
-            accounts: accounts
-                .into_iter()
-                .map(admin_account_record)
-                .collect::<AdminStoreResult<_>>()?,
-            next_cursor,
-        })
-    }
-
     async fn list_accounts(
         &self,
         query: AdminAccountListQuery,
@@ -524,25 +485,6 @@ impl AccountStore for PgAdminAccountStore {
             });
         }
         Ok(credentials)
-    }
-
-    async fn load_credential_for_plugin(
-        &self,
-        account_id: &CoreProviderAccountId,
-    ) -> AdminStoreResult<Option<ProviderExportCredentialInput>> {
-        self.accounts
-            .load_provider_account(account_id.as_str())
-            .await
-            .map_err(|error| admin_store_error(ENTITY, error))?
-            .map(|record| {
-                Ok(ProviderExportCredentialInput {
-                    account: admin_account_record(record.summary)?,
-                    provider_material: ProviderDocument::new(OpaqueProviderData::new(
-                        record.provider_credentials_json.fields().clone(),
-                    )),
-                })
-            })
-            .transpose()
     }
 
     async fn commit_credential_import(

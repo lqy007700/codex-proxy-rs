@@ -1,6 +1,7 @@
 //! 管理控制面 HTTP 接口的测试入口
 
-mod plugins;
+mod usage_data_store;
+
 use std::{
     collections::BTreeMap,
     sync::{
@@ -105,8 +106,6 @@ pub(super) struct ProviderQuotaGate {
 
 pub(super) struct AdminTestFixture {
     pub services: AdminServices,
-    plugin_ports: Arc<plugins::TestPluginPorts>,
-    published_snapshot: gateway_core::runtime::RuntimeSnapshotHandle,
     pub client_key: Arc<Mutex<Option<ClientKeyRecord>>>,
     pub observations: Arc<Mutex<MemoryObservations>>,
     pub auth: Arc<MemoryAuthStore>,
@@ -177,8 +176,6 @@ impl AdminTestFixture {
             account: Arc::clone(&account),
             account_usage: Arc::clone(&account_usage),
         });
-        let plugin_ports = Arc::new(plugins::TestPluginPorts::default());
-        let published_snapshot = gateway_core::runtime::RuntimeSnapshotHandle::default();
         let stores = AdminStorePorts::new(
             AdminAccountStorePorts::new(
                 unused.clone(),
@@ -191,10 +188,7 @@ impl AdminTestFixture {
             unused,
             settings.clone(),
             gateway_admin::ports::backup::BackupStorePorts::disabled(),
-            plugin_ports.clone(),
-            plugin_ports.clone(),
-            plugin_ports.clone(),
-            plugin_ports.clone(),
+            Arc::new(usage_data_store::UnusedUsageDataStore),
             Arc::new(alerts::MemoryAlerts::default()),
         );
         let provider_quota = Arc::new(Mutex::new(None));
@@ -227,12 +221,6 @@ impl AdminTestFixture {
             stores,
             gateway_admin::AdminRuntimePorts {
                 timezone,
-                service_middleware: std::sync::Arc::new(|| None),
-                plugin_preparation: plugin_ports.clone(),
-                plugin_management: plugin_ports.clone(),
-                published_snapshot: published_snapshot.clone(),
-                plugin_inspector: plugin_ports.clone(),
-                plugin_distribution: plugin_ports.clone(),
                 pricing_source: Arc::new(StaticPricingSource),
                 email_sender: Arc::new(alerts::TestEmailSender),
                 providers: gateway_admin::ports::provider::ProviderAdminRegistry::new(providers)
@@ -249,8 +237,6 @@ impl AdminTestFixture {
         .expect("initialize test admin services");
         Self {
             services: bundle.services(),
-            plugin_ports,
-            published_snapshot,
             client_key,
             observations,
             auth,
@@ -301,7 +287,6 @@ impl ClientDistributionResolver for StaticClientDistribution {
 
 #[derive(Clone)]
 pub(super) struct AdminTestState(AdminServices);
-
 impl SessionState for AdminTestState {
     fn admin_services(&self) -> &AdminServices {
         &self.0
@@ -710,7 +695,6 @@ impl SettingsStore for MemorySettingsStore {
 }
 
 pub(super) struct MemoryClientKeyStore(Arc<Mutex<Option<ClientKeyRecord>>>);
-
 #[derive(Default)]
 pub(super) struct MemoryObservations {
     pub summary: Option<UsageOverview>,
@@ -724,7 +708,6 @@ pub(super) struct MemoryObservations {
 
 pub(super) const PRIMARY_GROUP_ID: &str = "grp_11111111111111111111111111111111";
 pub(super) const SECONDARY_GROUP_ID: &str = "grp_22222222222222222222222222222222";
-
 struct MemoryAccountGroupState {
     revision: Revision,
     groups: BTreeMap<gateway_core::routing::AccountGroupId, AccountGroupRecord>,
@@ -1018,7 +1001,6 @@ impl ClientKeyStore for MemoryClientKeyStore {
     async fn update_client_key_budget_limits(
         &self,
         _: gateway_admin::model::client_keys::UpdateClientKeyBudgetLimits,
-        _: gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin,
         _: &MutationContext,
     ) -> AdminStoreResult<Option<Revision>> {
         Err(AdminStoreError::new(
@@ -1031,7 +1013,6 @@ impl ClientKeyStore for MemoryClientKeyStore {
     async fn reset_client_key_budget(
         &self,
         command: gateway_admin::model::client_keys::ResetClientKeyBudget,
-        _: gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin,
         _: &MutationContext,
     ) -> AdminStoreResult<()> {
         use gateway_admin::model::client_keys::ClientKeyBudgetPeriod;
@@ -1090,7 +1071,6 @@ impl ClientKeyStore for MemoryClientKeyStore {
         Ok(Some(ClientKeySecret::new(
             ClientKeyRecord {
                 identity_policy: Default::default(),
-
                 portable_history: false,
                 request_profile_overrides: Default::default(),
                 budget: Default::default(),
@@ -1179,13 +1159,6 @@ impl AccountStore for UnusedStore {
             .expect("account")
             .as_ref()
             .is_some_and(|account| account.account.id == id))
-    }
-
-    async fn list_plugin_accounts(
-        &self,
-        _: gateway_admin::model::provider_credentials::PluginAccountListQuery,
-    ) -> AdminStoreResult<gateway_admin::model::provider_credentials::PluginAccountPage> {
-        Err(unavailable("plugin account list"))
     }
 
     async fn list_accounts(
@@ -1296,13 +1269,6 @@ impl AccountStore for UnusedStore {
         _: &[ProviderAccountId],
     ) -> AdminStoreResult<Vec<ProviderExportCredentialInput>> {
         Err(unavailable("credential export"))
-    }
-
-    async fn load_credential_for_plugin(
-        &self,
-        _: &ProviderAccountId,
-    ) -> AdminStoreResult<Option<ProviderExportCredentialInput>> {
-        Err(unavailable("plugin credential export"))
     }
 
     async fn commit_credential_import(
@@ -1651,7 +1617,6 @@ impl ProviderAdmin for UnusedProvider {
     }
 
     async fn account_unavailable(&self, _: &ProviderAccountId) {}
-
     async fn connection_test_operation(
         &self,
         _: &gateway_core::routing::UpstreamModelId,
@@ -1807,7 +1772,6 @@ impl SystemOperations for UnusedSystem {
         &self,
         _: Option<String>,
         _: Option<gateway_admin::model::system::SystemUpdateChannel>,
-        _: Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
         _mode: gateway_admin::model::system::SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
         Err(unavailable_system())
@@ -1817,17 +1781,11 @@ impl SystemOperations for UnusedSystem {
         Err(unavailable_system())
     }
 
-    async fn rollback(
-        &self,
-        _: Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
-    ) -> Result<SystemOperationAccepted, SystemOperationError> {
+    async fn rollback(&self) -> Result<SystemOperationAccepted, SystemOperationError> {
         Err(unavailable_system())
     }
 
-    async fn restart(
-        &self,
-        _preflight: Arc<dyn gateway_admin::ports::system::SystemRestartPreflight>,
-    ) -> Result<SystemOperationAccepted, SystemOperationError> {
+    async fn restart(&self) -> Result<SystemOperationAccepted, SystemOperationError> {
         Err(unavailable_system())
     }
 }

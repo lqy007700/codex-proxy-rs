@@ -133,15 +133,6 @@ impl SystemUpdateConfig {
             .map_err(|error| internal("无法确定当前程序位置").with_source(error))
     }
 
-    pub(crate) fn official_plugins_dir(&self) -> Result<PathBuf, OperationError> {
-        let executable = self.executable_path()?;
-        let parent = executable
-            .parent()
-            .filter(|path| !path.as_os_str().is_empty())
-            .ok_or_else(|| internal("无法确定官方插件安装目录"))?;
-        Ok(parent.join("plugins").join("official"))
-    }
-
     pub(crate) fn web_dist_dir(&self) -> Result<&Path, OperationError> {
         self.web_dist_dir
             .as_deref()

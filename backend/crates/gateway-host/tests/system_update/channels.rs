@@ -122,7 +122,6 @@ async fn install_should_use_confirmed_channel_and_infer_new_default_only_after_r
         .perform_update(
             Some("1.1.0-beta.1".into()),
             Some(Stable),
-            Arc::new(AllowingUpdatePreflight),
             gateway_admin::model::system::SystemUpdateMode::Upgrade,
         )
         .await
@@ -139,7 +138,6 @@ async fn install_should_use_confirmed_channel_and_infer_new_default_only_after_r
         .perform_update(
             Some("1.1.0-beta.1".into()),
             Some(Beta),
-            Arc::new(AllowingUpdatePreflight),
             gateway_admin::model::system::SystemUpdateMode::Upgrade,
         )
         .await
@@ -160,7 +158,6 @@ async fn install_should_use_confirmed_channel_and_infer_new_default_only_after_r
             .perform_update(
                 Some("1.1.0-beta.1".into()),
                 Some(Alpha),
-                Arc::new(AllowingUpdatePreflight),
                 gateway_admin::model::system::SystemUpdateMode::Upgrade
             )
             .await

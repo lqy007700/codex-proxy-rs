@@ -26,7 +26,7 @@ function fixture() {
       'build-docker-binary (linux-amd64)', 'build-docker-image (linux/amd64)',
     ].map(name => ({ name, conclusion: 'success' })),
     artifacts: [
-      'frontend-dist', 'plugin-release-assets', 'codex-proxy-rs-linux-amd64', 'image-digest-linux-amd64',
+      'frontend-dist', 'release-identity', 'codex-proxy-rs-linux-amd64', 'image-digest-linux-amd64',
     ].map(name => ({ name, expired: false })),
   };
 }
@@ -89,7 +89,7 @@ test('封口清单必须同时匹配版本和提交', () => {
     const manifest = { schema_version: 1, sealed: true, gateway_version: '1.2.3+fork', gateway_git_sha: 'a'.repeat(40) };
     const command = steps.find(step => step.name === 'Verify recovery version and commit').run;
     for (const patch of [{}, { gateway_version: '1.2.4+fork' }, { gateway_git_sha: 'b'.repeat(40) }, { sealed: false }]) {
-      writeFileSync(path.join(directory, 'reuse-manifest/plugin-release-manifest.json'), JSON.stringify({ ...manifest, ...patch }));
+      writeFileSync(path.join(directory, 'reuse-manifest/release-manifest.json'), JSON.stringify({ ...manifest, ...patch }));
       const result = spawnSync('bash', ['-c', command], {
         encoding: 'utf8',
         env: { ...process.env, RUNNER_TEMP: directory, RELEASE_VERSION: manifest.gateway_version, RELEASE_SHA: manifest.gateway_git_sha },

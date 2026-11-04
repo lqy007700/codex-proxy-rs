@@ -8,18 +8,14 @@ use gateway_core::policy::{ClientApiKeyId, PlaintextClientApiKey, RateLimits};
 
 use gateway_admin::{
     model::{
-        AdminErrorKind, MutationActor, MutationContext, PageSize, Revision,
+        AdminErrorKind, MutationActor, MutationContext, Revision,
         client_keys::{
             ClientKeyCursor, ClientKeyCursorValue, ClientKeyListQuery, ClientKeyPage,
             ClientKeyPageSize, ClientKeyRecord, ClientKeySecret, ClientKeySort, ClientKeySortField,
             CreateClientKey, DeleteClientKey, NewClientKey, SetClientKeyEnabled, SortDirection,
             UpdateClientKey,
         },
-        plugin_client_keys::{
-            PluginClientKey, PluginClientKeyCursor, PluginClientKeyListQuery, PluginClientKeyPage,
-        },
     },
-    ports::provider::{ProviderAdmin, ProviderAdminRegistry},
     ports::store::{AdminStoreError, AdminStoreErrorKind, AdminStoreResult, ClientKeyStore},
 };
 
@@ -38,7 +34,6 @@ impl ClientKeyStore for TestClientKeyStore {
     async fn update_client_key_budget_limits(
         &self,
         _: gateway_admin::model::client_keys::UpdateClientKeyBudgetLimits,
-        _: gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin,
         _: &MutationContext,
     ) -> AdminStoreResult<Option<Revision>> {
         Err(unused())
@@ -47,7 +42,6 @@ impl ClientKeyStore for TestClientKeyStore {
     async fn reset_client_key_budget(
         &self,
         command: gateway_admin::model::client_keys::ResetClientKeyBudget,
-        _: gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin,
         _: &MutationContext,
     ) -> AdminStoreResult<()> {
         self.resets.lock().unwrap().push(command);
@@ -97,7 +91,6 @@ impl ClientKeyStore for TestClientKeyStore {
         self.plaintexts.lock().unwrap().push(key.plaintext);
         let record = ClientKeyRecord {
             identity_policy: Default::default(),
-
             portable_history: key.portable_history,
             request_profile_overrides: Default::default(),
             id: key.id,
@@ -162,11 +155,7 @@ async fn reset_budget_forwards_scope_and_returns_only_key_identity() {
     };
     let result = services
         .client_keys()
-        .reset_budget(
-            &mutation_context(),
-            command.clone(),
-            gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin::Admin,
-        )
+        .reset_budget(&mutation_context(), command.clone())
         .await
         .unwrap();
     assert_eq!(result, command.id);
@@ -197,7 +186,6 @@ async fn client_key_cursor_should_reject_value_that_does_not_match_sort() {
         })
         .await
         .expect_err("mismatched cursor must fail");
-
     assert_eq!(error.kind(), AdminErrorKind::Invalid);
 }
 
@@ -220,96 +208,7 @@ async fn client_key_list_should_forward_the_full_nonzero_u16_page_size() {
         })
         .await
         .expect("maximum page size should reach store");
-
     assert_eq!(page.total, 0);
-}
-
-#[tokio::test]
-async fn plugin_client_key_list_projects_only_public_identity_and_uses_stable_name_cursor() {
-    let now = Utc::now();
-    let key_id = ClientApiKeyId::new("key_public").expect("key ID");
-    let next_id = ClientApiKeyId::new("key_next").expect("next key ID");
-    let sort = ClientKeySort {
-        field: ClientKeySortField::Name,
-        direction: SortDirection::Asc,
-    };
-    let store = Arc::new(TestClientKeyStore {
-        list_response: Mutex::new(Some(ClientKeyPage {
-            config_revision: Revision::new(7).expect("revision"),
-            items: vec![ClientKeyRecord {
-                identity_policy: Default::default(),
-
-                portable_history: false,
-                request_profile_overrides: Default::default(),
-                id: key_id.clone(),
-                name: "Public identity".to_owned(),
-                label: Some("private management label".to_owned()),
-                groups: Vec::new(),
-                provider_kinds: Vec::new(),
-                prefix: "sk_must_not_escape".to_owned(),
-                enabled: true,
-                limits: RateLimits::unlimited(),
-                budget: Default::default(),
-                last_used_at: Some(now),
-                created_at: now,
-                updated_at: now,
-            }],
-            total: 1,
-            next_cursor: Some(ClientKeyCursor {
-                sort,
-                value: ClientKeyCursorValue::Name("Public identity".to_owned()),
-                id: next_id.clone(),
-            }),
-        })),
-        ..Default::default()
-    });
-    let providers = ProviderAdminRegistry::new(Vec::<Arc<dyn ProviderAdmin>>::new())
-        .expect("empty provider registry");
-    let access = gateway_admin::initialize_plugin_client_keys(
-        providers,
-        store.clone(),
-        Arc::new(super::NoopSnapshot),
-    );
-    let input_cursor = PluginClientKeyCursor {
-        name: "Before".to_owned(),
-        id: ClientApiKeyId::new("key_before").expect("cursor key ID"),
-    };
-
-    let page = access
-        .list(PluginClientKeyListQuery {
-            cursor: Some(input_cursor.clone()),
-            limit: PageSize::new(25).expect("page size"),
-        })
-        .await
-        .expect("list plugin client keys");
-
-    assert_eq!(
-        page,
-        PluginClientKeyPage {
-            items: vec![PluginClientKey {
-                id: key_id,
-                name: "Public identity".to_owned(),
-                enabled: true,
-            }],
-            next_cursor: Some(PluginClientKeyCursor {
-                name: "Public identity".to_owned(),
-                id: next_id,
-            }),
-        }
-    );
-    assert_eq!(
-        *store.list_queries.lock().unwrap(),
-        vec![ClientKeyListQuery {
-            cursor: Some(ClientKeyCursor {
-                sort,
-                value: ClientKeyCursorValue::Name(input_cursor.name),
-                id: input_cursor.id,
-            }),
-            page_size: ClientKeyPageSize::new(25).expect("page size"),
-            search: None,
-            sort,
-        }]
-    );
 }
 
 #[tokio::test]
@@ -377,7 +276,6 @@ async fn duplicate_names_report_the_same_actionable_conflict_on_create_and_updat
             &mutation_context(),
             UpdateClientKey {
                 identity_policy: Default::default(),
-
                 portable_history: None,
                 request_profile_override_updates: Default::default(),
                 id: ClientApiKeyId::new("key_existing").unwrap(),
@@ -400,7 +298,6 @@ async fn duplicate_names_report_the_same_actionable_conflict_on_create_and_updat
 fn create_command(key: Option<&str>) -> CreateClientKey {
     CreateClientKey {
         identity_policy: Default::default(),
-
         portable_history: false,
         request_profile_overrides: Default::default(),
         custom_key: key.map(|value| PlaintextClientApiKey::new(value).unwrap()),
@@ -449,7 +346,6 @@ async fn duplicate_group_ids_are_rejected_before_key_creation_or_update() {
             &mutation_context(),
             UpdateClientKey {
                 identity_policy: Default::default(),
-
                 portable_history: None,
                 request_profile_override_updates: Default::default(),
                 id: ClientApiKeyId::new("key_existing").unwrap(),

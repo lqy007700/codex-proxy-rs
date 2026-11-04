@@ -44,8 +44,8 @@ use gateway_admin::{
             CredentialRotationCommit, PendingAuthorizationMutation, PrepareCredentialImport,
             PrepareCredentialRefresh, PrepareCredentialRotation, PreparedAuthorizationCommit,
             PreparedAuthorizationCredential, PreparedCredentialCreate, PreparedCredentialImport,
-            PreparedCredentialRotation, PreparedCredentialRotationFacts, PreparedPluginAccountSave,
-            ProviderDocument, ProviderExport, ProviderExportCredentialInput, ProviderModels,
+            PreparedCredentialRotation, PreparedCredentialRotationFacts, ProviderDocument,
+            ProviderExport, ProviderExportCredentialInput, ProviderModels,
             ProviderProfileActivityInsights, ProviderProfileStatistics,
             ProviderProfileStatisticsSummary, ProviderQuota, ProviderQuotaRequest,
             ProviderQuotaWindow, ProviderResetCreditResult, ProviderSubscription,
@@ -70,7 +70,6 @@ use gateway_admin::{
 use serde_json::{Map, json};
 
 pub(super) type EventLog = Arc<Mutex<Vec<&'static str>>>;
-
 pub(super) struct FakeProviderAdmin {
     kind: ProviderKind,
     capabilities: Mutex<gateway_admin::model::accounts::ProviderAccountCapabilities>,
@@ -797,17 +796,6 @@ impl AccountStore for FakeAccountStore {
             .any(|account| account.id == account_id))
     }
 
-    async fn list_plugin_accounts(
-        &self,
-        _: gateway_admin::model::provider_credentials::PluginAccountListQuery,
-    ) -> AdminStoreResult<gateway_admin::model::provider_credentials::PluginAccountPage> {
-        Err(AdminStoreError::new(
-            AdminStoreErrorKind::Unavailable,
-            "plugin accounts",
-            "unavailable",
-        ))
-    }
-
     async fn list_accounts(
         &self,
         _: AccountListQuery,
@@ -954,24 +942,6 @@ impl AccountStore for FakeAccountStore {
                 provider_material: document(),
             })
             .collect())
-    }
-
-    async fn load_credential_for_plugin(
-        &self,
-        account_id: &ProviderAccountId,
-    ) -> AdminStoreResult<Option<ProviderExportCredentialInput>> {
-        self.record("store.load_credential_for_plugin");
-        Ok(self
-            .accounts
-            .lock()
-            .expect("accounts")
-            .iter()
-            .find(|account| account.id == account_id.as_str())
-            .cloned()
-            .map(|account| ProviderExportCredentialInput {
-                account,
-                provider_material: document(),
-            }))
     }
 
     async fn commit_credential_import(
@@ -1377,7 +1347,6 @@ async fn connection_test_should_probe_unavailable_account() {
     let store = FakeAccountStore::with_account(account, events());
     let services =
         accounts_service_with_probe(provider, store, Arc::new(FailingAccountProbe)).await;
-
     let events = services
         .accounts()
         .test_connection(
@@ -1414,7 +1383,6 @@ async fn connection_test_rate_limited_probe_returns_provider_failure() {
         store: Arc::clone(&store),
     });
     let services = accounts_service_with_probe(provider, store, probe).await;
-
     let events = services
         .accounts()
         .test_connection(
@@ -1447,7 +1415,6 @@ async fn connection_test_should_preserve_disabled_account_status() {
     let store = FakeAccountStore::with_account(account, events());
     let services =
         accounts_service_with_probe(provider, store, Arc::new(FailingAccountProbe)).await;
-
     let events = services
         .accounts()
         .test_connection(
@@ -1479,7 +1446,6 @@ async fn accounts_export_should_pass_store_loaded_timestamps_and_material_to_pro
         )
         .await
         .expect("export credentials");
-
     let inputs = provider.export_inputs();
     let input = inputs.first().expect("provider export input");
     assert_eq!(
@@ -1498,7 +1464,6 @@ async fn accounts_refresh_should_keep_guard_through_store_commit() {
     let provider = FakeProviderAdmin::new("openai", events.clone());
     let store = FakeAccountStore::new("openai", events.clone());
     let services = accounts_service(provider, store.clone()).await;
-
     let result = services
         .accounts()
         .refresh(
@@ -1529,124 +1494,6 @@ async fn accounts_refresh_should_keep_guard_through_store_commit() {
 }
 
 #[tokio::test]
-async fn plugin_account_save_publishes_native_credential_change() {
-    let events = events();
-    let provider = FakeProviderAdmin::new("openai", events.clone());
-    let store = FakeAccountStore::new("openai", events.clone());
-    let snapshot = Arc::new(RecordingPluginAccountPublication(events.clone()));
-    let access = gateway_admin::initialize_plugin_accounts(
-        ProviderAdminRegistry::new([provider.clone() as Arc<dyn ProviderAdmin>]).unwrap(),
-        store.clone(),
-        snapshot,
-    );
-    let result = access
-        .save(
-            PreparedPluginAccountSave::Replace {
-                facts: plugin_rotation_facts(&account_record("openai")),
-                authentication_kind: "oauth".to_owned(),
-            },
-            &context("plugin-explicit-save"),
-        )
-        .await
-        .expect("save prepared plugin account facts");
-    tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        provider.quota_started.notified(),
-    )
-    .await
-    .expect("start post-commit quota observation");
-    assert_eq!(result.account_id.as_str(), "acct_test");
-    assert_eq!(result.credential_revision, revision(2));
-    assert_eq!(store.audit_requests(), ["plugin-explicit-save"]);
-    assert_eq!(
-        recorded(&events),
-        [
-            "store.credential_details",
-            "store.commit_rotation",
-            "provider.account_facts_changed",
-            "snapshot.publish_committed",
-            "provider.quota"
-        ]
-    );
-}
-
-#[tokio::test]
-async fn plugin_account_reads_resolve_the_authoritative_provider_from_the_account_id() {
-    let events = events();
-    let store = FakeAccountStore::new("xai", events.clone());
-    // 读取端口不能让调用方提供或伪造 Provider；注册表中即使只有另一 Provider，
-    // 也必须按 Store 中该 account ID 的权威事实返回
-    let registered_provider = FakeProviderAdmin::new("openai", events.clone());
-    let access = gateway_admin::initialize_plugin_accounts(
-        ProviderAdminRegistry::new([registered_provider as Arc<dyn ProviderAdmin>]).unwrap(),
-        store,
-        Arc::new(RecordingPluginAccountPublication(events.clone())),
-    );
-    let account_id = ProviderAccountId::new("acct_test").expect("account ID");
-
-    let runtime = access
-        .get_runtime(&account_id)
-        .await
-        .expect("load plugin account runtime");
-    let credential = access
-        .get_credential(&account_id)
-        .await
-        .expect("load plugin account credential");
-
-    assert_eq!(runtime.provider_kind.as_str(), "xai");
-    assert_eq!(credential.account.provider_kind.as_str(), "xai");
-    assert_eq!(credential.account.id, account_id.as_str());
-    assert_eq!(
-        recorded(&events),
-        [
-            "store.credential_details_by_id",
-            "store.load_credential_for_plugin",
-        ]
-    );
-}
-
-struct RecordingPluginAccountPublication(EventLog);
-
-impl gateway_core::runtime::SnapshotControl for RecordingPluginAccountPublication {
-    fn publish_committed(
-        &self,
-        revision: gateway_core::routing::ConfigRevision,
-    ) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            assert_eq!(revision.get(), 2);
-            self.0.lock().unwrap().push("snapshot.publish_committed");
-        })
-    }
-}
-
-#[tokio::test]
-async fn plugin_account_save_rejects_stale_authentication_kind_before_commit() {
-    let events = events();
-    let provider = FakeProviderAdmin::new("openai", events.clone());
-    let store = FakeAccountStore::new("openai", events.clone());
-    let access = gateway_admin::initialize_plugin_accounts(
-        ProviderAdminRegistry::new([provider as Arc<dyn ProviderAdmin>]).unwrap(),
-        store.clone(),
-        Arc::new(RecordingPluginAccountPublication(events.clone())),
-    );
-
-    let error = access
-        .save(
-            PreparedPluginAccountSave::Replace {
-                facts: plugin_rotation_facts(&account_record("openai")),
-                authentication_kind: "api_key".to_owned(),
-            },
-            &context("plugin-stale-auth-kind"),
-        )
-        .await
-        .expect_err("authentication kind change must be rejected");
-
-    assert_eq!(error.kind(), gateway_admin::model::AdminErrorKind::Conflict);
-    assert_eq!(recorded(&events), ["store.credential_details"]);
-    assert!(store.audit_requests().is_empty());
-}
-
-#[tokio::test]
 async fn accounts_quota_refresh_should_return_the_updated_account_status() {
     let events = events();
     let provider = FakeProviderAdmin::new("openai", events.clone());
@@ -1662,7 +1509,6 @@ async fn accounts_quota_refresh_should_return_the_updated_account_status() {
         .quota_refresh_account
         .lock()
         .expect("quota refresh account") = Some((store.clone(), account));
-
     let result = accounts_service(provider, store)
         .await
         .accounts()
@@ -1672,7 +1518,6 @@ async fn accounts_quota_refresh_should_return_the_updated_account_status() {
         )
         .await
         .expect("refresh quota");
-
     assert_eq!(
         result.account.quota.access(),
         gateway_core::account::QuotaAccessState::Allowed
@@ -1703,7 +1548,6 @@ async fn accounts_recover_should_commit_facts_then_return_normal_account() {
     account.last_error_message = Some("invalid credential".to_owned());
     let store = FakeAccountStore::with_account(account, events.clone());
     let services = accounts_service(provider, store.clone()).await;
-
     let result = services
         .accounts()
         .recover(
@@ -1712,7 +1556,6 @@ async fn accounts_recover_should_commit_facts_then_return_normal_account() {
         )
         .await
         .expect("recover account");
-
     assert_eq!(result.config_revision, revision(2));
     assert!(result.account.account.enabled);
     assert_eq!(
@@ -1783,7 +1626,6 @@ async fn accounts_recover_disabled_should_only_enable_scheduling_and_preserve_qu
         provider.set_quota(quota.clone());
         let store = FakeAccountStore::with_account(account.clone(), events.clone());
         let services = accounts_service(provider.clone(), store.clone()).await;
-
         let result = services
             .accounts()
             .recover(
@@ -1792,7 +1634,6 @@ async fn accounts_recover_disabled_should_only_enable_scheduling_and_preserve_qu
             )
             .await
             .expect("enable disabled account");
-
         account.enabled = true;
         assert_eq!(result.config_revision, revision(2));
         assert_eq!(result.account.account, account);
@@ -1832,7 +1673,6 @@ async fn accounts_recover_disabled_should_not_publish_when_enabling_fails() {
     let store = FakeAccountStore::with_account(account.clone(), events.clone());
     store.fail_next_commit();
     let services = accounts_service(provider, store.clone()).await;
-
     let result = services
         .accounts()
         .recover(
@@ -1855,7 +1695,6 @@ async fn accounts_update_should_commit_then_release_disabled_account_and_publish
     let provider = FakeProviderAdmin::new("openai", events.clone());
     let store = FakeAccountStore::new("openai", events.clone());
     let services = accounts_service(provider, store.clone()).await;
-
     let result = services
         .accounts()
         .update(
@@ -1875,7 +1714,6 @@ async fn accounts_update_should_commit_then_release_disabled_account_and_publish
         )
         .await
         .expect("update account");
-
     assert_eq!(result.config_revision, revision(2));
     assert_eq!(
         recorded(&events),
@@ -1896,7 +1734,6 @@ async fn accounts_update_should_not_notify_provider_when_store_commit_fails() {
     let store = FakeAccountStore::new("openai", events.clone());
     store.fail_next_commit();
     let services = accounts_service(provider, store).await;
-
     services
         .accounts()
         .update(
@@ -1916,7 +1753,6 @@ async fn accounts_update_should_not_notify_provider_when_store_commit_fails() {
         )
         .await
         .expect_err("failed account update");
-
     assert_eq!(
         recorded(&events),
         ["store.load_account", "store.update_account"]
@@ -1962,7 +1798,6 @@ async fn accounts_batch_update_should_commit_once_and_notify_each_provider() {
         )
         .await
         .expect("batch update accounts");
-
     assert_eq!(result.config_revision, revision(2));
     assert_eq!(result.account_ids.len(), 2);
     assert_eq!(store.audit_requests(), ["batch-update-request"]);
@@ -2007,7 +1842,6 @@ async fn accounts_list_should_return_complete_directory_semantics() {
         })
         .await
         .expect("complete account directory");
-
     assert_eq!(page.summary.total, 1);
     assert_eq!(page.summary.normal, 1);
     let account = page.items.first().expect("account item");
@@ -2169,7 +2003,6 @@ async fn accounts_list_should_degrade_quota_failure_to_empty_window_without_drop
         })
         .await
         .expect("one failing quota must not fail the directory page");
-
     assert_eq!(page.items.len(), 2);
     let by_id = page
         .items
@@ -2197,7 +2030,6 @@ async fn accounts_list_should_prefer_credential_error_over_quota_exhaustion() {
     );
     account.access_token_expires_at = Some(Utc::now() - TimeDelta::minutes(5));
     let store = FakeAccountStore::with_account(account, events());
-
     let page = accounts_service(provider, store)
         .await
         .accounts()
@@ -2212,7 +2044,6 @@ async fn accounts_list_should_prefer_credential_error_over_quota_exhaustion() {
         })
         .await
         .expect("usage-limited account directory");
-
     assert_eq!(
         page.items.first().expect("account item").projection.status,
         gateway_admin::model::accounts::AccountStatus::Error,
@@ -2226,7 +2057,6 @@ async fn accounts_list_should_map_unknown_credential_to_error_not_normal() {
     let mut account = account_record("openai");
     account.credential_state = CredentialState::Unknown;
     let store = FakeAccountStore::with_account(account, events());
-
     let page = accounts_service(provider, store)
         .await
         .accounts()
@@ -2241,7 +2071,6 @@ async fn accounts_list_should_map_unknown_credential_to_error_not_normal() {
         })
         .await
         .expect("unknown account directory");
-
     assert_eq!(
         page.items.first().expect("account item").projection.status,
         gateway_admin::model::accounts::AccountStatus::Error,
@@ -2275,7 +2104,6 @@ async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view()
         provider_data: None,
     });
     let store = FakeAccountStore::new("openai", events());
-
     let page = accounts_service(provider, store)
         .await
         .accounts()
@@ -2290,7 +2118,6 @@ async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view()
         })
         .await
         .expect("account directory with display quota cooldown");
-
     assert_eq!(
         page.items.first().expect("account item").projection.status,
         gateway_admin::model::accounts::AccountStatus::Normal,
@@ -2324,7 +2151,6 @@ async fn accounts_list_should_not_derive_exhaustion_from_provider_quota_view() {
         provider_data: None,
     });
     let store = FakeAccountStore::new("openai", events());
-
     let page = accounts_service(provider, store)
         .await
         .accounts()
@@ -2339,7 +2165,6 @@ async fn accounts_list_should_not_derive_exhaustion_from_provider_quota_view() {
         })
         .await
         .expect("account directory with display quota limit");
-
     assert_eq!(
         page.items.first().expect("account item").projection.status,
         gateway_admin::model::accounts::AccountStatus::Normal,
@@ -2480,7 +2305,6 @@ async fn quota_forecast_only_queries_the_two_selected_source_windows() {
         .quota_forecast(&ProviderAccountId::new("acct_test").unwrap())
         .await
         .expect("quota forecast");
-
     let queries = store.quota_window_queries();
     assert_eq!(
         queries
@@ -2785,7 +2609,6 @@ async fn accounts_list_should_attach_local_usage_to_quota_windows() {
         })
         .await
         .expect("quota window usage");
-
     let item = &page.items[0];
     let usage = item.quota.windows[0]
         .local_usage
@@ -2794,7 +2617,6 @@ async fn accounts_list_should_attach_local_usage_to_quota_windows() {
     assert_eq!(usage.total_tokens, Some(4_330_000));
     // 短期额度条保留自己的本地用量，但不作为周/月统计面板的回退
     assert!(item.usage.is_none());
-
     let queries = store.quota_window_queries();
     assert_eq!(queries.len(), 1);
     assert_eq!(queries[0].account_id, "acct_test");
@@ -2967,7 +2789,6 @@ async fn accounts_list_should_not_attach_account_usage_to_model_specific_quota_w
         })
         .await
         .expect("quota window usage");
-
     let local_tokens = page.items[0]
         .quota
         .windows
@@ -3005,7 +2826,6 @@ async fn accounts_refresh_provider_failure_should_not_call_store_commit() {
     provider.fail_next(ProviderAdminErrorKind::Unavailable);
     let store = FakeAccountStore::new("openai", events.clone());
     let services = accounts_service(provider, store).await;
-
     services
         .accounts()
         .refresh(
@@ -3014,7 +2834,6 @@ async fn accounts_refresh_provider_failure_should_not_call_store_commit() {
         )
         .await
         .expect_err("Provider preparation must fail");
-
     assert_eq!(
         recorded(&events),
         ["store.load_account", "provider.prepare_refresh"]
@@ -3041,7 +2860,6 @@ async fn reset_credit_oauth_refresh_should_reuse_the_exact_consume_command() {
         .consume_reset_credit(&context("reset-credit-refresh"), command.clone())
         .await
         .expect("consume after OAuth refresh");
-
     assert_eq!(result.code, "reset");
     assert_eq!(provider.reset_credit_commands(), [command.clone(), command]);
     assert!(recorded(&events).contains(&"provider.prepare_refresh"));
@@ -3067,7 +2885,6 @@ async fn reset_credit_refresh_without_quota_should_complete_with_the_same_comman
         .consume_reset_credit(&context("reset-without-quota"), command.clone())
         .await
         .expect("缺少可选额度能力不能中断凭据刷新后的消费重试");
-
     assert_eq!(result.code, "reset");
     assert_eq!(provider.reset_credit_commands(), [command.clone(), command]);
     assert_eq!(
@@ -3084,13 +2901,11 @@ async fn accounts_quota_refresh_should_still_reject_an_unsupported_operation() {
     let provider = FakeProviderAdmin::new("example", events());
     *provider.quota_failure.lock().unwrap() = Some(ProviderAdminErrorKind::Unsupported);
     let services = accounts_service(provider, FakeAccountStore::new("example", events())).await;
-
     let error = services
         .accounts()
         .quota(&ProviderAccountId::new("acct_test").unwrap(), true)
         .await
         .expect_err("显式刷新不能被解释为空额度投影");
-
     assert_eq!(error.kind(), gateway_admin::model::AdminErrorKind::Invalid);
 }
 
@@ -3113,7 +2928,6 @@ async fn reset_credit_unknown_result_should_keep_a_stable_admin_kind() {
         .consume_reset_credit(&context("reset-credit-ambiguous"), command)
         .await
         .expect_err("ambiguous consume result must remain classified");
-
     assert_eq!(
         error.kind(),
         gateway_admin::model::AdminErrorKind::UpstreamResultUnknown
@@ -3132,7 +2946,6 @@ async fn accounts_refresh_should_not_expose_the_provider_failure_message() {
     provider.fail_next_with_message(ProviderAdminErrorKind::Conflict, upstream_message);
     let store = FakeAccountStore::new("openai", events.clone());
     let services = accounts_service(provider, store).await;
-
     let error = services
         .accounts()
         .refresh(
@@ -3141,7 +2954,6 @@ async fn accounts_refresh_should_not_expose_the_provider_failure_message() {
         )
         .await
         .expect_err("Provider preparation must fail");
-
     assert_eq!(error.kind(), gateway_admin::model::AdminErrorKind::Conflict);
     assert_eq!(error.to_string(), "服务商资源状态冲突，请刷新后重试");
     assert!(!error.to_string().contains(upstream_message));
@@ -3158,7 +2970,6 @@ async fn accounts_refresh_store_failure_should_drop_guard_after_commit_attempt()
     let store = FakeAccountStore::new("openai", events.clone());
     store.fail_next_commit();
     let services = accounts_service(provider, store).await;
-
     services
         .accounts()
         .refresh(
@@ -3167,7 +2978,6 @@ async fn accounts_refresh_store_failure_should_drop_guard_after_commit_attempt()
         )
         .await
         .expect_err("Store commit must fail");
-
     assert_eq!(
         recorded(&events),
         [
@@ -3317,24 +3127,6 @@ fn rotation_result(command: CredentialRotationCommit) -> CredentialMutationResul
     }
 }
 
-fn plugin_rotation_facts(account: &AccountRecord) -> PreparedCredentialRotationFacts {
-    PreparedCredentialRotationFacts {
-        account_id: ProviderAccountId::new(account.id.clone()).expect("account ID"),
-        provider_kind: account.provider_kind.clone(),
-        expected_credential_revision: account.credential_revision,
-        replacement_identity: None,
-        name: "plugin refreshed account".to_owned(),
-        email: account.email.clone(),
-        plan_type: account.plan_type.clone(),
-        preserve_profile: true,
-        preserve_credential_state: false,
-        provider_material: document(),
-        has_refresh_token: account.has_refresh_token,
-        access_token_expires_at: account.access_token_expires_at,
-        next_refresh_at: account.next_refresh_at,
-    }
-}
-
 fn empty_profile_statistics() -> ProviderProfileStatistics {
     ProviderProfileStatistics {
         display_name: Some("Preview user".to_owned()),
@@ -3382,7 +3174,6 @@ async fn personal_info_should_query_both_parts_concurrently_once_on_every_reques
     let store = FakeAccountStore::new("openai", events.clone());
     let services = accounts_service(provider, store).await;
     let account_id = ProviderAccountId::new("acct_test").unwrap();
-
     for _ in 0..2 {
         let info = tokio::time::timeout(
             std::time::Duration::from_secs(1),
@@ -3638,37 +3429,6 @@ async fn unregistered_provider_accounts_have_no_live_management_capabilities() {
         "retired-provider"
     );
     assert_eq!(page.items[0].capabilities, Default::default());
-}
-
-#[tokio::test]
-async fn plugin_quota_refresh_uses_native_provider_without_changing_configuration() {
-    let events = events();
-    let provider = FakeProviderAdmin::new("openai", events.clone());
-    let store = FakeAccountStore::new("openai", events.clone());
-    let access = gateway_admin::initialize_plugin_accounts(
-        ProviderAdminRegistry::new([provider.clone() as Arc<dyn ProviderAdmin>]).unwrap(),
-        store,
-        Arc::new(RecordingPluginAccountPublication(events.clone())),
-    );
-    let id = ProviderAccountId::new("acct_test").unwrap();
-    access.get_quota(&id).await.unwrap();
-    access.refresh_quota(&id).await.unwrap();
-    assert_eq!(
-        provider.quota_requests(),
-        vec![
-            ProviderQuotaRequest {
-                account_id: id.clone(),
-                refresh: false,
-                rolling_usage: None
-            },
-            ProviderQuotaRequest {
-                account_id: id,
-                refresh: true,
-                rolling_usage: None
-            },
-        ]
-    );
-    assert!(!recorded(&events).contains(&"snapshot.publish_committed"));
 }
 
 struct CapacityRuntime {

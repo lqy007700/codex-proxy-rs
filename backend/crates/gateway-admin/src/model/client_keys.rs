@@ -10,10 +10,7 @@ use gateway_core::{
     routing::{AccountGroupId, ProviderKind},
 };
 
-use super::{
-    AdminModelError, Revision, account_groups::AccountGroupRef,
-    plugin_resources::PluginResourceOwner,
-};
+use super::{AdminModelError, Revision, account_groups::AccountGroupRef};
 
 pub type ProviderRequestProfileOverrides =
     BTreeMap<ProviderKind, gateway_core::account::OpaqueProviderData>;
@@ -37,7 +34,6 @@ pub fn validate_group_ids(group_ids: &[AccountGroupId]) -> Result<(), AdminModel
 /// Client Key 列表保持旧 HTTP 合同允许的完整非零 `u16` 页大小
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClientKeyPageSize(NonZeroU16);
-
 impl ClientKeyPageSize {
     /// 创建 1 至 65535 的 Client Key 页大小
     ///
@@ -250,13 +246,6 @@ pub struct UpdateClientKeyBudgetLimits {
     pub id: ClientApiKeyId,
     pub daily_limit_usd: Option<gateway_core::metering::Decimal>,
     pub weekly_limit_usd: Option<gateway_core::metering::Decimal>,
-}
-
-/// 预算变更的调用来源；插件身份由 Runtime 给出，不能从插件请求反序列化
-#[derive(Debug, Clone)]
-pub enum ClientKeyBudgetMutationOrigin {
-    Admin,
-    Plugin(PluginResourceOwner),
 }
 
 /// 删除 Client Key

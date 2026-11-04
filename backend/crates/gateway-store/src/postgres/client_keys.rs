@@ -50,7 +50,6 @@ use super::{ControlPlaneRepository, PgControlPlaneRepository};
 const ENTITY: &str = "client API key";
 const CLIENT_API_KEY_LAST_USED_FLUSH_DELAY: Duration = Duration::from_secs(1);
 const CLIENT_API_KEY_LAST_USED_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientApiKeySnapshot {
     pub portable_history: bool,
@@ -738,21 +737,12 @@ impl ClientKeyStore for PgAdminClientKeyStore {
     async fn update_client_key_budget_limits(
         &self,
         command: gateway_admin::model::client_keys::UpdateClientKeyBudgetLimits,
-        origin: gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin,
         context: &MutationContext,
     ) -> AdminStoreResult<Option<gateway_admin::model::Revision>> {
-        use gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin;
         let map_error = |error| admin_store_error(ENTITY, error);
-        let mut tx = match &origin {
-            ClientKeyBudgetMutationOrigin::Admin => {
-                self.keys.pool.begin().await.map_err(|source| {
-                    map_error(postgres_unavailable("begin budget limits update", source))
-                })?
-            }
-            ClientKeyBudgetMutationOrigin::Plugin(owner) => {
-                super::plugins::begin_plugin_mutation(&self.keys.pool, owner).await?
-            }
-        };
+        let mut tx = self.keys.pool.begin().await.map_err(|source| {
+            map_error(postgres_unavailable("begin budget limits update", source))
+        })?;
         // 保持与完整 Key 编辑相同的锁顺序；绝不读出整份配置再覆盖写回
         sqlx::query("select config_revision from runtime_settings where id=1 for update")
             .execute(&mut *tx)
@@ -835,11 +825,9 @@ impl ClientKeyStore for PgAdminClientKeyStore {
     async fn reset_client_key_budget(
         &self,
         command: ResetClientKeyBudget,
-        origin: gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin,
         context: &MutationContext,
     ) -> AdminStoreResult<()> {
-        super::client_budgets::reset_client_key_budget(&self.keys.pool, command, origin, context)
-            .await
+        super::client_budgets::reset_client_key_budget(&self.keys.pool, command, context).await
     }
 
     async fn get_client_key(

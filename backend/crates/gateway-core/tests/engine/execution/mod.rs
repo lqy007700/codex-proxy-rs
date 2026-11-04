@@ -1,12 +1,11 @@
 //! 执行服务的准入、预算、请求记录与终结行为测试
 
 mod account_mappings;
-mod identity;
 mod outbound;
-use gateway_core::routing::extensions::{ExtensionSetId, ExtensionSetLease, ExtensionSetReference};
+use gateway_core::routing::extensions::ExtensionSetReference;
 
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -14,7 +13,6 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use gateway_core::engine::authentication::ClientIdentityPort;
 use gateway_core::engine::budget::{ClientBudgetCharge, ClientBudgetError, ClientBudgetPort};
 use gateway_core::error::GatewayError;
 
@@ -211,41 +209,6 @@ fn budget_rejection_releases_client_concurrency_without_creating_a_charge() {
 }
 
 #[test]
-fn plugin_page_key_selection_uses_normal_root_admission_and_budget() {
-    block_on(async {
-        let admissions = Arc::new(Admissions::default());
-        let budget = Arc::new(Budget {
-            reject: true,
-            active: admissions.active.clone(),
-            ..Default::default()
-        });
-        let service = service(admissions.clone(), budget.clone());
-        let key = ClientApiKeyId::new("key_start_test").unwrap();
-        let prepared = service.prepare_plugin_execution(&key).await.unwrap();
-        assert_eq!(prepared.client().policy().key_id(), &key);
-        let request = request(&service, ClientTransport::HttpSse);
-        let result = service
-            .start_prepared(
-                prepared,
-                gateway_core::engine::execution::PreparedExecutionRequest {
-                    public_model: request.public_model,
-                    operation: request.operation,
-                    metadata: request.metadata,
-                },
-            )
-            .await;
-        assert!(
-            matches!(result, Err(error) if error.client_error_code() == Some("key_daily_budget_exceeded"))
-        );
-        assert!(!admissions.active.load(Ordering::SeqCst));
-        assert!(budget.charges.lock().unwrap().is_empty());
-        assert!(
-            matches!(service.prepare_plugin_execution(&ClientApiKeyId::new("key_missing").unwrap()).await, Err(error) if error.kind() == GatewayErrorKind::Unauthorized)
-        );
-    });
-}
-
-#[test]
 fn provider_http_endpoint_uses_the_same_admission_and_budget_gate() {
     let admissions = Arc::new(Admissions::default());
     let budget = Arc::new(Budget {
@@ -392,126 +355,6 @@ fn reused_client_cannot_start_after_key_disable_or_snapshot_suspension() {
         assert!(matches!(result, Err(error) if error.kind() == expected));
         assert!(admissions.limits.lock().unwrap().is_empty());
     }
-}
-
-struct FrontendAuthenticationFixture {
-    decisions: Mutex<VecDeque<FrontendAuthenticationDecision>>,
-    identities: BTreeMap<String, ClientApiKeyId>,
-    exclusive: bool,
-    calls: AtomicUsize,
-}
-
-impl FrontendAuthenticationPlan for FrontendAuthenticationFixture {
-    fn authenticate<'a>(
-        &'a self,
-        _: &'a ClientAuthenticationRequest,
-    ) -> BoxFuture<'a, Result<FrontendAuthenticationDecision, FrontendAuthenticationError>> {
-        Box::pin(async move {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            self.decisions
-                .lock()
-                .unwrap()
-                .pop_front()
-                .ok_or(FrontendAuthenticationError)
-        })
-    }
-
-    fn client_key_id(&self, principal: &str) -> Option<ClientApiKeyId> {
-        self.identities.get(principal).cloned()
-    }
-
-    fn exclusive(&self) -> bool {
-        self.exclusive
-    }
-}
-
-struct AuthenticationGeneration(Arc<dyn FrontendAuthenticationPlan>);
-
-impl ExtensionSetLease for AuthenticationGeneration {
-    fn is_ready(&self) -> bool {
-        Arc::strong_count(&self.0) > 0
-    }
-}
-
-fn authentication_generation(
-    index: &FrontendAuthenticationExtensionIndex,
-    id: &str,
-    plan: Arc<dyn FrontendAuthenticationPlan>,
-) -> ExtensionSetReference {
-    let id = ExtensionSetId::new(id.to_owned()).unwrap();
-    let plan = index.register(id.clone(), plan).unwrap();
-    ExtensionSetReference::new(id, Arc::new(AuthenticationGeneration(plan)))
-}
-
-#[test]
-fn reused_client_is_reauthenticated_by_the_current_frontend_plan_without_identity_drift() {
-    block_on(async {
-        let authentication = FrontendAuthenticationExtensionIndex::default();
-        let initial_plan = Arc::new(FrontendAuthenticationFixture {
-            decisions: Mutex::new(VecDeque::from([
-                FrontendAuthenticationDecision::Authenticated {
-                    principal: "external-user".into(),
-                },
-            ])),
-            identities: BTreeMap::from([(
-                "external-user".into(),
-                ClientApiKeyId::new("key_start_test").unwrap(),
-            )]),
-            exclusive: true,
-            calls: AtomicUsize::new(0),
-        });
-        let initial = start_snapshot().with_extensions(Some(authentication_generation(
-            &authentication,
-            "authentication-first",
-            initial_plan.clone(),
-        )));
-        let snapshots = RuntimeSnapshotHandle::new(initial);
-        let admissions = Arc::new(Admissions::default());
-        let service = DefaultExecutionService::new(
-            snapshots.clone(),
-            Arc::new(TrackingExecutionStore::default()),
-            ProviderRegistry::default(),
-            admissions.clone(),
-            Arc::new(UnusedContinuation),
-            Arc::new(RecordingClientApiKeyUsage::default()),
-            Arc::new(crate::RecordingDiagnostics::default()),
-        )
-        .with_frontend_authentication(authentication.clone());
-        let client = service
-            .authenticate_request(
-                ClientAuthenticationRequest::new("External controlled-fixture").unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(initial_plan.calls.load(Ordering::SeqCst), 1);
-
-        let replacement_plan = Arc::new(FrontendAuthenticationFixture {
-            decisions: Mutex::new(VecDeque::from([
-                FrontendAuthenticationDecision::Authenticated {
-                    principal: "external-user".into(),
-                },
-            ])),
-            identities: BTreeMap::from([(
-                "external-user".into(),
-                ClientApiKeyId::new("another-key").unwrap(),
-            )]),
-            exclusive: true,
-            calls: AtomicUsize::new(0),
-        });
-        snapshots.publish(
-            start_snapshot().with_extensions(Some(authentication_generation(
-                &authentication,
-                "authentication-second",
-                replacement_plan.clone(),
-            ))),
-        );
-        let mut next = request(&service, ClientTransport::WebSocket);
-        next.client = client;
-        let result = service.start(next).await;
-        assert!(matches!(result, Err(error) if error.kind() == GatewayErrorKind::Unauthorized));
-        assert_eq!(replacement_plan.calls.load(Ordering::SeqCst), 1);
-        assert!(admissions.limits.lock().unwrap().is_empty());
-    });
 }
 
 #[test]
@@ -1005,35 +848,6 @@ impl RequestPolicyPlan for FixedRoutingPolicy {
 }
 
 #[derive(Debug)]
-struct NestedRoutingPolicy;
-
-impl RequestPolicyPlan for NestedRoutingPolicy {
-    fn route_model(
-        &self,
-        input: ModelRouteInput,
-    ) -> BoxFuture<'static, Result<ModelRouteDecision, RequestPolicyFault>> {
-        let provider = if input.suppresses_plugin("nested-fixture") {
-            "nested"
-        } else {
-            "openai"
-        };
-        Box::pin(async move {
-            Ok(ModelRouteDecision::Route {
-                provider: Some(ProviderKind::new(provider).unwrap()),
-                model: None,
-            })
-        })
-    }
-
-    fn schedule_account(
-        &self,
-        _: AccountScheduleInput,
-    ) -> BoxFuture<'static, Result<AccountScheduleDecision, RequestPolicyFault>> {
-        Box::pin(async { Ok(AccountScheduleDecision::Delegate) })
-    }
-}
-
-#[derive(Debug)]
 struct EffectObservingPolicy;
 
 impl RequestPolicyPlan for EffectObservingPolicy {
@@ -1050,106 +864,6 @@ impl RequestPolicyPlan for EffectObservingPolicy {
         _: AccountScheduleInput,
     ) -> BoxFuture<'static, Result<AccountScheduleDecision, RequestPolicyFault>> {
         Box::pin(async { Ok(AccountScheduleDecision::Delegate) })
-    }
-}
-
-struct ProcessingProvider;
-
-#[async_trait]
-impl Provider for ProcessingProvider {
-    fn name(&self) -> &'static str {
-        "openai"
-    }
-
-    fn catalog_generation(&self) -> ProviderCatalogGeneration {
-        ProviderCatalogGeneration::default()
-    }
-
-    async fn query_model_capabilities(
-        &self,
-    ) -> Result<Vec<ProviderModelCapabilities>, ProviderError> {
-        Ok(Vec::new())
-    }
-
-    async fn execute(
-        self: Arc<Self>,
-        request: ProviderRequest,
-        _: AttemptContext,
-    ) -> Result<ProviderStream, ProviderError> {
-        let candidate = request.candidate();
-        let provider = candidate.provider().clone();
-        let account = ProviderAccountId::new("acct_openai").unwrap();
-        let transport = UpstreamTransport::new("websocket").unwrap();
-        let metadata = ProviderCallMetadata::new(
-            provider,
-            candidate.upstream_model().cloned().unwrap(),
-            account,
-            transport,
-        );
-        let response = ResponseMeta::new("response-policy", "gpt-start");
-        let event = |event_type: &str, fact| {
-            ProviderEvent::canonical_with_wire(
-                vec![fact],
-                ProtocolWireEvent::json(
-                    "openai",
-                    Some(event_type.to_owned()),
-                    json!({"type": event_type, "future": {"nested": true}}),
-                )
-                .unwrap(),
-            )
-        };
-        Ok(ProviderStream::new(
-            metadata,
-            futures::stream::iter([
-                Ok(event(
-                    "response.created",
-                    GatewayEvent::Started(response.clone()),
-                )),
-                Ok(event(
-                    "response.completed",
-                    GatewayEvent::Completed(response),
-                )),
-            ]),
-            (),
-        ))
-    }
-}
-
-struct PendingNestedProvider;
-
-#[async_trait]
-impl Provider for PendingNestedProvider {
-    fn name(&self) -> &'static str {
-        "nested"
-    }
-
-    fn catalog_generation(&self) -> ProviderCatalogGeneration {
-        ProviderCatalogGeneration::default()
-    }
-
-    async fn query_model_capabilities(
-        &self,
-    ) -> Result<Vec<ProviderModelCapabilities>, ProviderError> {
-        Ok(Vec::new())
-    }
-
-    async fn execute(
-        self: Arc<Self>,
-        request: ProviderRequest,
-        _: AttemptContext,
-    ) -> Result<ProviderStream, ProviderError> {
-        let candidate = request.candidate();
-        let metadata = ProviderCallMetadata::new(
-            candidate.provider().clone(),
-            candidate.upstream_model().cloned().unwrap(),
-            ProviderAccountId::new("acct_nested").unwrap(),
-            UpstreamTransport::new("websocket").unwrap(),
-        );
-        Ok(ProviderStream::new(
-            metadata,
-            futures::stream::pending::<Result<ProviderEvent, ProviderError>>(),
-            (),
-        ))
     }
 }
 
@@ -1198,201 +912,6 @@ fn request_policy_snapshot(
     .unwrap()
     .with_account_directory(directory)
     .with_extensions(Some(generation))
-}
-
-fn plugin_origin_scope() -> gateway_core::engine::extensions::ExtensionCallScope {
-    gateway_core::engine::extensions::ExtensionCallScope::default().with_request(Arc::new(
-        gateway_core::engine::extensions::RequestContext {
-            method: "POST".into(),
-            uri: "/plugin/proxy".into(),
-            http_version: "HTTP/1.1".into(),
-            headers: vec![gateway_core::engine::middleware::MiddlewareHeader::new(
-                "User-Agent",
-                Bytes::from_static(b"fixture-client/494"),
-            )],
-            peer_addr: None,
-            client_ip: Some("192.0.2.49".parse().unwrap()),
-        },
-    ))
-}
-
-#[test]
-fn explicit_key_model_execution_preserves_http_origin_and_leaves_background_origin_unknown() {
-    use gateway_core::engine::nested::{BoundModelExecutionRequest, NestedModelExecutionPort};
-    block_on(async {
-        for has_origin in [true, false] {
-            let store = Arc::new(TrackingExecutionStore::default());
-            let service = DefaultExecutionService::new(
-                RuntimeSnapshotHandle::new(request_policy_snapshot(
-                    super::extensions::reference("origin-fixture"),
-                    &[ProviderKind::new("openai").unwrap()],
-                )),
-                store.clone(),
-                ProviderRegistry::new([Arc::new(ProcessingProvider) as Arc<dyn Provider>]).unwrap(),
-                Arc::new(Admissions::default()),
-                Arc::new(UnusedContinuation),
-                Arc::new(RecordingClientApiKeyUsage::default()),
-                Arc::new(crate::RecordingDiagnostics::default()),
-            );
-            let input = request(&service, ClientTransport::InternalPlugin);
-            let client = ClientIdentityPort::resolve_client(
-                &service,
-                ClientApiKeyId::new("key_start_test").unwrap(),
-                None,
-            )
-            .await
-            .unwrap();
-            let mut started = NestedModelExecutionPort::start_bound(
-                &service,
-                BoundModelExecutionRequest {
-                    client,
-                    initiating_plugin_instance_id: "origin-fixture".into(),
-                    cancellation: Default::default(),
-                    extension_scope: if has_origin {
-                        plugin_origin_scope()
-                    } else {
-                        Default::default()
-                    },
-                    public_model: input.public_model,
-                    operation: input.operation,
-                    metadata: input.metadata,
-                    provider: None,
-                    account: None,
-                },
-            )
-            .await
-            .unwrap();
-            let mut child = NestedModelExecutionPort::start(
-                &service,
-                NestedModelExecutionRequest {
-                    parent_request_id: started.request_id.clone(),
-                    initiating_plugin_instance_id: "nested-origin-fixture".into(),
-                    public_model: PublicModelId::new("gpt-start").unwrap(),
-                    operation: start_operation(),
-                    metadata: request(&service, ClientTransport::InternalPlugin).metadata,
-                    provider: None,
-                    account: None,
-                    parent_account: None,
-                },
-            )
-            .await
-            .unwrap();
-            child.session.collect_uncommitted().await.unwrap();
-            child.session.commit_downstream(Some(200)).await.unwrap();
-            child.session.detach_finalize().await;
-            started.session.collect_uncommitted().await.unwrap();
-            {
-                let requests = store.requests.lock().unwrap();
-                assert_eq!(requests.len(), 2);
-                for request in requests.iter() {
-                    assert_eq!(
-                        request.client_ip,
-                        has_origin.then(|| "192.0.2.49".parse().unwrap())
-                    );
-                    assert_eq!(
-                        request.user_agent.as_deref(),
-                        has_origin.then_some("fixture-client/494")
-                    );
-                    assert_eq!(
-                        request.client_transport,
-                        ClientTransport::InternalPlugin.as_str()
-                    );
-                }
-            }
-            started.session.detach_finalize().await;
-        }
-    });
-}
-
-#[test]
-fn completed_parent_rejects_new_nested_execution_and_cancels_an_active_child() {
-    block_on(async {
-        let parent_provider = Arc::new(ProcessingProvider);
-        let providers = ProviderRegistry::new([
-            parent_provider as Arc<dyn Provider>,
-            Arc::new(PendingNestedProvider) as Arc<dyn Provider>,
-        ])
-        .unwrap();
-        let provider_index = providers;
-        let generation = super::extensions::reference("nested-cancel");
-        let policy_index = RequestPolicyExtensionIndex::default();
-        let _owner = policy_index
-            .register(generation.id().clone(), Arc::new(NestedRoutingPolicy))
-            .unwrap();
-        let service = DefaultExecutionService::new(
-            RuntimeSnapshotHandle::new(request_policy_snapshot(
-                generation,
-                &[
-                    ProviderKind::new("openai").unwrap(),
-                    ProviderKind::new("nested").unwrap(),
-                ],
-            )),
-            Arc::new(TrackingExecutionStore::default()),
-            provider_index.clone(),
-            Arc::new(Admissions::default()),
-            Arc::new(UnusedContinuation),
-            Arc::new(RecordingClientApiKeyUsage::default()),
-            Arc::new(crate::RecordingDiagnostics::default()),
-        )
-        .with_request_policies(policy_index);
-
-        let mut parent = service
-            .start(request(&service, ClientTransport::HttpJson))
-            .await
-            .unwrap();
-        let nested_request = |parent_request_id| NestedModelExecutionRequest {
-            parent_request_id,
-            initiating_plugin_instance_id: "nested-fixture".to_owned(),
-            public_model: PublicModelId::new("gpt-start").unwrap(),
-            operation: start_operation(),
-            metadata: ExecutionRequestMetadata {
-                protocol: "openai".to_owned(),
-                endpoint: "host.model".to_owned(),
-                transport: ClientTransport::InternalPlugin,
-                stream: true,
-                client_ip: None,
-                user_agent: None,
-                previous_response_id: None,
-            },
-            provider: Some(ProviderKind::new("nested").unwrap()),
-            account: None,
-            parent_account: None,
-        };
-        let mut child = gateway_core::engine::nested::NestedModelExecutionPort::start(
-            &service,
-            nested_request(parent.request_id.clone()),
-        )
-        .await
-        .unwrap();
-
-        let events = parent.session.collect_uncommitted().await.unwrap();
-        assert!(
-            events
-                .iter()
-                .any(|event| { matches!(event.canonical_facts(), [GatewayEvent::Completed(_)]) })
-        );
-        parent.session.commit_downstream(Some(200)).await.unwrap();
-        assert!(parent.session.is_finalized());
-
-        let new_child = gateway_core::engine::nested::NestedModelExecutionPort::start(
-            &service,
-            nested_request(parent.request_id.clone()),
-        )
-        .await;
-        assert!(
-            matches!(new_child, Err(error) if error.kind() == GatewayErrorKind::PolicyDenied),
-            "a finalized parent must be removed from the callback registry"
-        );
-        assert!(
-            matches!(
-                child.session.next_event().await,
-                Err(EngineError::Cancelled)
-            ),
-            "an in-flight child must inherit cancellation from the released parent authority"
-        );
-        child.session.detach_finalize().await;
-        parent.session.detach_finalize().await;
-    });
 }
 
 struct TestNativeResponseTranslator;
@@ -3065,10 +2584,7 @@ use gateway_core::engine::admission::{
     ClientAdmissionDecision, ClientAdmissionError, ClientAdmissionPort, ClientAdmissionRecovery,
     ClientAdmissionRequest, ClientAdmissionRestoreResult,
 };
-use gateway_core::engine::authentication::{
-    ClientAuthenticationRequest, FrontendAuthenticationDecision, FrontendAuthenticationError,
-    FrontendAuthenticationExtensionIndex, FrontendAuthenticationPlan,
-};
+use gateway_core::engine::authentication::ClientAuthenticationRequest;
 use gateway_core::engine::continuation::{
     NativeContinuationPin, NativeContinuationPort, NativeContinuationStoreError, PreviousResponseId,
 };
@@ -3077,7 +2593,6 @@ use gateway_core::engine::execution::{
     ExecutionRequestMetadata, ExecutionService, ExecutionSession, StartExecution,
     StartProviderExecution,
 };
-use gateway_core::engine::nested::NestedModelExecutionRequest;
 use gateway_core::engine::observation::{
     RequestObservation, RequestObservationOutcome, RequestObserverExtensionIndex,
     RequestObserverPlan, WebSocketResponseObservation,

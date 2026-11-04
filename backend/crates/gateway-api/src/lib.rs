@@ -104,7 +104,6 @@ impl ApiConfig {
         let header = HeaderName::from_str(&self.request_id_header)
             .map_err(|_| ApiConfigError::InvalidRequestIdHeader)?;
         self.request_id_header = header.as_str().to_owned();
-
         let mut origins = Vec::with_capacity(self.cors_allowed_origins.len());
         let mut unique = BTreeSet::new();
         for origin in &self.cors_allowed_origins {
@@ -138,45 +137,14 @@ pub enum ApiConfigError {
 pub struct ApiBundle {
     router: Router,
     settings: middleware::SettingsSource,
-    middleware: Option<middleware::PlanSource>,
     timeout: Option<Duration>,
     request_id_header: HeaderName,
 }
 
 impl ApiBundle {
-    /// 组合根从请求已冻结的快照解析计划；响应流持有同一代次
-    #[must_use]
-    pub fn with_middleware(
-        mut self,
-        source: impl Fn(
-            Option<&gateway_core::routing::RuntimeSnapshot>,
-        ) -> Option<gateway_core::engine::middleware::FrozenMiddlewarePlan>
-        + Send
-        + Sync
-        + 'static,
-    ) -> Self {
-        self.middleware = Some(Arc::new(source));
-        self
-    }
-
-    /// 内部调用使用同一总路由；组合根持有强引用，Runtime 只保存 Weak
-    pub fn dispatcher(&self) -> Arc<dyn gateway_core::engine::middleware::http::Dispatcher> {
-        Arc::new(middleware::RouterDispatcher {
-            router: middleware::wrap(
-                self.router.clone(),
-                self.middleware.clone(),
-                self.timeout,
-                self.request_id_header.clone(),
-                self.settings.clone(),
-            ),
-            settings: self.settings.clone(),
-        })
-    }
-
     pub fn router(self) -> Router {
         middleware::wrap(
             self.router,
-            self.middleware,
             self.timeout,
             self.request_id_header,
             self.settings,
@@ -220,7 +188,6 @@ pub fn initialize(
         .merge(openai::router::router())
         .merge(provider::router())
         .merge(admin::router::<ApiState>())
-        .merge(admin::model_router())
         .merge(auth::router::<ApiState>())
         .merge(key_usage::router::<ApiState>())
         .fallback_service(
@@ -293,7 +260,6 @@ pub fn initialize(
     Ok(ApiBundle {
         settings,
         router,
-        middleware: None,
         timeout: config.request_timeout_seconds.map(Duration::from_secs),
         request_id_header,
     })

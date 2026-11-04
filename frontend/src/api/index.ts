@@ -14,7 +14,6 @@ export * from './modules/keys'
 export * from './modules/login'
 
 // 插件管理
-export * from './modules/plugins'
 
 // 代理管理
 export * from './modules/proxies'

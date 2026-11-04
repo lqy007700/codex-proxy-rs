@@ -68,7 +68,7 @@ impl StoreBundle {
         std::mem::take(&mut self.worker_contributions)
     }
 
-    /// 在插件命令真正执行前启动四个必要写泵；不注册任何后台业务 Worker
+    /// 在独立命令写入前启动必要写泵，不注册后台业务 Worker
     pub fn start_command_line_writes(&mut self) -> Result<(), CommandStoreDrainError> {
         if self.command_drain.is_some() {
             return Err(CommandStoreDrainError);
@@ -134,7 +134,6 @@ async fn connect(
         .get_connection_manager()
         .await
         .map_err(|source| redis_unavailable("connect Redis manager", source))?;
-
     let cooldowns = Arc::new(redis::RedisCredentialCooldownRepository::new(
         redis_connection.clone(),
         REDIS_NAMESPACE,
@@ -174,10 +173,6 @@ async fn connect(
         REDIS_NAMESPACE,
     )?);
 
-    let plugins = Arc::new(postgres::PgPluginStore::new(pool.clone()));
-    if !read_only {
-        plugins.recover_abandoned_state_transitions().await?;
-    }
     let usage_data = Arc::new(postgres::PgUsageDataStore::new(
         pool.clone(),
         observability_query_budget.clone(),
@@ -219,9 +214,6 @@ async fn connect(
             control_plane: postgres::PgControlPlaneRepository::new(pool.clone()),
         }),
         backup_ports(pool.clone(), &config)?,
-        plugins.clone(),
-        plugins.clone(),
-        plugins,
         usage_data,
         Arc::new(postgres::PgAlertRepository::new(
             pool.clone(),
@@ -282,7 +274,6 @@ async fn connect(
     )
     .with_account_error_protection(cooldowns.clone())
     .with_budget(Arc::new(budgets))
-    .with_session_affinity(Arc::clone(&provider_session_affinity))
     .with_client_retry_store(Arc::new(redis::RedisClientRetryRepository::new(
         redis_connection.clone(),
         REDIS_NAMESPACE,

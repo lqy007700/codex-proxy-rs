@@ -10,13 +10,8 @@
 | 客户端协议 | [Responses、Chat、Images、模型与 Provider 操作](#3-openai-数据面与模型目录) · [额度查询](#api-key-额度查询) |
 | 账号与授权范围 | [账号](#5-账号) · [代理](#独立代理管理--managed-proxies) · [分组](#6-账号分组) · [Client Key](#7-client-key) |
 | 系统与运维 | [健康检查](#2-健康检查) · [运行设置](#8-运行设置) · [备份](#9-备份) · [统计与诊断](#10-dashboard用量与错误) · [版本与更新](#11-版本更新与重启) |
-| 插件 | [安装包与来源](#安装包与来源) · [运行实例](#121-运行实例) · [管理扩展](#122-管理扩展页面与原始-api) |
 
 ## 1. 鉴权与公共约定
-
-下文描述宿主路由的默认行为。已启用的 `http` 中间件在路由匹配、认证和正文解析前统一进入，
-可改写请求、覆盖本次请求设置、直接返回响应或接管 WebSocket 升级；管理、模型、健康检查和静态资源使用同一入口。
-挂载与覆盖合同见 [SDK 洋葱中间件](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#洋葱中间件)
 
 ### OpenAI 数据面客户端接口
 
@@ -28,10 +23,6 @@ Authorization: Bearer sk_...
 
 自动生成的 Key 保持 `sk_` 格式；迁入的自定义 Key 使用保存时的原值，不限制前缀或固定长度。
 无论格式如何，只有已保存且启用的 Client Key 能通过鉴权
-
-启用[入口认证插件](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#数据面入口认证)时，
-`Authorization` 可按插件协议校验，并由宿主将外部身份映射到明确绑定的 Client Key。
-账号范围、模型权限、并发和预算仍由该 Key 决定；插件认证不接管管理员或 Key 自助页登录
 
 Codex 原生生图配置还会携带 `X-OpenAI-Actor-Authorization: proxy-managed`。
 它仅用于客户端识别服务端托管认证，不能代替 Client Key。网关和 OpenAI Provider 都会过滤该请求头，
@@ -121,7 +112,7 @@ HTTPS 来源以及缺失、`null` 或非法来源保留 `Secure`。`HttpOnly`、
 
 请求无需自带 `x-request-id`；缺失时服务端自动生成 UUID 并在响应头回传同一 request ID。
 `api.request_id_header` 可改变注入与回传的 header 名，管理端鉴权不依赖该名字。
-管理端 JSON 与动态响应统一带 `Cache-Control: no-store`；插件静态资源按下述资源接口的私有缓存策略返回
+管理端 JSON 与动态响应统一带 `Cache-Control: no-store`
 
 管理端长度已知且至少 1 KiB 的 `application/json` 响应按 `Accept-Encoding` 协商 gzip，
 压缩时返回 `Content-Encoding: gzip`，可协商的响应带 `Vary: accept-encoding`。
@@ -215,7 +206,7 @@ Codex PAT 验证服务不可用和身份响应无效分别返回 `50301`、`5020
 会改变路由快照或安全配置的写入由后端在事务内推进 `config_revision`，用于快照发布与审计。
 账号、分组等响应中的 `configRevision` 表示已提交事实，不是这些接口的写入前置条件。
 [运行设置整体更新](#8-运行设置)必须提交读取时的 `configRevision`，过期返回 `409`；
-代理的 `revision`、插件实例的 `expectedRevision` 属于各自资源，按对应接口提交，不与全局版本混用
+代理的 `revision` 属于该资源，按对应接口提交，不与全局版本混用
 
 ## 2. 健康检查
 
@@ -322,8 +313,7 @@ Codex 的 review 等子代理请求仍使用 `/v1/responses`，并通过 `x-open
 #### 请求期限
 
 模型请求默认不限制总执行时长。排队受[并发等待设置](#8-运行设置)约束，上游传输仍有独立的连接、空闲与心跳超时；
-持续有输出的请求不会仅因总时长达到固定值而结束。插件可以对单次模型执行设置显式总时限，
-从该次请求开始计算，见 [SDK 请求设置](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#模型请求与-attempt)
+持续有输出的请求不会仅因总时长达到固定值而结束
 
 `api.request_timeout_seconds` 控制 HTTP 路由处理到返回响应的等待，默认 `null`；不限制已返回响应的流式正文寿命，
 也不是 WebSocket 每轮模型执行的总时限。客户端断开或取消仍会结束所属执行，反向代理和客户端可另设超时
@@ -335,8 +325,7 @@ Codex 的 review 等子代理请求仍使用 `/v1/responses`，并通过 `x-open
 多帧连续解码，整体展开结果受运行设置 `responsesMaxDecompressedBodyBytes` 约束（默认 64 MiB），
 超限在继续展开前返回 `400 request_too_large`，错误信息包含当前请求的上限字节数。zstd
 回溯窗口独立固定为最多 64 MiB，不能满足该限制的帧按解码失败处理。这个限制保护入站解压资源，不是
-模型上下文或 Token 上限；未压缩正文不经过此解压检查。插件受管出站仍受同一设置约束，
-见[请求解压上限](#请求解压上限)。
+模型上下文或 Token 上限；未压缩正文不经过此解压检查
 不支持的编码、逗号分隔的叠加编码和重复 `Content-Encoding` 头返回
 `400 unsupported_content_encoding`；压缩正文损坏、截断或解压后不是合法 JSON 返回
 `400 invalid_json`。本地错误不包含原始正文或解压库细节。WebSocket 文本帧不经过这条解压路径
@@ -356,8 +345,6 @@ API Key 与 OAuth 共用模拟客户端画像（`User-Agent`、`originator`、`v
 `openai.residency`、`openai.account_routing_override` 控制，配置值覆盖客户端同名头，
 省略或 `null` 时不发送，配置说明见 [部署与运维](../deploy/README.md#启动后的运行设置)。
 `x-openai-fedramp` 按业务头透传，保留原始多值
-上述过滤描述原生转发；已信任插件的显式 header 改写可以覆盖账号与画像生成的默认头，
-不按认证或会话字段名称拦截，边界见 [SDK 请求中间件](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#模型请求与-attempt)
 
 Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和 `sec-fetch-*`
 携带的下游 SDK/浏览器环境或页面来源。过滤规则适用于所有下游客户端，与 User-Agent 无关；
@@ -377,8 +364,6 @@ Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和
 Images 的 `x-codex-image-turn-id` 和 Desktop 自动 Git 上下文的 `clientUserMessageId`。
 输入项元数据保持不变。Search 的会话 `id` 按同一安装身份域映射，只替换该值的原始字节，其余正文保持不变。
 `prompt_cache_key` 同样按安装身份映射，保留同一身份内的缓存共享关系；未提供时不补造。
-受信任插件可读取原始请求，自行生成身份并在 `outbound` 改写完整请求与关联字段；宿主不重新派生或补回业务字段，
-实际选号与计费归属保持不变，详见 [SDK 出站请求准备](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#上游出站准备)。
 续接 response ID、历史 item/call ID、业务正文和未知扩展不参与映射，
 该处理减少显式追踪标识的跨账号复用，不保证会话内容或业务 metadata 无法关联
 
@@ -427,10 +412,6 @@ turn metadata 的 `workspaces` 也会保留仓库绝对路径、Git 远端地址
 
 #### WebSocket 与上游传输
 
-公开 HTTP 请求在路由匹配前经过已绑定的 `http` 中间件；插件可以改写握手路径和请求参数。
-已升级的 Responses 连接在入站解析前和出站写入前经过 `websocket` 中间件，完整消息与主动发送接口见
-[SDK 洋葱中间件](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#洋葱中间件)。下述规则描述默认协议处理
-
 Responses WebSocket 接受文本消息，`response.create` 在同一连接串行执行。当前响应期间收到的后续创建请求
 留在有界接收队列中，待当前响应完成终结和写出后再逐条校验、准入与执行，不因请求提前到达而断开。
 接收队列容量为 32 个事件，超载仍关闭连接；Ping/Pong、客户端关闭和服务关闭不等待队列中的请求执行
@@ -468,7 +449,7 @@ OAuth 账号默认 `prefer_websocket`，客户端使用 HTTP/SSE 时仍可能选
 
 内建 xAI 适配器不支持 `generate=false` 的非生成预热请求，在发送推理请求前返回
 `400 unsupported_prewarm`，不会将其当作普通生成调用。`generate=true` 或省略该字段正常执行；
-客户端可跳过预热继续正式请求，外部插件 adapter 按各自的协议能力处理
+客户端可跳过预热继续正式请求
 
 Codex OAuth backend 的候选上游为 WS 时，无 `previous_response_id` 的普通新链若规范化
 `response.create` 达到 15 MiB，发送前选择 HTTP/SSE；HTTP 和 WS 入站均适用，下游交付协议不变。
@@ -530,7 +511,6 @@ ChatGPT OAuth 账号不接受 Grok 模型
 “与某个官方账号的整个目录完全一致”，也不会固定后续推理账号。
 读取失败返回 `503 model_catalog_unavailable`，不以简化模板或空成功响应覆盖客户端缓存。
 成功获取的 API Key 目录被账号模型政策全部过滤时返回空列表，区别于读取失败。
-插件声明的适配模型按受管适配器账号范围与当前 Key 权限交集追加；同名原生完整对象优先保留，不与插件画像拼接字段
 
 原生目录可能返回缓存结果，成功缓存有效期为 5 分钟。每次查询都检查账号资格和 Client Key 范围。
 成功目录响应带 `Cache-Control: private, no-store`，不借用上游 ETag 标识经过选择/别名/聚合后的正文
@@ -557,7 +537,7 @@ response ID 按 opaque 值处理而不假设 UUID 或固定长度；除客户端
 OpenAI 上游错误 envelope 和允许下发的 opaque header 值也不由 canonical 观测结果重写。
 `reasoning.effort` 的数字和未知扩展值保留给上游判断，本地观测不限制参数形态。
 `response.metadata` 的业务内容继续交付，仅其中的响应头沿用凭据、账号身份和逐跳头隔离规则。
-未改写的 WebSocket 文本不依赖 JSON 旁路解析成功；插件改写后的响应仍复核必要关联，原始 SSE 心跳
+WebSocket 文本不依赖 JSON 旁路解析成功；原始 SSE 心跳
 和无法提取事实的未改写内容不构成协议失败。
 
 文本生成的客户端模型名取自原生协议入口首次校验通过的请求，在请求中间件和模型映射前冻结，
@@ -571,7 +551,7 @@ Provider 原始模型观测、实际发送目标与计费保持原值，记录�
 响应中间件仍可显式改写最终输出；Images、Search、Live 与模型目录不使用该投影
 
 Images 固定使用 OpenAI Provider，不重建正文或映射模型字段；Provider 从原始 JSON 旁路提取图片模型，
-按[账号模型限制](#账号模型限制)选号，并复核插件改写后的模型。账号选择、鉴权头替换和端点路由
+按[账号模型限制](#账号模型限制)选号。账号选择、鉴权头替换和端点路由
 不改变请求正文，成功与非容量失败响应正文保持原始字节。
 
 仍以 `invalid_encrypted_content` 交付的 HTTP 错误统一使用 `409`，错误正文、错误码及允许下发的响应头保持不变。
@@ -624,7 +604,7 @@ Responses 的 HTTP/SSE 与 WebSocket 按顺序即时交付正常事件，不暂�
 WebSocket 独立 Ping 保活；上游 WS 每 25 秒发送 Ping 并回复 Pong，Ping/Pong 不跨段转发，也不转换为 SSE 事件；Responses HTTP 流式请求完成准入后，执行仍在等待且连续 15 秒无输出时提交 `200`
 和 SSE 注释心跳，此后的等待继续每 15 秒保活，包括请求中间件等待和上游尚未返回事件。
 首次心跳前仍保留最终 HTTP 状态与响应头；心跳发出后发生的失败使用 `response.failed` 和 `[DONE]`，
-后续取得的上游或插件响应头无法再补发，`Retry-After` 转入流内错误的 `response.error.headers`。
+后续取得的上游响应头无法再补发，`Retry-After` 转入流内错误的 `response.error.headers`。
 心跳不代表业务输出，不关闭已有的安全重试窗口。
 SSE 注释和 WebSocket Ping/Pong 不重置官方 Codex 客户端的事件空闲超时，
 其 `stream_idle_timeout_ms` 默认是 300 秒；长请求需持续收到真实事件，
@@ -691,7 +671,7 @@ OpenAI 选号阶段确认本次可选账号全部额度耗尽时，HTTP 返回 `
 ### API Key 额度查询
 
 `GET /v1/usage` 使用同一数据面入口认证，默认传入 `Authorization: Bearer <Client Key>`；
-启用入口认证插件时可查询其映射 Key 的额度。不接受会话 Cookie、管理 API Key 或查询参数。
+不接受会话 Cookie、管理 API Key 或查询参数。
 只返回当前 Key 的日与周额度，不包含明文 Key、账号资料或其他 Key 的数据。查询本身不执行模型推理、扣费或占用推理并发/RPM，
 不更新最近使用时间或开启预算窗口；额度耗尽后仍可查询。已配置的入口认证和 request 中间件仍按授权执行
 
@@ -736,7 +716,7 @@ OpenAI 选号阶段确认本次可选账号全部额度耗尽时，HTTP 返回 `
 引导、sideband 与 hangup 的业务扩展头默认透传；认证、账号身份、下游环境与传输头遵守
 [请求头与身份](#请求头与身份)边界。`X-Session-Id`、`Voice-Session-Id` 是 Live 业务会话标识，原样透传。
 `Session-Id`、`Thread-Id` 等已识别追踪标识按选中账号的安装身份稳定映射，同账号各阶段保持一致，
-换账号使用不同标识，客户端 trace 原样透传。创建请求可由 attempt 插件改写本次构造身份，后续 sideband / hangup 仍使用钉住账号的身份。
+换账号使用不同标识，客户端 trace 原样透传。后续 sideband / hangup 使用钉住账号的身份
 Live 不继承 Responses 的路由提示与续接状态；turn metadata 中的原账号绑定信息清理后保留其他字段。
 真实 call ID 保留用于钉住账号访问通话。HTTP 业务头保留原始多值字节，sideband 握手沿用 WebSocket 可编码的头值
 
@@ -993,7 +973,6 @@ Pro 使用 `all` 时也能参与 luna 调度。套餐名称不自动生成或修
 无可用账号错误，不会回退到被禁止的账号。已开始请求使用冻结的政策，新请求使用已发布的新配置。
 Images 和 Search 按原始请求正文的模型 ID 检查，不依赖模型目录或全局模型映射；可手动添加目录未列出的模型 ID。
 模型缺失、重复或无法识别时，仅使用模型政策为 `all` 的账号，不推测上游默认模型。
-Search 的选号限制不约束插件在选号后主动改写正文。
 管理员连接测试不受该模型限制；连接测试成功只证明指定账号的上游能力。
 普通 `/v1/models` 和单模型查询将已发现的 OpenAI 模型关联到来源账号，至少一个来源账号在当前 Key 范围内且政策允许时才展示；
 同 Provider 中未发现该模型的 `all` 账号不会使它进入列表。原生目录保留已有来源选择和完整模型对象
@@ -1062,7 +1041,7 @@ Images、独立 Search、Live 和管理员连接测试不应用账号模型映�
 移除关联账号只清除指定账号的代理绑定与连接地址，使其改为直连，保留凭据、调度参数与分组。
 若账号已不再绑定请求中的代理，则返回 409
 删除代理会自动解除全部关联账号的代理绑定与连接地址，账号保留其余设置并改为直连。
-代理仍被插件来源或插件包引用时返回 409，账号绑定保持不变
+旧插件归档引用随代理删除清空，不阻止原生账号解绑
 
 `maxWebsocketConnections` 为此代理的 OpenAI Responses 上游 WS 连接上限，范围 0–4294967295，0 表示不限制。
 创建时省略默认为 0，更新时省略或 `null` 保留原值。关联账号共享预算，修改后新请求使用新值，已存在的连接仍计数。
@@ -1073,7 +1052,7 @@ Images、独立 Search、Live 和管理员连接测试不应用账号模型映�
 
 代理默认启用，更新 `enabled: false` 后保留配置、测试结果和账号绑定，关联账号的新请求改为直连，
 不应用该代理的位置覆盖；重新启用后恢复原出口及位置规则。省略 `enabled` 保留当前状态。
-禁用代理仍可执行连接测试，但不能以 ID 选择用于账号绑定、新的账号授权、导入或插件下载
+禁用代理仍可执行连接测试，但不能以 ID 选择用于账号绑定、新的账号授权、导入
 
 `detectLocation: true` 在测试连接时解析出口位置；结果 `location.status` 为 `notRequested`、
 `detected`、`failed` 或 `conflict`。`detected` 携带 `location`，`failed` 携带安全错误说明；
@@ -1159,7 +1138,7 @@ OAuth 等待回调期间不持有保护；提交仍拒绝已删除或连接配�
 每个任务接受 1–200 个 `items`，请求体上限为 4 MiB。每个条目遵循下节的 Provider 文档与设置合同，独立处理
 并返回结果。批量 AT / RT 按非空输入顺序拆成单账号条目，因此可逐条统计；
 管理端上传的 OpenAI JSON 文件按 `accounts` 数组拆成单账号条目，每项保留该账号引用的代理，
-成功与失败分别记录；xAI、插件文档及直接调用导入 API 的多账号文档仍由 Provider 按自身语义处理。
+成功与失败分别记录；xAI 文档及直接调用导入 API 的多账号文档仍由 Provider 按自身语义处理。
 管理端按条目数和请求体大小分批创建任务，同一输入重试时复用各批的提交标识，已创建任务不会重复执行。
 一个未拆分的文档可导入多个账号，条目成功数与入库账号数可能不同
 
@@ -1672,7 +1651,7 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 严格亲和下的后代线程始终启用账号排队，沿用 `concurrencyWaitTimeoutSeconds` 和请求截止时间；
 `maxWaitingPerAccount` 为 0 时使用每队列 1,000 人上限，否则沿用配置的上限。
 可识别来源的 Search、Images、Live 创建请求采用同样规则，身份与轮次关联见[会话绑定](architecture.md#6-路由账号范围与-continuation)。
-插件显式选号须通过账号资格与租约检查，见[调度合同](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#路由调度与观察)。普通请求关闭账号排队且没有可用容量时返回 `503` / `account_capacity_unavailable`，
+普通请求关闭账号排队且没有可用容量时返回 `503` / `account_capacity_unavailable`，
 与无候选账号的 `no_available_provider` 区分；排队不绕过账号范围、模型权限、RPM 或金额限额
 
 OpenAI 会话因之前的上游 `cyber_policy` 拒绝而排除全部可选账号时，选号失败返回 `400` / `cyber_policy`，
@@ -1763,9 +1742,6 @@ Redis 操作回执保留 30 天；预览日志在到期 30 天后随新预览按
 读取设置返回 `configRevision`。更新请求必须携带读取时的同一版本；版本比较、设置替换和审计在同一事务内完成。
 并发修改导致版本过期时返回 `409`，不保存当前请求；读取最新设置并确认差异后再提交，不能静默重试覆盖。
 成功响应返回新版本，后续请求使用发布后的快照
-
-运行设置保存包含必填的 `maxRetryAfterSeconds`；缺失、非整数或超出 u32 范围返回 `422`，不写入配置。
-调用插件 `settings.load`／`settings.replace` 的程序应使用包含 `max_retry_after_seconds` 的匹配 SDK 重建
 
 位置检测返回 `status: detected` 与 `location`，双栈出口时区不一致时返回 `conflict`，
 无法获取出口或位置时返回 `failed` 与 `message`。检测忽略进程代理环境变量，复用代理探测的超时与并发限制；
@@ -1898,7 +1874,7 @@ UA、平台参数及自动 Git 上下文版本由 [OpenAI 上游客户端身份]
 该对象最多容纳 5 个执行请求与 5 个等待请求。Key 并发为 0（不限）时跳过 Key 排队。
 OpenAI 严格亲和下后代线程的会话账号等待不随普通账号排队关闭，见 [Client Key 等待规则](#7-client-key)。
 `concurrencyWaitTimeoutSeconds` 取值 1～120，默认 30，从首次入队开始计时，密钥与账号两层共享该等待时限；
-切换账号或内部重试不重新计时；若插件设置了请求总时限，等待也计入该时限。排队超时不用于中断已开始的上游生成。
+切换账号或内部重试不重新计时。排队超时不用于中断已开始的上游生成。
 设置更新请求须包含这三个字段，新请求使用更新后的快照
 
 `openaiGuardianReservedConcurrency`（默认 0，取值 0～4,294,967,295）设置 Codex Guardian 自动审批的每账号独立并发，保存后对新请求生效。
@@ -1917,7 +1893,7 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 - `preferred`（优先）：会话内所有可关联请求优先主账号，并发已满、额度耗尽、停用、限流冷却或不支持当前模型时临时分流，保留会话绑定，后续请求仍优先主账号
 - `strict`（严格）：同一会话共用账号，后代请求等待当前账号并跟随根请求换号
 
-插件显式选号及原生续写的状态归属约束在三种模式下仍然生效
+原生续写的状态归属约束在三种模式下仍然生效
 
 `openaiSessionAffinityTtlHours` 是账号绑定及其会话关联的滑动保留时长，单位小时，默认 24，取值 1～720。
 各类请求统一在发送前成功准入时按请求冻结值续期。
@@ -1930,19 +1906,15 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 总路由尝试仍最多 32 次，其他恢复占用路由次数时可提前结束普通阶段，为保底保留最后一次机会。
 提高任何预算都不放宽安全重放或交付后的重试限制。
 设置更新请求须包含账号亲和、亲和时长与其他恢复换号上限；未提供 `recoveryAttempts` 时使用默认值 4，
-省略 `recoveryRotationAttempts` 时保留已有值。旧插件设置服务继续使用原字段合同，写入时也保留业务换号预算。
+省略 `recoveryRotationAttempts` 时保留已有值。
 保存后对新请求生效，执行中请求及其重试沿用冻结值
 
 ### 请求解压上限
 
-`responsesMaxDecompressedBodyBytes` 限制压缩 Responses HTTP 请求的解压输出，以及插件受管 HTTP
-的实际出站正文（包括账号上游请求，无论是否压缩），单位字节，默认 67108864（64 MiB）。
-必须为正整数，且可表示为进程平台的 `isize`；管理端以整数 MiB 编辑。
-插件模型调用从同一设置派生内部请求编码预算，具体边界见 [SDK 模型请求](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#key模型与模型调用)
+`responsesMaxDecompressedBodyBytes` 限制压缩 Responses HTTP 请求的解压输出，单位字节，默认 67108864（64 MiB）。
+必须为正整数，且可表示为进程平台的 `isize`；管理端以整数 MiB 编辑
 
-保存并发布成功后，新请求使用新值；在途模型请求及其路由、调度、attempt 和重试回调沿用冻结预算。
-显式 Key 的模型调用沿用当前父调用内绑定的快照，父调用结束后重新绑定时使用新值；无模型请求上下文的
-受管 HTTP 调用读取当前发布值，无需重启插件。调小该值可能使插件上传或转发返回 413，且不发送出站请求。
+保存并发布成功后，新请求使用新值，在途请求继续使用冻结预算。
 调高上限会增加大请求的内存占用，不代表扩大模型 Token 上限、响应缓冲或整个进程的内存预算
 
 ### 智能调度
@@ -2228,7 +2200,7 @@ Desktop 三段 SemVer 门禁，也不会自动回写最低版本设置。门禁�
 
 全部备份端点位于 `/api/admin/settings/backups/*`，使用管理接口响应信封，字段为 camelCase，响应带 `Cache-Control: no-store`
 
-归档为 `.sql.gz` 业务备份，包含账号、Key、设置、插件、已用额度和已发布用量汇总，不包含请求明细与诊断/审计日志。
+归档为 `.sql.gz` 业务备份，包含账号、Key、设置、已用额度、已发布用量汇总及保留的历史插件归档，不包含请求明细与诊断/审计日志。
 汇总范围和离线恢复限制见 [备份内容与限制](../deploy/README.md#备份内容与限制)；没有在线恢复端点
 
 统计重建或时间桶尚未发布完成时，任务以 `backup.analytics_not_ready` 失败；统计就绪后重新创建备份
@@ -2565,8 +2537,7 @@ Provider metadata 分别保留 `requestedServiceTier` 与 `upstreamServiceTier` 
 | `POST` | `/api/admin/system/update` | `{ targetVersion, channel?, mode? }` | 受理后台在线升级或降级，返回 `202` |
 | `GET` | `/api/admin/system/update/status` | 无 | 查询当前更新或回滚状态 |
 | `POST` | `/api/admin/system/rollback` | 无 | 回滚到保留的上一版本 |
-| `GET` | `/api/admin/system/restart/check` | 无 | 只读检查重启目标与启用插件 |
-| `POST` | `/api/admin/system/restart` | `{ confirmation? }` | 复核兼容性风险确认并重启，保留插件启用配置 |
+| `POST` | `/api/admin/system/restart` | 无 | 校验安装文件并重启 |
 
 在线更新遵循[版本命名与升级规则](../deploy/README.md#版本命名与升级规则)。版本接口的
 `updateChannel` 由当前版本推导，取值为 `stable`、`alpha`、`beta`、`rc`、`exp`，无法识别时为 `unknown`。
@@ -2585,29 +2556,6 @@ Provider metadata 分别保留 `requestedServiceTier` 与 `upstreamServiceTier` 
 强制检查失败时通过 `warning` 返回错误，`hasUpdate=false`，不以旧缓存或“没有更新”掩盖失败。
 普通查询可复用 20 分钟内的结果，缓存按通道隔离，较慢的旧检查不能覆盖新检查结果。下载时仍会校验目标资产、校验和及归档
 
-详情的 `downgradeVersions` 按版本从近到远返回当前版本之前、所选通道内的最近 5 个发行，
-同样限制大版本与实验线，并计入二开发行迭代号；草稿、无效和重复版本不参与计数。
-每项包含 `version`、`releaseUrl`、`notes` 和 `unsupportedReason`，缺少当前平台安装包或校验文件时
-保留该项并返回不可用原因，不用更早版本补位。无历史版本、不支持更新或查询失败时返回空数组。
-降级执行会重新查询并校验目标仍在这 5 个发行中，目标移出范围或被删除时任务失败，不替换为其他版本。
-降级在文件替换前检查启用插件与目标发行的兼容性，不能确认兼容时拒绝安装，不修改插件配置。
-程序降级不会回退数据库与配置，调用者须提示备份和数据兼容风险
-
-更新 POST 在本地校验目标版本并持久化任务后返回 `202`，数据包含 `operationId`、`targetVersion`、
-`deploymentMode` 和 `message`，只表示已受理。Release 查询、远端目标复核、下载、校验及文件替换在后台
-执行，结果通过 `/update/status` 的 `operation` 查询：`status` 为 `idle`、`running`、`succeeded` 或 `failed`，
-终态包含 `finishedAt`，失败原因在 `error` 中。SSE 的 `operationId` 用于关联进度；终态事件发出前状态已落盘。
-连接中断不取消已受理任务；响应丢失时先查询状态，不自动重复提交。打开更新页面时也会恢复最近一次任务。
-下载并解包后校验发行身份。升级与本地备份回滚的插件兼容性风险在重启前提示，
-历史发行降级按上述严格预检处理。安装与回滚在文件交换前后复核全局配置版本，
-文件替换失败或取消时成组恢复二进制、Web 资源和官方插件目录
-
-客户端重启前调用 `restart/check`，返回 `targetVersion`、`releaseManifestSha256`、`configRevision` 和 `incompatiblePlugins`，
-每项包含 `instanceId`、`name`、`reason`，检查不修改插件状态。源码运行的目标版本与发行摘要为空，检查当前宿主兼容性。
-存在不兼容插件时，客户端展示列表并取得确认后，将完整检查结果作为 `confirmation` 提交重启请求。
-服务端在重启锁内重新检查，目标或配置变化返回 `40901`，须重新检查并确认。确认后保留启用配置，重启时不兼容实例保持未启动，不挂载能力或故障占位；插件额外认证和拦截停止生效，宿主原生认证继续执行。
-没有兼容性风险时可省略确认，不切换插件版本、接受其他制品或改写配置版本
-
 状态响应的 `currentVersion` 表示已安装文件的版本，运行中的版本仍以 `/version` 为准。
 `needRestart=true` 表示已验证的安装文件尚未在当前进程生效，此时应调用重启接口，不能重复发起更新或切换通道。
 最近一次 `operation` 仅表示操作历史，成功记录不等于待重启，也不改变远端 `hasUpdate`。
@@ -2616,365 +2564,3 @@ Provider metadata 分别保留 `requestedServiceTier` 与 `upstreamServiceTier` 
 Host 关闭或任务取消会记录失败终态；状态查询会收敛无执行锁的遗留 `running`。
 异常退出留下的锁仍遵循 30 分钟过期规则，未过期前不会抢占其他进程的操作。
 实例升级和仓库发版见 [部署文档](../deploy/README.md#镜像升级与源码构建)
-
-## 12. 插件管理
-
-除明确标注的公开入口外，以下接口需要管理身份。图标读取及 12.2 中标注的原始响应接口直接返回资源、插件响应
-或模型响应，其余接口使用统一管理响应信封。制品按摘要记录用户的完整信任决定；首次安装某个插件时会尝试创建默认配置，
-配置完整则启用，缺少必填项则保留为待配置。操作流程见 [插件使用](plugins.md)，开发合同见
-[SDK](../backend/crates/gateway-plugin/sdk/README.md)。不提供官方商店或第三方市场订阅接口
-
-插件通过类型化公开服务维护请求明细、聚合统计并试算费用，接口与数值合同见 [SDK 用量维护与计价](../backend/crates/gateway-plugin/sdk/docs/usage-data.md)。聚合参与原生总量与趋势，不增加请求明细列表条目
-
-### 安装包与来源
-
-| 方法 | 路径 | 行为 |
-| --- | --- | --- |
-| GET | `/api/admin/plugins/artifacts` | 列出制品的 `metadata`、固定 `source`、`installedAt` 与可为 `null` 的 `acceptedAt` |
-| GET | `/api/admin/plugins/artifacts/{sha256}/icon?theme=light\|dark` | 管理身份；按不可变制品摘要读取已校验图标；无图标返回 404 |
-| POST | `/api/admin/plugins/artifacts/upload` | 上传原始 tar.gz 包体，最多 32 MiB；查询参数 `sha256` 必须固定已解析的包；确认信任并完成安装 |
-| POST | `/api/admin/plugins/artifacts/upload/verify` | 同样接收原始包体，只读解析并校验，返回 `metadata` 与 `source`，不安装 |
-| POST | `/api/admin/plugins/artifacts/install` | 从 URL 或固定 GitHub Release 下载、校验，确认信任并完成安装 |
-| POST | `/api/admin/plugins/artifacts/verify` | 按远程来源只读解析并校验完整包，返回 `metadata` 与固定 `source`，不持久化或启动插件 |
-| POST | `/api/admin/plugins/artifacts/accept` | 严格请求 `{ "sha256": "<小写 SHA-256>" }`，确认信任已导入制品并完成安装 |
-| POST | `/api/admin/plugins/artifacts/delete` | 请求 `{ "sha256": "<小写 SHA-256>" }`，删除未被引用的制品 |
-| POST | `/api/admin/plugins/releases/query` | 查询指定 GitHub 仓库的最新稳定版或明确 tag |
-| POST | `/api/admin/plugins/updates/check` | 按插件已保存的来源和策略查询 Release，只读，不下载或切换实例 |
-| GET / POST | `/api/admin/plugins/source-credentials` | 列出公开授权范围，或创建独立下载凭据 |
-| POST | `/api/admin/plugins/source-credentials/delete` | 请求 `{ "id": "<凭据 ID>" }`，删除未被来源引用的下载凭据 |
-| GET / POST | `/api/admin/plugins/update-sources` | 查询或显式改变插件后续安装的允许来源及更新检查策略 |
-
-删除制品时，同一事务会清理该制品使用过且已无任何制品引用的下载凭据；删除插件的最后一个版本时，
-同时清理其来源规则、更新检查策略及出站代理引用。其他版本共享的凭据、代理本身和审计记录保留，
-独立创建但未被该制品使用的下载凭据不会被顺带删除。完整卸载后重新安装不受旧来源规则限制
-
-#### 包信息
-
-安装包使用的版本与字段规则见 [SDK 清单](../backend/crates/gateway-plugin/sdk/docs/manifest.md)。
-插件 ID 由 `publisher + "." + name` 派生；`displayName` 和可选 `author` 仅用于展示
-
-制品 `metadata` 返回 `pluginId`、`name`、`displayName`、`publisher`、可为 `null` 的 `author`、`version`、
-`description`、`license`、`sha256`、`platforms`、可为 `null` 的 `icon`、`contributes`、
-`configurationSchema`、`secretFields` 和 `stateNamespaces`。`contributes` 是以稳定 snake_case capability 为 key 的对象；每个值包含
-`id`、`version`、`stages`、`inputFormats` 和 `outputFormats`。`id` 是实例绑定引用的完整贡献项 ID，客户端必须通过
-当前制品的 `contributes` 映射确定其 capability，不能解析 ID 文本推测能力
-
-#### 图标读取
-
-`metadata.icon` 为清单中的包内路径或 `{ "light": "...", "dark": "..." }` 对象；未声明时为 `null`。
-配置示例、支持格式与文件限制见 [SDK 插件图标](../backend/crates/gateway-plugin/sdk/docs/manifest.md#插件图标)
-
-读取浅色主题图标使用 `GET /api/admin/plugins/artifacts/{sha256}/icon?theme=light`：
-
-- `sha256` 为制品的 64 位小写十六进制摘要；`theme` 必填，值为 `light` 或 `dark`。单路径图标在两种主题下返回相同内容
-- 成功返回图片原始字节，`Content-Type` 为清单声明的 MIME，不使用 JSON 信封、不转换图片格式。制品不存在或未提供图标时返回 `404`
-- 响应包含 `X-Content-Type-Options: nosniff` 和 `Cache-Control: private, max-age=31536000, immutable`；缓存按制品摘要与主题区分
-- SVG 使用 sandbox CSP 隔离，允许内联样式和 data 图片，禁止脚本执行与外部资源请求
-
-客户端应将接口地址用于 `<img src="…">`，不内联 SVG，也不把清单路径拼成文件系统路径或公开 URL。
-没有图标时由客户端显示通用图标
-
-#### 解析与确认安装
-
-本地包先调用 `artifacts/upload/verify`，远程包先调用 `artifacts/verify`。校验只返回包信息与来源，
-不保存、不确认信任、不启动插件，也不代表实例配置或私有状态已经兼容。
-修改文件、地址、Release、摘要、凭据或代理选择后必须重新校验；确认安装时固定校验返回的身份、版本与摘要
-
-远程解析请求包含 `location`、可选 `credentialIds` 和 `outboundProxyId`，不需要预先提供 ID 或版本。
-更新已有插件时可传 `expectedPluginId` 锁定预期身份；首次安装从包内清单读取身份，并按该身份复核已保存的来源绑定。
-URL 与 GitHub 的 `location.sha256` 在解析时均可省略，由服务端计算实际包摘要；提供摘要时必须通过匹配检查
-
-确认安装时，将解析返回的 `metadata.pluginId`、`metadata.version` 和 `metadata.sha256` 分别填入
-`pluginId`、`version`、`location.sha256`，与原来的来源、凭据和代理选择一起提交 `artifacts/install`。
-这三个字段在远程安装时必填，确保实际安装内容与确认的包相同。清单 ID、版本、宿主兼容范围与平台
-必须通过校验；来源类型、地址或代理选择变化返回冲突，需要先显式修改更新来源。相同包及来源重复安装为幂等操作；
-同一插件版本的平台产物不允许替换成不同内容。安装新版本保留已安装旧版本
-
-```json
-{
-  "pluginId": "acme.example",
-  "version": "1.0.0",
-  "credentialIds": [],
-  "outboundProxyId": null,
-  "location": {
-    "kind": "url",
-    "url": "https://downloads.example.org/plugin.tar.gz",
-    "sha256": "<64 位小写十六进制摘要>"
-  }
-}
-```
-
-上传、远程安装和 `artifacts/accept` 成功响应均为平铺对象：
-
-```json
-{
-  "artifact": {
-    "metadata": {},
-    "source": { "kind": "upload" },
-    "installedAt": "2026-09-22T00:00:00Z",
-    "acceptedAt": "2026-09-22T00:00:01Z"
-  },
-  "configRevision": 2,
-  "defaultInstanceId": "<实例 UUID 或 null>",
-  "configurationRequired": false
-}
-```
-
-接受制品时，若该插件没有任何实例，服务端使用稳定的 creation ID 创建一份默认实例：普通配置取 schema 默认值，
-敏感字段不复制默认值；按下文[能力绑定规则](#能力绑定与范围)为适用贡献项及阶段建立空范围默认 binding。
-缺少必填项时 `configurationRequired=true` 且实例保持停用；配置完整且版本兼容时直接启用，宿主范围或能力版本不匹配时保留停用，等待手动确认。
-非法 schema、类型错误或把敏感字段放入普通配置会拒绝安装。已有该插件实例时不额外创建或切换实例，
-`defaultInstanceId=null`。相同摘要的接受和默认实例创建可重试，不产生副本
-
-宿主发行目录导入的制品只写入不可变包和来源，`acceptedAt=null`；确认来源与版本后调用 `artifacts/accept`。未接受制品不能用于创建、更新或启用实例
-
-GitHub 的 `location` 使用 `kind: "github"`、`repository: "owner/repo"`、`tag`、`asset`、
-`allow_prerelease` 和 `sha256`。解析时优先使用显式摘要或 GitHub 的 SHA-256，缺失时读取同一 Release 的
-`checksums.txt`；都未提供时计算下载内容的摘要供确认安装使用。显式摘要与 GitHub 摘要冲突时拒绝下载。
-摘要用于内容一致性检查，不证明发布者身份，只应安装可信来源的插件
-
-#### GitHub Release 查询
-
-查询请求为 `{ "query": { "repository": "owner/repo", "tag": null, "allowPrerelease": false }, "credentialIds": [], "outboundProxyId": null }`。
-`tag: null` 查询最新稳定版；预发行版须指定 tag 并允许预发行。响应包含固定 tag、产物列表、`queriedAt`
-和 `expiresAt`。显式查询刷新成功结果，同一批并发查询共享结果；下载固定 tag 的产物可复用 1 小时内的元数据，失败缓存 30 秒；限流返回错误，不转换成空列表
-
-#### 下载认证与代理
-
-下载凭据创建字段为 `name`、`origin`、`pathPrefix`、`purposes`、`authentication`。
-`purposes` 可选 `metadata`、`artifact`；`authentication.kind` 可选 `github`、`bearer`、`basic`、`header`，
-分别携带 `token`、`token`、`username/password`、`name/value`。列表与创建响应只返回 ID 和授权范围。
-每次重定向都按 origin、路径段边界和用途重新匹配凭据，重叠授权拒绝执行。
-来源 URL 使用 HTTPS，不包含用户信息、查询参数或片段；回环地址允许 HTTP，供本机来源使用
-
-查询、校验和远程安装的 `outboundProxyId` 指向已保存的出站代理，与下载凭据独立，公开来源也可选择代理。
-省略或 `null` 表示直连，不继承进程环境代理；代理失败不会回退直连。查询与下载期间代理配置变化时返回 `409`，需重新操作。
-查询缓存与限流按凭据及代理身份隔离。制品历史 `source.outbound_proxy` 只保存下载时的 `{ id, revision }`，不返回代理地址或认证信息。
-仍被更新来源或制品引用的代理不能删除；修改后续来源不会清除已安装制品的历史引用
-
-#### 更新来源与检查
-
-修改更新来源请求为 `{ "pluginId": "acme.example", "source": { "kind": "github", "repository": "owner/repo" }, "policy": { "kind": "stable" }, "outboundProxyId": null }`；
-其他可选来源为 `upload` 或带 `url` 的 `url`。`policy` 省略时为 `manual`；GitHub 还支持 `stable`（最新稳定版）和
-`{ "kind": "pinned", "tag": "v2.0.0-rc.1", "allow_prerelease": true }`。其他来源只支持 `manual`。
-来源、策略和代理选择一同持久化与审计；代理字段省略或 `null` 明确保存为直连。`upload` 和 `builtin` 不接受代理。
-变更不改变已安装包的历史来源，不自动下载、接受制品或切换实例版本
-
-检查更新请求为 `{ "pluginId": "acme.example", "credentialIds": [] }`，返回 `binding` 和 `release`。
-服务端使用已保存的来源、策略和代理，不接受临时替换仓库或代理；查询期间来源变更返回 `409`，不可访问或限流仍返回错误。
-`release` 仅是来源元数据，不表示插件包已通过身份、版本、平台、兼容范围或摘要校验；选择产物后仍须显式调用安装接口，
-安装成功也不会自动修改现有实例的固定制品。手动策略和不支持 Release 查询的来源返回明确错误，不伪装为没有更新
-
-### 12.1 运行实例
-
-| 方法 | 路径 | 行为 |
-| --- | --- | --- |
-| GET | `/api/admin/plugins/instances` | 列出实例配置、功能绑定、配置完整性及发布状态，不返回 secret 值 |
-| POST | `/api/admin/plugins/instances` | 创建实例，返回 `id` 和 `configRevision` |
-| POST | `/api/admin/plugins/instances/update` | 请求 `{ "id": "<实例 ID>", "instance": { ...配置字段 } }`，整体更新实例 |
-| GET | `/api/admin/plugins/instances/version-plan?id=<实例 ID>&artifactSha256=<目标摘要>` | 只读生成版本设置草稿，不启动插件、不返回密钥值 |
-| POST | `/api/admin/plugins/instances/switch-version` | 请求 `{ "id": "<实例 ID>", "target": { "artifactSha256": "<已安装目标摘要>", "expectedRevision": 1 } }`，准备后切换版本 |
-| GET | `/api/admin/plugins/instances/rollback-plan?id=<实例 ID>` | 只读列出当前版本、实例 revision 与按语义版本降序排列的已安装、已接受且有配置快照的旧版候选，不启动插件 |
-| POST | `/api/admin/plugins/instances/rollback` | 请求 `{ "id": "<实例 ID>", "target": { "artifactSha256": "<已安装且已接受旧版摘要>", "expectedRevision": 1 } }`，校验后回滚 |
-| POST | `/api/admin/plugins/instances/disable` | 请求 `{ "id": "<实例 ID>" }`，停用实例并发布新集合 |
-| POST | `/api/admin/plugins/instances/delete` | 请求 `{ "id": "<实例 ID>" }`，删除已停用实例 |
-
-#### 创建与更新
-
-创建与更新的配置字段为 `name`、`artifactSha256`、`enabled`、`configuration` 和必填的 `bindings`，
-`secrets` 可选。输入严格拒绝未知字段；`trustedProcess` 和 `grants` 不是输入字段。`artifactSha256` 必须指向
-已接受的制品。`configuration` 是匹配插件 schema 的 JSON 对象；敏感字段必须
-放入 `secrets`，空对象清除全部值。省略时同版本编辑保留当前值；跨版本编辑优先保留目标版本快照的密钥，没有快照则保留当前值
-
-创建可传 `creationId`（标准小写 UUID），同一草稿重试复用该 ID，已保存且内容不同则返回 409，不创建副本或覆盖旧配置。
-相同内容的重试仍会重新准备并发布，不保证配置 revision 不变。更新可传 `expectedRevision`，与实例列表的 `revision`
-不一致时返回 409，管理员应重新加载后确认。创建不能传 `expectedRevision`，更新不能传 `creationId`。
-删除实例会一并删除其 secret、私有状态与版本配置快照，停用则保留这些数据
-
-保存启用配置时，可传 `replaceInstances: [{ "id": "<旧配置 ID>", "expectedRevision": 1 }]`，
-明确确认同时停用的同插件配置（最多 256 项，不得包含当前配置或重复 ID）。同一插件最多启用一个实例，省略且已有其他启用配置时返回 409。
-不能将已有实例切换成另一个插件。
-目标配置准备通过后，停用旧配置与保存目标在同一事务提交，旧配置及其密钥、私有状态保留。
-待停用配置必须仍启用且 revision 与确认时一致，否则返回 409，重新读取并确认后再提交
-
-列表项包含 `id`、`name`、`artifactSha256`、`enabled`、`configurationRequired`、`configuration`、
-`secretFields`、`bindings`、`revision`、`running`、`publishedRevision`、`runtime`、`compatibilityWarning`、`loadError` 和 `apiDeprecations`。
-`compatibilityWarning` 表示宿主范围或已声明能力版本不匹配，不自动启动；手动确认后可尝试本次启动，成功运行后仍保留提醒。
-`loadError` 表示包结构、清单、RPC 或平台等加载检查失败，非空时拒绝启用且不能通过确认覆盖；两项无对应问题时为 `null`，停用实例也返回检查结果。运行故障通过 `runtime.failure` 返回，不改写 `enabled`。
-未通过启动准入的实例没有执行贡献或故障占位。恢复诊断使用 `runtime.failure.code=version_incompatible`（可确认尝试）或 `package_unloadable`（不能加载），`running=false`，不改写 `enabled`
-
-手动启动软不兼容实例时，先读取该实例及目标包的 `version-plan`，向管理员展示 `compatibilityWarning`。
-确认后通过 `instances/update` 提交 `enabled=true` 和原样返回的 `compatibilityConfirmation`，其中包含 `hostFingerprint`、`instanceId`、`instanceRevision` 和 `artifactSha256`。
-服务端复核宿主、实例配置版本和目标包，缺少确认或确认过期返回 409；包无法加载返回 400。确认仅放行本次目标实例，不持久化，不放行其他实例，下次宿主启动重新检查。
-创建软不兼容实例时先保存为停用，再读取计划确认启动；停用请求不接受确认信息
-
-`configurationRequired` 由当前制品 schema 与已保存的普通/敏感配置实时派生，不写入数据库；它只表示仍缺少必填值。停用实例也不能保存
-类型错误、非法 schema 或把敏感字段混入普通配置
-
-`apiDeprecations` 为仍受支持的旧接口提示数组，包含 `capability`、`version`、`replacementVersion`、`introducedIn`、`remainingReleases` 和 `migration`。
-`introducedIn` 在首次正式发布前为 `null`；`remainingReleases` 表示还会支持的后续正式版本数，不计预发行。提示不改变启停状态或阻止安装，无弃用提示时为空数组
-
-#### 版本切换与私有状态
-
-私有状态通过 [SDK 回调](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#状态日志与迁移)访问，不提供任意读写的管理 HTTP 接口。
-升级若需要迁移，实例可能暂时停用；迁移失败且发生并发配置变更时保持停用，不覆盖管理员的新配置。
-版本切换只接受同一插件已安装且已接受的制品，`expectedRevision` 必须等于实例列表中的 `revision`，过期请求返回 409。
-`version-plan` 返回 `instanceRevision`、`artifactSha256`、`configuration`、`secretFields`、`bindings`、`restored`、`compatibilityWarning`、`compatibilityConfirmation` 和 `loadError`。
-`restored` 表示使用了目标版本的配置快照，兼容字段适用于当前包和版本切换目标；无软不兼容时确认信息为 `null`。没有快照时只补充缺失的 schema 默认值，保留当前显式值；功能范围按能力与阶段映射到目标声明，
-新能力使用默认绑定，已关闭的既有能力继续关闭，客户端认证仍须显式身份映射。草稿不代表已通过校验
-
-`switch-version` 重新生成草稿并执行准备与提交，名称和启停状态保持不变。不兼容设置返回 400，启用软不兼容目标但缺少风险确认返回 409，当前设置不变；
-可读取草稿并通过 `instances/update` 携带原 `expectedRevision` 提交修正。不会推断字段改名或丢弃未知参数与密钥
-
-每个实例、制品摘要保存一份最近启用时提交的配置快照，包含普通配置、secret 与 binding，停用草稿不覆盖快照。
-`rollback` 只接受有快照的较早语义版本，恢复该版本设置并重新检查平台、配置与私有状态，保留当前名称与启停状态。
-快照与实例修改共享事务，不从审计日志重建，也不恢复私有业务数据；删除实例或制品时删除对应快照
-
-#### 完整信任与受管资源
-
-安装并启用插件意味着完整信任其代码与行为，安全由安装者承担。清单与握手不包含权限声明，宿主回调不按访问域或阶段授权，参见[插件信任说明](plugins.md#完整信任)
-
-回调保持类型、期限、取消、实例 revision、资源归属和事务一致性检查。模型调用可显式选择 Key，按所选 Key 的准入、预算、用量与计费合同执行；省略 Key 时继承现有模型父请求身份
-
-受管 HTTP 不限制插件目标地址段。宿主解析 DNS，连接保留原始 Host 与 TLS 域名校验；代理沿用账号配置，失败不自动回退直连，重定向不自动跟随
-
-#### 能力绑定与范围
-
-`bindings` 通过 `contribution` 指定清单已声明的贡献项，并包含该贡献项声明支持的 `stage`、顺序和失败策略；
-尚未声明、尚未注册或阶段不匹配的贡献项不能启用。
-首次安装生成的默认实例会为适用贡献项的每个声明阶段创建 binding；`observer` 分别创建完成与 WebSocket 两类事件绑定。
-默认 `order=0`、所有范围数组为空；观察阶段使用 `observe`，重试阶段使用 `delegate`，其他阶段使用 `reject`。
-`model_catalog`、`management`、`command_line` 和 `maintenance` 按清单声明注册，不接受 binding；
-`frontend_authentication` 必须由管理员显式配置身份映射，也不自动创建
-
-`middleware` v6 可绑定 `http`、`websocket`、`service`、`request`、`attempt` 和 `outbound`，按声明的挂载阶段分别配置。
-`http`、`websocket` 和 `service` 不使用 Key、分组、Provider 或模型范围，这些数组必须为空；插件在处理器内匹配路径、消息或服务操作。
-`request` 与 `routing` 支持 Key、分组和公开模型范围，Provider 范围必须为空；`attempt`、`outbound`、`upstream`、`scheduling`、`retry` 与 `observation` 可使用 Provider 范围
-
-`outbound` 准备原生 Provider 交给 transport 的请求，覆盖 OpenAI Responses HTTP / WS、Images、Search、Live 创建及 xAI 生成与压缩。
-它使用最终上游模型匹配范围，下一层返回准备后的请求，不执行发送；字节、headers、HTTP 方法和目标的合同见 [SDK 出站请求准备](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#上游出站准备)。
-该阶段不包括 OAuth、额度刷新等后台请求，也不包括由 `upstream_adapter` 自行执行的发送
-
-`observer` 固定使用 `observation/observe`，必填 `event` 为 `request_completed` 或 `websocket_response`。
-每种事件最多一条绑定，可分别设置请求范围；同一实例两类事件的 `order` 必须相同。其他能力不接受非空 `event`。
-完成事件完整提供终态、用量、费用与耗时，订阅不裁剪字段
-
-```json
-{
-  "contribution": "acme.request-observer.observer",
-  "stage": "observation",
-  "event": "request_completed",
-  "order": 10,
-  "failurePolicy": "observe",
-  "clientKeyIds": [],
-  "accountGroupIds": [],
-  "providerIds": [],
-  "models": []
-}
-```
-
-范围数组缺省或为空表示不限制该维度；同一数组中的条件取并集，不同维度取交集，全部为空表示全局。
-`clientKeyIds` 和 `accountGroupIds` 引用已有资源 ID，保存启用实例时校验存在性；引用被删除后仍可停用实例，
-保留原绑定供管理员修订，重新启用前必须修正引用。账号组范围使用请求开始时
-Client Key 已冻结的绑定组（含绑定但禁用的组），不按最终选中账号重新解释；全账号 Key 没有绑定组。
-Provider 范围匹配最终实际尝试的 Provider；未进入 Provider 的拒绝不会命中有限 Provider 范围。
-模型范围匹配客户端请求的公开模型 ID。配置发布不改变在途请求的匹配范围，同一实例不会因命中多个组而重复调用
-
-`frontend_authentication` binding 只能使用 `authentication` 阶段、`reject` 或 `delegate` 失败策略，并通过
-`identityBindings: [{ "principal": "...", "clientKeyId": "..." }]` 明确映射外部身份；其他范围数组必须为空。
-普通 binding 不能携带 `identityBindings`。已停用、删除或不再授权的 Key 不会因映射恢复访问
-
-实例不为管理页面或命令行预绑定模型执行 Key。管理页面经 12.2 的模型桥在每次调用时显式提交 `clientKeyId`；
-CLI 插件也须在具体调用中选择当前 Key。管理员身份本身不提升为推理身份；模型桥用 Key ID 选择身份，不在桥参数中传递 Key 明文
-
-观察失败只记录诊断，不改变响应、路由、标准 Usage 或账单。完成事件最多派发一次；上游 WebSocket 事件按请求保序，
-原始帧通过独立载荷传递，完成通知不等待消息队列排空。过载可能丢弃事件，不承诺进程崩溃后的持久投递。
-尚未通过重新鉴权、未建立冻结请求上下文的失败不触发完成观察；下游消息改写使用 `websocket` 中间件，普通响应流改写使用请求中间件
-
-#### 发布状态
-
-启用或修改时先准备候选进程及目录，再提交和发布；失败不替换正在运行的集合。
-切换后在途请求保留原版本，其引用排空后回收旧进程
-
-| 字段 | 含义 |
-| --- | --- |
-| `enabled` | 期望启用状态 |
-| `publishedRevision` | 当前已发布的全局配置版本 |
-| `running` | `runtime.status == "running"` 的派生值；不代表插件业务或外部服务健康 |
-| `runtime.status` | 当前进程观察到的运行状态，独立于期望启用和发布版本 |
-| `runtime.actualRevision` / `actualArtifactSha256` | 当前发布集合持有的实例版本与制品摘要，无对应会话时为 `null` |
-| `runtime.failure` | 脱敏后的 `{ code, message }`；没有已知失败时为 `null` |
-| `runtime.drainingRevisions` | 仍被在途工作持有的旧实例版本 |
-| `runtime.load` | 当前发布会话的资源采样；无对应会话或诊断不可用时为 `null` |
-
-`runtime.status` 包括 `disabled`、`awaiting_publication`、`preparing`、`running`、`blocked`、
-`preparation_failed`、`faulted`、`draining` 和 `unknown`。`running` 要求配置匹配、当前会话就绪且发布集合可服务。
-已启用实例缺少运行诊断时返回 `unknown`，不根据发布版本推断运行正常，也不制造失败原因；已停用配置仍可确定为 `disabled`
-
-`runtime.load` 与 `actualRevision`、`actualArtifactSha256` 指向同一会话，不汇总其他排空版本。
-以下计数来自现有调用表和容量资源，采样不是原子快照，各项可能重叠，不能相加作为调用总数：
-
-| 字段 | 含义 |
-| --- | --- |
-| `activeCalls` | 总在途名额，包含排队、等待取消确认及仍由响应流持有的调用 |
-| `executingCalls` | 首结果前占用的执行名额 |
-| `queuedCalls` | 等待首次执行的名额 |
-| `resumingCalls` | 已挂起、正在等待恢复授权的调用 |
-| `pendingCallbacks` | 驻留回调，包含已返回但插件尚未消费的结果 |
-| `activeStreams` | 已交付首结果、尚未收到 End 的流；End 后仍待消费的缓冲继续计入 `activeCalls` |
-
-### 12.2 管理扩展页面与原始 API
-
-`GET /api/admin/plugins/extensions` 需要管理身份，返回统一信封，`data` 为当前已发布的扩展数组。
-每项包含 `target: { instanceId, artifactSha256, revision }`、`name`、`configurationSchema`、
-`pages`、`routes`、`resources` 和 `callbacks`。schema 不是实例配置，不包含 secret 值。
-页面目录的 `pages[].title` 与 `pages[].description` 分别用于宿主页面标题、副标题；未声明副标题时为 `null`。
-目录来自冻结的插件注册结果，并与当前持久化实例复验；停用、换包或修改实例后旧目录项立即不再可用
-
-以下用 `{target}` 表示 `{instanceId}/{artifactSha256}/{revision}`，`{path}` 表示包内已声明的相对路径：
-
-| 方法 | 路径 | 身份与响应 |
-| --- | --- | --- |
-| 已注册方法 | `/api/admin/plugins/extensions/{target}/api/{path}` | 管理身份；插件原始响应，不套管理信封 |
-| GET | `/api/admin/plugins/extensions/{target}/resources/{path}` | 管理身份；已校验的静态字节 |
-| POST | `/api/admin/plugins/extensions/{target}/models/responses?clientKeyId=<ID>` | 管理身份；原生 Responses JSON 或 SSE，不套管理信封 |
-| POST | `/api/admin/plugins/extensions/{target}/callback-tickets` | 管理身份；统一信封中的一次性回调票据 |
-| GET | `/plugins/resources/{target}/{path}` | 无须登录，但资源须声明公开且制品已被接受 |
-| GET | `/plugins/callbacks/{target}/{path}` | 无须登录，但必须携带有效且未消费的 `state` 票据 |
-
-实例目标失效返回 409，调用方应刷新扩展目录，不重放原操作。尚无可用发布视图时返回 503。
-所有入口都要求当前实例仍启用、制品已接受且版本匹配；公开资源与回调按插件注册内容开放。
-公开入口不是读取任意包文件的路径。
-单项静态资源最多 1 MiB，总量最多 8 MiB；资源必须同时出现在制品清单和注册结果中
-
-管理 API 转交方法、相对路径、查询字符串、完整请求头、宿主请求关联与原始正文，保留 Cookie、认证头、
-重复头与非 UTF-8 值。仅接受注册的方法、路径和内容类型；查询最多 8 KiB，正文最多 1 MiB 且受运行帧预算约束，
-GET/HEAD 不接受正文。响应状态码为 200–599，内容类型元数据须在注册列表内，204/304 不允许正文；
-插件返回的完整响应头在 HTTP 语法校验后覆盖默认值。失败可能发生在副作用之后，不提供自动重试
-
-动态 API 与登录回调设置 `Cache-Control: no-store`。静态资源成功响应设置 `private, no-cache` 与内容 ETag，
-浏览器可保存正文，但每次复用前必须重新校验管理员身份（公开资源除外）、实例版本和资源授权；
-`If-None-Match` 匹配时返回无正文的 `304`。停用、版本或授权变更后，旧目标仍被拒绝，不返回缓存命中。
-两类响应默认设置 nosniff、no-referrer 与限制性 CSP，动态处理器可显式覆盖默认响应头。管理端页面使用隔离 iframe，
-仅允许脚本，不具有父页面同源权限；联网、弹窗、表单、嵌套页面和顶层导航均不开放。
-页面访问已声明管理路由须经过固定目标的宿主桥，不能指定其他实例或版本。插件页面作者合同见
-[SDK 管理 API 与页面](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#管理页面公开入口与-cli)
-
-模型桥只接受严格的 `clientKeyId` 查询参数和 Responses JSON 正文；传输正文与解压后的正文均最多 8 MiB。
-服务端先复核固定目标与实例 revision，再按 ID 查询当前 Client Key，并使用普通 Responses HTTP/SSE 执行链；
-因此仍执行当前 Key 的准入、账号范围、预算、用量、计费与请求插件链，包括发起页面所属插件自己的适用 hook。
-这不是嵌套的宿主模型回调，管理身份本身也不提供推理身份，Key 明文不会离开宿主
-
-等待首帧、非流式生成和流式正文交付期间约每秒复核一次固定目标与实例 revision。实例停用、制品或 revision
-变化以及访问资格失效会取消底层执行并停止响应。成功或协议错误沿用 Responses 内容类型，并返回可检索的
-`x-request-id` 与 `x-gateway-request-id`。模型插件读取完整请求头，响应头不按插件身份裁剪；
-页面桥传递浏览器 `Headers` 可读取的全部字段，浏览器自身对 Cookie 等字段的规则仍适用。
-内置页面桥最多并发 4 个模型请求，每次拉取最多 64 KiB，总期限 10 分钟；页面在已收到响应后 30 秒不继续拉取会取消，
-等待首个响应本身不受该空闲计时误杀
-
-票据请求为 `{ "path": "oauth", "ttlSeconds": 60 }`，有效期只允许 1–600 秒；响应数据为
-`{ "state": "<一次性不透明票据>", "expiresAtMs": 0 }`。state 绑定签发管理身份、实例、制品、版本与路径，
-不得记录或截图。公开回调只接受无正文的 GET，查询参数必须恰好包含一个 `state`；过期、错路径、跨实例、
-并发重复或已消费票据均拒绝。宿主在执行前原子消费票据，因此超时或插件失败后不能重放。
-公开调用使用 `public_management` 阶段，插件可以使用宿主回调；票据仍用于关联和消费一次登录流程。
-票据用于受控接收第三方返回结果，不代替敏感管理操作的身份校验

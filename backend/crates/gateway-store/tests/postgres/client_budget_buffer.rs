@@ -3,9 +3,7 @@
 use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
 use gateway_admin::{
-    model::client_keys::{
-        ClientKeyBudgetMutationOrigin, ClientKeyBudgetPeriod, ResetClientKeyBudget,
-    },
+    model::client_keys::{ClientKeyBudgetPeriod, ResetClientKeyBudget},
     ports::store::ClientKeyStore as _,
 };
 use gateway_core::{
@@ -157,7 +155,6 @@ async fn pending_cost_respects_committed_ids_and_manual_reset_boundaries() {
                 id: key_id("key"),
                 period: ClientKeyBudgetPeriod::All,
             },
-            ClientKeyBudgetMutationOrigin::Admin,
             &context(),
         )
         .await

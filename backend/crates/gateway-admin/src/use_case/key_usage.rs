@@ -33,15 +33,13 @@ use super::{map_store_error, observability::health_timeline_at};
 pub trait KeyUsageService: Send + Sync {
     /// 验证 Key 并只读查询当前额度，不记录 Key 使用或执行推理准入
     async fn budget(&self, plaintext: &str) -> Result<Option<ClientBudgetStatus>, AdminError>;
-
-    /// 使用 Core 已认证的宿主身份查询额度，不接收插件自报的 Key ID
+    /// 使用 Core 已认证的宿主身份查询额度，不接受调用方自报的 Key ID
     async fn budget_for_client(
         &self,
         id: &ClientApiKeyId,
     ) -> Result<Option<ClientBudgetStatus>, AdminError>;
 
     async fn version(&self, session_id: Option<&str>) -> Result<Option<SystemVersion>, AdminError>;
-
     async fn config(&self, session_id: Option<&str>)
     -> Result<Option<ClientKeySecret>, AdminError>;
 

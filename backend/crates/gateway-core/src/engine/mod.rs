@@ -8,11 +8,11 @@ pub mod client_retry;
 pub mod connection;
 pub mod continuation;
 pub mod coordinator;
+pub mod effects;
 pub mod execution;
 pub mod extensions;
 mod image_generation;
 pub mod middleware;
-pub mod nested;
 pub mod observation;
 pub mod policy;
 pub mod probe;
@@ -327,7 +327,7 @@ pub struct RequestAttemptContext {
     concurrency_wait_budget: crate::concurrency::ConcurrencyWaitBudget,
     connection_budget: connection::ConnectionBudget,
     request_policy: Option<policy::RequestPolicyContext>,
-    execution_effects: Option<Arc<nested::ExecutionEffects>>,
+    execution_effects: Option<Arc<effects::ExecutionEffects>>,
     middleware: Option<middleware::FrozenMiddlewarePlan>,
     upstream_adapters: Option<upstream_adapter::FrozenUpstreamAdapterPlan>,
     requested_model: Option<PublicModelId>,
@@ -502,7 +502,7 @@ impl RequestAttemptContext {
     #[must_use]
     pub fn with_execution_effects(
         mut self,
-        effects: Option<Arc<nested::ExecutionEffects>>,
+        effects: Option<Arc<effects::ExecutionEffects>>,
     ) -> Self {
         self.execution_effects = effects;
         self
@@ -617,7 +617,7 @@ impl AttemptContext {
     }
 
     #[must_use]
-    pub fn execution_effects(&self) -> Option<Arc<nested::ExecutionEffects>> {
+    pub fn execution_effects(&self) -> Option<Arc<effects::ExecutionEffects>> {
         self.request.execution_effects.as_ref().map(Arc::clone)
     }
 

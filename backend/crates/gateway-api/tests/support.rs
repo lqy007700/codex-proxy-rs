@@ -24,7 +24,6 @@ use gateway_core::{
 use serde_json::Value;
 
 pub(crate) const RAW_KEY: &str = "cpr_live_candidate_must_not_leak";
-
 pub(crate) async fn auth_app() -> (axum::Router, Arc<crate::admin::MemoryAuthStore>) {
     let fixture = key_fixture().await;
     (
@@ -95,7 +94,6 @@ impl SystemOperations for VersionSystem {
             build_time: "internal-build-time".to_owned(),
             deployment_mode: "binary".to_owned(),
             update_channel: "release".to_owned(),
-
             latest_version: "3.8.0".to_owned(),
             has_update: true,
             update_cached: true,
@@ -119,7 +117,6 @@ impl SystemOperations for VersionSystem {
         &self,
         _: Option<String>,
         _: Option<gateway_admin::model::system::SystemUpdateChannel>,
-        _: std::sync::Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
         _mode: gateway_admin::model::system::SystemUpdateMode,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
         unreachable!("client route must not perform updates")
@@ -129,17 +126,11 @@ impl SystemOperations for VersionSystem {
         unreachable!("client route must not request update status")
     }
 
-    async fn rollback(
-        &self,
-        _: std::sync::Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
-    ) -> Result<SystemOperationAccepted, SystemOperationError> {
+    async fn rollback(&self) -> Result<SystemOperationAccepted, SystemOperationError> {
         unreachable!("client route must not roll back")
     }
 
-    async fn restart(
-        &self,
-        _preflight: Arc<dyn gateway_admin::ports::system::SystemRestartPreflight>,
-    ) -> Result<SystemOperationAccepted, SystemOperationError> {
+    async fn restart(&self) -> Result<SystemOperationAccepted, SystemOperationError> {
         unreachable!("client route must not restart")
     }
 }

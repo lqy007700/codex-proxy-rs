@@ -108,7 +108,6 @@ impl RuntimeSettingsUpdate {
 #[async_trait]
 pub trait RuntimeSettingsRepository: Send + Sync {
     async fn load_runtime_settings(&self) -> StoreResult<RuntimeSettings>;
-
     async fn update_runtime_settings(&self, update: RuntimeSettingsUpdate)
     -> StoreResult<Revision>;
 }
@@ -229,7 +228,7 @@ impl ProviderRuntimePolicyPort for PgRuntimeSettingsRepository {
     > {
         Box::pin(async move {
             // 单条语句共享一个 MVCC 快照：先核对候选 revision，再只投影配置对象；
-            // Client Key 明文与其它策略字段不会进入插件准备边界
+            // 仅加载本用例所需的运行设置字段
             let rows = sqlx::query_as::<_, (i64, Option<sqlx::types::Json<serde_json::Value>>)>(
                 "select settings.config_revision, profiles.profile
                  from runtime_settings settings

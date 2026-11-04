@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use gateway_admin::model::{
     MutationContext,
-    client_keys::{ClientKeyBudgetMutationOrigin, ClientKeyBudgetPeriod, ResetClientKeyBudget},
+    client_keys::{ClientKeyBudgetPeriod, ResetClientKeyBudget},
 };
 use gateway_admin::ports::store::AdminStoreResult;
 use gateway_core::{
@@ -26,20 +26,14 @@ use crate::{StoreError, StoreResult, mutation_audit, postgres_unavailable};
 pub(super) async fn reset_client_key_budget(
     pool: &PgPool,
     command: ResetClientKeyBudget,
-    origin: ClientKeyBudgetMutationOrigin,
     context: &MutationContext,
 ) -> AdminStoreResult<()> {
-    let mut tx = match &origin {
-        ClientKeyBudgetMutationOrigin::Admin => pool.begin().await.map_err(|source| {
-            crate::admin_store_error(
-                "client API key budget",
-                postgres_unavailable("begin budget reset", source),
-            )
-        })?,
-        ClientKeyBudgetMutationOrigin::Plugin(owner) => {
-            super::plugins::begin_plugin_mutation(pool, owner).await?
-        }
-    };
+    let mut tx = pool.begin().await.map_err(|source| {
+        crate::admin_store_error(
+            "client API key budget",
+            postgres_unavailable("begin budget reset", source),
+        )
+    })?;
     reset_client_key_budget_in_transaction(&mut tx, &command, context)
         .await
         .map_err(|error| crate::admin_store_error("client API key budget", error))?;

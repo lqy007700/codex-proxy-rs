@@ -20,9 +20,8 @@ use gateway_admin::{
         provider_credentials::{
             AuthorizationCommit, AuthorizationCredentialCommit, CredentialDetails,
             CredentialImportCommit, CredentialImportResult, CredentialMutationResult,
-            CredentialRotationCommit, PluginAccountListQuery, PluginAccountPage,
-            PreparedCredentialCreate, PreparedCredentialImport, PreparedCredentialRotationFacts,
-            ProviderDocument, ProviderExportCredentialInput,
+            CredentialRotationCommit, PreparedCredentialCreate, PreparedCredentialImport,
+            PreparedCredentialRotationFacts, ProviderDocument, ProviderExportCredentialInput,
         },
     },
     ports::store::{AccountStore, AdminStoreError, AdminStoreErrorKind, AdminStoreResult},

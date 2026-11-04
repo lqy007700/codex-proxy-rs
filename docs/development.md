@@ -8,8 +8,7 @@
 | --- | --- |
 | 修改宿主前后端 | [环境与依赖](#环境与依赖) → [启动宿主](#启动宿主) |
 | 定位模块与共享实现 | [源码入口](#源码入口) |
-| 同时修改 UI 或插件 | [源码联调](#源码联调) → [启动与检查](#启动与检查) |
-| 验证本地 SDK | [本地 SDK 验证](#本地-sdk-验证) |
+| 同时修改 UI | [源码联调](#源码联调) → [启动与检查](#启动与检查) |
 | 提交跨仓库改动 | [编辑与提交](#编辑与提交) |
 | 维护个人版本与同步上游 | [main 分支维护](#main-分支维护) |
 
@@ -46,7 +45,7 @@ git config remote.pushDefault origin
 已发布 tag 不移动或覆盖，后续修复使用新版本
 
 首次发布前在 fork 的 Actions 页面启用工作流，并确认可以向本仓库写入 Release 与 GHCR 包。
-Release 工作流提供匹配版本的二进制、前端、插件合同清单、部署文件和校验和；
+Release 工作流提供匹配版本的二进制、前端、部署文件和校验和；
 自动安装与更新需要可公开下载的 Release 附件，无需登录拉取时还应将 GHCR 镜像包设为公开。
 只推送源码或 tag 不代表发行产物已经可用，须确认工作流完成和资源齐全
 
@@ -120,13 +119,12 @@ pnpm --dir frontend dev
 
 ## 源码联调
 
-宿主、组件库和官方插件保留独立仓库，通过 Git 子模块在同一目录开发：
+宿主和组件库保留独立仓库，通过 Git 子模块在同一目录开发：
 
 | 目录 | 仓库与职责 |
 | --- | --- |
 | `frontend` / `backend` | 宿主管理端与 Rust 网关 |
 | `modules/ui` | `codex-proxy-ui`，共用组件与主题 |
-| `modules/plugins` | `codex-proxy-plugins`，官方插件示例 |
 
 各仓库的常规 CI 验证自身代码和锁定依赖。源码模式用于按需联调，运行前确认所选版本或提交组合及其公开合同兼容
 
@@ -146,7 +144,6 @@ cd codex-proxy-rs
 ```bash
 pnpm --dir modules/ui install --frozen-lockfile
 pnpm --dir frontend install --frozen-lockfile
-pnpm --dir modules/plugins/examples/workbench/frontend install --frozen-lockfile
 ```
 
 ### 启动与检查
@@ -155,39 +152,18 @@ pnpm --dir modules/plugins/examples/workbench/frontend install --frozen-lockfile
 
 ```bash
 pnpm --dir frontend dev:source                            # 管理端，引用本地 UI
-pnpm --dir modules/plugins/examples/workbench/frontend dev:source  # 插件页面，引用本地 UI
 pnpm --dir modules/ui dev                                 # 组件库交互示例
 ```
 
-管理端需要[已启动的网关](#启动宿主)。插件独立预览的宿主桥使用模拟数据；已安装插件读取包内静态资源，修改后需重新构建、打包和安装
+管理端需要[已启动的网关](#启动宿主)
 
-`dev:source` 使用 Vite 的 `source` 模式，由 `@codex-proxy/ui/vite` 的 `CodexProxyUI` 适配器将公开入口解析到 `modules/ui`，并统一处理共享依赖、源码预构建排除与开发服务的文件访问范围。入口映射以 UI 包 `exports` 中的 `codex-proxy-source` 条件为准，由 Vite 热更新。插件单独检出时仍用普通 `dev`；`source` 模式需要上述子模块目录结构
+`dev:source` 使用 Vite 的 `source` 模式，由 `@codex-proxy/ui/vite` 的 `CodexProxyUI` 适配器将公开入口解析到 `modules/ui`，并统一处理共享依赖、源码预构建排除与开发服务的文件访问范围。入口映射以 UI 包 `exports` 中的 `codex-proxy-source` 条件为准，由 Vite 热更新。`source` 模式需要上述子模块目录结构
 
 ```bash
 pnpm --dir frontend build:source
-pnpm --dir modules/plugins/examples/workbench/frontend build:source
 ```
 
-`build:source` 用各项目的 `tsconfig.source.json` 检查源码类型，管理端构建到 `frontend/node_modules/.vite/source-dist`，示例构建到其前端项目的 `.vite/source-dist`，不改写正式依赖、锁文件或 `dist`。
-
-### 本地 SDK 验证
-
-插件正式 SDK 依赖仍由其 Cargo 锁文件固定。需要验证尚未发布的 SDK 修改时，在临时副本运行 Cargo patch，避免改写插件锁文件。以下命令从宿主根目录执行：
-
-```bash
-(
-  set -e
-  cpr_sdk_check_dir=$(mktemp -d)
-  trap 'rm -rf "$cpr_sdk_check_dir"' EXIT
-  mkdir "$cpr_sdk_check_dir/backend"
-  cp modules/plugins/examples/workbench/backend/Cargo.{toml,lock} "$cpr_sdk_check_dir/backend/"
-  cp -R modules/plugins/examples/workbench/backend/{src,tests} "$cpr_sdk_check_dir/backend/"
-  cp modules/plugins/examples/workbench/plugin.json "$cpr_sdk_check_dir/"
-  RUST_MIN_STACK=16777216 CARGO_TARGET_DIR="$PWD/backend/target/plugin-development" \
-    cargo +1.99.1 test --manifest-path "$cpr_sdk_check_dir/backend/Cargo.toml" \
-    --config "patch.\"https://github.com/zyycn/codex-proxy-rs.git\".gateway-plugin-sdk.path=\"$PWD/backend/crates/gateway-plugin/sdk\""
-)
-```
+`build:source` 用 `tsconfig.source.json` 检查源码类型，管理端构建到 `frontend/node_modules/.vite/source-dist`，不改写正式依赖、锁文件或 `dist`
 
 ## 编辑与提交
 
@@ -195,8 +171,8 @@ pnpm --dir modules/plugins/examples/workbench/frontend build:source
 
 1. 在要修改的子模块内先创建分支，例如 `git -C modules/ui switch -c feat/select`。初次初始化的子模块通常处于 detached HEAD
 2. 在子模块运行自身检查，并在宿主根目录运行所需联调检查
-3. 分别提交、推送并合并组件库或插件 PR。宿主只记录子模块提交号，不能替代子仓库的提交与推送
-4. 管理端与插件页面按需升级 UI 依赖，各自固定标签或提交并维护锁文件，无需与 `modules/ui` 同步版本
-5. 提交宿主改动及 `modules/ui`、`modules/plugins` 指针。指针必须指向远程可取得的提交，不能只存在于开发机
+3. 分别提交、推送并合并组件库 PR。宿主只记录子模块提交号，不能替代子仓库的提交与推送
+4. 管理端按需升级 UI 依赖，并固定标签或提交并维护锁文件，无需与 `modules/ui` 同步版本
+5. 提交宿主改动及 `modules/ui` 指针。指针必须指向远程可取得的提交，不能只存在于开发机
 
-更新子模块指针不会自动升级消费方依赖。正式依赖不能写成开发机路径或浮动分支；SDK 仍由插件仓库固定到包含所需合同的宿主提交
+更新子模块指针不会自动升级消费方依赖。正式依赖不能写成开发机路径或浮动分支

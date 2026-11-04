@@ -43,14 +43,6 @@ async fn inspection_bundle_does_not_migrate_and_rejects_business_writes() {
     let inspection = gateway_store::initialize_read_only(config.clone())
         .await
         .unwrap();
-    assert!(
-        inspection
-            .admin_ports()
-            .plugins()
-            .load_instances()
-            .await
-            .is_err()
-    );
     let tables: i64 =
         sqlx::query_scalar("select count(*) from information_schema.tables where table_schema=$1")
             .bind(&schema)

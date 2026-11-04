@@ -5,11 +5,11 @@ use crate::{
         CoordinatedEvent, EngineError, ModelRequestId,
         authentication::ClientAuthenticationRequest,
         continuation::PreviousResponseId,
+        effects::ExecutionEffects,
         extensions::ExtensionCallScope,
         middleware::{
             FrozenMiddlewarePlan, MiddlewareAuthority, MiddlewareContext, MiddlewareTarget,
         },
-        nested::ExecutionEffects,
     },
     error::{GatewayError, GatewayErrorKind},
     event::{ProviderEvent, ProviderResponseHeader},
@@ -37,7 +37,6 @@ pub enum ClientTransport {
     HttpSse,
     WebSocket,
     InternalProbe,
-    InternalPlugin,
 }
 
 impl ClientTransport {
@@ -48,7 +47,6 @@ impl ClientTransport {
             Self::HttpSse => "http_sse",
             Self::WebSocket => "websocket",
             Self::InternalProbe => "internal",
-            Self::InternalPlugin => "internal_plugin",
         }
     }
 }
@@ -63,22 +61,6 @@ pub struct ExecutionRequestMetadata {
     pub client_ip: Option<IpAddr>,
     pub user_agent: Option<String>,
     pub previous_response_id: Option<PreviousResponseId>,
-}
-
-impl ExecutionRequestMetadata {
-    pub(super) fn inherit_request_origin(&mut self, scope: &ExtensionCallScope) {
-        let Some(request) = scope.request() else {
-            return;
-        };
-        // 执行入口可以是内部调用，客户端来源仍属于原始入口快照
-        self.client_ip = request.client_ip;
-        self.user_agent = request
-            .headers
-            .iter()
-            .find(|header| header.name().eq_ignore_ascii_case("user-agent"))
-            .and_then(|header| std::str::from_utf8(header.value()).ok())
-            .map(str::to_owned);
-    }
 }
 
 #[derive(Clone)]
@@ -400,20 +382,6 @@ pub trait ExecutionService: Send + Sync {
         client: AuthenticatedClient,
     ) -> BoxFuture<'_, Result<PreparedRootExecution, GatewayError>> {
         Box::pin(async move { PreparedRootExecution::new(client) })
-    }
-
-    /// 由已经验证管理会话与插件 models 域的宿主入口选择 Key
-    /// 不向页面提供明文，也不跳过普通请求的扩展、准入和计量
-    fn prepare_plugin_execution(
-        &self,
-        _client_key_id: &ClientApiKeyId,
-    ) -> BoxFuture<'_, Result<PreparedRootExecution, GatewayError>> {
-        Box::pin(async {
-            Err(GatewayError::new(
-                GatewayErrorKind::Unauthorized,
-                "Plugin model entry is unavailable.",
-            ))
-        })
     }
 
     /// 为已经通过 `verify_request` 的只读入口建立中间件生命周期，不重复写 Key 使用事实

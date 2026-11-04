@@ -59,7 +59,7 @@ pub struct RuntimeSettingsValues {
     pub openai_account_affinity: gateway_core::account::AccountAffinity,
     pub max_account_rotations: u32,
     pub recovery_attempts: u32,
-    /// 旧插件设置服务保持原 wire；省略时由持久层保留当前业务换号预算
+    /// 省略时由持久层保留当前业务换号预算
     #[serde(default, skip_serializing)]
     pub recovery_rotation_attempts: Option<u32>,
     pub openai_session_affinity_ttl_hours: u32,
@@ -109,7 +109,6 @@ pub struct ReplaceRuntimeSettings {
 #[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct AdminApiKey(String);
-
 impl AdminApiKey {
     #[must_use]
     pub fn new(value: impl Into<String>) -> Self {

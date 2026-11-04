@@ -22,9 +22,9 @@ use crate::model::{
     },
     auth::{AdminAuditEvent, AuthSession},
     client_keys::{
-        ClientKeyBudgetMutationOrigin, ClientKeyListQuery, ClientKeyPage, ClientKeyRecord,
-        ClientKeySecret, DeleteClientKey, NewClientKey, ResetClientKeyBudget, SetClientKeyEnabled,
-        UpdateClientKey, UpdateClientKeyBudgetLimits,
+        ClientKeyListQuery, ClientKeyPage, ClientKeyRecord, ClientKeySecret, DeleteClientKey,
+        NewClientKey, ResetClientKeyBudget, SetClientKeyEnabled, UpdateClientKey,
+        UpdateClientKeyBudgetLimits,
     },
     observability::{
         DashboardObservation, DashboardQuery, DiagnosticDimension, DiagnosticsObservation,
@@ -34,8 +34,7 @@ use crate::model::{
     },
     provider_credentials::{
         AuthorizationCommit, CredentialDetails, CredentialImportCommit, CredentialImportResult,
-        CredentialMutationResult, CredentialRotationCommit, PluginAccountListQuery,
-        PluginAccountPage, ProviderExportCredentialInput,
+        CredentialMutationResult, CredentialRotationCommit, ProviderExportCredentialInput,
     },
     quota_forecast_sampling::QuotaForecastHistory,
     settings::{AdminApiKey, AdminApiKeyMutation, ReplaceRuntimeSettings, RuntimeSettings},
@@ -112,12 +111,6 @@ pub type AdminStoreResult<T> = Result<T, AdminStoreError>;
 pub trait AccountStore:
     super::reset_credit_automation::ResetCreditAutomationStore + Send + Sync
 {
-    /// 插件回调按授权 Provider/账号在数据库过滤后做稳定 cursor 分页
-    async fn list_plugin_accounts(
-        &self,
-        query: PluginAccountListQuery,
-    ) -> AdminStoreResult<PluginAccountPage>;
-
     async fn list_accounts(
         &self,
         query: AccountListQuery,
@@ -131,7 +124,6 @@ pub trait AccountStore:
     ) -> AdminStoreResult<Option<AccountPageItem>>;
 
     async fn account_exists(&self, account_id: &str) -> AdminStoreResult<bool>;
-
     /// 只读取账号记录，不加载运行配置、分组或额度展示
     async fn load_account_record(
         &self,
@@ -161,7 +153,7 @@ pub trait AccountStore:
         account_id: &gateway_core::account::ProviderAccountId,
     ) -> AdminStoreResult<Option<CredentialDetails>>;
 
-    /// 插件按全局账号 ID 读取时，由数据库记录提供权威 Provider 归属
+    /// 按全局账号 ID 读取时，由数据库记录提供权威 Provider 归属
     async fn credential_details_by_id(
         &self,
         account_id: &gateway_core::account::ProviderAccountId,
@@ -172,12 +164,6 @@ pub trait AccountStore:
         provider_kind: &gateway_core::routing::ProviderKind,
         account_ids: &[gateway_core::account::ProviderAccountId],
     ) -> AdminStoreResult<Vec<ProviderExportCredentialInput>>;
-
-    /// 插件凭据读取只接收账号 ID，不接受调用方另行声明 Provider
-    async fn load_credential_for_plugin(
-        &self,
-        account_id: &gateway_core::account::ProviderAccountId,
-    ) -> AdminStoreResult<Option<ProviderExportCredentialInput>>;
 
     async fn commit_credential_import(
         &self,
@@ -251,7 +237,6 @@ pub trait AccountRuntimeStore: Send + Sync {
     ) -> AdminStoreResult<crate::model::accounts::AccountConcurrencyPage>;
 
     async fn active_rate_limits(&self) -> AdminStoreResult<AccountRuntimeSnapshot>;
-
     async fn account_runtime(
         &self,
         account_ids: &[String],
@@ -283,7 +268,6 @@ pub trait AccountRuntimeStore: Send + Sync {
 #[async_trait]
 pub trait AuthStore: Send + Sync {
     async fn load_password_hash(&self, admin_user_id: &str) -> AdminStoreResult<Option<String>>;
-
     /// 密码更新与审计必须在同一事务提交；旧哈希不匹配时不写入
     async fn change_password(
         &self,
@@ -300,11 +284,8 @@ pub trait AuthStore: Send + Sync {
     ) -> AdminStoreResult<bool>;
 
     async fn load_admin_api_key(&self) -> AdminStoreResult<Option<AdminApiKey>>;
-
     async fn load_session(&self, session_id: &str) -> AdminStoreResult<Option<AuthSession>>;
-
     async fn store_session(&self, session_id: &str, session: &AuthSession) -> AdminStoreResult<()>;
-
     /// 原子替换或撤销仍匹配的会话并返回当前值；过期或退出后不重新创建
     async fn compare_exchange_session(
         &self,
@@ -314,7 +295,6 @@ pub trait AuthStore: Send + Sync {
     ) -> AdminStoreResult<Option<AuthSession>>;
 
     async fn delete_session(&self, session_id: &str) -> AdminStoreResult<Option<AuthSession>>;
-
     async fn client_key_enabled(
         &self,
         id: &gateway_core::policy::ClientApiKeyId,
@@ -342,7 +322,6 @@ pub trait ClientKeyStore: Send + Sync {
     ) -> AdminStoreResult<Option<ClientKeyRecord>>;
 
     async fn list_client_keys(&self, query: ClientKeyListQuery) -> AdminStoreResult<ClientKeyPage>;
-
     async fn reveal_client_key(
         &self,
         id: &gateway_core::policy::ClientApiKeyId,
@@ -353,19 +332,16 @@ pub trait ClientKeyStore: Send + Sync {
         command: NewClientKey,
         context: &MutationContext,
     ) -> AdminStoreResult<(Revision, ClientKeyRecord)>;
-
     async fn update_client_key(
         &self,
         command: UpdateClientKey,
         context: &MutationContext,
     ) -> AdminStoreResult<(Revision, ClientKeyRecord)>;
-
     async fn set_client_key_enabled(
         &self,
         command: SetClientKeyEnabled,
         context: &MutationContext,
     ) -> AdminStoreResult<(Revision, ClientKeyRecord)>;
-
     async fn delete_client_key(
         &self,
         command: DeleteClientKey,
@@ -376,7 +352,6 @@ pub trait ClientKeyStore: Send + Sync {
     async fn update_client_key_budget_limits(
         &self,
         command: UpdateClientKeyBudgetLimits,
-        origin: ClientKeyBudgetMutationOrigin,
         context: &MutationContext,
     ) -> AdminStoreResult<Option<Revision>>;
 
@@ -384,7 +359,6 @@ pub trait ClientKeyStore: Send + Sync {
     async fn reset_client_key_budget(
         &self,
         command: ResetClientKeyBudget,
-        origin: ClientKeyBudgetMutationOrigin,
         context: &MutationContext,
     ) -> AdminStoreResult<()>;
 }
@@ -445,10 +419,8 @@ pub trait UsageBillingProjector: Send + Sync {
 pub trait ObservabilityStore: Send + Sync {
     /// 读取实现声明的总预算，缓存等待沿用同一配置，避免外层提前截断
     fn query_timeout(&self) -> std::time::Duration;
-
     /// 缓存必须与删除和后台投影提交的版本一致
     async fn analytics_cache_generation(&self) -> AdminStoreResult<u64>;
-
     /// 返回历史统计区间和指定观测时刻下的实时账号状态
     async fn dashboard_summary(
         &self,
@@ -478,9 +450,7 @@ pub trait ObservabilityStore: Send + Sync {
     ) -> AdminStoreResult<UsageInsightsObservation>;
 
     async fn list_usage_records(&self, query: UsageQuery) -> AdminStoreResult<UsagePage>;
-
     async fn usage_record_detail(&self, request_id: &str) -> AdminStoreResult<UsageDetail>;
-
     async fn usage_summary(
         &self,
         range: TimeRange,
@@ -496,7 +466,6 @@ pub trait ObservabilityStore: Send + Sync {
     ) -> AdminStoreResult<DiagnosticsObservation>;
 
     async fn list_ops_errors(&self, query: OpsErrorQuery) -> AdminStoreResult<OpsErrorPage>;
-
     /// 按精确目标读取受控错误，不受列表时间窗口与当前页面影响
     async fn diagnostic_errors(
         &self,
@@ -521,9 +490,7 @@ pub trait SettingsStore: Send + Sync {
     ) -> AdminStoreResult<crate::model::Revision>;
 
     async fn load_runtime_settings(&self) -> AdminStoreResult<RuntimeSettings>;
-
     async fn admin_api_key_exists(&self) -> AdminStoreResult<bool>;
-
     async fn replace_runtime_settings(
         &self,
         command: ReplaceRuntimeSettings,
@@ -581,9 +548,6 @@ pub struct AdminStorePorts {
     observability: Arc<dyn ObservabilityStore>,
     settings: Arc<dyn SettingsStore>,
     backup: BackupStorePorts,
-    plugins: Arc<dyn super::plugins::PluginStore>,
-    plugin_state: Arc<dyn super::plugins::PluginStateStore>,
-    plugin_resources: Arc<dyn super::plugin_resources::PluginResourceStore>,
     usage_data: Arc<dyn super::usage_data::UsageDataStore>,
     alerts: Arc<dyn super::alerts::AlertRepository>,
 }
@@ -605,21 +569,6 @@ impl AdminStorePorts {
         self.usage_data.clone()
     }
 
-    #[must_use]
-    pub fn plugin_resources(&self) -> Arc<dyn super::plugin_resources::PluginResourceStore> {
-        self.plugin_resources.clone()
-    }
-
-    #[must_use]
-    pub fn plugins(&self) -> Arc<dyn super::plugins::PluginStore> {
-        Arc::clone(&self.plugins)
-    }
-
-    #[must_use]
-    pub fn plugin_state(&self) -> Arc<dyn super::plugins::PluginStateStore> {
-        Arc::clone(&self.plugin_state)
-    }
-
     #[expect(
         clippy::too_many_arguments,
         reason = "组合根需显式注入各领域窄端口，不能用服务定位器隐藏依赖"
@@ -632,9 +581,6 @@ impl AdminStorePorts {
         observability: Arc<dyn ObservabilityStore>,
         settings: Arc<dyn SettingsStore>,
         backup: BackupStorePorts,
-        plugins: Arc<dyn super::plugins::PluginStore>,
-        plugin_state: Arc<dyn super::plugins::PluginStateStore>,
-        plugin_resources: Arc<dyn super::plugin_resources::PluginResourceStore>,
         usage_data: Arc<dyn super::usage_data::UsageDataStore>,
         alerts: Arc<dyn super::alerts::AlertRepository>,
     ) -> Self {
@@ -646,9 +592,6 @@ impl AdminStorePorts {
             observability,
             settings,
             backup,
-            plugins,
-            plugin_state,
-            plugin_resources,
             usage_data,
             alerts,
         }

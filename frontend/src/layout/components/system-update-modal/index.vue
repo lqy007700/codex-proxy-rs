@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SystemRestartPlan, SystemUpdateChannel, SystemUpdateDetail } from '@/api'
+import type { SystemUpdateChannel, SystemUpdateDetail } from '@/api'
 import { ZButton, ZConfirmDialog, ZDialog, ZMarkdown, ZPopover, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
 import {
   ArrowUpCircle,
@@ -11,12 +11,10 @@ import {
   Power,
   RefreshCw,
   Terminal,
-  TriangleAlert,
 } from '@lucide/vue'
 
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
-import { checkSystemRestart } from '@/api'
 import { normalizeSystemVersion, useSystemUpdateStore } from '@/stores/modules/system-update'
 import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
@@ -60,8 +58,6 @@ const updateConfirmInfo = shallowRef<SystemUpdateDetail | null>(null)
 const updateConfirmPreviousTarget = shallowRef('')
 const preparingUpdate = shallowRef(false)
 const checkingRestart = shallowRef(false)
-const restartConfirmOpen = shallowRef(false)
-const restartPlan = shallowRef<SystemRestartPlan | null>(null)
 
 const presentation = computed(() => resolveSystemUpdatePresentation({
   version: version.value,
@@ -232,12 +228,7 @@ async function handleRestart() {
   try {
     if (!updateInfo.value)
       throw new Error('请等待系统更新信息加载完成')
-    restartPlan.value = await checkSystemRestart()
-    if (restartPlan.value.incompatiblePlugins.length) {
-      restartConfirmOpen.value = true
-      return
-    }
-    await restartNow(restartPlan.value)
+    await restartNow()
   }
   catch (error: unknown) {
     ZNotification.error({
@@ -246,21 +237,6 @@ async function handleRestart() {
   }
   finally {
     checkingRestart.value = false
-  }
-}
-
-async function handleConfirmRestart() {
-  if (!restartPlan.value)
-    return
-  try {
-    await restartNow(restartPlan.value)
-    restartConfirmOpen.value = false
-  }
-  catch (error: unknown) {
-    restartConfirmOpen.value = false
-    ZNotification.error({
-      message: errorMessage(error, '重启失败，请重新检查'),
-    })
   }
 }
 
@@ -526,7 +502,7 @@ watch(
         v-if="needRestart"
         type="primary"
         :loading="restarting || checkingRestart"
-        :disabled="loading || updating || restartConfirmOpen"
+        :disabled="loading || updating"
         @click="handleRestart"
       >
         <template #icon>
@@ -559,31 +535,6 @@ watch(
     @refresh="refreshDowngradeVersions"
     @confirm="handleDowngrade"
   />
-
-  <ZConfirmDialog
-    v-model="restartConfirmOpen"
-    title="插件兼容性提醒"
-    description="重启后保留启用配置，逐个尝试启动插件"
-    confirm-text="继续重启"
-    :loading="restarting"
-    @confirm="handleConfirmRestart"
-  >
-    <div class="grid gap-4">
-      <div v-if="restartPlan?.targetVersion" class="flex items-center justify-between gap-3 text-cp-sm">
-        <span class="text-cp-text-secondary">重启后版本</span>
-        <span class="font-mono font-emphasis text-cp-text">v{{ restartPlan.targetVersion }}</span>
-      </div>
-      <ul class="m-0 max-h-64 list-none overflow-y-auto p-0" aria-label="不兼容插件">
-        <li v-for="plugin in restartPlan?.incompatiblePlugins" :key="plugin.instanceId" class="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
-          <TriangleAlert class="mt-0.5 size-4 shrink-0 text-cp-warning" aria-hidden="true" />
-          <div class="grid min-w-0 gap-1">
-            <strong class="wrap-anywhere text-cp-sm font-heavy text-cp-text">{{ plugin.name }}</strong>
-            <span class="wrap-anywhere text-cp-xs leading-relaxed font-normal text-cp-text-secondary">{{ plugin.reason }}</span>
-          </div>
-        </li>
-      </ul>
-    </div>
-  </ZConfirmDialog>
 
   <ZConfirmDialog
     v-model="updateConfirmOpen"

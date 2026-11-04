@@ -122,20 +122,15 @@ module ReleaseMetadata
     }
   end
 
-  def self.seal_manifest(metadata)
-    path = 'backend/crates/gateway-plugin/runtime/plugin-host-compatibility.json'
-    host = JSON.parse(File.read(path))
-    raise "Invalid plugin host compatibility declaration: #{path}" unless host['schema_version'] == 2
+  def self.write_identity(metadata)
     manifest = {
       'schema_version' => 1,
       'sealed' => true,
       'gateway_version' => metadata.fetch('version'),
       'gateway_git_sha' => metadata.fetch('git_sha'),
-      'plugin_host' => host,
-      'plugins' => []
     }
-    FileUtils.mkdir_p('dist/plugin-release-assets')
-    File.write('dist/plugin-release-assets/plugin-release-manifest.json', JSON.pretty_generate(manifest) + "\n")
+    FileUtils.mkdir_p('dist/release-identity')
+    File.write('dist/release-identity/release-manifest.json', JSON.pretty_generate(manifest) + "\n")
   end
 end
 
@@ -150,7 +145,7 @@ if $PROGRAM_NAME == __FILE__
       puts value
     when 'outputs'
       metadata = ReleaseMetadata.outputs(value)
-      ReleaseMetadata.seal_manifest(metadata)
+      ReleaseMetadata.write_identity(metadata)
       metadata.each { |key, entry| puts "#{key}=#{entry}" }
     else
       raise "Unknown command: #{command}"

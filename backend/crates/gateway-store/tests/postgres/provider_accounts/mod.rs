@@ -26,8 +26,8 @@ use gateway_admin::{
         observability::TimeRange,
         provider_credentials::{
             AuthorizationCommit, AuthorizationCredentialCommit, AuthorizationMutationTarget,
-            AuthorizationOwnerBinding, PendingAuthorizationMutation, PluginAccountListQuery,
-            PreparedCredentialCreate, ProviderDocument,
+            AuthorizationOwnerBinding, PendingAuthorizationMutation, PreparedCredentialCreate,
+            ProviderDocument,
         },
     },
     ports::store::AccountStore,
@@ -140,7 +140,6 @@ async fn refresh_candidates_should_filter_order_and_bound_in_one_query() {
         .list_refresh_candidates(query)
         .await
         .expect("load bounded refresh candidates");
-
     assert_eq!(
         candidates
             .iter()
@@ -171,7 +170,6 @@ async fn provider_account_should_allow_missing_upstream_user_id() {
         .insert_provider_account(pending)
         .await
         .expect("insert account without upstream identity");
-
     let stored = repository
         .load_provider_account("acct_pending_identity")
         .await
@@ -231,7 +229,6 @@ async fn core_quota_batch_reads_only_observed_accounts_in_one_contract_call() {
         .await
         .expect("read quota batch");
     observations.sort_by(|left, right| left.account_id.cmp(&right.account_id));
-
     assert_eq!(observations.len(), 2);
     assert_eq!(observations[0].account_id.as_str(), "acct_quota_a");
     assert_eq!(observations[0].expected_revision, revision);
@@ -304,7 +301,6 @@ async fn quota_observation_touch_preserves_quota_state_and_advances_account_upda
     .fetch_one(&database.pool)
     .await
     .expect("load account update time before quota touch");
-
     assert_eq!(
         repository
             .touch_quota_observation(QuotaObservationTouch {
@@ -356,7 +352,6 @@ async fn quota_observation_touch_preserves_quota_state_and_advances_account_upda
         chrono::DateTime::<Utc>::from(touched_at).timestamp_micros()
     );
     assert!(stored.6 > account_updated_at);
-
     database.close().await;
 }
 
@@ -378,7 +373,6 @@ async fn delayed_provider_observations_cannot_overwrite_newer_state_or_quota() {
     let older = newer
         .checked_sub(Duration::from_secs(30))
         .expect("older observation time");
-
     let quota = |marker: &str, observed_at| QuotaObservation {
         plan_type: Some(if marker == "newer" { "pro" } else { "plus" }.to_owned()),
         account_id: account_id.clone(),
@@ -447,7 +441,6 @@ async fn delayed_provider_observations_cannot_overwrite_newer_state_or_quota() {
         .pop()
         .expect("fenced quota");
     assert_eq!(observed.quota.expose_to_provider()["marker"], "newer");
-
     database.close().await;
 }
 
@@ -483,7 +476,6 @@ async fn quota_plan_changes_survive_inflight_background_and_manual_token_refresh
     assert_eq!(upgraded.plan_type(), Some("pro"));
     assert_eq!(upgraded.revision(), original.revision());
     assert_eq!(current_revision(&database.pool).await, config_revision);
-
     // 刷新在额度更新前已准备好旧资料，CAS 提交仍须保留数据库中的新套餐
     let refresh = CredentialCasUpdate::new(
         id.clone(),
@@ -585,7 +577,6 @@ async fn credential_error_message_is_persisted_and_cleared_on_recovery() {
         .await
         .expect("insert state message fixture");
     let revision = CredentialRevision::new(1).expect("revision");
-
     repository
         .apply_state_change(AccountStateChange {
             message: Some("upstream returned 402 payment required".to_owned()),
@@ -628,7 +619,6 @@ async fn credential_error_message_is_persisted_and_cleared_on_recovery() {
     .expect("read recoverable refresh failure");
     assert_eq!(recoverable.0.as_deref(), Some("access_token_expired"));
     assert_eq!(recoverable.1.as_deref(), Some("Invalid refresh token."));
-
     repository
         .apply_state_change(AccountStateChange {
             message: None,
@@ -647,7 +637,6 @@ async fn credential_error_message_is_persisted_and_cleared_on_recovery() {
             .await
             .expect("read cleared error message");
     assert_eq!(cleared, None);
-
     database.close().await;
 }
 
@@ -658,7 +647,6 @@ async fn terminal_admin_list_filters_and_sorts_before_pagination_with_retained_u
     };
     let repository = PgProviderAccountRepository::new(database.pool.clone());
     let now = Utc::now();
-
     let mut alpha = account("acct_alpha", "user-alpha");
     alpha.email = Some("alpha@example.invalid".to_owned());
     let mut beta = account("acct_beta", "user-beta");
@@ -749,7 +737,6 @@ async fn terminal_admin_list_filters_and_sorts_before_pagination_with_retained_u
     )
     .await
     .expect("seed charlie usage");
-
     let store = admin_account_store(&database.pool);
     let usage_page = store
         .list_accounts(
@@ -840,7 +827,6 @@ async fn terminal_admin_list_filters_and_sorts_before_pagination_with_retained_u
     assert_eq!(filtered.summary, usage_page.summary);
     assert_eq!(filtered.items[0].account.id, "acct_alpha");
     assert_eq!(filtered.items[0].account.provider_kind.as_str(), "openai");
-
     let rate_limited = store
         .list_accounts(
             AccountListQuery {
@@ -867,7 +853,6 @@ async fn terminal_admin_list_filters_and_sorts_before_pagination_with_retained_u
     assert_eq!(rate_limited.items[0].account.id, "acct_alpha");
     assert_eq!(rate_limited.summary.rate_limited, 1);
     assert_eq!(rate_limited.summary.normal, 0);
-
     let email_domain_page = store
         .list_accounts(
             AccountListQuery {
@@ -886,7 +871,6 @@ async fn terminal_admin_list_filters_and_sorts_before_pagination_with_retained_u
     assert_eq!(email_domain_page.total, 6);
     assert_eq!(email_domain_page.items.len(), 2);
     assert_eq!(email_domain_page.summary, usage_page.summary);
-
     let error_accounts = store
         .list_accounts(
             AccountListQuery {
@@ -935,7 +919,6 @@ async fn terminal_admin_usage_chunks_large_selections_and_preserves_exact_costs(
     .expect("seed exact usage request");
     let mut account_ids = vec!["acct_usage_exact".to_owned()];
     account_ids.extend((0..200).map(|index| format!("missing_account_{index}")));
-
     super::drain_analytics(&database.pool).await;
     let usage = admin_account_store(&database.pool)
         .load_account_usage(
@@ -966,7 +949,6 @@ async fn terminal_admin_usage_chunks_large_selections_and_preserves_exact_costs(
     assert_eq!(usage[0].models.len(), 1);
     assert_eq!(usage[0].models[0].model, "gpt-exact");
     assert_eq!(usage[0].models[0].costs[0].amount.as_str(), "1.2345678901");
-
     database.close().await;
 }
 
@@ -1028,7 +1010,6 @@ async fn terminal_admin_quota_window_usage_prefers_provider_total_and_falls_back
     .execute(&database.pool)
     .await
     .expect("separate provider total from fallback components");
-
     let mut usage = admin_account_store(&database.pool)
         .load_account_usage_by_windows(&[
             AccountUsageWindowQuery {
@@ -1051,7 +1032,6 @@ async fn terminal_admin_quota_window_usage_prefers_provider_total_and_falls_back
         .await
         .expect("load quota window usage");
     usage.sort_by(|left, right| left.key.cmp(&right.key));
-
     assert_eq!(usage[0].key, "long");
     assert_eq!(usage[0].usage.total_tokens, Some(720));
     assert_eq!(usage[0].usage.models.len(), 2);
@@ -1080,7 +1060,6 @@ async fn terminal_admin_quota_window_usage_prefers_provider_total_and_falls_back
     assert_eq!(usage[1].usage.models.len(), 1);
     assert_eq!(usage[1].usage.models[0].model, "gpt-window-recent");
     assert_eq!(usage[1].usage.models[0].total_tokens, Some(700));
-
     database.close().await;
 }
 
@@ -1135,7 +1114,6 @@ async fn terminal_admin_quota_window_usage_should_include_only_statusless_websoc
     .execute(&database.pool)
     .await
     .expect("make quota window requests statusless");
-
     let usage = admin_account_store(&database.pool)
         .load_account_usage_by_windows(&[AccountUsageWindowQuery {
             account_id: "acct_quota_window_websocket".to_owned(),
@@ -1147,7 +1125,6 @@ async fn terminal_admin_quota_window_usage_should_include_only_statusless_websoc
         }])
         .await
         .expect("load statusless quota window usage");
-
     assert_eq!(
         (
             usage[0].usage.request_count,
@@ -1203,7 +1180,6 @@ async fn terminal_admin_mutations_keep_revision_account_and_audit_atomic() {
     .await
     .expect("read disabled state");
     assert!(!enabled);
-
     let revision = store
         .delete_accounts(
             DeleteAccounts {
@@ -1368,7 +1344,6 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
             .await
             .unwrap();
     assert!(changed_fields.iter().any(|field| field == "notes"));
-
     store
         .update_account(
             UpdateAccount {
@@ -1620,7 +1595,6 @@ async fn account_enable_preserves_facts_and_explicit_recovery_clears_them() {
         .fetch_one(&database.pool)
         .await
         .expect("load disabled account facts");
-
     let enabled = store
         .batch_update_accounts(
             BatchUpdateAccounts {
@@ -1642,7 +1616,6 @@ async fn account_enable_preserves_facts_and_explicit_recovery_clears_them() {
         )
         .await
         .expect("enable account scheduling");
-
     assert_eq!(enabled.config_revision.get(), 2);
     assert!(
         repository
@@ -1679,7 +1652,6 @@ async fn account_enable_preserves_facts_and_explicit_recovery_clears_them() {
         )
         .await
         .expect("recover account");
-
     assert_eq!(result.config_revision.get(), 3);
     let current = sqlx::query_as::<_, RecoveredAccountRow>(
         "select enabled, credential_state, quota_access_state, quota_evidence,
@@ -1766,7 +1738,6 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
         )
         .await
         .expect("batch update accounts");
-
     assert_eq!(result.config_revision.get(), 2);
     assert_eq!(result.account_ids.len(), 2);
     let scheduling: Vec<(bool, Option<i64>, i16)> = sqlx::query_as(
@@ -1785,7 +1756,6 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
         );
     }
     assert_eq!(audit_count(&database.pool, &context.request_id).await, 1);
-
     let revision_before_failure = current_revision(&database.pool).await;
     let audit_before_failure = audit_count(&database.pool, &context.request_id).await;
     store
@@ -1809,7 +1779,6 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
         )
         .await
         .expect_err("missing group must roll back the batch");
-
     assert_eq!(
         current_revision(&database.pool).await,
         revision_before_failure
@@ -1868,7 +1837,6 @@ async fn terminal_admin_delete_removes_enabled_accounts_in_one_transaction() {
         )
         .await
         .expect("delete enabled account atomically");
-
     assert_eq!(revision.get(), 2);
     assert_eq!(
         account_count(&database.pool, "acct_enabled_delete_a").await
@@ -1906,7 +1874,6 @@ async fn admin_import_updates_the_same_verified_identity_without_rebinding_it() 
     .execute(&database.pool)
     .await
     .expect("seed stale quota");
-
     let mut updated = account("acct_admin_reimport", "user-admin-upsert");
     updated.name = "updated import".to_owned();
     updated.provider_credentials_json = credential_json("updated-import-secret");
@@ -1946,7 +1913,6 @@ async fn admin_import_updates_the_same_verified_identity_without_rebinding_it() 
         "credential replacement must clear stale quota"
     );
     assert_eq!(row.4, "banned");
-
     repository
         .import_provider_accounts(ImportProviderAccounts {
             settings: None,
@@ -1958,7 +1924,6 @@ async fn admin_import_updates_the_same_verified_identity_without_rebinding_it() 
         .await
         .expect_err("an existing account ID must not be rebound");
     assert_eq!(current_revision(&database.pool).await, 3);
-
     database.close().await;
 }
 
@@ -2039,7 +2004,6 @@ async fn authorization_create_returns_existing_account_id_when_identity_is_upser
         )
         .await
         .expect("authorize existing identity");
-
     let result = result.result;
 
     assert_eq!(
@@ -2220,7 +2184,6 @@ async fn core_refresh_cas_updates_profile_and_credential_under_one_revision() {
     .execute(&database.pool)
     .await
     .expect("seed refresh failure details");
-
     let account_id = ProviderAccountId::new("acct_core_refresh").expect("account ID");
     let quota_observed_at = SystemTime::now();
     let quota_reset_at = quota_observed_at
@@ -2398,7 +2361,6 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
             .await
             .expect("load cooldown imported account");
     assert_eq!(second, (true, "ready".to_owned()));
-
     repository
         .import_provider_accounts(ImportProviderAccounts {
             settings: None,
@@ -2444,7 +2406,6 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
         }
     ));
     assert_eq!(current_revision(&database.pool).await, 2);
-
     sqlx::query(
         "update provider_accounts
          set credential_state = 'expired'
@@ -2454,7 +2415,6 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
     .execute(&database.pool)
     .await
     .expect("seed stale credential state");
-
     let rotation = repository
         .rotate_provider_account(RotateProviderAccount {
             settings: None,
@@ -2528,7 +2488,6 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
     assert_eq!(unchanged.2, 2);
     assert_eq!(unchanged.3, "user-admin-rebound");
     assert_eq!(unchanged.4.as_deref(), Some("workspace-admin-rebound"));
-
     let revision = repository
         .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
             model_mappings: Default::default(),
@@ -2557,7 +2516,6 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
     assert_eq!(exports[0].summary.id, "acct_admin_b");
     assert_eq!(exports[1].summary.id, "acct_admin_a");
     assert!(!format!("{exports:?}").contains("rotated-secret"));
-
     let revision = repository
         .delete_provider_accounts_admin(DeleteProviderAccounts {
             scope,
@@ -2574,7 +2532,6 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
         .await
         .expect("count provider account audits");
     assert_eq!(audit_count, 4);
-
     database.close().await;
 }
 
@@ -2825,7 +2782,6 @@ async fn provider_account_import_and_reauthorization_preserve_existing_membershi
             .await
             .expect("load scheduling after reauthorization");
     assert_eq!(scheduling, (Some(9), 40));
-
     database.close().await;
 }
 
@@ -2862,7 +2818,6 @@ async fn verified_credential_rotation_preserves_quota_exhaustion() {
         })
         .await
         .expect("persist quota exhaustion");
-
     repository
         .rotate_provider_account(RotateProviderAccount {
             settings: None,
@@ -2878,7 +2833,6 @@ async fn verified_credential_rotation_preserves_quota_exhaustion() {
         })
         .await
         .expect("rotate exhausted account credential");
-
     let quota_access_state: String =
         sqlx::query_scalar("select quota_access_state from provider_accounts where id = $1")
             .bind("acct_rotation_quota")
@@ -2886,7 +2840,6 @@ async fn verified_credential_rotation_preserves_quota_exhaustion() {
             .await
             .expect("load exhausted account after credential rotation");
     assert_eq!(quota_access_state, "exhausted".to_owned());
-
     database.close().await;
 }
 
@@ -2903,7 +2856,6 @@ async fn xai_free_quota_exhaustion_state_is_persisted() {
         .insert_provider_account(imported)
         .await
         .expect("insert xAI account");
-
     let observed_at = SystemTime::now();
     repository
         .apply_quota_access(QuotaAccessChange {
@@ -2913,7 +2865,6 @@ async fn xai_free_quota_exhaustion_state_is_persisted() {
         })
         .await
         .expect("persist xAI free quota exhaustion");
-
     let current: (String, String) = sqlx::query_as(
         "select provider_kind, quota_access_state
          from provider_accounts where id = $1",
@@ -2923,7 +2874,6 @@ async fn xai_free_quota_exhaustion_state_is_persisted() {
     .await
     .expect("load persisted xAI quota state");
     assert_eq!(current, ("xai".to_owned(), "exhausted".to_owned()),);
-
     database.close().await;
 }
 
@@ -2940,7 +2890,6 @@ async fn xai_resettable_usage_limit_state_is_persisted() {
         .insert_provider_account(imported)
         .await
         .expect("insert xAI account");
-
     let observed_at = SystemTime::now();
     repository
         .apply_quota_access(QuotaAccessChange {
@@ -2954,7 +2903,6 @@ async fn xai_resettable_usage_limit_state_is_persisted() {
         })
         .await
         .expect("persist xAI resettable usage limit");
-
     let current: (String, String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
         "select provider_kind, quota_access_state, quota_reset_at
          from provider_accounts where id = $1",
@@ -2966,7 +2914,6 @@ async fn xai_resettable_usage_limit_state_is_persisted() {
     assert_eq!(current.0, "xai");
     assert_eq!(current.1, "exhausted");
     assert!(current.2.is_some());
-
     database.close().await;
 }
 
@@ -3073,7 +3020,6 @@ async fn disabled_account_updates_credentials_without_enabling_scheduling() {
         })
         .await
         .expect("import disabled account");
-
     repository
         .apply_state_change(AccountStateChange {
             message: Some("refresh token expired".to_owned()),
@@ -3113,7 +3059,6 @@ async fn disabled_account_updates_credentials_without_enabling_scheduling() {
         })
         .await
         .expect("refresh disabled account credential");
-
     let current: (bool, String, serde_json::Value, i64) = sqlx::query_as(
         "select enabled, credential_state, provider_credentials_json, credential_revision
          from provider_accounts where id = $1",
@@ -3126,7 +3071,6 @@ async fn disabled_account_updates_credentials_without_enabling_scheduling() {
     assert_eq!(current.1, "ready");
     assert_eq!(current.2["access_token"], "disabled-refreshed-secret");
     assert_eq!(current.3, 2);
-
     database.close().await;
 }
 

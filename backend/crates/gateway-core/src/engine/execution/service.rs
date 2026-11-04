@@ -11,38 +11,29 @@ use super::contract::{
 };
 use super::probe_store::{ProbeObservation, TransientExecutionStore};
 use super::scope::{
-    ActiveRequestAuthority, ActiveRequestLease, ActiveRequestRegistry, AuthorizedExecution,
-    BoundExecutionFacts, ExecutionStartGuard, ExecutionTarget, NestedExecutionFacts,
-    NestedExecutionGraph, PendingStartExecution, PreparedExecutionStart,
+    AuthorizedExecution, ExecutionStartGuard, ExecutionTarget, PendingStartExecution,
+    PreparedExecutionStart,
 };
+use super::session::DefaultExecutionSession;
 use super::{COORDINATION_TIMEOUT, DIAGNOSTIC_TIMEOUT};
-use super::{scope::ExecutionAdmission, session::DefaultExecutionSession};
 use crate::{
     concurrency::{CapacityWait, ConcurrencyWaitBudget, ConcurrencyWaitQueue},
     engine::{
         AttemptCoordinator, EngineError, ExecutionStore, GatewayEngine, ModelRequestId,
-        NewModelRequest, ProbeFailure, ProviderAccountId, UpstreamSendState,
+        NewModelRequest, ProbeFailure, UpstreamSendState,
         admission::{
             ClientAdmissionDecision, ClientAdmissionPort, ClientAdmissionRejection,
             ClientAdmissionRequest,
         },
-        authentication::{
-            ClientAuthenticationRequest, ClientIdentityPort, FrontendAuthenticationDecision,
-            FrontendAuthenticationExtensionIndex,
-        },
+        authentication::ClientAuthenticationRequest,
         budget::{ClientBudgetCharge, ClientBudgetPort},
         continuation::{
             ContinuationBinding, NativeContinuationPin, NativeContinuationPort,
             NativeContinuationStoreErrorKind,
         },
         coordinator::CoordinationExtensions,
-        extensions::{ExecutionExtensionIndex, ExtensionCallScope},
+        extensions::ExecutionExtensionIndex,
         middleware::FrozenMiddlewarePlan,
-        nested::{
-            AffinityLookupPort, AffinityLookupRequest, AffinityLookupResult,
-            BoundModelExecutionRequest, ExecutionEffects, NestedModelExecutionPort,
-            NestedModelExecutionRequest,
-        },
         observation::{
             FrozenRequestObservationContext, RequestObservationDispatch, RequestObservationScope,
             RequestObserverExtensionIndex,
@@ -60,19 +51,17 @@ use crate::{
     lifecycle::{CancellationToken, Deadline, REQUEST_LEASE_TTL},
     operation::Operation,
     policy::{ClientApiKeyId, ClientPolicy},
-    provider_ports::{ProviderSessionAffinityPort, ProviderStoreErrorKind},
     routing::{
-        FrozenAccountScope, ProviderCatalogUnavailable, ProviderModelContent,
-        PublicModelDescriptor, PublicModelId, RoutingContext, RuntimeSnapshot, UpstreamModelId,
-        request_settings::RequestSettings,
+        ProviderCatalogUnavailable, ProviderModelContent, PublicModelDescriptor, PublicModelId,
+        RoutingContext, RuntimeSnapshot, UpstreamModelId, request_settings::RequestSettings,
     },
-    runtime::{RuntimeSnapshotHandle, RuntimeSnapshotPublisher},
+    runtime::RuntimeSnapshotHandle,
 };
 use futures::{FutureExt as _, future::BoxFuture, pin_mut, select_biased};
 use futures_timer::Delay;
 use std::{
     collections::BTreeSet,
-    sync::{Arc, Weak},
+    sync::Arc,
     time::{Instant, SystemTime},
 };
 
@@ -90,12 +79,8 @@ pub struct DefaultExecutionService {
     request_observers: Option<RequestObserverExtensionIndex>,
     request_policies: Option<RequestPolicyExtensionIndex>,
     execution_extensions: Option<ExecutionExtensionIndex>,
-    frontend_authentication: Option<FrontendAuthenticationExtensionIndex>,
-    session_affinity: Option<Arc<dyn ProviderSessionAffinityPort>>,
     client_retry: Option<Arc<dyn crate::engine::client_retry::ClientRetryStore>>,
     account_error_protection: Option<Arc<dyn crate::provider_ports::ProviderCooldownPort>>,
-    snapshot_refresh: Option<Arc<RuntimeSnapshotPublisher>>,
-    active_requests: ActiveRequestRegistry,
 }
 
 impl DefaultExecutionService {
@@ -122,12 +107,8 @@ impl DefaultExecutionService {
             request_observers: None,
             request_policies: None,
             execution_extensions: None,
-            frontend_authentication: None,
-            session_affinity: None,
             client_retry: None,
             account_error_protection: None,
-            snapshot_refresh: None,
-            active_requests: Arc::default(),
         }
     }
 
@@ -176,31 +157,6 @@ impl DefaultExecutionService {
         self
     }
 
-    #[must_use]
-    pub fn with_frontend_authentication(
-        mut self,
-        authentication: FrontendAuthenticationExtensionIndex,
-    ) -> Self {
-        self.frontend_authentication = Some(authentication);
-        self
-    }
-
-    #[must_use]
-    pub fn with_session_affinity(
-        mut self,
-        session_affinity: Arc<dyn ProviderSessionAffinityPort>,
-    ) -> Self {
-        self.session_affinity = Some(session_affinity);
-        self
-    }
-
-    /// CLI command-plane 没有后台订阅；每次绑定显式身份前主动编译最新事实
-    #[must_use]
-    pub fn with_snapshot_refresh(mut self, refresh: Arc<RuntimeSnapshotPublisher>) -> Self {
-        self.snapshot_refresh = Some(refresh);
-        self
-    }
-
     fn authenticate_without_usage(
         &self,
         plaintext: &str,
@@ -242,39 +198,7 @@ impl DefaultExecutionService {
                 .acquire()
                 .map_err(|_| ClientAuthenticationError::SnapshotUnavailable)?,
         };
-        let frontend = self
-            .frontend_authentication
-            .as_ref()
-            .and_then(|index| snapshot.extensions().and_then(|set| index.resolve(set)));
-        let policy = if let Some(frontend) = frontend {
-            match frontend
-                .authenticate(&authentication)
-                .await
-                .map_err(|_| ClientAuthenticationError::ProviderUnavailable)?
-            {
-                FrontendAuthenticationDecision::Authenticated { principal } => {
-                    let id = frontend
-                        .client_key_id(&principal)
-                        .ok_or(ClientAuthenticationError::InvalidKey)?;
-                    snapshot
-                        .client_policy(&id)
-                        .filter(|policy| policy.authorize().is_ok())
-                        .cloned()
-                        .ok_or(ClientAuthenticationError::InvalidKey)?
-                }
-                FrontendAuthenticationDecision::Rejected => {
-                    return Err(ClientAuthenticationError::InvalidKey);
-                }
-                FrontendAuthenticationDecision::NotMatched if frontend.exclusive() => {
-                    return Err(ClientAuthenticationError::InvalidKey);
-                }
-                FrontendAuthenticationDecision::NotMatched => {
-                    native_policy(&snapshot, &authentication)?
-                }
-            }
-        } else {
-            native_policy(&snapshot, &authentication)?
-        };
+        let policy = native_policy(&snapshot, &authentication)?;
         let policy = match authentication.settings() {
             Some(settings) => settings.apply_policy(policy),
             None => RequestSettings::new(snapshot.clone()).apply_policy(policy),
@@ -410,16 +334,8 @@ impl DefaultExecutionService {
             deadline_at,
             cancellation,
             extension_scope,
-            required_provider: None,
-            required_account: None,
-            nested: None,
-            bound: None,
-            graph: client
-                .snapshot
-                .extensions()
-                .map(|_| Arc::new(NestedExecutionGraph::new(execution_effects))),
+            execution_effects: Some(execution_effects),
             execution_effects_baseline,
-            nested_permit: None,
         };
         self.start_authorized(
             PendingStartExecution {
@@ -496,12 +412,10 @@ impl DefaultExecutionService {
                         .snapshot
                         .responses_max_decompressed_body_bytes(),
                 )
-                .with_execution_effects(Arc::clone(&authorization.graph.as_ref()?.effects)),
+                .with_execution_effects(Arc::clone(authorization.execution_effects.as_ref()?)),
             )
         });
-        // 路由插件可以调用 host.model/host.affinity；仅这条扩展路径必须在首次 RPC
-        // 前取得父 Key 准入
-        // 无策略的原生路由仍保持“先路由、后准入”的既有顺序
+        // 请求策略执行前取得 Key 准入；原生路由保持先路由、后准入的顺序
         let mut start_guard = None;
         let request_observation = self.request_observers.as_ref().and_then(|observers| {
             let generation = request.client.snapshot.extensions()?.clone();
@@ -528,16 +442,7 @@ impl DefaultExecutionService {
             if request_policy.is_some() {
                 start_guard = Some(self.prepare_execution_start(&request, &request_id, &mut authorization).await?);
             }
-            let mut routing_context = RoutingContext::default();
-            if let Some(provider) = authorization.required_provider.clone() {
-                if !authorization.account_scope.provider_kinds().contains(&provider) {
-                    return Err(GatewayError::new(
-                        GatewayErrorKind::PolicyDenied,
-                        "Nested provider is outside the frozen account scope.",
-                    ));
-                }
-                routing_context.required_provider = Some(provider);
-            }
+            let routing_context = RoutingContext::default();
             let account_scope = Arc::clone(&authorization.account_scope);
             let plan = match &request.target {
                 ExecutionTarget::ProviderEndpoint {
@@ -582,12 +487,8 @@ impl DefaultExecutionService {
                                     ));
                                 }
                                 if let Some(provider) = provider {
-                                    if authorization
-                                        .required_provider
-                                        .as_ref()
-                                        .is_some_and(|required| required != &provider)
-                                        || !authorization
-                                            .account_scope
+                                    if !authorization
+                                        .account_scope
                                             .provider_kinds()
                                             .contains(&provider)
                                     {
@@ -674,10 +575,7 @@ impl DefaultExecutionService {
                         .await?,
                 );
             }
-            let execution_effects = authorization
-                .graph
-                .as_ref()
-                .map(|graph| Arc::clone(&graph.effects));
+            let execution_effects = authorization.execution_effects.clone();
             let extensions =
                 CoordinationExtensions::new(continuation, request_observation.clone())
                     .with_caller_identity(request.client.policy.caller_identity())
@@ -762,55 +660,25 @@ impl DefaultExecutionService {
         authorization: &mut AuthorizedExecution,
     ) -> Result<ExecutionStartGuard, GatewayError> {
         let concurrency_wait_budget = ConcurrencyWaitBudget::default();
-        let (admission, admission_decision_ms) = if authorization.nested.is_some() {
-            let permit = authorization.nested_permit.take().ok_or_else(|| {
-                GatewayError::new(
-                    GatewayErrorKind::Internal,
-                    "Nested execution admission is unavailable.",
-                )
-            })?;
-            (ExecutionAdmission::Nested(permit), None)
-        } else {
-            let admission_started_at = Instant::now();
-            let admission = self
-                .acquire_client_admission(
-                    &request.client,
-                    request_id,
-                    authorization.deadline_at,
-                    authorization.cancellation.clone(),
-                    &concurrency_wait_budget,
-                )
-                .await?;
-            let admission = if let Some(permit) = authorization.nested_permit.take() {
-                ExecutionAdmission::Bound(admission, permit)
-            } else {
-                ExecutionAdmission::Client(admission)
-            };
-            (admission, Some(duration_ms(admission_started_at.elapsed())))
-        };
+        let admission_started_at = Instant::now();
+        let admission = self
+            .acquire_client_admission(
+                &request.client,
+                request_id,
+                authorization.deadline_at,
+                authorization.cancellation.clone(),
+                &concurrency_wait_budget,
+            )
+            .await?;
+        let admission_decision_ms = Some(duration_ms(admission_started_at.elapsed()));
         if let Some(budget) = &self.budget
             && let Err(error) = budget.admit(request.client.policy.key_id().clone()).await
         {
             admission.release().await;
             return Err(error);
         }
-        let active_request = authorization.graph.as_ref().map(|graph| {
-            self.register_active_request(
-                request_id.clone(),
-                ActiveRequestAuthority {
-                    client: request.client.clone(),
-                    account_scope: Arc::clone(&authorization.account_scope),
-                    deadline_at: authorization.deadline_at,
-                    // 回收嵌套调用权限只取消子作用域，父请求仍需完成响应流终态加工
-                    cancellation: authorization.cancellation.child_token(),
-                    extension_scope: authorization.extension_scope.clone(),
-                    graph: Arc::clone(graph),
-                },
-            )
-        });
         Ok(ExecutionStartGuard {
             admission,
-            active_request,
             concurrency_wait_budget,
             admission_decision_ms,
         })
@@ -838,7 +706,6 @@ impl DefaultExecutionService {
         let providers = self.providers.clone();
         let ExecutionStartGuard {
             admission,
-            active_request,
             concurrency_wait_budget,
             admission_decision_ms,
         } = start_guard;
@@ -853,28 +720,6 @@ impl DefaultExecutionService {
                     &client.policy.caller_identity(),
                 )
             });
-        let (request_kind, subagent_kind) = if let Some(nested) = authorization.nested.as_ref() {
-            (
-                Some("plugin_child_model".to_owned()),
-                Some(nested.initiating_plugin_instance_id.clone()),
-            )
-        } else if let Some(bound) = authorization.bound.as_ref() {
-            (
-                Some("plugin_bound_model".to_owned()),
-                Some(bound.initiating_plugin_instance_id.clone()),
-            )
-        } else {
-            (observation.request_kind, observation.subagent_kind)
-        };
-        if let Some(nested) = authorization.nested.as_ref() {
-            tracing::debug!(
-                parent_request_id = nested.parent_request_id.as_str(),
-                child_request_id = request_id.as_str(),
-                plugin_instance_id = nested.initiating_plugin_instance_id,
-                depth = authorization.extension_scope.len(),
-                "插件子模型请求已继承父请求身份与 deadline"
-            );
-        }
         let new_request = NewModelRequest {
             caller_identity: Some(client.policy.caller_identity()),
             id: request_id.clone(),
@@ -891,8 +736,8 @@ impl DefaultExecutionService {
             user_agent: metadata.user_agent,
             reasoning_effort: observation.reasoning_effort,
             reasoning_preset: observation.reasoning_preset,
-            request_kind,
-            subagent_kind,
+            request_kind: observation.request_kind,
+            subagent_kind: observation.subagent_kind,
             compact: observation.compact,
             continuation: observation.continuation,
             image_generation_requested: operation.image_generation_requested(),
@@ -904,11 +749,7 @@ impl DefaultExecutionService {
         if let Some(store) = &self.account_error_protection {
             engine = engine.with_account_error_protection(Arc::clone(store));
         }
-        // 插件内部调用不共享外部客户端的失败轮次，探测另走 transient engine
-        if authorization.nested.is_none()
-            && authorization.bound.is_none()
-            && let Some(store) = &self.client_retry
-        {
+        if let Some(store) = &self.client_retry {
             engine = engine.with_client_retry_store(Arc::clone(store));
         }
         let coordinator = AttemptCoordinator::new(engine);
@@ -917,7 +758,7 @@ impl DefaultExecutionService {
                 new_request,
                 operation,
                 plan,
-                authorization.required_account,
+                None,
                 extensions,
                 authorization.cancellation,
             )
@@ -938,9 +779,6 @@ impl DefaultExecutionService {
                     )
                     .await;
                 }
-                if let Some(active_request) = active_request {
-                    active_request.release();
-                }
                 admission.release().await;
                 return Err(gateway_error_from_engine(&error));
             }
@@ -952,339 +790,11 @@ impl DefaultExecutionService {
             session: Box::new(DefaultExecutionSession::new(
                 core,
                 admission,
-                active_request,
                 Arc::clone(&self.continuation),
                 self.budget.clone(),
                 self.diagnostics.clone(),
             )),
         })
-    }
-
-    fn register_active_request(
-        &self,
-        request_id: ModelRequestId,
-        authority: ActiveRequestAuthority,
-    ) -> ActiveRequestLease {
-        let authority = Arc::new(authority);
-        let mut active = self
-            .active_requests
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let previous = active.insert(request_id.clone(), Arc::downgrade(&authority));
-        debug_assert!(previous.is_none(), "model request IDs must be unique");
-        drop(active);
-        ActiveRequestLease {
-            registry: Arc::clone(&self.active_requests),
-            request_id,
-            authority,
-        }
-    }
-
-    fn active_request(
-        &self,
-        request_id: &ModelRequestId,
-    ) -> Result<Arc<ActiveRequestAuthority>, GatewayError> {
-        let authority = self
-            .active_requests
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(request_id)
-            .and_then(Weak::upgrade)
-            .ok_or_else(|| {
-                GatewayError::new(
-                    GatewayErrorKind::PolicyDenied,
-                    "Parent model request is not active.",
-                )
-            })?;
-        if authority.cancellation.is_cancelled() {
-            return Err(GatewayError::new(
-                GatewayErrorKind::Cancelled,
-                "Parent request was cancelled.",
-            ));
-        }
-        if authority.deadline_at.is_elapsed() {
-            return Err(GatewayError::new(
-                GatewayErrorKind::Timeout,
-                "Parent request deadline elapsed.",
-            ));
-        }
-        Ok(authority)
-    }
-
-    async fn start_nested_inner(
-        &self,
-        request: NestedModelExecutionRequest,
-    ) -> Result<StartedExecution, GatewayError> {
-        let NestedModelExecutionRequest {
-            parent_request_id,
-            initiating_plugin_instance_id,
-            public_model,
-            operation,
-            mut metadata,
-            provider,
-            account,
-            parent_account,
-        } = request;
-        let parent = self.active_request(&parent_request_id)?;
-        if parent.extension_scope.len() >= ExtensionCallScope::MAXIMUM_DEPTH {
-            return Err(GatewayError::new(
-                GatewayErrorKind::PolicyDenied,
-                "Nested model execution depth is exhausted.",
-            ));
-        }
-        let extension_scope = parent
-            .extension_scope
-            .extending(initiating_plugin_instance_id.clone())
-            .ok_or_else(|| {
-                GatewayError::new(
-                    GatewayErrorKind::PolicyDenied,
-                    "Recursive plugin model execution is not allowed.",
-                )
-            })?;
-        let (account_scope, required_provider) = restrict_model_execution_scope(
-            parent.account_scope.as_ref(),
-            provider,
-            account.as_ref(),
-            parent_account.as_ref(),
-        )?;
-        let nested_permit = parent.graph.acquire()?;
-        // Core.start 之后的路由/Provider 可以继续调用外部系统；在进入子执行前即按
-        // 可能已出站记水位，不能让父 attempt 随后的 `not_sent` 触发重放
-        parent.graph.effects.observe();
-        let execution_effects_baseline = parent.graph.effects.epoch();
-        metadata.endpoint = "host.model".to_owned();
-        metadata.transport = ClientTransport::InternalPlugin;
-        metadata.inherit_request_origin(&extension_scope);
-        let authorization = AuthorizedExecution {
-            account_scope,
-            response_control: None,
-            deadline_at: parent.deadline_at,
-            cancellation: parent.cancellation.child_token(),
-            extension_scope,
-            required_provider,
-            required_account: account,
-            nested: Some(NestedExecutionFacts {
-                parent_request_id,
-                initiating_plugin_instance_id,
-            }),
-            bound: None,
-            graph: Some(Arc::clone(&parent.graph)),
-            execution_effects_baseline,
-            nested_permit: Some(nested_permit),
-        };
-        self.start_authorized(
-            PendingStartExecution {
-                client: parent.client.clone(),
-                target: ExecutionTarget::Model(public_model),
-                operation,
-                metadata,
-            },
-            authorization,
-            SystemTime::now(),
-            None,
-        )
-        .await
-    }
-
-    async fn client_for_key_id(
-        &self,
-        client_key_id: &ClientApiKeyId,
-        settings: Option<RequestSettings>,
-    ) -> Result<AuthenticatedClient, GatewayError> {
-        if settings.is_none()
-            && let Some(refresh) = &self.snapshot_refresh
-        {
-            refresh.refresh().await.map_err(|_| {
-                GatewayError::new(
-                    GatewayErrorKind::Internal,
-                    "Gateway configuration is unavailable.",
-                )
-            })?;
-        }
-        let snapshot = settings
-            .as_ref()
-            .map(|settings| settings.snapshot())
-            .map_or_else(|| self.snapshots.acquire(), Ok)
-            .map_err(|_| {
-                GatewayError::new(
-                    GatewayErrorKind::Internal,
-                    "Gateway configuration is unavailable.",
-                )
-            })?;
-        let policy = snapshot
-            .client_policy(client_key_id)
-            .cloned()
-            .ok_or_else(|| {
-                GatewayError::new(
-                    GatewayErrorKind::Unauthorized,
-                    "Client API key no longer exists.",
-                )
-            })?;
-        if !matches!(
-            policy.identity_policy(),
-            crate::policy::CallerIdentityPolicy::Direct
-        ) {
-            return Err(GatewayError::new(
-                GatewayErrorKind::PolicyDenied,
-                "Proxy keys require an authenticated caller envelope.",
-            ));
-        }
-        policy.authorize().map_err(|_| {
-            GatewayError::new(
-                GatewayErrorKind::PolicyDenied,
-                "Client API key is disabled.",
-            )
-        })?;
-        Ok(AuthenticatedClient {
-            policy: match &settings {
-                Some(settings) => settings.apply_policy(policy),
-                None => RequestSettings::new(snapshot.clone()).apply_policy(policy),
-            },
-            settings,
-            snapshot,
-            authentication: None,
-        })
-    }
-
-    async fn start_bound_model_inner(
-        &self,
-        request: BoundModelExecutionRequest,
-    ) -> Result<StartedExecution, GatewayError> {
-        let BoundModelExecutionRequest {
-            client,
-            initiating_plugin_instance_id,
-            cancellation,
-            extension_scope,
-            public_model,
-            operation,
-            mut metadata,
-            provider,
-            account,
-        } = request;
-        if cancellation.is_cancelled() {
-            return Err(GatewayError::new(
-                GatewayErrorKind::Cancelled,
-                "Bound plugin invocation was cancelled.",
-            ));
-        }
-        if extension_scope.len() >= ExtensionCallScope::MAXIMUM_DEPTH {
-            return Err(GatewayError::new(
-                GatewayErrorKind::PolicyDenied,
-                "Plugin model execution depth exceeded.",
-            ));
-        }
-        let extension_scope = extension_scope
-            .extending(initiating_plugin_instance_id.clone())
-            .ok_or_else(|| {
-                GatewayError::new(
-                    GatewayErrorKind::PolicyDenied,
-                    "Plugin model execution scope is recursive.",
-                )
-            })?;
-        let now = SystemTime::now();
-        let deadline_at =
-            Deadline::from_timeout(now, client.execution_timeout()).ok_or_else(|| {
-                GatewayError::new(GatewayErrorKind::Internal, "System clock is invalid.")
-            })?;
-        let (account_scope, required_provider) = restrict_model_execution_scope(
-            client.policy.account_scope().as_ref(),
-            provider,
-            account.as_ref(),
-            None,
-        )?;
-        // 连接承载多个独立执行；递归预算和副作用只在本次执行的子调用图内共享
-        // 父调用的取消继续向子执行传播，不能因新建执行丢失扩展调用链
-        let graph = Arc::new(NestedExecutionGraph::new(Arc::new(
-            ExecutionEffects::default(),
-        )));
-        let permit = graph.acquire()?;
-        let execution_effects_baseline = graph.effects.epoch();
-        metadata.endpoint = "host.model".to_owned();
-        metadata.transport = ClientTransport::InternalPlugin;
-        metadata.inherit_request_origin(&extension_scope);
-        self.client_api_key_usage
-            .record_used(client.policy.key_id());
-        self.start_authorized(
-            PendingStartExecution {
-                client,
-                target: ExecutionTarget::Model(public_model),
-                operation,
-                metadata,
-            },
-            AuthorizedExecution {
-                account_scope,
-                response_control: None,
-                deadline_at,
-                cancellation: cancellation.child_token(),
-                extension_scope,
-                required_provider,
-                required_account: account,
-                nested: None,
-                bound: Some(BoundExecutionFacts {
-                    initiating_plugin_instance_id,
-                }),
-                graph: Some(graph),
-                execution_effects_baseline,
-                nested_permit: Some(permit),
-            },
-            now,
-            None,
-        )
-        .await
-    }
-
-    async fn lookup_affinity_inner(
-        &self,
-        request: AffinityLookupRequest,
-    ) -> Result<Option<AffinityLookupResult>, GatewayError> {
-        let AffinityLookupRequest {
-            parent_request_id,
-            provider,
-            key,
-        } = request;
-        let parent = self.active_request(&parent_request_id)?;
-        if !parent.account_scope.provider_kinds().contains(&provider) {
-            return Err(GatewayError::new(
-                GatewayErrorKind::PolicyDenied,
-                "Affinity provider is outside the frozen authorization scope.",
-            ));
-        }
-        let affinity = self.session_affinity.as_ref().ok_or_else(|| {
-            GatewayError::new(
-                GatewayErrorKind::PolicyDenied,
-                "Provider session affinity is unavailable.",
-            )
-        })?;
-        let account = {
-            let load = affinity.load(&provider, &key).fuse();
-            let timeout = Delay::new(COORDINATION_TIMEOUT).fuse();
-            pin_mut!(load, timeout);
-            select_biased! {
-                result = load => result.map_err(|error| match error.kind() {
-                    ProviderStoreErrorKind::Unavailable => GatewayError::new(
-                        GatewayErrorKind::ProviderInfrastructureUnavailable,
-                        "Provider session affinity is temporarily unavailable.",
-                    ),
-                    ProviderStoreErrorKind::InvalidData | ProviderStoreErrorKind::Conflict => {
-                        GatewayError::new(GatewayErrorKind::Internal, "Provider session affinity is invalid.")
-                    }
-                })?,
-                _ = timeout => return Err(GatewayError::new(
-                    GatewayErrorKind::ProviderInfrastructureUnavailable,
-                    "Provider session affinity lookup timed out.",
-                )),
-            }
-        };
-        let Some(binding) = account else {
-            return Ok(None);
-        };
-        let account = binding.account_id().clone();
-        if !parent.account_scope.allows(&account)
-            || parent.account_scope.account_provider(&account) != Some(&provider)
-        {
-            return Ok(None);
-        }
-        Ok(Some(AffinityLookupResult::new(provider, account)))
     }
 
     async fn acquire_client_admission(
@@ -1747,19 +1257,6 @@ impl ExecutionService for DefaultExecutionService {
         self.execution_extensions.as_ref()?.middleware(&generation)
     }
 
-    fn prepare_plugin_execution(
-        &self,
-        client_key_id: &ClientApiKeyId,
-    ) -> BoxFuture<'_, Result<PreparedRootExecution, GatewayError>> {
-        let client_key_id = client_key_id.clone();
-        Box::pin(async move {
-            let client = self.client_for_key_id(&client_key_id, None).await?;
-            self.client_api_key_usage
-                .record_used(client.policy.key_id());
-            PreparedRootExecution::new(client)
-        })
-    }
-
     fn start_prepared(
         &self,
         prepared: PreparedRootExecution,
@@ -1819,94 +1316,6 @@ impl ExecutionService for DefaultExecutionService {
     }
 }
 
-impl ClientIdentityPort for DefaultExecutionService {
-    fn resolve_client(
-        &self,
-        client_key_id: ClientApiKeyId,
-        settings: Option<RequestSettings>,
-    ) -> BoxFuture<'_, Result<AuthenticatedClient, GatewayError>> {
-        Box::pin(async move { self.client_for_key_id(&client_key_id, settings).await })
-    }
-
-    fn verify_client(
-        &self,
-        request: ClientAuthenticationRequest,
-    ) -> BoxFuture<'_, Result<AuthenticatedClient, GatewayError>> {
-        Box::pin(async move {
-            let cancellation = request
-                .invocation()
-                .map(|origin| origin.cancellation.clone());
-            let verification = self.verify_request(request).fuse();
-            pin_mut!(verification);
-            match cancellation {
-                Some(cancellation) => {
-                    let cancelled = cancellation.cancelled().fuse();
-                    pin_mut!(cancelled);
-                    select_biased! {
-                        () = cancelled => Err(GatewayError::new(GatewayErrorKind::Cancelled, "Client verification was cancelled.")),
-                        result = verification => result.map_err(authentication_gateway_error),
-                    }
-                }
-                None => verification.await.map_err(authentication_gateway_error),
-            }
-        })
-    }
-}
-
-impl NestedModelExecutionPort for DefaultExecutionService {
-    fn models(
-        &self,
-        client: AuthenticatedClient,
-        cancellation: CancellationToken,
-        protocol: String,
-        client_version: String,
-    ) -> BoxFuture<'_, Result<Vec<PublicModelId>, GatewayError>> {
-        Box::pin(async move {
-            let cancelled = cancellation.cancelled().fuse();
-            let timeout = Delay::new(DIAGNOSTIC_TIMEOUT).fuse();
-            let catalog = self
-                .client_model_catalog(&client, &protocol, &client_version)
-                .fuse();
-            pin_mut!(cancelled, timeout, catalog);
-            let models = select_biased! {
-                () = cancelled => return Err(GatewayError::new(GatewayErrorKind::Cancelled, "Model catalog call was cancelled.")),
-                () = timeout => return Err(GatewayError::new(GatewayErrorKind::Timeout, "Model catalog deadline elapsed.")),
-                result = catalog => result.map_err(|_| GatewayError::new(GatewayErrorKind::Internal, "Model catalog is unavailable."))?,
-            };
-            Ok(models
-                .into_iter()
-                .map(|model| match model {
-                    PublicModelDescriptor::Native { model, .. } => model,
-                    PublicModelDescriptor::Adapted(profile) => profile.model().clone(),
-                })
-                .collect())
-        })
-    }
-
-    fn start(
-        &self,
-        request: NestedModelExecutionRequest,
-    ) -> BoxFuture<'_, Result<StartedExecution, GatewayError>> {
-        Box::pin(async move { self.start_nested_inner(request).await })
-    }
-
-    fn start_bound(
-        &self,
-        request: BoundModelExecutionRequest,
-    ) -> BoxFuture<'_, Result<StartedExecution, GatewayError>> {
-        Box::pin(async move { self.start_bound_model_inner(request).await })
-    }
-}
-
-impl AffinityLookupPort for DefaultExecutionService {
-    fn lookup(
-        &self,
-        request: AffinityLookupRequest,
-    ) -> BoxFuture<'_, Result<Option<AffinityLookupResult>, GatewayError>> {
-        Box::pin(async move { self.lookup_affinity_inner(request).await })
-    }
-}
-
 impl ClientKeyVerifier for DefaultExecutionService {
     fn verify_client_key(
         &self,
@@ -1938,71 +1347,6 @@ fn constant_time_equal(left: &str, right: &str) -> bool {
             difference | (left ^ right)
         })
         == 0
-}
-
-fn restrict_model_execution_scope(
-    parent_scope: &FrozenAccountScope,
-    provider: Option<ProviderKind>,
-    account: Option<&ProviderAccountId>,
-    parent_account: Option<&ProviderAccountId>,
-) -> Result<(Arc<FrozenAccountScope>, Option<ProviderKind>), GatewayError> {
-    let mut account_scope = parent_scope.clone();
-    if let Some(parent_account) = parent_account {
-        if !parent_scope.allows(parent_account) {
-            return Err(GatewayError::new(
-                GatewayErrorKind::PolicyDenied,
-                "Parent attempt account is outside the frozen account scope.",
-            ));
-        }
-        if account == Some(parent_account) {
-            return Err(GatewayError::new(
-                GatewayErrorKind::PolicyDenied,
-                "Nested execution cannot wait for the parent attempt account.",
-            ));
-        }
-        account_scope = account_scope.excluding_account(parent_account.clone());
-    }
-    let required_provider = match account {
-        Some(account) => {
-            if !account_scope.allows(account) {
-                return Err(GatewayError::new(
-                    GatewayErrorKind::PolicyDenied,
-                    "Model account is outside the frozen authorization scope.",
-                ));
-            }
-            let account_provider = account_scope
-                .account_provider(account)
-                .cloned()
-                .ok_or_else(|| {
-                    GatewayError::new(
-                        GatewayErrorKind::PolicyDenied,
-                        "Model account is unavailable in the frozen snapshot.",
-                    )
-                })?;
-            if provider
-                .as_ref()
-                .is_some_and(|provider| provider != &account_provider)
-            {
-                return Err(GatewayError::new(
-                    GatewayErrorKind::PolicyDenied,
-                    "Model provider and account do not match.",
-                ));
-            }
-            Some(account_provider)
-        }
-        None => provider,
-    };
-    if required_provider
-        .as_ref()
-        .is_some_and(|provider| !account_scope.provider_kinds().contains(provider))
-        || account_scope.provider_kinds().is_empty()
-    {
-        return Err(GatewayError::new(
-            GatewayErrorKind::PolicyDenied,
-            "Model provider is outside the frozen authorization scope.",
-        ));
-    }
-    Ok((Arc::new(account_scope), required_provider))
 }
 
 fn native_policy(

@@ -22,7 +22,6 @@ mod compression;
 pub(crate) mod diagnostics;
 mod extract;
 pub mod observability;
-mod plugins;
 pub mod presenter;
 pub mod proxies;
 pub mod settings;
@@ -36,10 +35,6 @@ pub use wire::{
     AdminPageData, AdminResponse, PageMeta, WireValidationError,
 };
 
-pub(crate) fn model_router() -> Router<crate::ApiState> {
-    plugins::model_router().layer(middleware::map_response(no_store))
-}
-
 /// 构造管理用例路由；模型执行桥由完整 API 组合单独装配
 pub fn router<S>() -> Router<S>
 where
@@ -48,7 +43,6 @@ where
     Router::new()
         .merge(account_groups::router::<S>())
         .merge(proxies::router::<S>())
-        .merge(plugins::router::<S>())
         .merge(accounts::router::<S>())
         .merge(affinity::router::<S>())
         .merge(alerts::router::<S>())
@@ -65,7 +59,6 @@ where
                 .quality(CompressionLevel::Fastest)
                 .compress_when(compression::AdminJson),
         )
-        .merge(plugins::public_router().method_not_allowed_fallback(method_not_allowed))
         .layer(middleware::map_response(no_store))
 }
 

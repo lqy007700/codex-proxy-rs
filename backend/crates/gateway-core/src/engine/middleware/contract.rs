@@ -15,9 +15,9 @@ use bytes::Bytes;
 use futures::future::BoxFuture;
 
 use crate::account::{ProviderAccountId, scope::AccountGroupId};
+use crate::engine::effects::ExecutionEffects;
 use crate::engine::execution::ClientTransport;
 use crate::engine::extensions::ExtensionCallScope;
-use crate::engine::nested::ExecutionEffects;
 use crate::engine::provider::ProviderCallMetadata;
 use crate::engine::{EngineError, ModelRequestId};
 use crate::error::{GatewayError, ProviderError};

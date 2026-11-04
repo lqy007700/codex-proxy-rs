@@ -365,7 +365,7 @@ impl SettingsService for DefaultSettingsService {
         context: &MutationContext,
         mut command: ReplaceRuntimeSettings,
     ) -> Result<RuntimeSettings, AdminError> {
-        // 旧管理端和插件省略新增字段时保留持久值，最终写入仍由 revision 防止并发覆盖
+        // 省略可选字段时保留持久值，最终写入仍由 revision 防止并发覆盖
         if command.values.recovery_rotation_attempts.is_none() {
             command.values.recovery_rotation_attempts = self
                 .store

@@ -63,22 +63,6 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/usage/index.vue'),
       },
       {
-        path: 'plugins',
-        component: () => import('@/views/plugins/index.vue'),
-        children: [
-          {
-            path: '',
-            name: 'plugins',
-            component: () => import('@/views/plugins/components/PluginManagement.vue'),
-          },
-          {
-            path: ':instanceId/:pageId',
-            name: 'plugin-page',
-            component: () => import('@/views/plugins/components/PluginPage.vue'),
-          },
-        ],
-      },
-      {
         path: 'theme',
         name: 'theme',
         component: () => import('@/views/theme/index.vue'),

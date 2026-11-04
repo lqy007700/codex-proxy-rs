@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use super::client_retry::{ClientRetryGuard, ClientRetryKey};
-use super::nested::ExecutionEffects;
+use super::effects::ExecutionEffects;
 use super::observation::{
     RequestObservationDispatch, ResponseObservation, WebSocketResponseAttempt,
 };

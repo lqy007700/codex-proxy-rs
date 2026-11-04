@@ -1,6 +1,5 @@
 //! Responses WebSocket 连接生命周期与多轮请求边界测试
 
-mod middleware;
 mod transport;
 
 use std::{
@@ -341,7 +340,6 @@ async fn pump_replies_to_ping_with_the_same_pong_payload() {
     incoming
         .send(Ok(Message::Ping(vec![1, 2, 3].into())))
         .expect("send Ping to test socket");
-
     let message = written.recv().await.expect("pump must write Pong");
     let Message::Pong(payload) = message else {
         panic!("pump wrote a non-Pong control frame");
@@ -360,7 +358,6 @@ async fn pump_consumes_pong_without_forwarding_a_business_event() {
     incoming
         .send(Ok(Message::Pong(vec![4, 5, 6].into())))
         .expect("send Pong to test socket");
-
     let result = tokio::time::timeout(Duration::from_secs(1), connection.next_event()).await;
     assert!(result.is_err(), "Pong unexpectedly reached the coordinator");
 }
@@ -403,7 +400,6 @@ async fn client_close_should_take_priority_over_queued_business_frames() {
     incoming
         .send(Ok(Message::Close(None)))
         .expect("close socket");
-
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(1), connection.wait_for_exit())
             .await
@@ -428,7 +424,6 @@ async fn client_close_flush_has_a_short_deadline_without_sending_another_frame()
     } = test_connection(true);
     incoming.send(Ok(Message::Close(None))).expect("close peer");
     let started = tokio::time::Instant::now();
-
     let reason = tokio::time::timeout(Duration::from_secs(2), connection.wait_for_exit())
         .await
         .expect("peer close cannot consume the ordinary write timeout");
@@ -464,7 +459,6 @@ async fn lifecycle_shutdown_interrupts_a_pending_client_close_flush() {
         "close flush must start"
     );
     cancellation.cancel();
-
     let reason = tokio::time::timeout(Duration::from_millis(50), connection.wait_for_exit())
         .await
         .expect("host cancellation must not wait for the close timeout");
@@ -491,7 +485,6 @@ async fn full_business_queue_should_not_block_lifecycle_shutdown() {
         .expect("send Ping after queue fills");
     assert!(matches!(written.recv().await, Some(Message::Pong(_))));
     cancellation.cancel();
-
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(1), connection.wait_for_exit())
             .await
@@ -534,7 +527,6 @@ async fn outbound_commands_are_written_in_acknowledged_order() {
         ..
     } = test_connection(false);
     let request_id = Arc::<str>::from("req_test");
-
     connection
         .send_text(
             "first".to_owned(),
@@ -549,7 +541,6 @@ async fn outbound_commands_are_written_in_acknowledged_order() {
         )
         .await
         .expect("second write acknowledgement");
-
     let first = written.recv().await.expect("first wire message");
     let second = written.recv().await.expect("second wire message");
     assert!(
@@ -569,7 +560,6 @@ async fn stalled_business_write_cannot_block_the_heartbeat_write_deadline() {
     } = test_connection(true);
     let request_id = Arc::<str>::from("req_test");
     let started = tokio::time::Instant::now();
-
     let error = connection
         .send_text(
             "payload".to_owned(),
@@ -578,7 +568,6 @@ async fn stalled_business_write_cannot_block_the_heartbeat_write_deadline() {
         .await
         .expect_err("heartbeat deadline must interrupt the stalled business write");
     tokio::task::yield_now().await;
-
     assert!(matches!(error, ConnectionWriteError::Closed) && dropped.load(Ordering::Acquire));
     assert_eq!(started.elapsed(), Duration::from_secs(25 + 5));
     assert_eq!(
@@ -609,7 +598,6 @@ async fn pump_marks_the_connection_expired_at_sixty_minutes() {
         .next_event()
         .await
         .expect("deadline must emit an event");
-
     assert!(matches!(event, ConnectionEvent::Expired) && connection.is_expired());
     peer.abort();
 }
@@ -624,10 +612,8 @@ async fn dropping_the_connection_aborts_and_drops_the_socket_owner() {
         cancellation,
         ..
     } = test_connection(false);
-
     drop(connection);
     tokio::task::yield_now().await;
-
     assert!(dropped.load(Ordering::Acquire));
     assert!(cancellation.is_cancelled());
 }
@@ -660,7 +646,6 @@ async fn idle_connection_reaches_the_official_limit_without_starting_an_executio
     );
     let (mut socket, response) = connect_async(request).await.expect("upgrade WebSocket");
     assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
-
     tokio::time::advance(Duration::from_secs(60 * 60)).await;
     tokio::task::yield_now().await;
     let text = loop {
@@ -676,7 +661,6 @@ async fn idle_connection_reaches_the_official_limit_without_starting_an_executio
         }
     };
     let value = serde_json::from_str::<Value>(&text).expect("connection limit JSON");
-
     assert_eq!(
         value,
         json!({
@@ -690,7 +674,6 @@ async fn idle_connection_reaches_the_official_limit_without_starting_an_executio
         })
     );
     assert_eq!(trace.starts.load(Ordering::Acquire), 0);
-
     // 服务端已因生命周期到期关闭；不再向关闭中的连接写入
     drop(socket);
     server.abort();
@@ -736,7 +719,6 @@ async fn active_response_crossing_the_limit_writes_terminal_before_the_limit_err
         ))
         .await
         .expect("send response.create");
-
     let mut initial_types = Vec::new();
     loop {
         tokio::task::yield_now().await;
@@ -776,7 +758,6 @@ async fn active_response_crossing_the_limit_writes_terminal_before_the_limit_err
         .expect("connection remains open")
         .expect("valid frame");
     assert!(matches!(pong, ClientMessage::Pong(_)));
-
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(60 * 60)).await;
     tokio::task::yield_now().await;
@@ -816,44 +797,13 @@ async fn start_active_response() -> (
     TestClientSocket,
     tokio::task::JoinHandle<()>,
 ) {
-    start_active_response_with_middleware(None, "/v1/responses").await
-}
-
-async fn start_active_response_with_middleware(
-    plan: Option<gateway_core::engine::middleware::FrozenMiddlewarePlan>,
-    path: &str,
-) -> (
-    Arc<CrossingLimitTrace>,
-    TestClientSocket,
-    tokio::task::JoinHandle<()>,
-) {
     let trace = Arc::new(CrossingLimitTrace::default());
     let execution = Arc::new(CrossingLimitExecution {
         client: authenticated_client("sk_ws_crossing_limit"),
         trace: Arc::clone(&trace),
     });
-    let app = if let Some(plan) = plan {
-        let admin = crate::admin::AdminTestFixture::new().await;
-        gateway_api::initialize(
-            gateway_api::ApiConfig {
-                asset_directory: std::env::temp_dir(),
-                cors_allowed_origins: Vec::new(),
-                request_timeout_seconds: None,
-                request_id_header: "x-request-id".into(),
-            },
-            execution,
-            admin.services,
-            Vec::new(),
-            Arc::new(crate::openai::EmptyWorkerHealth),
-            Arc::new(crate::openai::TestLifecycle::default()),
-            Arc::new(crate::support::RecordingDiagnostics::default()),
-        )
-        .unwrap()
-        .with_middleware(move |_| Some(plan.clone()))
-        .router()
-    } else {
-        api_router(execution).await
-    };
+    let app = api_router(execution).await;
+    let path = "/v1/responses";
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind WebSocket test server");
@@ -928,7 +878,6 @@ async fn requests_received_during_an_active_response_should_execute_in_order() {
         .expect("valid WebSocket frame");
     assert!(matches!(message, ClientMessage::Pong(_)));
     assert_eq!(trace.starts.load(Ordering::Acquire), 1);
-
     for completed_count in 1..=3 {
         trace.release_terminal.notify_one();
         let expected_types = if completed_count < 3 {
@@ -981,7 +930,6 @@ async fn queued_unknown_message_should_be_rejected_before_the_next_valid_request
             .expect("queue frame");
     }
     trace.release_terminal.notify_one();
-
     let mut event_types = Vec::new();
     for _ in 0..4 {
         let message = tokio::time::timeout(Duration::from_secs(2), socket.next())
@@ -1021,7 +969,6 @@ async fn queued_binary_frame_should_be_rejected_after_the_active_response_finish
         .await
         .expect("queue binary frame");
     trace.release_terminal.notify_one();
-
     let message = tokio::time::timeout(Duration::from_secs(2), socket.next())
         .await
         .expect("terminal timeout")
@@ -1117,7 +1064,6 @@ async fn client_close_should_cancel_active_execution_without_starting_queued_req
         .await
         .expect("queue request");
     socket.close(None).await.expect("close WebSocket");
-
     tokio::time::timeout(
         Duration::from_secs(2),
         trace.cancellation_observed.notified(),
@@ -1145,7 +1091,6 @@ async fn idle_pump_sends_heartbeat_without_bursting_after_a_delay() {
     } = test_connection(false);
     tokio::task::yield_now().await;
     assert!(matches!(written.try_recv(), Err(TryRecvError::Empty)));
-
     tokio::time::advance(Duration::from_secs(25)).await;
     let first = written.recv().await.expect("first heartbeat");
     assert!(matches!(first, Message::Ping(_)));
@@ -1153,7 +1098,6 @@ async fn idle_pump_sends_heartbeat_without_bursting_after_a_delay() {
         .send(Ok(Message::Pong(vec![1].into())))
         .expect("reply before scheduler delay");
     tokio::task::yield_now().await;
-
     tokio::time::advance(Duration::from_secs(120)).await;
     let second = written.recv().await.expect("heartbeat after delay");
     assert!(matches!(&second, Message::Ping(_)));
@@ -1281,7 +1225,6 @@ async fn active_response_receives_heartbeats_during_two_hundred_seconds_of_silen
     }
     assert_eq!(trace.starts.load(Ordering::Acquire), 1);
     assert!(!trace.cancelled.load(Ordering::Acquire));
-
     trace.release_terminal.notify_one();
     let message = tokio::time::timeout(Duration::from_secs(2), socket.next())
         .await

@@ -68,10 +68,7 @@ async fn rollback_after_restart_should_require_restart_even_for_a_lower_version(
     let status = restarted.update_status().await.expect("new process");
     assert!(!status.need_restart);
     assert_eq!(status.previous_version.as_deref(), Some("1.0.0"));
-    restarted
-        .rollback(Arc::new(AllowingUpdatePreflight))
-        .await
-        .expect("rollback");
+    restarted.rollback().await.expect("rollback");
     let status = restarted.update_status().await.expect("pending rollback");
     assert!(status.need_restart);
     assert_eq!(status.current_version.as_deref(), Some("1.0.0"));
@@ -137,12 +134,7 @@ async fn pending_update_should_revoke_rollback_when_backup_content_changes() {
         .expect("pending with invalid backup");
     assert!(status.need_restart);
     assert!(status.previous_version.is_none());
-    assert!(
-        service
-            .rollback(Arc::new(AllowingUpdatePreflight))
-            .await
-            .is_err()
-    );
+    assert!(service.rollback().await.is_err());
     assert_eq!(
         fs::read(fixture.executable()).expect("binary"),
         b"new-binary"

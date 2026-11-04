@@ -1,4 +1,4 @@
-//! 用量计数使用十进制字符串，避免插件前端丢失整数精度
+//! 用量计数使用十进制字符串，避免前端丢失整数精度
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 use std::fmt;

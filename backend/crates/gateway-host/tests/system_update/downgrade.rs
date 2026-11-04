@@ -36,15 +36,9 @@ async fn mount_catalog(server: &MockServer, releases: Vec<serde_json::Value>) {
 async fn start_downgrade(
     service: &ProcessSystemOperations,
     target: &str,
-    preflight: Arc<dyn SystemUpdatePreflight>,
 ) -> Result<SystemOperationAccepted, SystemOperationError> {
     service
-        .perform_update(
-            Some(target.into()),
-            None,
-            preflight,
-            SystemUpdateMode::Downgrade,
-        )
+        .perform_update(Some(target.into()), None, SystemUpdateMode::Downgrade)
         .await
 }
 
@@ -201,7 +195,7 @@ async fn downgrade_should_install_the_fifth_target_and_preserve_a_complete_rollb
             .is_err(),
         "普通升级不能接受旧版本"
     );
-    start_downgrade(&service, TARGET_VERSION, Arc::new(AllowingUpdatePreflight))
+    start_downgrade(&service, TARGET_VERSION)
         .await
         .expect("accepted");
     let status = wait_for_update(&service).await;
@@ -214,18 +208,13 @@ async fn downgrade_should_install_the_fifth_target_and_preserve_a_complete_rollb
         fs::read(fixture.web().join("index.html")).unwrap(),
         b"new-web"
     );
-    assert_eq!(
-        fs::read(fixture.official().join("new-plugin.tar.gz")).unwrap(),
-        b"new-plugin"
-    );
+
     assert_eq!(
         fs::read(fixture.executable().with_extension("backup")).unwrap(),
         b"old-binary"
     );
     assert!(
-        start_downgrade(&service, "1.9.8", Arc::new(AllowingUpdatePreflight))
-            .await
-            .is_err(),
+        start_downgrade(&service, "1.9.8").await.is_err(),
         "待重启时禁止再次安装"
     );
 }
@@ -248,7 +237,7 @@ async fn downgrade_should_reject_a_sixth_or_removed_target_before_downloading() 
             newer.push(release(&server, target));
         }
         mount_catalog(&server, newer).await;
-        start_downgrade(&service, target, Arc::new(AllowingUpdatePreflight))
+        start_downgrade(&service, target)
             .await
             .expect("accepted for revalidation");
         let status = wait_for_update(&service).await;
@@ -288,42 +277,16 @@ async fn downgrade_should_reject_invalid_direction_major_and_channel_without_net
         "1.9.0-beta.1",
         "1.9.0-exp.1",
     ] {
-        assert!(
-            start_downgrade(&service, target, Arc::new(AllowingUpdatePreflight))
-                .await
-                .is_err(),
-            "{target}"
-        );
+        assert!(start_downgrade(&service, target).await.is_err(), "{target}");
     }
     assert!(server.received_requests().await.unwrap().is_empty());
     assert!(!fixture.state().exists());
     assert_eq!(fs::read(fixture.executable()).unwrap(), b"old-binary");
 }
 
-struct RejectingDowngrade;
-
-#[async_trait::async_trait]
-impl SystemUpdatePreflight for RejectingDowngrade {
-    async fn validate(&self, _: SystemUpdateCandidate) -> Result<Revision, SystemOperationError> {
-        panic!("降级不能走普通升级的宽松校验")
-    }
-    async fn validate_downgrade(
-        &self,
-        _: SystemUpdateCandidate,
-    ) -> Result<Revision, SystemOperationError> {
-        Err(SystemOperationError::new(
-            SystemOperationErrorKind::Conflict,
-            "fixture incompatible plugin",
-        ))
-    }
-    async fn confirm_revision(&self, _: Revision) -> Result<(), SystemOperationError> {
-        unreachable!()
-    }
-}
-
 #[tokio::test]
 async fn failed_downgrade_should_preserve_all_running_files_and_release_locks() {
-    for reject_plugin in [false, true] {
+    for _ in [()] {
         let server = MockServer::start().await;
         let fixture = Fixture::new();
         fixture
@@ -331,22 +294,11 @@ async fn failed_downgrade_should_preserve_all_running_files_and_release_locks() 
                 &server,
                 TARGET_VERSION,
                 ArchiveKind::Safe,
-                if reject_plugin {
-                    ChecksumKind::Valid
-                } else {
-                    ChecksumKind::Mismatch
-                },
+                ChecksumKind::Mismatch,
             )
             .await;
         let service = service(&fixture, &server, "1.10.0");
-        let preflight: Arc<dyn SystemUpdatePreflight> = if reject_plugin {
-            Arc::new(RejectingDowngrade)
-        } else {
-            Arc::new(AllowingUpdatePreflight)
-        };
-        start_downgrade(&service, TARGET_VERSION, preflight)
-            .await
-            .unwrap();
+        start_downgrade(&service, TARGET_VERSION).await.unwrap();
         let status = wait_for_update(&service).await;
         assert_eq!(status.operation.status, SystemOperationStatus::Failed);
         assert!(!status.need_restart);
@@ -355,10 +307,7 @@ async fn failed_downgrade_should_preserve_all_running_files_and_release_locks() 
             fs::read(fixture.web().join("index.html")).unwrap(),
             b"old-web"
         );
-        assert_eq!(
-            fs::read(fixture.official().join("old-plugin.tar.gz")).unwrap(),
-            b"old-plugin"
-        );
+
         assert!(!fixture.lock().exists());
     }
 }
