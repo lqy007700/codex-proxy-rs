@@ -713,44 +713,6 @@ OpenAI 选号阶段确认本次可选账号全部额度耗尽时，HTTP 返回 `
 缺失、非法、已禁用或已删除的 Key 返回 OpenAI 风格 `401` 错误；未知查询参数返回 `400 invalid_usage_query`，
 读取账本失败返回 `503 usage_unavailable`，不会用零余额掩盖故障
 
-### CPR 互联只读协议
-
-`GET /v1/cpr/link` 使用数据面推理 Key，不接受管理 Key、会话 Cookie 或查询参数。
-Key 必须开启 `peerSharing.enabled` 并显式绑定非空分组；共享范围取请求冻结权限与当前权限的交集，
-仅公开有效分组内的直连 OAuth 账号，API Key 转接账号不递归公开。
-开启共享也将该 Key 的实际推理范围收窄到所选分组的直连账号，不改变普通／保底恢复阶段。
-查询不执行推理、刷新远端、扣费、占推理并发/RPM 或更新最近使用时间，预算耗尽仍可查询
-
-响应直接返回 JSON，所有状态均带 `Cache-Control: no-store`：
-
-| 字段或能力 | 合同 |
-| --- | --- |
-| `object`、`schema_version` | 固定 `"cpr.peer"`、`2`，不支持 v1 降级 |
-| `observed_at`、`expires_at` | RFC3339 UTC 时间，顶层到期必须晚于观测且不超过其后 30 分钟 |
-| `capabilities` | 获准公开的能力列表，未知能力或字段可忽略，不消费未声明能力的数据 |
-| `key_usage` → `usage` | 组件状态、观测时间，以及 `data.allowed` 预算结论与可选金额窗口 |
-| `pool_summary` → `pool` | 匿名池总数、互斥状态计数及可选套餐分布 |
-| `quota_windows` → `quota.accounts` | 匿名账号、各自观测有效期及额度窗口，不将不同账号百分比相加 |
-| `model_availability` → `models` | 模型额度观测，不承诺首次选号或即时容量 |
-
-公开套餐分布时优先使用明确套餐，缺失时从本地已保存的额度快照补全；未知套餐保持未知。
-套餐公开不要求同时公开额度，也不触发回源刷新或扩大额度公开范围
-
-匿名账号 ID 在同 Key 下稳定、跨 Key 隔离，不公开邮箱、名称、内部账号 ID、出口或凭据。
-金额使用非负十进制字符串，不限额的总额与剩余额度为 `null`；金额窗口与本机 Token 统计不是同一口径。
-缺失、过期或不支持的组件保持未知，顶层新时间不能延长组件旧观测。
-仅有效、新于耗尽事实的 `usage.data.allowed: true` 可解除耗尽；金额增加、重置到期和查询失败均不证明恢复
-
-每进程每 Key 每分钟限 30 次查询，聚合最多并发 8 个；上限为 3000 个账号、
-预算与账号窗口各 6000 个、2000 个模型及 4 MiB 响应，超限整体失败，不返回截断的成功结果。
-认证失败返回 `401`，未开启共享返回 `403 peer_sharing_disabled`，查询参数非法返回 `400 invalid_peer_query`，
-限流返回带 `Retry-After` 的 `429 peer_query_rate_limited`，聚合不可用或超限返回 `503`
-
-接入端对启用的 OpenAI API Key 账号访问 `{base_url}/cpr/link`，沿用账号代理与证书策略，
-禁止重定向，期限 5 秒、响应上限 4 MiB；显式代理失败不转直连。
-创建、导入和连接保存后异步发现，后台周期同步；不支持结论跨重启保留，手动刷新可重新识别。
-网络或无效响应保留旧观测并退避，`401/403` 清除撤销内容，连接变化使旧观测失效
-
 ### Codex Live 语音通话
 
 语音通话复用数据面 Client Key 鉴权，并按该 Key 的账号分组选路。通话引导是一次性请求，走与其他
@@ -943,11 +905,8 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 
 账号列表的 `search` 按字面量包含匹配名称、邮箱、内部账号 ID 和上游账号／用户 ID，不区分大小写；`%`、`_` 和 `\` 按普通字符处理
 
-OpenAI API Key 账号的 `upstream` 提供 `discovered`、`stale`、`observedAt`、展示时间、`connectionRevision`、
-`lastError` 及可选 `pool`；错误分类为 `unauthorized`、`unsupported`、`rate_limited`、`invalid_response` 或 `unavailable`。
-普通列表只投影摘要，详情按需返回匿名节点额度；`quota.windows` 的 `sourceAccountId` 标识远端匿名节点，
-金额窗口的 `amount` 提供已用、剩余与总额展示值，不替换本机 `usage`。
-`POST /api/admin/accounts/quota/refresh` 等待手动同步结果，失败返回错误，不把异步受理视为刷新成功
+OpenAI API Key 账号不主动发现或同步远端额度，账号列表展示本机累计用量。
+额度查询与刷新能力由 `capabilities.quota`、`capabilities.quotaRefresh` 声明，未声明刷新能力的账号不提供额度刷新操作
 
 账号视图的 `capacity` 返回查询时的普通并发容量：`usedSlots` 不含独立审批池和排队请求，
 读取运行态失败时为 `null`；`totalSlots` 是应用账号独立配置或全局默认值后的上限，`null` 表示不限。
@@ -1628,7 +1587,7 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 | `POST` | `/api/admin/client-keys/delete` | `{ id }` | 删除 |
 
 创建字段为 `name`、可选 `label`、`groupIds`、`maxConcurrency`、`requestsPerMinute`、可选
-`dailyLimitUsd`、`weeklyLimitUsd`、`customKey`、`portableHistory`、`peerSharing`、`identityPolicy` 和 `providerRequestProfileOverrides`。更新请求携带 `id`，不接受 `customKey`。
+`dailyLimitUsd`、`weeklyLimitUsd`、`customKey`、`portableHistory`、`identityPolicy` 和 `providerRequestProfileOverrides`。更新请求携带 `id`，不接受 `customKey`。
 `groupIds` 必须显式提交：空数组派生 `routingScope: "all"`，非空数组派生
 `routingScope: "groups"`。响应同时返回分组引用 `groups`，以及从当前有效账号池派生、仅供展示的
 `providerKinds`。创建和 reveal 响应会返回完整明文 Key，调用方
@@ -1636,10 +1595,6 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 
 `identityPolicy` 创建时省略为直连，更新时省略或 `null` 保留原值，列表与详情返回当前配置。
 模式、来源与转发要求见[可信调用方身份](#可信调用方身份)
-
-`peerSharing` 为 `{ enabled, sharePool, shareQuota, sharePlans }`，创建时省略默认全部关闭，
-更新时省略或 `null` 保留原配置，提交对象时替换完整配置；`sharePlans` 依赖 `sharePool`。
-启用共享必须显式绑定非空分组，现有 Key 不自动公开账号池。协议见 [CPR 互联只读协议](#cpr-互联只读协议)
 
 `portableHistory` 控制 OpenAI Provider 的跨渠道聊天兼容，创建时默认 `false`，更新时省略或 `null` 保留原值，列表与详情返回当前布尔值
 开启时正常保留推理 ID、密文和原生续接，包括 `previous_response_id` 和上游支持的压缩历史，不根据换号或地址变化主动清理

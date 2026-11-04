@@ -6,16 +6,8 @@ import request from '../request'
 export type ApiKeyRoutingScope = 'all' | 'groups'
 export type ApiKeyBudgetPeriod = 'daily' | 'weekly' | 'all'
 
-export interface ApiKeyPeerSharing {
-  enabled: boolean
-  sharePool: boolean
-  shareQuota: boolean
-  sharePlans: boolean
-}
-
 export interface ApiKey {
   identityPolicy: import('./affinity').CallerIdentityPolicy
-  peerSharing: ApiKeyPeerSharing
   portableHistory: boolean
   providerRequestProfileOverrides: ProviderRequestProfiles
   openaiClientProfileOverride: ClientProfileSelection | null
@@ -80,7 +72,6 @@ interface ApiKeyListParams {
 
 export interface ApiKeyWriteParam {
   identityPolicy?: import('./affinity').CallerIdentityPolicy
-  peerSharing?: ApiKeyPeerSharing | null
   portableHistory?: boolean
   name: string
   label: string | null

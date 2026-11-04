@@ -545,7 +545,7 @@ fn recovery_roles_follow_the_frozen_scope_and_preserve_hard_eligibility() {
 }
 
 #[test]
-fn peer_sharing_scope_preserves_local_recovery_stages() {
+fn group_scope_preserves_local_recovery_stages() {
     use gateway_core::{
         account::{AccountSchedulingRole, AccountSelector},
         engine::recovery::AccountRecoveryStage,
@@ -573,24 +573,20 @@ fn peer_sharing_scope_preserves_local_recovery_stages() {
                 };
                 let account =
                     RuntimeAccount::new(provider.clone(), BTreeSet::from([group.clone()]))
-                        .with_scheduling_role(role)
-                        .with_direct_authentication_kind(Some("test".into()));
+                        .with_scheduling_role(role);
                 (id, account)
             })
             .collect(),
     ));
-    let scope = Arc::new(
-        FrozenAccountScope::new(
-            directory,
-            ClientRoutingScope::restricted(
-                vec![RoutingGroupSnapshot::new(group.clone(), "peer".into())],
-                BTreeSet::from([group]),
-                BTreeSet::from([provider]),
-            )
-            .unwrap(),
+    let scope = Arc::new(FrozenAccountScope::new(
+        directory,
+        ClientRoutingScope::restricted(
+            vec![RoutingGroupSnapshot::new(group.clone(), "group".into())],
+            BTreeSet::from([group]),
+            BTreeSet::from([provider]),
         )
-        .with_direct_accounts_only(true),
-    );
+        .unwrap(),
+    ));
     for (stage, expected) in [
         (AccountRecoveryStage::Initial, "acct_a"),
         (

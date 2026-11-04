@@ -42,7 +42,6 @@ pub struct SnapshotAccountGroupData {
 pub struct SnapshotProviderAccountData {
     pub id: String,
     pub provider_kind: String,
-    pub authentication_kind: String,
     pub model_access: gateway_core::account::AccountModelAccess,
     pub model_mappings: gateway_core::account::AccountModelMappings,
     pub scheduling_role: gateway_core::account::AccountSchedulingRole,
@@ -151,7 +150,6 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                     .with_portable_history(key.portable_history)
                     .with_name_snapshot(key.name_snapshot)
                     .with_request_profiles(key.request_profiles)
-                    .with_peer_sharing(key.peer_sharing)
                     .with_identity_policy(key.identity_policy)
                 })
                 .collect();
@@ -174,7 +172,6 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                                 .with_scheduling_role(account.scheduling_role)
                                 .with_model_access(account.model_access)
                                 .with_model_mappings(account.model_mappings)
-                                .with_authentication_kind(account.authentication_kind)
                         })
                         .map_err(|_| SnapshotStoreError::unavailable())
                 })
@@ -326,14 +323,13 @@ async fn load_client_keys(
             sqlx::types::Json<BTreeMap<String, serde_json::Map<String, serde_json::Value>>>,
             String,
             bool,
-            sqlx::types::Json<gateway_core::policy::ClientPeerSharing>,
             sqlx::types::Json<gateway_core::policy::CallerIdentityPolicy>,
         ),
     >(
         "select k.id, k.key,
                 coalesce(array_agg(kg.account_group_id order by kg.account_group_id)
                   filter (where kg.account_group_id is not null), '{}') as group_ids,
-                k.max_concurrency, k.requests_per_minute, k.provider_request_profiles_json, k.name, k.portable_history, k.peer_sharing_json, k.identity_policy_json
+                k.max_concurrency, k.requests_per_minute, k.provider_request_profiles_json, k.name, k.portable_history, k.identity_policy_json
          from client_api_keys k
          left join client_api_key_groups kg on kg.client_api_key_id = k.id
          where k.enabled and (k.identity_source_id is null or exists(select 1 from caller_identity_sources s where s.id=k.identity_source_id and s.enabled))
@@ -349,8 +345,7 @@ async fn load_client_keys(
             key.portable_history = row.7;
             key.request_profiles = decode_request_profiles(row.5.0)?;
             key.name_snapshot = Some(row.6);
-            key.peer_sharing = row.8.0;
-            key.identity_policy = row.9.0;
+            key.identity_policy = row.8.0;
             Ok(key)
         })
         .collect()
@@ -383,27 +378,24 @@ async fn load_account_groups(
 async fn load_provider_accounts(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<Vec<SnapshotProviderAccountData>> {
-    let rows = sqlx::query_as::<_, (String, String, sqlx::types::Json<gateway_core::account::AccountModelAccess>, sqlx::types::Json<gateway_core::account::AccountModelMappings>, String, String)>(
-        "select id, provider_kind, model_access_json, model_mappings_json, scheduling_role, authentication_kind from provider_accounts order by id",
+    let rows = sqlx::query_as::<_, (String, String, sqlx::types::Json<gateway_core::account::AccountModelAccess>, sqlx::types::Json<gateway_core::account::AccountModelMappings>, String)>(
+        "select id, provider_kind, model_access_json, model_mappings_json, scheduling_role from provider_accounts order by id",
     )
     .fetch_all(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("load snapshot provider accounts", source))?;
     rows.into_iter()
-        .map(
-            |(id, provider_kind, model_access, model_mappings, role, authentication_kind)| {
-                let scheduling_role = gateway_core::account::AccountSchedulingRole::parse(&role)
-                    .ok_or_else(|| invalid("invalid scheduling_role"))?;
-                Ok(SnapshotProviderAccountData {
-                    id,
-                    provider_kind,
-                    model_access: model_access.0,
-                    model_mappings: model_mappings.0,
-                    scheduling_role,
-                    authentication_kind,
-                })
-            },
-        )
+        .map(|(id, provider_kind, model_access, model_mappings, role)| {
+            let scheduling_role = gateway_core::account::AccountSchedulingRole::parse(&role)
+                .ok_or_else(|| invalid("invalid scheduling_role"))?;
+            Ok(SnapshotProviderAccountData {
+                id,
+                provider_kind,
+                model_access: model_access.0,
+                model_mappings: model_mappings.0,
+                scheduling_role,
+            })
+        })
         .collect()
 }
 

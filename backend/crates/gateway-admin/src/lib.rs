@@ -24,10 +24,6 @@ pub use use_case::affinity::AffinityService;
 pub use use_case::plugins::{PluginDistributionPorts, PluginManagementService, PluginsService};
 
 pub use use_case::key_usage::KeyUsageService;
-pub use use_case::peer_link::upstream::{
-    PeerUpstreamBundle, initialize as initialize_peer_upstream,
-};
-pub use use_case::peer_link::{PeerLinkError, PeerLinkService};
 
 pub use use_case::{
     account_groups::AccountGroupService,
@@ -212,7 +208,6 @@ pub struct AdminServices {
     proxies: Arc<dyn ProxiesService>,
     auth: Arc<dyn AuthService>,
     key_usage: Arc<dyn KeyUsageService>,
-    peer_link: Arc<dyn PeerLinkService>,
     accounts: Arc<dyn AccountsService>,
     account_groups: Arc<dyn AccountGroupService>,
     client_keys: Arc<dyn ClientKeyService>,
@@ -272,11 +267,6 @@ impl AdminServices {
     #[must_use]
     pub fn auth(&self) -> &dyn AuthService {
         self.auth.as_ref()
-    }
-
-    #[must_use]
-    pub fn peer_link(&self) -> &dyn PeerLinkService {
-        self.peer_link.as_ref()
     }
 
     #[must_use]
@@ -354,7 +344,6 @@ impl AdminBundle {
 
 /// 组合根提供给控制面的运行能力；与配置和存储端口分别传入
 pub struct AdminRuntimePorts {
-    pub upstream_info: Option<Arc<dyn ports::peer::PeerUpstreamService>>,
     pub timezone: gateway_core::time::DeploymentTimeZone,
     pub service_middleware: public_service::PlanSource,
     pub plugin_preparation: Arc<dyn ports::plugins::PluginPreparation>,

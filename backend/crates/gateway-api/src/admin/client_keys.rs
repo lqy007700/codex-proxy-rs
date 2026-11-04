@@ -155,8 +155,6 @@ pub struct CreateClientKeyRequest {
     #[serde(default)]
     portable_history: bool,
     #[serde(default)]
-    peer_sharing: gateway_core::policy::ClientPeerSharing,
-    #[serde(default)]
     identity_policy: gateway_core::policy::CallerIdentityPolicy,
     #[serde(default)]
     provider_request_profile_overrides: ProviderRequestProfileOverrides,
@@ -197,7 +195,6 @@ impl CreateClientKeyRequest {
         )?;
         Ok(CreateClientKey {
             portable_history: self.portable_history,
-            peer_sharing: self.peer_sharing,
             identity_policy: self.identity_policy,
             request_profile_overrides,
             custom_key: self
@@ -226,7 +223,6 @@ impl CreateClientKeyRequest {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateClientKeyRequest {
-    peer_sharing: Option<gateway_core::policy::ClientPeerSharing>,
     identity_policy: Option<gateway_core::policy::CallerIdentityPolicy>,
     #[serde(default)]
     portable_history: Option<bool>,
@@ -262,7 +258,6 @@ impl UpdateClientKeyRequest {
         )?;
         Ok(UpdateClientKey {
             portable_history: self.portable_history,
-            peer_sharing: self.peer_sharing,
             identity_policy: self.identity_policy,
             request_profile_override_updates,
             id: client_key_id(self.id, "clientKeyMutationNotFound")?,
@@ -351,7 +346,6 @@ impl ClientKeyMutationRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ClientKeyView {
     portable_history: bool,
-    peer_sharing: gateway_core::policy::ClientPeerSharing,
     #[serde(default)]
     identity_policy: gateway_core::policy::CallerIdentityPolicy,
     provider_request_profile_overrides: ProviderRequestProfileOverrides,
@@ -405,7 +399,6 @@ impl From<(ClientKeyRecord, crate::time::TimePresenter)> for ClientKeyView {
             xai_client_profile_override: provider_request_profile_overrides.get("xai").cloned(),
             provider_request_profile_overrides,
             portable_history: record.portable_history,
-            peer_sharing: record.peer_sharing,
             identity_policy: record.identity_policy,
             id: record.id.to_string(),
             name: record.name,

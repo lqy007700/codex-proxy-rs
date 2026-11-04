@@ -21,7 +21,6 @@ pub mod scope;
 mod selection;
 mod smart_scheduling;
 mod store;
-mod upstream;
 
 pub use error::CredentialError;
 pub use model::*;
@@ -29,4 +28,3 @@ pub(crate) use selection::smart_score;
 pub use selection::*;
 pub use smart_scheduling::{SmartSchedulingConfig, SmartSchedulingConfigError};
 pub use store::ProviderAccountStore;
-pub use upstream::*;

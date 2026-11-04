@@ -61,7 +61,6 @@ async fn initialize_inner(
 ) -> Result<AdminBundle, AdminError> {
     let AdminRuntimePorts {
         email_sender,
-        upstream_info,
         timezone,
         service_middleware,
         plugin_preparation,
@@ -105,7 +104,6 @@ async fn initialize_inner(
         providers.clone(),
         snapshot.clone(),
         probe.clone(),
-        upstream_info.clone(),
     );
     let backup_ports = store.backup();
     let backups = Arc::new(DefaultBackupService::new(
@@ -144,15 +142,9 @@ async fn initialize_inner(
         store.accounts(),
         store.proxies(),
         snapshot.clone(),
-        upstream_info.clone(),
     ));
     let plugin_accounts = plugin_accounts.unwrap_or_else(|| {
-        initialize_plugin_accounts(
-            providers.clone(),
-            store.accounts(),
-            snapshot.clone(),
-            upstream_info.clone(),
-        )
+        initialize_plugin_accounts(providers.clone(), store.accounts(), snapshot.clone())
     });
     let import_tasks = use_case::import_tasks::DefaultImportTasksService::new(credentials.clone());
     let import_task = use_case::import_tasks::ImportTaskWorker(import_tasks.clone());
@@ -175,12 +167,6 @@ async fn initialize_inner(
         .workers()
         .map_err(|_| AdminError::internal("告警任务注册失败"))?;
     let services = AdminServices {
-        peer_link: Arc::new(use_case::peer_link::DefaultPeerLinkService::new(
-            store.client_keys(),
-            store.accounts(),
-            store.account_runtime(),
-            providers.clone(),
-        )),
         timezone,
         public_services: Arc::new(public_services),
         plugin_management: Arc::new(PluginManagementService::new(
@@ -203,7 +189,6 @@ async fn initialize_inner(
             proxy_probe,
             snapshot.clone(),
             providers.clone(),
-            upstream_info.clone(),
         )),
         auth,
         accounts: accounts.clone(),
@@ -226,7 +211,6 @@ async fn initialize_inner(
             providers.clone(),
             timezone,
             system.clone(),
-            upstream_info,
         )),
         settings,
         alerts,
@@ -267,13 +251,9 @@ pub fn initialize_plugin_accounts(
     providers: ports::provider::ProviderAdminRegistry,
     accounts: Arc<dyn ports::store::AccountStore>,
     snapshot: Arc<dyn gateway_core::runtime::SnapshotControl>,
-    upstream_info: Option<Arc<dyn ports::peer::PeerUpstreamService>>,
 ) -> Arc<dyn PluginAccountAccess> {
     Arc::new(use_case::plugin_accounts::DefaultPluginAccountAccess::new(
-        providers,
-        accounts,
-        snapshot,
-        upstream_info,
+        providers, accounts, snapshot,
     ))
 }
 
@@ -300,10 +280,6 @@ pub fn initialize_plugin_resources(
 
 /// 服务端与 CLI 复用账号用例，不随命令启动后台调度
 #[must_use]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "账号存储、发布、探测与互联分别通过独立端口注入"
-)]
 pub fn initialize_accounts(
     accounts: Arc<dyn ports::store::AccountStore>,
     account_runtime: Arc<dyn ports::store::AccountRuntimeStore>,
@@ -312,7 +288,6 @@ pub fn initialize_accounts(
     providers: ProviderAdminRegistry,
     snapshot: Arc<dyn SnapshotControl>,
     probe: Arc<dyn AccountProbe>,
-    upstream_info: Option<Arc<dyn ports::peer::PeerUpstreamService>>,
 ) -> Arc<dyn AccountsService> {
     Arc::new(DefaultAccountsService::new(
         accounts,
@@ -322,7 +297,6 @@ pub fn initialize_accounts(
         providers,
         snapshot,
         probe,
-        upstream_info,
     ))
 }
 

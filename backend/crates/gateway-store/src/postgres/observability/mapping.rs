@@ -135,7 +135,6 @@ pub(crate) fn admin_dashboard_account_usage(
     usage: ProviderAccountUsageObservation,
 ) -> admin_observability::DashboardAccountUsage {
     admin_observability::DashboardAccountUsage {
-        upstream: None,
         account_id: usage.account_id,
         provider_kind: usage.provider_kind,
         authentication_kind: usage.authentication_kind,

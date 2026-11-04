@@ -25,9 +25,6 @@ const items = computed(() => props.windows.map((window) => {
 
   return {
     key: window.key,
-    amount: window.amount,
-    observedAt: window.observedAtDisplay,
-    stale: window.stale,
     local: view.mode === 'local',
     localLabel: view.local.label,
     requestDisplay: view.local.requestDisplay,
@@ -64,24 +61,7 @@ const items = computed(() => props.windows.map((window) => {
       :class="grouped ? 'grid-cols-2' : 'grid-cols-1'"
     >
       <div v-for="item in items" :key="item.key" class="grid min-w-0 gap-1.5">
-        <template v-if="item.amount">
-          <div class="flex min-w-0 items-baseline justify-between gap-2 text-cp-xs">
-            <span class="text-cp-text-secondary">{{ item.label }}</span>
-            <strong class="font-mono text-cp-text" :title="`剩余 ${item.amount.remainingDisplay}，总额 ${item.amount.totalDisplay}`">
-              {{ item.amount.remainingDisplay }} / {{ item.amount.totalDisplay }}
-            </strong>
-          </div>
-          <p class="text-cp-xs text-cp-text-tertiary">
-            已用 {{ item.amount.usedDisplay }}
-          </p>
-          <p v-if="item.localUsageDisplay" class="text-cp-xs text-cp-text-tertiary">
-            本机窗口消耗 {{ item.localUsageDisplay }}
-          </p>
-          <p class="text-cp-xs text-cp-text-tertiary">
-            重置 {{ item.resetAtDisplay }}
-          </p>
-        </template>
-        <template v-else-if="item.local">
+        <template v-if="item.local">
           <div class="flex min-w-0 items-baseline justify-between gap-2 text-cp-xs leading-3.5">
             <span class="min-w-0 truncate font-bold text-cp-text-quaternary">
               {{ item.localLabel }}
@@ -155,9 +135,6 @@ const items = computed(() => props.windows.map((window) => {
             </span>
           </p>
         </template>
-        <p v-if="item.observedAt" class="text-cp-xs text-cp-text-tertiary" :class="{ 'text-cp-warning-text': item.stale }">
-          {{ item.stale ? '观测已过期' : '观测时间' }} {{ item.observedAt }}
-        </p>
       </div>
     </div>
   </section>

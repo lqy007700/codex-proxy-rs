@@ -1,7 +1,7 @@
 import type { FormRule, FormRules } from '@codex-proxy/ui'
 import type { ApiKeyFormValue } from './useApiKeyEditor'
 
-export function useApiKeyFormRules(sharingEnabled: () => boolean): FormRules<ApiKeyFormValue> {
+export function useApiKeyFormRules(): FormRules<ApiKeyFormValue> {
   function amountRule(label: string): FormRule {
     return {
       trigger: ['blur', 'change'],
@@ -23,11 +23,6 @@ export function useApiKeyFormRules(sharingEnabled: () => boolean): FormRules<Api
   }
 
   return {
-    groupIds: {
-      trigger: ['change'],
-      validator: (_rule, value) => !sharingEnabled() || (Array.isArray(value) && value.length > 0),
-      message: '开启 CPR 互联需要选择至少一个分组',
-    },
     name: {
       required: true,
       whitespace: true,

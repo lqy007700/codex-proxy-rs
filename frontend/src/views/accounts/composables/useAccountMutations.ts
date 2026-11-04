@@ -234,9 +234,7 @@ export function useAccountMutations(options: {
           options.selectedIds.value = selectedIds
         }
         ZNotification.success({
-          message: result.account.upstream?.lastError === 'unsupported'
-            ? '已完成识别，上游未提供互联能力'
-            : '额度已刷新',
+          message: '额度已刷新',
         })
       }
       catch {}

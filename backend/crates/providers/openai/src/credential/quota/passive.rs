@@ -66,7 +66,6 @@ impl CodexCredentialQuotaService {
             let outcome = self
                 .store
                 .compare_and_swap_quota(QuotaObservation {
-                    expected_connection: None,
                     plan_type,
                     account_id: account.id().clone(),
                     expected_revision: account.revision(),
@@ -94,7 +93,6 @@ impl CodexCredentialQuotaService {
         let outcome = self
             .store
             .compare_and_swap_quota(QuotaObservation {
-                expected_connection: None,
                 plan_type,
                 account_id: account.id().clone(),
                 expected_revision: account.revision(),

@@ -10,7 +10,6 @@ use super::TestDatabase;
 #[test]
 fn client_key_snapshot_debug_redacts_plaintext_key() {
     let policy = ClientApiKeySnapshot {
-        peer_sharing: Default::default(),
         identity_policy: Default::default(),
 
         portable_history: false,
@@ -59,5 +58,43 @@ async fn runtime_snapshot_loads_enabled_plaintext_key_without_debug_exposure() {
         plaintext
     );
     assert!(!format!("{snapshot:?}").contains(&plaintext));
+    database.close().await;
+}
+
+#[tokio::test]
+async fn legacy_sharing_configuration_does_not_participate_in_snapshot_loading() {
+    let Some(database) = TestDatabase::create("legacy_sharing_ignored").await else {
+        return;
+    };
+    let plaintext = format!("sk_{}", "l".repeat(43));
+    sqlx::query("insert into client_api_keys(id,name,key,peer_sharing_json,created_at,updated_at) values('legacy_key','legacy',$1,$2,now(),now())")
+        .bind(&plaintext)
+        .bind(sqlx::types::Json(serde_json::json!({"enabled": true, "sharePool": true, "shareQuota": true, "sharePlans": true})))
+        .execute(&database.pool).await.unwrap();
+    for stored in [
+        serde_json::json!({"enabled": true, "sharePool": true, "shareQuota": true, "sharePlans": true}),
+        serde_json::json!({"enabled": true}),
+        serde_json::json!({"unused": "opaque legacy data"}),
+    ] {
+        sqlx::query("update client_api_keys set peer_sharing_json=$1 where id='legacy_key'")
+            .bind(sqlx::types::Json(stored.clone()))
+            .execute(&database.pool)
+            .await
+            .unwrap();
+        let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+            .load_runtime_snapshot()
+            .await
+            .unwrap();
+        let key = &snapshot.client_api_keys[0];
+        assert_eq!(key.plaintext_key.expose_for_auth(), plaintext);
+        assert!(key.group_ids.is_empty());
+        let persisted: serde_json::Value = sqlx::query_scalar(
+            "select peer_sharing_json from client_api_keys where id='legacy_key'",
+        )
+        .fetch_one(&database.pool)
+        .await
+        .unwrap();
+        assert_eq!(persisted, stored);
+    }
     database.close().await;
 }

@@ -96,7 +96,6 @@ impl ClientKeyStore for TestClientKeyStore {
         }
         self.plaintexts.lock().unwrap().push(key.plaintext);
         let record = ClientKeyRecord {
-            peer_sharing: Default::default(),
             identity_policy: Default::default(),
 
             portable_history: key.portable_history,
@@ -238,7 +237,6 @@ async fn plugin_client_key_list_projects_only_public_identity_and_uses_stable_na
         list_response: Mutex::new(Some(ClientKeyPage {
             config_revision: Revision::new(7).expect("revision"),
             items: vec![ClientKeyRecord {
-                peer_sharing: Default::default(),
                 identity_policy: Default::default(),
 
                 portable_history: false,
@@ -378,7 +376,6 @@ async fn duplicate_names_report_the_same_actionable_conflict_on_create_and_updat
         .update(
             &mutation_context(),
             UpdateClientKey {
-                peer_sharing: Default::default(),
                 identity_policy: Default::default(),
 
                 portable_history: None,
@@ -402,7 +399,6 @@ async fn duplicate_names_report_the_same_actionable_conflict_on_create_and_updat
 
 fn create_command(key: Option<&str>) -> CreateClientKey {
     CreateClientKey {
-        peer_sharing: Default::default(),
         identity_policy: Default::default(),
 
         portable_history: false,
@@ -452,7 +448,6 @@ async fn duplicate_group_ids_are_rejected_before_key_creation_or_update() {
         .update(
             &mutation_context(),
             UpdateClientKey {
-                peer_sharing: Default::default(),
                 identity_policy: Default::default(),
 
                 portable_history: None,

@@ -85,7 +85,6 @@ pub(crate) struct DefaultObservabilityService {
     settings: Arc<dyn SettingsStore>,
     providers: ProviderAdminRegistry,
     system: Arc<dyn super::system::SystemService>,
-    upstream_info: Option<Arc<dyn crate::ports::peer::PeerUpstreamService>>,
 }
 
 impl DefaultObservabilityService {
@@ -97,7 +96,6 @@ impl DefaultObservabilityService {
         providers: ProviderAdminRegistry,
         timezone: gateway_core::time::DeploymentTimeZone,
         system: Arc<dyn super::system::SystemService>,
-        upstream_info: Option<Arc<dyn crate::ports::peer::PeerUpstreamService>>,
     ) -> Self {
         Self {
             timezone,
@@ -106,7 +104,6 @@ impl DefaultObservabilityService {
             settings,
             providers,
             system,
-            upstream_info,
         }
     }
 
@@ -804,7 +801,6 @@ impl DefaultObservabilityService {
             .map(|usage| (usage.account_id.clone(), usage))
             .collect::<HashMap<_, _>>();
         let providers = self.providers.clone();
-        let peer = self.upstream_info.as_deref();
         let quota_reads = accounts.iter().map(|account| {
             let rolling_usage = rolling_usage.remove(&account.account_id);
             let account_id = ProviderAccountId::new(account.account_id.clone()).ok();
@@ -815,11 +811,6 @@ impl DefaultObservabilityService {
                 let (Some(account_id), Some(provider)) = (account_id, provider) else {
                     return None;
                 };
-                if let Some(peer) = peer
-                    && let Ok(Some(quota)) = peer.read_summary(&account_id).await
-                {
-                    return Some(quota);
-                }
                 provider
                     .quota(ProviderQuotaRequest {
                         account_id,
@@ -837,7 +828,6 @@ impl DefaultObservabilityService {
                 quota.apply_limit_reached_display();
                 account.quota_used_percent = quota.representative_used_percent();
                 account.quota_window = quota.representative_window().cloned();
-                account.upstream = quota.upstream;
             }
         }
     }

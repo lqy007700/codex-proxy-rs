@@ -64,7 +64,6 @@ pub struct ProviderBundle {
 pub async fn initialize(
     config: OpenAiConfig,
     ports: ProviderStorePorts,
-    upstream_info: Arc<dyn gateway_core::account::UpstreamInfoSource>,
 ) -> Result<ProviderBundle, OpenAiInitializeError> {
     let provider_kind =
         ProviderKind::new("openai").map_err(|_| OpenAiInitializeError::InvalidProviderKind)?;
@@ -167,21 +166,18 @@ pub async fn initialize(
         http.clone(),
         config.base_url().to_owned(),
     ));
-    let selector = Arc::new(
-        CodexCredentialSelector::new(
-            provider_kind.clone(),
-            repository.clone(),
-            Arc::clone(&leases),
-            session_affinity,
-            session_exclusions,
-            Arc::clone(&quota),
-            Arc::clone(&catalog),
-            ports.cooldowns(),
-            Arc::clone(&account_feedback),
-            CodexCookiePolicy::official().map_err(|_| OpenAiInitializeError::CookiePolicy)?,
-        )
-        .with_upstream_info(upstream_info),
-    );
+    let selector = Arc::new(CodexCredentialSelector::new(
+        provider_kind.clone(),
+        repository.clone(),
+        Arc::clone(&leases),
+        session_affinity,
+        session_exclusions,
+        Arc::clone(&quota),
+        Arc::clone(&catalog),
+        ports.cooldowns(),
+        Arc::clone(&account_feedback),
+        CodexCookiePolicy::official().map_err(|_| OpenAiInitializeError::CookiePolicy)?,
+    ));
     let session_transport_recovery = CodexSessionTransportRecovery::default();
     let core_provider: Arc<dyn Provider> = Arc::new(
         CodexProvider::new(

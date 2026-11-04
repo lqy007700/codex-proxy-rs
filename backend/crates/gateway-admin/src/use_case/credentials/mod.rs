@@ -19,7 +19,6 @@ pub struct CredentialsService {
     accounts: Arc<dyn AccountStore>,
     proxies: Arc<dyn ProxyStore>,
     snapshot: Arc<dyn SnapshotControl>,
-    upstream_info: Option<Arc<dyn crate::ports::peer::PeerUpstreamService>>,
 }
 
 impl CredentialsService {
@@ -29,14 +28,12 @@ impl CredentialsService {
         accounts: Arc<dyn AccountStore>,
         proxies: Arc<dyn ProxyStore>,
         snapshot: Arc<dyn SnapshotControl>,
-        upstream_info: Option<Arc<dyn crate::ports::peer::PeerUpstreamService>>,
     ) -> Self {
         Self {
             providers,
             accounts,
             proxies,
             snapshot,
-            upstream_info,
         }
     }
 
@@ -50,7 +47,6 @@ impl CredentialsService {
             self.accounts.clone(),
             self.proxies.clone(),
             self.snapshot.clone(),
-            self.upstream_info.clone(),
         ))
     }
 }

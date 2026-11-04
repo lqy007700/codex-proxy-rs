@@ -1,4 +1,4 @@
-import type { ApiKey, ApiKeyPeerSharing } from '@/api'
+import type { ApiKey } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
 import { cloneDeep } from 'es-toolkit'
 import { ref, shallowRef } from 'vue'
@@ -8,7 +8,6 @@ import { notification as ZNotification } from '@/utils/notification'
 
 export interface ApiKeyFormValue {
   identityPolicy: import('@/api/modules/affinity').CallerIdentityPolicy
-  peerSharing: ApiKeyPeerSharing
   portableHistory: boolean
   providerRequestProfileOverrides: ProviderRequestProfiles
   customKey: string
@@ -42,7 +41,6 @@ export function useApiKeyEditor(options: {
     editingKey.value = key
     form.value = {
       identityPolicy: cloneDeep(key.identityPolicy ?? { mode: 'direct' }),
-      peerSharing: { ...key.peerSharing },
       providerRequestProfileOverrides: cloneDeep(key.providerRequestProfileOverrides),
       portableHistory: key.portableHistory,
       customKey: '',
@@ -80,7 +78,6 @@ export function useApiKeyEditor(options: {
       async () => {
         const payload = {
           identityPolicy: cloneDeep(form.value.identityPolicy),
-          peerSharing: { ...form.value.peerSharing },
           portableHistory: form.value.portableHistory,
           name: form.value.name.trim(),
           label: form.value.label.trim() || null,
@@ -150,12 +147,6 @@ export function useApiKeyEditor(options: {
 function emptyForm(): ApiKeyFormValue {
   return {
     identityPolicy: { mode: 'direct' },
-    peerSharing: {
-      enabled: false,
-      sharePool: false,
-      shareQuota: false,
-      sharePlans: false,
-    },
     portableHistory: false,
     providerRequestProfileOverrides: {},
     customKey: '',

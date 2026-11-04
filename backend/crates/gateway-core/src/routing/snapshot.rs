@@ -10,8 +10,7 @@ use crate::account::{FastMode, ProviderAccountId};
 use crate::concurrency::ConcurrencyQueuePolicy;
 use crate::operation::{Operation, OperationKind};
 use crate::policy::{
-    ClientApiKeyId, ClientPeerSharing, ClientPolicy, CodexClientMinVersions, PlaintextClientApiKey,
-    RateLimits,
+    ClientApiKeyId, ClientPolicy, CodexClientMinVersions, PlaintextClientApiKey, RateLimits,
 };
 use crate::settings::{SettingsValues, compiled::CompiledSettings};
 use crate::validation::RoutingError;
@@ -32,7 +31,6 @@ type ModelCatalogAccounts = BTreeMap<ProviderKind, BTreeMap<String, BTreeSet<Pro
 pub struct SnapshotClientPolicyFacts {
     portable_history: bool,
     identity_policy: crate::policy::CallerIdentityPolicy,
-    peer_sharing: ClientPeerSharing,
     name_snapshot: Option<String>,
     request_profiles: BTreeMap<ProviderKind, crate::account::OpaqueProviderData>,
     key_id: ClientApiKeyId,
@@ -51,12 +49,6 @@ impl SnapshotClientPolicyFacts {
     #[must_use]
     pub const fn with_portable_history(mut self, enabled: bool) -> Self {
         self.portable_history = enabled;
-        self
-    }
-
-    #[must_use]
-    pub const fn with_peer_sharing(mut self, sharing: ClientPeerSharing) -> Self {
-        self.peer_sharing = sharing;
         self
     }
 
@@ -84,7 +76,6 @@ impl SnapshotClientPolicyFacts {
     ) -> Self {
         Self {
             identity_policy: Default::default(),
-            peer_sharing: ClientPeerSharing::default(),
             key_id,
             portable_history: false,
             name_snapshot: None,
@@ -139,7 +130,6 @@ pub struct SnapshotProviderAccountFacts {
     model_access: crate::account::AccountModelAccess,
     model_mappings: crate::account::AccountModelMappings,
     scheduling_role: crate::account::AccountSchedulingRole,
-    authentication_kind: String,
 }
 
 impl SnapshotProviderAccountFacts {
@@ -165,18 +155,11 @@ impl SnapshotProviderAccountFacts {
             scheduling_role: crate::account::AccountSchedulingRole::Regular,
             model_access: crate::account::AccountModelAccess::all(),
             model_mappings: crate::account::AccountModelMappings::empty(),
-            authentication_kind: String::new(),
         }
     }
 }
 
 impl SnapshotProviderAccountFacts {
-    #[must_use]
-    pub fn with_authentication_kind(mut self, authentication_kind: String) -> Self {
-        self.authentication_kind = authentication_kind;
-        self
-    }
-
     #[must_use]
     pub fn with_model_mappings(mut self, mappings: crate::account::AccountModelMappings) -> Self {
         self.model_mappings = mappings;
@@ -548,8 +531,6 @@ async fn compile_runtime_snapshot(
     for account in facts.provider_accounts {
         let provider_kind = ProviderKind::new(account.provider_kind)
             .map_err(|_| RuntimeSnapshotCompileError::InvalidData)?;
-        let direct_account =
-            catalogs.is_direct_account(&provider_kind, &account.authentication_kind);
         // 账号归属独立于当前执行器集合；Provider 撤下后仍保留账号和分组，路由只选已注册执行器
         if accounts
             .insert(
@@ -557,10 +538,7 @@ async fn compile_runtime_snapshot(
                 RuntimeAccount::new(provider_kind, BTreeSet::new())
                     .with_scheduling_role(account.scheduling_role)
                     .with_model_access(account.model_access)
-                    .with_model_mappings(account.model_mappings)
-                    .with_direct_authentication_kind(
-                        direct_account.then_some(account.authentication_kind),
-                    ),
+                    .with_model_mappings(account.model_mappings),
             )
             .is_some()
         {
@@ -588,10 +566,7 @@ async fn compile_runtime_snapshot(
         *account = RuntimeAccount::new(account.provider_kind().clone(), group_ids)
             .with_scheduling_role(account.scheduling_role())
             .with_model_access(account.model_access().clone())
-            .with_model_mappings(account.model_mappings().clone())
-            .with_direct_authentication_kind(
-                account.direct_authentication_kind().map(str::to_owned),
-            );
+            .with_model_mappings(account.model_mappings().clone());
     }
     let account_directory = Arc::new(RuntimeAccountDirectory::new(accounts));
 
@@ -649,7 +624,6 @@ async fn compile_runtime_snapshot(
                 policy.limits,
             )
             .with_name_snapshot(policy.name_snapshot)
-            .with_peer_sharing(policy.peer_sharing)
             .with_identity_policy(policy.identity_policy),
         );
     }

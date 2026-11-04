@@ -169,7 +169,6 @@ impl ClientKeyService for DefaultClientKeyService {
             .identity_policy
             .validate()
             .map_err(|_| AdminError::invalid("invalid caller identity policy"))?;
-        validate_peer_sharing(command.peer_sharing, &command.group_ids)?;
         let id = ClientApiKeyId::new(format!("key_{}", Uuid::now_v7().simple()))
             .map_err(|_| AdminError::internal("创建 Client API Key ID 失败"))?;
         let plaintext = if let Some(key) = command.custom_key {
@@ -182,7 +181,6 @@ impl ClientKeyService for DefaultClientKeyService {
             .create_client_key(
                 NewClientKey {
                     portable_history: command.portable_history,
-                    peer_sharing: command.peer_sharing,
                     identity_policy: command.identity_policy,
                     request_profile_overrides: command.request_profile_overrides,
                     id,
@@ -223,9 +221,6 @@ impl ClientKeyService for DefaultClientKeyService {
             policy
                 .validate()
                 .map_err(|_| AdminError::invalid("调用方身份配置不合法"))?;
-        }
-        if let Some(sharing) = command.peer_sharing {
-            validate_peer_sharing(sharing, &command.group_ids)?;
         }
         let id = command.id.clone();
         let (config_revision, record) = self
@@ -323,17 +318,4 @@ pub(super) fn generate_key() -> String {
     let mut bytes = [0_u8; 32];
     OsRng.fill_bytes(&mut bytes);
     format!("sk_{}", URL_SAFE_NO_PAD.encode(bytes))
-}
-
-fn validate_peer_sharing(
-    sharing: gateway_core::policy::ClientPeerSharing,
-    groups: &[gateway_core::routing::AccountGroupId],
-) -> Result<(), AdminError> {
-    sharing.validate(!groups.is_empty()).map_err(|error| {
-        use gateway_core::policy::ClientPeerSharingError;
-        AdminError::invalid(match error {
-            ClientPeerSharingError::MissingGroupScope => "开启 CPR 互联需要指定账号分组",
-            ClientPeerSharingError::PlansWithoutPool => "公开套餐分布需要先公开账号池",
-        })
-    })
 }

@@ -150,7 +150,7 @@ API Key 上游支持标准 OpenAI `data[].id` 列表和完整 Codex `models[]` �
 | 纯协议转换 | [Chat request](../backend/crates/gateway-protocol/src/openai/chat/request.rs)、[response](../backend/crates/gateway-protocol/src/openai/chat/response.rs)、[stream](../backend/crates/gateway-protocol/src/openai/chat/stream.rs)、[协议测试](../backend/crates/gateway-protocol/tests/openai/chat/request.rs) |
 | 上游目录判别及校验 | [transport/catalog.rs](../backend/crates/providers/openai/src/transport/catalog.rs)、[credential/catalog.rs 测试](../backend/crates/providers/openai/tests/credential/catalog.rs) |
 
-### 原生模型资格与互联
+### 原生模型资格
 
 账号级模型映射与全局映射共同冻结在路由计划中，重试和保底使用各自账号的目标模型与能力，
 账号映射按左侧请求模型检查本地模型政策，实际目标仍受上游目录、能力与权限约束。
@@ -162,15 +162,8 @@ API Key 上游支持标准 OpenAI `data[].id` 列表和完整 Codex `models[]` �
 OpenAI OAuth 按已知套餐隔离目录，API Key 按账号及凭据版本隔离；未知套餐或没有有效目录时交由上游验证。
 明确拒绝模型只冷却该账号与模型 30 分钟，凭据变化后旧冷却失效，不扩大为账号级冻结或放宽续接换号限制
 
-CPR Link v2 共享权限默认关闭，只公开绑定有效分组中的直连 OAuth 账号，不递归公开 API Key 转接账号。
-授权范围内的保底账号可进入匿名池观测，但协议不传递调度角色；实际推理仍按本地普通／保底阶段执行。
-接入互联不改变账号用途、创建默认值或 `recoveryAttempts`，各节点各自执行恢复预算，不协商跨节点总次数。
-对外字段与有效期见 [CPR 互联只读协议](api.md#cpr-互联只读协议)
-
 | 职责 | 代码与回归入口 |
 | --- | --- |
-| 共享授权与本地聚合 | [peer_link](../backend/crates/gateway-admin/src/use_case/peer_link/mod.rs)、[导出回归](../backend/crates/gateway-admin/tests/use_case/peer_link/mod.rs) |
-| 发现、连接隔离与恢复 | [upstream](../backend/crates/gateway-admin/src/use_case/peer_link/upstream/mod.rs)、[同步回归](../backend/crates/gateway-admin/tests/use_case/peer_link/upstream/mod.rs) |
 | 原生模型资格 | [OpenAI selector](../backend/crates/providers/openai/src/credential/selector.rs)、[资格回归](../backend/crates/providers/openai/tests/provider/contract/model_account_eligibility.rs) |
 
 ## 请求记录与诊断
@@ -246,7 +239,7 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 | `0040_quota_alerts.sql` | OAuth 额度预警检查进度与周期去重 |
 | `0041_account_error_protection.sql` | 账号错误保护设置、规则和保护 revision；移除旧容量冻结设置列 |
 | `0042_client_key_portable_history.sql` | Client Key 可移植历史开关，默认关闭 |
-| `0043_cpr_link.sql` | Client Key 共享权限默认关闭，账号额度 JSON 上限为 8 MiB |
+| `0043_cpr_link.sql` | 历史保留列与 8 MiB 账号额度 JSON 上限，兼容约束见 [升级与回退](../backend/migrations/README.md#升级与回退) |
 | `0044_retry_after_wait_limit.sql` | 单次上游建议等待上限，默认 240 秒 |
 
 实际文件和冻结摘要见[迁移目录](../backend/migrations/README.md#冻结规则)。

@@ -13,10 +13,6 @@ export type AccountErrorReason
     | 'account_banned'
 
 export interface AccountQuotaWindow {
-  sourceAccountId?: string | null
-  amount?: { usedDisplay: string, remainingDisplay: string, totalDisplay: string } | null
-  observedAtDisplay?: string | null
-  stale?: boolean
   key: string
   group: string
   limitId: string | null
@@ -137,7 +133,6 @@ export interface AccountModelAccess {
 }
 
 export interface Account {
-  upstream: AccountUpstream | null
   capabilities: AccountCapabilities
   outboundProxyId: string | null
   outboundProxyEndpoint: string | null
@@ -201,19 +196,4 @@ export interface AccountRefreshResponse {
 
 export interface AccountIdParam {
   accountId: string
-}
-
-export interface AccountUpstream {
-  discovered: boolean
-  observedAt: string | null
-  observedAtDisplay: string
-  observedAtRelative: string | null
-  stale: boolean
-  connectionRevision: string
-  lastError: 'unauthorized' | 'unsupported' | 'rate_limited' | 'invalid_response' | 'unavailable' | null
-  pool: {
-    accountCount: number
-    states: { ready: number, cooldown: number, exhausted: number, disabled: number, error: number, unknown: number }
-    plans: Array<{ name: string, count: number }>
-  } | null
 }

@@ -179,3 +179,22 @@ async fn configured_cors_origin_assembles_router_and_answers_preflight() {
     assert!(allow_headers.contains("x-api-key"));
     assert!(allow_headers.contains("x-request-id"));
 }
+
+#[tokio::test]
+async fn retired_link_endpoint_does_not_export_account_or_budget_data() {
+    use crate::support::{RAW_KEY, key_fixture};
+    let fixture = key_fixture().await;
+    let app = super::api_router_with_admin_and_client(fixture.services, RAW_KEY, "key-42");
+    for authorization in [None, Some(format!("Bearer {RAW_KEY}"))] {
+        let mut request = Request::get("/v1/cpr/link");
+        if let Some(authorization) = authorization {
+            request = request.header("authorization", authorization);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+}

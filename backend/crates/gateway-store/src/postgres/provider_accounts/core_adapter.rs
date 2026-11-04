@@ -318,7 +318,6 @@ impl ProviderAccountStore for PgProviderAccountRepository {
                 )
                 .ok_or_else(|| CoreStoreError::new(CoreStoreErrorKind::InvalidData))?;
                 Ok(QuotaObservation {
-                    expected_connection: None,
                     plan_type: row.try_get("plan_type").map_err(|source| {
                         CoreStoreError::caused_by(CoreStoreErrorKind::InvalidData, source)
                     })?,
@@ -339,13 +338,6 @@ impl ProviderAccountStore for PgProviderAccountRepository {
         observation: QuotaObservation,
     ) -> Result<QuotaWriteOutcome, CoreStoreError> {
         super::quota::write(self, observation).await
-    }
-
-    async fn get_quota_versions(
-        &self,
-        accounts: &[CoreProviderAccountId],
-    ) -> Result<Vec<gateway_core::account::QuotaObservationVersion>, CoreStoreError> {
-        super::quota::versions(self, accounts).await
     }
 
     async fn apply_quota_access(

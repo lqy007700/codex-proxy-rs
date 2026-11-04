@@ -12,7 +12,7 @@ use gateway_core::account::{
     AccountErrorReason, AccountFeedbackStats, AccountQuotaSignals, AccountRuntimeSignals,
     AccountSchedulingBlocker, AccountSelectionContext, AccountSelectionPolicy, AccountSelector,
     AccountStatus, CredentialState, PreferredAccountSelection, ProviderAccount, ProviderAccountId,
-    QuotaEvidence, RotationStrategy,
+    QuotaEvidence,
 };
 use gateway_core::concurrency::{CapacityWait, ConcurrencyWaitQueue, QueueRejection, WaitPriority};
 use gateway_core::engine::{AttemptContext, ContinuationAttempt, policy::AccountPolicyError};
@@ -141,7 +141,6 @@ pub struct CodexCredentialSelector {
     quota: Arc<CodexCredentialQuotaService>,
     catalog: Arc<CodexCredentialCatalogService>,
     cooldowns: Arc<dyn ProviderCooldownPort>,
-    upstream_info: Option<Arc<dyn gateway_core::account::UpstreamInfoSource>>,
     cookie_policy: CodexCookiePolicy,
     risk_recovery: Mutex<HashMap<String, RiskRecoveryState>>,
     account_feedback: Arc<AccountFeedbackStats>,
@@ -293,7 +292,6 @@ impl CodexCredentialSelector {
             quota,
             catalog,
             cooldowns,
-            upstream_info: None,
             cookie_policy,
             risk_recovery: Mutex::new(HashMap::new()),
             waiting: ConcurrencyWaitQueue::default(),
@@ -323,40 +321,12 @@ impl CodexCredentialSelector {
         .await
     }
 
-    #[must_use]
-    pub(crate) fn with_upstream_info(
-        mut self,
-        upstream_info: Arc<dyn gateway_core::account::UpstreamInfoSource>,
-    ) -> Self {
-        self.upstream_info = Some(upstream_info);
-        self
-    }
-
-    fn quota_signals(
-        &self,
-        account: &ProviderAccount,
-        model: CodexSelectionModel<'_>,
-        strategy: RotationStrategy,
-    ) -> Option<AccountQuotaSignals> {
+    fn quota_signals(&self, account: &ProviderAccount) -> Option<AccountQuotaSignals> {
         if account.authentication_kind() == CODEX_AUTHENTICATION_KIND_OAUTH {
-            return self.quota.scheduling_signals(account);
-        }
-        if strategy != RotationStrategy::Smart {
-            return None;
-        }
-        let signal =
-            self.upstream_info
-                .as_ref()?
-                .signal(account, model.model()?, SystemTime::now())?;
-        let rank = if signal.exhausted {
-            Some(0)
+            self.quota.scheduling_signals(account)
         } else {
-            signal
-                .remaining_percent
-                .map(|percent| (percent.clamp(0.0, 100.0) * 100.0).round() as u64)
-        };
-        // 选号只读取 Smart 额度分，额度恢复由互联同步事务独立提交
-        Some(AccountQuotaSignals::new(None, rank))
+            None
+        }
     }
 
     pub(crate) async fn select_with_cyber_policy(
@@ -890,11 +860,7 @@ impl CodexCredentialSelector {
                             failure_rate_basis_points: None,
                             first_output_latency_ms: None,
                         })
-                        .with_provider_quota(self.quota_signals(
-                            &account,
-                            model.for_account(request.attempt, account.id()),
-                            request.attempt.account_selection_policy().strategy(),
-                        ))
+                        .with_provider_quota(self.quota_signals(&account))
                         .with_rate_limit(rate_limits.get(account.id()).copied().flatten())
                         .with_runtime_health(health.0, health.1);
                     AccountCandidate { account, signals }

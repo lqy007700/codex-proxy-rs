@@ -8,9 +8,6 @@ pub use caller::{
 };
 
 mod client_version;
-mod peer_sharing;
-
-pub use peer_sharing::{ClientPeerSharing, ClientPeerSharingError};
 
 pub use client_version::{
     ClientVersionRejection, CodexClientKind, CodexClientMinVersions, CodexClientVersion,
@@ -135,7 +132,6 @@ pub struct ClientSettings {
 pub struct ClientPolicy {
     identity_policy: CallerIdentityPolicy,
     caller_identity: Option<CallerIdentity>,
-    peer_sharing: ClientPeerSharing,
     name_snapshot: Option<String>,
     defaults: Arc<ClientSettings>,
     key_id: ClientApiKeyId,
@@ -209,7 +205,6 @@ impl ClientPolicy {
         Self {
             identity_policy: CallerIdentityPolicy::default(),
             caller_identity: None,
-            peer_sharing: ClientPeerSharing::default(),
             name_snapshot: None,
             defaults: Arc::new(ClientSettings {
                 request_profiles: account_scope.request_profiles().clone(),
@@ -228,23 +223,6 @@ impl ClientPolicy {
     pub fn with_name_snapshot(mut self, name: Option<String>) -> Self {
         self.name_snapshot = name;
         self
-    }
-
-    #[must_use]
-    pub fn with_peer_sharing(mut self, sharing: ClientPeerSharing) -> Self {
-        self.account_scope = Arc::new(
-            self.account_scope
-                .as_ref()
-                .clone()
-                .with_direct_accounts_only(sharing.enabled),
-        );
-        self.peer_sharing = sharing;
-        self
-    }
-
-    #[must_use]
-    pub const fn peer_sharing(&self) -> ClientPeerSharing {
-        self.peer_sharing
     }
 
     #[must_use]

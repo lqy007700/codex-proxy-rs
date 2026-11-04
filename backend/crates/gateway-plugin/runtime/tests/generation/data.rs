@@ -134,8 +134,6 @@ impl PluginAccountAccess for Facts {
         self.reads.fetch_add(1, Ordering::SeqCst);
         assert_eq!(account.as_str(), "acct_facts");
         Ok(ProviderQuota {
-            upstream: None,
-
             credits: Some(ProviderQuotaCredits {
                 has_credits: true,
                 unlimited: false,
@@ -145,8 +143,6 @@ impl PluginAccountAccess for Facts {
             observed_at: None,
             refresh_token_expires_at: None,
             windows: vec![ProviderQuotaWindow {
-                upstream: None,
-
                 key: "weekly".into(),
                 group: "private group".into(),
                 label: "private label".into(),

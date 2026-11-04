@@ -18,7 +18,6 @@ pub(super) async fn fixture() -> AdminTestFixture {
     let fixture = key_fixture().await;
     let now = Utc::now();
     *fixture.client_key.lock().unwrap() = Some(ClientKeyRecord {
-        peer_sharing: Default::default(),
         identity_policy: Default::default(),
 
         portable_history: false,

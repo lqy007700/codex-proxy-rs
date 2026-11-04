@@ -172,16 +172,6 @@ impl OpenAiAdminProvider {
 
 #[async_trait]
 impl ProviderAdmin for OpenAiAdminProvider {
-    fn is_direct_account(&self, authentication_kind: &str) -> bool {
-        crate::credential::is_direct_account_kind(authentication_kind)
-    }
-
-    fn peer_model_eligible(&self, account: &AccountRecord, model: &str) -> Option<bool> {
-        account_from_record(account).ok().map(|account| {
-            crate::credential::CodexSelectionModel::Requested(model).allows_account(&account)
-        })
-    }
-
     fn compile_privacy_policy(
         &self,
         policy: &gateway_core::settings::privacy::CodexPrivacyPolicy,
@@ -807,32 +797,6 @@ impl ProviderAdmin for OpenAiAdminProvider {
         self.read_quota_snapshots(requests).await
     }
 
-    fn peer_authentication_kinds(&self) -> &[&str] {
-        &[crate::credential::CODEX_AUTHENTICATION_KIND_API_KEY]
-    }
-
-    fn peer_connection(
-        &self,
-        loaded: &gateway_core::account::LoadedCredential,
-    ) -> Result<Option<gateway_admin::ports::peer::PeerConnection>, ProviderAdminError> {
-        if loaded.account.provider() != &self.provider_kind
-            || !self.supports_peer_connection(loaded.account.authentication_kind())
-        {
-            return Ok(None);
-        }
-        let credential = CodexCredentialCodec::decode(&loaded.credential)
-            .map_err(|_| provider_admin_error(ProviderAdminErrorKind::Invalid))?;
-        match credential.authentication {
-            crate::credential::CodexRuntimeAuthentication::ApiKey(authentication) => {
-                Ok(Some(gateway_admin::ports::peer::PeerConnection {
-                    base_url: authentication.configuration.base_url,
-                    bearer_token: authentication.secret,
-                }))
-            }
-            crate::credential::CodexRuntimeAuthentication::OAuth(_) => Ok(None),
-        }
-    }
-
     fn quota_forecast_observation(
         &self,
         document: &ProviderDocument,
@@ -1264,7 +1228,6 @@ fn account_matches_record(account: &ProviderAccount, record: &AccountRecord) -> 
 
 fn empty_quota() -> ProviderQuota {
     ProviderQuota {
-        upstream: None,
         credits: None,
         plan_type: None,
         observed_at: None,
@@ -1301,7 +1264,6 @@ fn project_quota_snapshot(snapshot: CodexAccountQuotaSnapshot) -> ProviderQuota 
         .iter()
         .filter(|window| should_project_quota_window(window))
         .map(|window| ProviderQuotaWindow {
-            upstream: None,
             key: window.key().to_owned(),
             group: quota_group(window.kind()).to_owned(),
             label: codex_quota_window_label(window.kind(), window.role(), window.window_seconds()),
@@ -1325,7 +1287,6 @@ fn project_quota_snapshot(snapshot: CodexAccountQuotaSnapshot) -> ProviderQuota 
     // 在窗口全部过期后继续维持限流
     let limit_reached = quota_windows_limit_reached(&windows);
     ProviderQuota {
-        upstream: None,
         plan_type: snapshot.plan_type().map(str::to_owned),
         observed_at: Some(DateTime::<Utc>::from(snapshot.observed_at())),
         refresh_token_expires_at: None,

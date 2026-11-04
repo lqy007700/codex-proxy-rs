@@ -29,7 +29,6 @@ pub(crate) struct DefaultPluginAccountAccess {
     providers: ProviderAdminRegistry,
     accounts: Arc<dyn AccountStore>,
     snapshot: Arc<dyn SnapshotControl>,
-    upstream_info: Option<Arc<dyn crate::ports::peer::PeerUpstreamService>>,
 }
 
 impl DefaultPluginAccountAccess {
@@ -38,13 +37,11 @@ impl DefaultPluginAccountAccess {
         providers: ProviderAdminRegistry,
         accounts: Arc<dyn AccountStore>,
         snapshot: Arc<dyn SnapshotControl>,
-        upstream_info: Option<Arc<dyn crate::ports::peer::PeerUpstreamService>>,
     ) -> Self {
         Self {
             providers,
             accounts,
             snapshot,
-            upstream_info,
         }
     }
 
@@ -55,18 +52,14 @@ impl DefaultPluginAccountAccess {
     ) -> Result<crate::model::provider_credentials::ProviderQuota, AdminError> {
         let account = self.get_runtime(account_id).await?;
         let provider = self.provider(&account.provider_kind)?;
-        super::peer_link::upstream::read_quota(
-            self.upstream_info.as_deref(),
-            provider.as_ref(),
-            &account,
-            crate::model::provider_credentials::ProviderQuotaRequest {
+        provider
+            .quota(crate::model::provider_credentials::ProviderQuotaRequest {
                 account_id: account_id.clone(),
                 refresh,
                 rolling_usage: None,
-            },
-        )
-        .await
-        .map_err(|error| map_provider_error(error, "plugin quota facts"))
+            })
+            .await
+            .map_err(|error| map_provider_error(error, "plugin quota facts"))
     }
 
     fn provider(
@@ -173,7 +166,6 @@ impl PluginAccountAccess for DefaultPluginAccountAccess {
                 .credential
                 .credential_revision;
                 publish_credentials_and_observe_quota(
-                    self.upstream_info.as_ref(),
                     &provider,
                     &self.accounts,
                     self.snapshot.as_ref(),
@@ -218,7 +210,6 @@ impl PluginAccountAccess for DefaultPluginAccountAccess {
                     .credential_revision
                     .ok_or_else(|| AdminError::internal("账号保存未返回凭据版本"))?;
                 publish_credentials_and_observe_quota(
-                    self.upstream_info.as_ref(),
                     &provider,
                     &self.accounts,
                     self.snapshot.as_ref(),

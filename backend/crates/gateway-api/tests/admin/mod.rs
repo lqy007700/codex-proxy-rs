@@ -1,7 +1,6 @@
 //! 管理控制面 HTTP 接口的测试入口
 
 mod plugins;
-mod upstream_info;
 use std::{
     collections::BTreeMap,
     sync::{
@@ -227,9 +226,6 @@ impl AdminTestFixture {
             ClientConfig::default(),
             stores,
             gateway_admin::AdminRuntimePorts {
-                upstream_info: Some(Arc::new(upstream_info::TestPeerInfo(Arc::clone(
-                    &provider_quota,
-                )))),
                 timezone,
                 service_middleware: std::sync::Arc::new(|| None),
                 plugin_preparation: plugin_ports.clone(),
@@ -1093,7 +1089,6 @@ impl ClientKeyStore for MemoryClientKeyStore {
         let now = Utc::now();
         Ok(Some(ClientKeySecret::new(
             ClientKeyRecord {
-                peer_sharing: Default::default(),
                 identity_policy: Default::default(),
 
                 portable_history: false,
@@ -1642,22 +1637,6 @@ impl UnusedProvider {
 
 #[async_trait]
 impl ProviderAdmin for UnusedProvider {
-    fn is_direct_account(&self, authentication_kind: &str) -> bool {
-        authentication_kind == "oauth"
-    }
-
-    fn peer_model_eligible(
-        &self,
-        _: &gateway_admin::model::accounts::AccountRecord,
-        _: &str,
-    ) -> Option<bool> {
-        Some(true)
-    }
-
-    fn peer_authentication_kinds(&self) -> &[&str] {
-        &["api_key"]
-    }
-
     fn pricing_catalog(&self) -> gateway_admin::model::pricing::ProviderPricingCatalog {
         serde_json::from_value(serde_json::json!({
             "builtin-model": {

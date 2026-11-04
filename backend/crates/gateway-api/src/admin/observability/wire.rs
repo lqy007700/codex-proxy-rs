@@ -400,7 +400,6 @@ pub struct DashboardCacheCardView {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardAccountUsageView {
-    pub upstream: Option<crate::admin::accounts::AccountUpstreamInfoView>,
     pub id: String,
     pub provider: String,
     pub authentication_kind: String,

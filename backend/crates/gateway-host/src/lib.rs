@@ -7,7 +7,6 @@ pub mod email;
 mod logging;
 pub mod official_plugins;
 pub mod outbound;
-pub mod peer;
 pub mod plugin_distribution;
 pub mod pricing;
 pub mod process;

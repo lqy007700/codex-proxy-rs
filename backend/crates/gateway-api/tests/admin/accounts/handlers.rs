@@ -579,3 +579,61 @@ async fn concurrency_details_require_admin_validate_paging_and_report_lease_time
         }
     }
 }
+
+#[tokio::test]
+async fn native_quota_refresh_waits_for_provider_and_preserves_observation() {
+    use super::super::ProviderQuotaGate;
+    use chrono::Utc;
+    use gateway_admin::model::provider_credentials::ProviderQuota;
+    use gateway_core::account::{
+        AccountStatusFacts, CredentialState, ProviderAccountId, QuotaState,
+    };
+    use std::{sync::Arc, time::Duration};
+
+    let fixture = AdminTestFixture::new().await;
+    let observed_at = Utc::now();
+    *fixture.account.lock().unwrap() = Some(account_page_item(
+        AccountStatusFacts {
+            enabled: true,
+            credential_state: CredentialState::Ready,
+            access_token_expires_at: None,
+            quota: QuotaState::unknown(),
+            cooldown: None,
+            last_error_reason: None,
+            last_error_message: None,
+        },
+        observed_at,
+        "oauth",
+    ));
+    *fixture.provider_quota.lock().unwrap() = Some(ProviderQuota {
+        plan_type: Some("plus".to_owned()),
+        observed_at: Some(observed_at),
+        ..Default::default()
+    });
+    let gate = Arc::new(ProviderQuotaGate {
+        entered: tokio::sync::Semaphore::new(0),
+        release: tokio::sync::Semaphore::new(0),
+    });
+    *fixture.provider_quota_gate.lock().unwrap() = Some(gate.clone());
+    let services = fixture.services.clone();
+    let request = tokio::spawn(async move {
+        services
+            .accounts()
+            .quota(&ProviderAccountId::new("acct_cooldown").unwrap(), true)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), gate.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert!(!request.is_finished());
+    gate.release.add_permits(1);
+    let result = tokio::time::timeout(Duration::from_secs(2), request)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.quota.observed_at, Some(observed_at));
+    assert_eq!(result.account.plan_type.as_deref(), Some("plus"));
+}

@@ -53,7 +53,6 @@ type CredentialLoadHook = dyn for<'a> Fn(
 pub(crate) struct MemoryAccountStore {
     accounts: Mutex<BTreeMap<ProviderAccountId, StoredAccount>>,
     quota_reads: AtomicUsize,
-    largest_quota_read: AtomicUsize,
     fail_provider_listing: AtomicBool,
     pending_account_reads: bool,
     credential_load_hook: Mutex<Option<Arc<CredentialLoadHook>>>,
@@ -61,10 +60,6 @@ pub(crate) struct MemoryAccountStore {
 }
 
 impl MemoryAccountStore {
-    pub(crate) fn largest_quota_read(&self) -> usize {
-        self.largest_quota_read.load(Ordering::SeqCst)
-    }
-
     pub(crate) fn with_pending_account_reads() -> Self {
         Self {
             pending_account_reads: true,
@@ -458,28 +453,10 @@ impl ProviderAccountStore for MemoryAccountStore {
         accounts: &[ProviderAccountId],
     ) -> Result<Vec<QuotaObservation>, StoreError> {
         self.quota_reads.fetch_add(1, Ordering::SeqCst);
-        self.largest_quota_read
-            .fetch_max(accounts.len(), Ordering::SeqCst);
         let stored = self.accounts.lock().expect("account store lock");
         Ok(accounts
             .iter()
             .filter_map(|account| stored.get(account)?.quota.clone())
-            .collect())
-    }
-
-    async fn get_quota_versions(
-        &self,
-        accounts: &[ProviderAccountId],
-    ) -> Result<Vec<gateway_core::account::QuotaObservationVersion>, StoreError> {
-        let stored = self.accounts.lock().unwrap();
-        Ok(accounts
-            .iter()
-            .filter_map(|id| stored.get(id)?.quota.as_ref())
-            .map(|quota| gateway_core::account::QuotaObservationVersion {
-                account_id: quota.account_id.clone(),
-                credential_revision: quota.expected_revision,
-                observed_at: quota.observed_at,
-            })
             .collect())
     }
 
@@ -491,17 +468,6 @@ impl ProviderAccountStore for MemoryAccountStore {
         let stored = accounts
             .get_mut(&observation.account_id)
             .ok_or_else(|| store_error(StoreErrorKind::InvalidData))?;
-        if observation
-            .expected_connection
-            .as_ref()
-            .is_some_and(|expected| {
-                !stored.account.enabled()
-                    || gateway_core::account::UpstreamConnection::for_account(&stored.account)
-                        != *expected
-            })
-        {
-            return Ok(QuotaWriteOutcome::Conflict);
-        }
         if stored.account.revision() != observation.expected_revision {
             return Ok(QuotaWriteOutcome::Conflict);
         }

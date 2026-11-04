@@ -205,7 +205,6 @@ impl PluginResourceStore for PgPluginStore {
         let key = NewClientApiKey {
             portable_history: command.portable_history,
             identity_policy: Default::default(),
-            peer_sharing: Default::default(),
             request_profile_overrides: command.request_profile_overrides,
             id: command.id.as_str().to_owned(),
             name: command.name,

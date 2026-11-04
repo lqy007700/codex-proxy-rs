@@ -15,8 +15,6 @@ fn now() -> DateTime<Utc> {
 
 fn window(key: &str, days: u64) -> ProviderQuotaWindow {
     ProviderQuotaWindow {
-        upstream: None,
-
         key: key.to_owned(),
         group: if days > 7 { "monthly" } else { "shortTerm" }.to_owned(),
         label: key.to_owned(),
@@ -60,8 +58,6 @@ fn window(key: &str, days: u64) -> ProviderQuotaWindow {
 
 fn quota(windows: Vec<ProviderQuotaWindow>) -> ProviderQuota {
     ProviderQuota {
-        upstream: None,
-
         credits: None,
         plan_type: None,
         observed_at: Some(now()),

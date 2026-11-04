@@ -32,7 +32,7 @@ use gateway_core::{
     engine::budget::{ClientBudgetLimits, ClientBudgetStatus},
     engine::execution::ClientApiKeyUsageSink,
     metering::Decimal,
-    policy::{ClientApiKeyId, ClientPeerSharing, PlaintextClientApiKey, RateLimits},
+    policy::{ClientApiKeyId, PlaintextClientApiKey, RateLimits},
     routing::{AccountGroupId, ProviderKind},
     task::{DaemonTask, WorkerDaemonContext, WorkerTaskError},
 };
@@ -54,7 +54,6 @@ const CLIENT_API_KEY_LAST_USED_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientApiKeySnapshot {
     pub portable_history: bool,
-    pub peer_sharing: ClientPeerSharing,
     pub identity_policy: gateway_core::policy::CallerIdentityPolicy,
     pub name_snapshot: Option<String>,
     pub request_profiles: std::collections::BTreeMap<
@@ -77,7 +76,6 @@ impl ClientApiKeySnapshot {
     ) -> StoreResult<Self> {
         Ok(Self {
             portable_history: false,
-            peer_sharing: ClientPeerSharing::default(),
             identity_policy: Default::default(),
             name_snapshot: None,
             request_profiles: std::collections::BTreeMap::new(),
@@ -125,7 +123,6 @@ impl fmt::Debug for ClientApiKeySecret {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientApiKeyRecord {
     pub portable_history: bool,
-    pub peer_sharing: ClientPeerSharing,
     pub identity_policy: gateway_core::policy::CallerIdentityPolicy,
     pub request_profile_overrides: BTreeMap<ProviderKind, OpaqueProviderData>,
     pub id: String,
@@ -289,7 +286,6 @@ pub struct ClientApiKeyPage {
 #[derive(Clone)]
 pub struct NewClientApiKey {
     pub portable_history: bool,
-    pub peer_sharing: ClientPeerSharing,
     pub identity_policy: gateway_core::policy::CallerIdentityPolicy,
     pub request_profile_overrides: BTreeMap<ProviderKind, OpaqueProviderData>,
     pub id: String,
@@ -319,9 +315,6 @@ impl NewClientApiKey {
         require_nonempty(ENTITY, "name", &self.name)?;
         validate_group_ids(&self.group_ids)?;
         validate_request_profiles(self.request_profile_overrides.values())?;
-        self.peer_sharing
-            .validate(!self.group_ids.is_empty())
-            .map_err(|_| invalid("invalid peer sharing scope"))?;
         self.identity_policy
             .validate()
             .map_err(|_| invalid("invalid caller identity policy"))?;
@@ -332,7 +325,6 @@ impl NewClientApiKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateClientApiKeyDetails {
     pub portable_history: Option<bool>,
-    pub peer_sharing: Option<ClientPeerSharing>,
     pub identity_policy: Option<gateway_core::policy::CallerIdentityPolicy>,
     pub request_profile_override_updates: BTreeMap<ProviderKind, Option<OpaqueProviderData>>,
     pub id: String,
@@ -399,7 +391,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
         query.validate()?;
         let total = count_client_api_keys(&self.pool, query.search.as_deref()).await?;
         let mut statement = QueryBuilder::<Postgres>::new(
-            "select k.id, k.name, k.label, k.portable_history, k.peer_sharing_json, k.identity_policy_json, k.provider_request_profiles_json as request_profile_overrides,
+            "select k.id, k.name, k.label, k.portable_history, k.identity_policy_json, k.provider_request_profiles_json as request_profile_overrides,
                     left(k.key, least(10, length(k.key) / 2)) as prefix, k.enabled,
                     k.max_concurrency, k.requests_per_minute, k.last_used_at, k.created_at,
                     k.updated_at, '[]'::jsonb as groups, '{}'::text[] as provider_kinds
@@ -459,7 +451,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
     async fn get_client_api_key(&self, id: &str) -> StoreResult<Option<ClientApiKeyRecord>> {
         require_nonempty(ENTITY, "id", id)?;
         let record = sqlx::query(
-            "select k.id, k.name, k.label, k.portable_history, k.peer_sharing_json, k.identity_policy_json, k.provider_request_profiles_json as request_profile_overrides,
+            "select k.id, k.name, k.label, k.portable_history, k.identity_policy_json, k.provider_request_profiles_json as request_profile_overrides,
                     left(k.key, least(10, length(k.key) / 2)) as prefix, k.enabled,
                     k.max_concurrency, k.requests_per_minute, k.last_used_at, k.created_at,
                     k.updated_at, coalesce(groups.groups, '[]'::jsonb) as groups,
@@ -911,7 +903,6 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             .create_client_api_key(
                 NewClientApiKey {
                     portable_history: command.portable_history,
-                    peer_sharing: command.peer_sharing,
                     identity_policy: command.identity_policy,
                     request_profile_overrides: command.request_profile_overrides,
                     id: id.as_str().to_owned(),
@@ -943,7 +934,6 @@ impl ClientKeyStore for PgAdminClientKeyStore {
                         "weekly_limit_usd",
                         "provider_request_profiles_json",
                         "portable_history",
-                        "peer_sharing_json",
                         "identity_policy_json",
                     ]
                     .into_iter()
@@ -967,7 +957,6 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             .update_client_api_key(
                 UpdateClientApiKeyDetails {
                     portable_history: command.portable_history,
-                    peer_sharing: command.peer_sharing,
                     identity_policy: command.identity_policy,
                     request_profile_override_updates: command.request_profile_override_updates,
                     id: id.as_str().to_owned(),
@@ -997,7 +986,6 @@ impl ClientKeyStore for PgAdminClientKeyStore {
                         "weekly_limit_usd",
                         "provider_request_profiles_json",
                         "portable_history",
-                        "peer_sharing_json",
                         "identity_policy_json",
                     ]
                     .into_iter()
@@ -1130,7 +1118,6 @@ fn admin_client_key_cursor(cursor: ClientApiKeyCursor) -> AdminStoreResult<Admin
 fn admin_client_key_record(record: ClientApiKeyRecord) -> AdminStoreResult<AdminClientKeyRecord> {
     Ok(AdminClientKeyRecord {
         portable_history: record.portable_history,
-        peer_sharing: record.peer_sharing,
         identity_policy: record.identity_policy,
         request_profile_overrides: record.request_profile_overrides,
         id: ClientApiKeyId::new(record.id)
@@ -1184,8 +1171,8 @@ pub(crate) async fn insert_client_api_key_in_transaction(
     sqlx::query(
         "insert into client_api_keys (
            id, name, label, key, enabled, max_concurrency, requests_per_minute,
-           last_used_at, created_at, updated_at, daily_limit_usd, weekly_limit_usd, provider_request_profiles_json, portable_history, peer_sharing_json, identity_policy_json
-         ) values ($1, $2, $3, $4, true, $5, $6, null, now(), now(), $7::text::numeric, $8::text::numeric, $9::jsonb, $10, $11::jsonb, $12::jsonb)",
+           last_used_at, created_at, updated_at, daily_limit_usd, weekly_limit_usd, provider_request_profiles_json, portable_history, identity_policy_json
+         ) values ($1, $2, $3, $4, true, $5, $6, null, now(), now(), $7::text::numeric, $8::text::numeric, $9::jsonb, $10, $11::jsonb)",
     )
     .bind(&key.id)
     .bind(key.name.trim())
@@ -1197,7 +1184,6 @@ pub(crate) async fn insert_client_api_key_in_transaction(
     .bind(key.budget.weekly_usd.canonical())
     .bind(sqlx::types::Json(request_profile_overrides))
     .bind(key.portable_history)
-    .bind(sqlx::types::Json(key.peer_sharing))
     .bind(sqlx::types::Json(&key.identity_policy))
     .execute(&mut **transaction)
     .await
@@ -1234,27 +1220,6 @@ pub(crate) async fn update_client_api_key_in_transaction(
             .validate()
             .map_err(|_| invalid("invalid caller identity policy"))?;
     }
-    let sharing = match key.peer_sharing {
-        Some(sharing) => sharing,
-        None => {
-            sqlx::query_scalar::<_, sqlx::types::Json<ClientPeerSharing>>(
-                "select peer_sharing_json from client_api_keys where id = $1",
-            )
-            .bind(&key.id)
-            .fetch_optional(&mut **transaction)
-            .await
-            .map_err(|source| postgres_unavailable("load client peer sharing", source))?
-            .ok_or_else(|| StoreError::NotFound {
-                source: None,
-                entity: ENTITY,
-                id: key.id.clone(),
-            })?
-            .0
-        }
-    };
-    sharing
-        .validate(!key.group_ids.is_empty())
-        .map_err(|_| invalid("invalid peer sharing scope"))?;
     let removed_profiles = key
         .request_profile_override_updates
         .keys()
@@ -1281,8 +1246,7 @@ pub(crate) async fn update_client_api_key_in_transaction(
              provider_request_profiles_json = (provider_request_profiles_json - $8::text[])
                  || $9::jsonb,
              portable_history = coalesce($10, portable_history),
-             peer_sharing_json = coalesce($11::jsonb, peer_sharing_json),
-             identity_policy_json = coalesce($12::jsonb, identity_policy_json)
+             identity_policy_json = coalesce($11::jsonb, identity_policy_json)
          where id = $1",
     )
     .bind(&key.id)
@@ -1295,7 +1259,6 @@ pub(crate) async fn update_client_api_key_in_transaction(
     .bind(removed_profiles)
     .bind(sqlx::types::Json(replacement_profiles))
     .bind(key.portable_history)
-    .bind(key.peer_sharing.map(sqlx::types::Json))
     .bind(key.identity_policy.as_ref().map(sqlx::types::Json))
     .execute(&mut **transaction)
     .await
@@ -1508,10 +1471,6 @@ fn client_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<ClientApiK
                     "identity_policy_json",
                 )
                 .map_err(|source| postgres_unavailable("decode caller identity policy", source))?
-                .0,
-            peer_sharing: row
-                .try_get::<sqlx::types::Json<ClientPeerSharing>, _>("peer_sharing_json")
-                .map_err(|source| invalid("invalid peer sharing").with_source(source))?
                 .0,
             request_profile_overrides:
                 decode_request_profiles(

@@ -6,14 +6,12 @@ import { ZEmpty, ZIconButton } from '@codex-proxy/ui'
 import { ChartNoAxesCombined, RefreshCw, UserRound } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
-import AccountUpstreamStatus from '@/components/account/AccountUpstreamStatus.vue'
 import { formatProviderLabel } from '@/utils/providers'
 import { groupedAccountQuotaWindows, orderedPanelQuotaWindows } from '../../constants'
 import AccountProfileModal from '../account-profile-modal/index.vue'
 import AccountQuotaForecastModal from '../account-quota-forecast-modal/index.vue'
 import AccountQuotaPanelEntry from './Entry.vue'
 import AccountResetCredits from './ResetCredits.vue'
-import UpstreamPool from './UpstreamPool.vue'
 
 const props = defineProps<{
   account: Account
@@ -27,13 +25,13 @@ const emit = defineEmits<{
 }>()
 
 const quotaEntries = computed(() => groupedAccountQuotaWindows(
-  orderedPanelQuotaWindows(props.account.quota.windows.filter(window => !window.sourceAccountId)),
+  orderedPanelQuotaWindows(props.account.quota.windows),
 ))
 const profileOpen = shallowRef(false)
 const forecastOpen = shallowRef(false)
 const hasForecast = computed(() => props.account.authenticationKind !== 'api_key')
 const hasPersonalInfo = computed(() => props.account.capabilities.profile || props.account.capabilities.subscription)
-const canRefresh = computed(() => props.account.enabled && (props.account.capabilities.quotaRefresh || Boolean(props.account.upstream)))
+const canRefresh = computed(() => props.account.enabled && props.account.capabilities.quotaRefresh)
 const hasActions = computed(() => hasPersonalInfo.value || hasForecast.value || canRefresh.value || props.account.capabilities.resetCredits)
 watch(hasPersonalInfo, (available) => {
   if (!available)
@@ -49,11 +47,10 @@ watch(hasPersonalInfo, (available) => {
           账号额度
         </h3>
         <p
-          v-if="account.capabilities.quota || quotaEntries.length > 0 || account.upstream"
+          v-if="account.capabilities.quota || quotaEntries.length > 0"
           class="m-0 mt-1 flex min-w-0 items-center gap-1.5 text-cp-xs font-emphasis text-cp-text-secondary"
         >
-          <AccountUpstreamStatus v-if="account.upstream" :upstream="account.upstream" />
-          <span v-else>{{ account.provider === 'openai' ? 'Codex' : formatProviderLabel(account.provider) }} 额度</span>
+          <span>{{ account.provider === 'openai' ? 'Codex' : formatProviderLabel(account.provider) }} 额度</span>
           <template v-if="account.planType">
             <span>·</span>
             <AccountPlanBadge :plan-type="account.planType" :plan-type-display="account.planTypeDisplay" size="sm" />
@@ -104,11 +101,10 @@ watch(hasPersonalInfo, (available) => {
       </div>
     </div>
 
-    <div v-if="!account.capabilities.quota && quotaEntries.length === 0 && !account.upstream?.discovered" class="grid flex-1 place-items-center">
+    <div v-if="!account.capabilities.quota && quotaEntries.length === 0" class="grid flex-1 place-items-center">
       <ZEmpty title="暂不支持查询上游额度" surface="none" />
     </div>
     <div v-else class="grid min-h-0 gap-3">
-      <UpstreamPool v-if="account.upstream?.discovered" :account="account" />
       <AccountQuotaPanelEntry
         v-for="entry in quotaEntries"
         :key="entry.key"

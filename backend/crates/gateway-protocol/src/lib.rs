@@ -4,6 +4,3 @@
 
 /// OpenAI wire contract
 pub mod openai;
-
-/// CPR 互联只读观测协议
-pub mod peer;
