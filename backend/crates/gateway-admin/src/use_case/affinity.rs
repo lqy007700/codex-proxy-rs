@@ -53,7 +53,7 @@ impl AffinityService {
             || query
                 .status
                 .as_deref()
-                .is_some_and(|value| !["bound", "pending"].contains(&value))
+                .is_some_and(|value| !["bound", "pending", "primary", "spillover"].contains(&value))
         {
             return Err(AdminError::invalid("亲和筛选类型无效"));
         }
@@ -62,7 +62,7 @@ impl AffinityService {
         }
         if let Some(reference) = &query.reference {
             ProviderSessionAffinityKey::try_new(reference.clone())
-                .map_err(|_| AdminError::invalid("会话引用无效"))?;
+                .map_err(|_| AdminError::invalid("绑定引用无效"))?;
         }
         self.stores.bindings.list(query).await
     }
@@ -97,7 +97,7 @@ impl AffinityService {
         uuid::Uuid::parse_str(&command.operation_id)
             .map_err(|_| AdminError::invalid("操作 ID 无效"))?;
         if command.selection.is_empty() || command.selection.len() > 200 {
-            return Err(AdminError::invalid("每次请选择 1 至 200 个会话"));
+            return Err(AdminError::invalid("每次请选择 1 至 200 个绑定"));
         }
         if let SessionBindingDirective::Target { account_id } = &command.directive {
             ProviderAccountId::new(account_id.clone())
@@ -109,7 +109,7 @@ impl AffinityService {
             ProviderKind::new(selection.provider.clone())
                 .map_err(|_| AdminError::invalid("渠道无效"))?;
             ProviderSessionAffinityKey::try_new(selection.reference.clone())
-                .map_err(|_| AdminError::invalid("会话引用无效"))?;
+                .map_err(|_| AdminError::invalid("绑定引用无效"))?;
             if selection.revision.len() != 32
                 || !selection
                     .revision
@@ -119,16 +119,16 @@ impl AffinityService {
                 return Err(AdminError::invalid("绑定版本无效"));
             }
             if !unique.insert(format!("{}:{}", selection.provider, selection.reference)) {
-                return Err(AdminError::invalid("会话不能重复选择"));
+                return Err(AdminError::invalid("绑定不能重复选择"));
             }
             let session = self
                 .stores
                 .bindings
                 .session(&selection.provider, &selection.reference)
                 .await?
-                .ok_or_else(|| AdminError::conflict("会话已过期，请刷新后重新选择"))?;
+                .ok_or_else(|| AdminError::conflict("绑定已过期，请刷新后重新选择"))?;
             if session.revision != selection.revision {
-                return Err(AdminError::conflict("会话绑定已变化，请刷新后重新预览"));
+                return Err(AdminError::conflict("绑定已变化，请刷新后重新预览"));
             }
             let rejection = self.rejection(&session, &command.directive).await?;
             items.push(AffinityPlanItem {
@@ -158,6 +158,17 @@ impl AffinityService {
         session: &AffinitySession,
         directive: &SessionBindingDirective,
     ) -> Result<Option<String>, AdminError> {
+        // New API 仅管理 Token 主偏好，不能通过逐会话操作制造与主绑定冲突的迁移
+        if matches!(
+            session.caller(),
+            gateway_core::policy::CallerIdentity::NewApi { .. }
+        ) && session.observation.binding_scope
+            == gateway_core::provider_ports::ProviderAffinityScope::Session
+        {
+            return Ok(Some(
+                "New API 会话仅查看归属，请操作对应 Key 的主绑定".to_owned(),
+            ));
+        }
         if matches!(directive, SessionBindingDirective::Clear) {
             return Ok(None);
         }

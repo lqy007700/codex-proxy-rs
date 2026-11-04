@@ -173,6 +173,7 @@ fn session(provider: &str, reference: &str) -> AffinitySession {
         reference: reference.into(),
         provider: provider.into(),
         observation: ProviderSessionObservation {
+            binding_scope: Default::default(),
             caller: CallerIdentity::Direct {
                 key_id: "key_direct".into(),
             },
@@ -436,4 +437,90 @@ async fn invalid_management_inputs_fail_before_store_access() {
             .await
             .is_err()
     );
+}
+
+#[test]
+fn scope_filter_distinguishes_token_primary_and_legacy_session_observations() {
+    use gateway_core::provider_ports::ProviderAffinityScope;
+    let mut item = session("openai", "scope-filter");
+    let mut legacy = serde_json::to_value(&item.observation).unwrap();
+    legacy.as_object_mut().unwrap().remove("bindingScope");
+    item.observation = serde_json::from_value(legacy).unwrap();
+    let query = |scope| AffinityQuery {
+        binding_scope: Some(scope),
+        ..Default::default()
+    };
+    assert!(query(ProviderAffinityScope::Session).matches(&item));
+    assert!(!query(ProviderAffinityScope::Token).matches(&item));
+    item.observation.binding_scope = ProviderAffinityScope::Token;
+    assert!(query(ProviderAffinityScope::Token).matches(&item));
+    assert!(!query(ProviderAffinityScope::Session).matches(&item));
+    assert!(AffinityQuery::default().matches(&item));
+}
+
+#[tokio::test]
+async fn newapi_session_operations_are_rejected_but_token_primary_can_be_managed() {
+    use gateway_core::provider_ports::ProviderAffinityScope;
+    let (stores, service) = fixture();
+    for scope in [ProviderAffinityScope::Session, ProviderAffinityScope::Token] {
+        {
+            let mut sessions = stores.sessions.lock().unwrap();
+            let item = sessions.get_mut("openai:same").unwrap();
+            item.observation.caller = CallerIdentity::NewApi {
+                source_id: "source".into(),
+                user_id: "1".into(),
+                token_id: "2".into(),
+            };
+            item.observation.binding_scope = scope;
+        }
+        let op = preview(
+            &service,
+            &[("openai", "same")],
+            SessionBindingDirective::Clear,
+        )
+        .await;
+        assert_eq!(
+            op.plan.items[0].rejection.is_some(),
+            scope == ProviderAffinityScope::Session
+        );
+        let result = service
+            .apply(&context(), &op.plan.operation_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            result.results["openai:same"].status,
+            if scope == ProviderAffinityScope::Session {
+                "rejected"
+            } else {
+                "applied"
+            }
+        );
+    }
+    assert_eq!(stores.mutations.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn token_status_filters_separate_recent_routing_from_pending_changes() {
+    use gateway_core::provider_ports::ProviderAffinityScope;
+    let (_, service) = fixture();
+    let query = |value: &str| AffinityQuery {
+        status: Some(value.into()),
+        ..Default::default()
+    };
+    let mut item = session("openai", "routing-status");
+    item.observation.binding_scope = ProviderAffinityScope::Token;
+    assert!(query("primary").matches(&item));
+    assert!(!query("spillover").matches(&item));
+    service.list(&query("primary")).await.unwrap();
+    service.list(&query("spillover")).await.unwrap();
+    item.observation.actual_account_id = "acct_b".into();
+    assert!(query("spillover").matches(&item));
+    assert!(query("bound").matches(&item));
+    assert!(!query("primary").matches(&item));
+    item.directive = Some(SessionBindingDirective::Reassign);
+    assert!(query("pending").matches(&item));
+    assert!(!query("spillover").matches(&item));
+    item.directive = None;
+    item.observation.binding_scope = ProviderAffinityScope::Session;
+    assert!(!query("spillover").matches(&item));
 }

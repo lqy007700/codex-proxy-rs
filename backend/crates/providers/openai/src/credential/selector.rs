@@ -17,18 +17,18 @@ use gateway_core::account::{
 use gateway_core::concurrency::{CapacityWait, ConcurrencyWaitQueue, QueueRejection, WaitPriority};
 use gateway_core::engine::{AttemptContext, ContinuationAttempt, policy::AccountPolicyError};
 use gateway_core::provider_ports::{
-    ProviderConcurrencyPool, ProviderCooldownPort, ProviderCooldownScope, ProviderLeaseAcquisition,
-    ProviderLeaseGuard, ProviderLeasePort, ProviderLeaseRequest, ProviderSchedulingLeaseRequest,
-    ProviderScopedCooldown, ProviderSessionAffinityKey, ProviderSessionAffinityPort,
-    ProviderSessionBinding, ProviderSessionExclusionPort, ProviderSessionExclusions,
-    ProviderStoreError,
+    ProviderAffinityScope, ProviderConcurrencyPool, ProviderCooldownPort, ProviderCooldownScope,
+    ProviderLeaseAcquisition, ProviderLeaseGuard, ProviderLeasePort, ProviderLeaseRequest,
+    ProviderSchedulingLeaseRequest, ProviderScopedCooldown, ProviderSessionAffinityKey,
+    ProviderSessionAffinityPort, ProviderSessionBinding, ProviderSessionExclusionPort,
+    ProviderSessionExclusions, ProviderStoreError,
 };
 use gateway_core::routing::ProviderKind;
 use secrecy::ExposeSecret;
 use thiserror::Error;
 use url::Url;
 
-use super::affinity::CodexSessionAffinity;
+use super::affinity::{CodexSessionAffinity, derive_newapi_token_affinity};
 use super::catalog::CodexCredentialCatalogService;
 use super::codec::CodexRuntimeAuthentication;
 use super::cookie::CodexCookiePolicy;
@@ -357,6 +357,7 @@ impl CodexCredentialSelector {
     async fn observe_session(
         &self,
         key: &ProviderSessionAffinityKey,
+        binding_scope: ProviderAffinityScope,
         attempt: &AttemptContext,
         account: &ProviderAccountId,
         policy: AccountSelectionPolicy,
@@ -368,6 +369,7 @@ impl CodexCredentialSelector {
                 &self.provider_kind,
                 key,
                 gateway_core::provider_ports::ProviderSessionObservation {
+                    binding_scope,
                     caller: attempt.caller_identity(),
                     client_key_id: attempt.client_api_key_ref().as_str().to_owned(),
                     request_id: attempt.request_id().as_str().to_owned(),
@@ -424,8 +426,14 @@ impl CodexCredentialSelector {
                     CredentialSelectionError::NoEligibleCredential,
                 )));
             }
-            self.observe_session(affinity.key(), attempt, &selected_account, policy)
-                .await?;
+            self.observe_session(
+                affinity.key(),
+                ProviderAffinityScope::Session,
+                attempt,
+                &selected_account,
+                policy,
+            )
+            .await?;
             lease.admitted_session = Some(affinity.key().clone());
         }
 
@@ -523,6 +531,9 @@ impl CodexCredentialSelector {
             .attempt
             .account_selection_policy()
             .openai_account_affinity();
+        let token_key = (!diagnostic && affinity_mode != AccountAffinity::Relaxed)
+            .then(|| derive_newapi_token_affinity(&request.attempt.caller_identity()))
+            .flatten();
         let mut queue_policy = request.attempt.account_selection_policy().queue_policy();
         if follow_only {
             // 关闭普通账号排队不能放开后代线程换号，沿用队列时间设置并保留有界人数
@@ -557,7 +568,7 @@ impl CodexCredentialSelector {
             request.attempt.deadline().at(),
             request.attempt.concurrency_wait_budget(),
         )
-        .with_periodic_recheck(binding_key.is_some())
+        .with_periodic_recheck(binding_key.is_some() || token_key.is_some())
         .with_priority(if prioritized {
             WaitPriority::High
         } else {
@@ -586,7 +597,13 @@ impl CodexCredentialSelector {
         }
         let pinned_account = required_account.or_else(|| continuation_account.clone());
         let mut snapshot_retries = 0;
+        let mut defer_token_directive = false;
         'capacity: loop {
+            let token_snapshot = if let Some(key) = token_key.as_ref() {
+                self.lookup_session_affinity(key).await?
+            } else {
+                None
+            };
             let binding_snapshot = if let Some(key) = binding_key {
                 self.lookup_session_affinity(key).await?
             } else {
@@ -618,6 +635,44 @@ impl CodexCredentialSelector {
                 return Err(CredentialSelectionError::ContinuationOwnerChanged);
             }
             let mut accounts = self.repository.list_for_provider().await?;
+            // 只有安全新链可以迁移主绑定；恢复轮询、保底和旧 owner 不改写用户偏好
+            let token_selection = token_key.is_some()
+                && !defer_token_directive
+                && request.attempt.attempt_index().get() == 1
+                && request.attempt.continuation_attempt() == ContinuationAttempt::None
+                && !follow_only
+                && pinned_account.is_none()
+                && matches!(
+                    request.attempt.recovery_stage(),
+                    gateway_core::engine::recovery::AccountRecoveryStage::Initial
+                );
+            let token_unavailable = token_snapshot.as_ref().is_some_and(|binding| {
+                !request
+                    .attempt
+                    .account_scope()
+                    .is_some_and(|scope| scope.allows(binding.account_id()))
+                    || !accounts.iter().any(|account| {
+                        account.id() == binding.account_id()
+                            && account.enabled()
+                            && !matches!(
+                                account.credential_state(),
+                                CredentialState::Banned | CredentialState::Invalid
+                            )
+                            && request.attempt.account_scope().is_some_and(|scope| {
+                                scope.scheduling_role(account.id())
+                                    == Some(gateway_core::account::AccountSchedulingRole::Regular)
+                            })
+                    })
+            });
+            let token_directive = token_snapshot
+                .as_ref()
+                .filter(|_| token_selection)
+                .and_then(ProviderSessionBinding::directive);
+            let token_primary = token_snapshot.as_ref().filter(|binding| {
+                (token_selection || defer_token_directive)
+                    && !token_unavailable
+                    && (binding.directive().is_none() || defer_token_directive)
+            });
             // store 侧常规调度列表不包含停用账号；管理端诊断要对固定账号执行真实上游
             // 验证，先补回 required 账号，再统一检查认证类型和传输能力
             if diagnostic
@@ -866,8 +921,8 @@ impl CodexCredentialSelector {
                     AccountCandidate { account, signals }
                 })
                 .collect::<Vec<_>>();
-            let mut affinity = binding
-                .as_ref()
+            let mut affinity = token_primary
+                .or(binding.as_ref())
                 .filter(|_| affinity_mode != AccountAffinity::Relaxed)
                 .map_or_else(AffinitySelection::default, |binding| {
                     affinity_selection_for_bound_account(
@@ -896,6 +951,26 @@ impl CodexCredentialSelector {
                         );
                     }
                     _ => {}
+                }
+            }
+            if let Some(directive) = token_directive {
+                match directive {
+                    gateway_core::provider_ports::SessionBindingDirective::Reassign => {
+                        if let Some(binding) = token_snapshot.as_ref() {
+                            excluded.insert(binding.account_id().clone());
+                        }
+                    }
+                    gateway_core::provider_ports::SessionBindingDirective::Target {
+                        account_id,
+                    } => {
+                        excluded.extend(
+                            candidates
+                                .iter()
+                                .filter(|candidate| candidate.account.id().as_str() != account_id)
+                                .map(|candidate| candidate.account.id().clone()),
+                        );
+                    }
+                    gateway_core::provider_ports::SessionBindingDirective::Clear => {}
                 }
             }
             if let Some(state) = cyber_policy_scope
@@ -973,7 +1048,8 @@ impl CodexCredentialSelector {
                 let mut wait_candidates = AccountSelector.wait_candidates(&candidates, &context);
                 let preferred_wait = preferred.as_ref().filter(|account| {
                     !diagnostic
-                        && (affinity_mode == AccountAffinity::Strict || pinned_account.is_some())
+                        && ((affinity_mode == AccountAffinity::Strict && token_primary.is_none())
+                            || pinned_account.is_some())
                         && queue_policy.max_waiting > 0
                         && wait_candidates.contains(account)
                 });
@@ -984,7 +1060,7 @@ impl CodexCredentialSelector {
                 // 只约束内置调度；插件的显式选号保留原裁决和完整候选
                 // 首次绑定由任意会话请求原子认领；后代只在已有绑定时限制为跟随当前账号
                 let selection = if ((follow_only && binding.is_some())
-                    || (affinity_mode == AccountAffinity::Preferred
+                    || ((affinity_mode == AccountAffinity::Preferred || token_primary.is_some())
                         && affinity.preferred_account().is_some()))
                     && selection.is_none_or(|selection| !selection.is_policy_choice())
                 {
@@ -1036,6 +1112,12 @@ impl CodexCredentialSelector {
                     selection.as_ref(),
                 );
                 let Some(selection) = selection else {
+                    if token_directive.is_some() {
+                        // 管理偏好不能中断聊天，目标暂不可用时保留指令并按原偏好重选
+                        // 每次请求最多退让一次，不放宽权限、原生归属或策略过滤
+                        defer_token_directive = true;
+                        continue 'capacity;
+                    }
                     if follow_only && let Some(binding) = binding.as_ref() {
                         // 冷却、排除、停用或当前账号不在本次范围时也只等待根线程恢复或迁移
                         waiting
@@ -1113,8 +1195,9 @@ impl CodexCredentialSelector {
                 let selected = selection.candidate();
                 // 管理员挂起指令属于发送边界，插件的显式选号也不能绕过
                 if binding_snapshot
-                    .as_ref()
-                    .is_some_and(|binding| match binding.directive() {
+                    .iter()
+                    .chain(token_snapshot.iter().filter(|_| token_selection))
+                    .any(|binding| match binding.directive() {
                         Some(gateway_core::provider_ports::SessionBindingDirective::Reassign) => {
                             binding.account_id() == selected.account.id()
                         }
@@ -1182,6 +1265,53 @@ impl CodexCredentialSelector {
                             .and_then(|scope| scope.scheduling_role(account.id()))
                             .unwrap_or_else(|| account.scheduling_role())
                             == gateway_core::account::AccountSchedulingRole::Regular;
+                        // Token 主绑定先认领，冲突者释放租约重读，不能让不同窗口各发各的
+                        // 分流和恢复只续期已有偏好；缺失绑定不能由增量或保底认领
+                        if let Some(key) = token_key.as_ref().filter(|_| {
+                            regular_account
+                                && (token_selection
+                                    || token_snapshot
+                                        .as_ref()
+                                        .is_some_and(|binding| binding.directive().is_none()))
+                        }) {
+                            let primary = token_snapshot
+                                .as_ref()
+                                .filter(|_| {
+                                    !token_selection
+                                        || (!token_unavailable && token_directive.is_none())
+                                })
+                                .map_or(account.id(), ProviderSessionBinding::account_id);
+                            if !self
+                                .admit_session(
+                                    key,
+                                    token_snapshot.as_ref(),
+                                    primary,
+                                    policy.openai_session_affinity_ttl(),
+                                )
+                                .await?
+                            {
+                                drop(guard);
+                                retry_account_snapshot(
+                                    request.attempt,
+                                    &account,
+                                    &mut snapshot_retries,
+                                )?;
+                                continue 'capacity;
+                            }
+                        }
+                        // 实际请求账号独立于主绑定，保底及待执行指令也应保留实际选号观测
+                        if let Some(key) = token_key.as_ref().filter(|_| {
+                            token_snapshot.is_some() || (token_selection && regular_account)
+                        }) {
+                            self.observe_session(
+                                key,
+                                ProviderAffinityScope::Token,
+                                request.attempt,
+                                account.id(),
+                                policy,
+                            )
+                            .await?;
+                        }
                         if let Some(key) = binding_key.filter(|_| {
                             regular_account
                                 && (normal_admission
@@ -1210,8 +1340,14 @@ impl CodexCredentialSelector {
                         if let Some(key) = request.session_affinity_key.filter(|_| {
                             !diagnostic && !request.attempt.caller_identity().is_unidentified()
                         }) {
-                            self.observe_session(key, request.attempt, account.id(), policy)
-                                .await?;
+                            self.observe_session(
+                                key,
+                                ProviderAffinityScope::Session,
+                                request.attempt,
+                                account.id(),
+                                policy,
+                            )
+                            .await?;
                         }
                         let affinity_telemetry = affinity.telemetry(account.id());
                         let affinity_observation = request.session_affinity_observation;

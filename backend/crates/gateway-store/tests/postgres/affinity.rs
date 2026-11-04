@@ -29,6 +29,7 @@ fn plan() -> AffinityPlan {
                 reference: "synthetic-session".into(),
                 provider: "openai".into(),
                 observation: ProviderSessionObservation {
+                    binding_scope: Default::default(),
                     caller: CallerIdentity::Direct {
                         key_id: "key_fixture".into(),
                     },

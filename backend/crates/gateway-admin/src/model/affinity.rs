@@ -29,6 +29,7 @@ impl AffinitySession {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AffinityQuery {
+    pub binding_scope: Option<gateway_core::provider_ports::ProviderAffinityScope>,
     pub cursor: Option<String>,
     pub mode: Option<String>,
     pub source_id: Option<String>,
@@ -57,7 +58,9 @@ impl AffinityQuery {
         let equal = |filter: &Option<String>, value: Option<&str>| {
             filter.as_deref().is_none_or(|filter| value == Some(filter))
         };
-        equal(&self.mode, Some(mode))
+        self.binding_scope
+            .is_none_or(|scope| scope == session.observation.binding_scope)
+            && equal(&self.mode, Some(mode))
             && equal(&self.source_id, source.map(String::as_str))
             && equal(&self.user_id, user.map(String::as_str))
             && equal(&self.token_id, token.map(String::as_str))
@@ -69,14 +72,18 @@ impl AffinityQuery {
             && equal(&self.account_id, Some(&session.account_id))
             && equal(&self.reference, Some(&session.reference))
             && equal(&self.request_id, Some(&session.observation.request_id))
-            && equal(
-                &self.status,
-                Some(if session.directive.is_some() {
-                    "pending"
-                } else {
-                    "bound"
-                }),
-            )
+            && self.status.as_deref().is_none_or(|status| match status {
+                "pending" => session.directive.is_some(),
+                "bound" => session.directive.is_none(),
+                "primary" | "spillover" => {
+                    session.observation.binding_scope
+                        == gateway_core::provider_ports::ProviderAffinityScope::Token
+                        && session.directive.is_none()
+                        && (session.account_id == session.observation.actual_account_id)
+                            == (status == "primary")
+                }
+                _ => false,
+            })
     }
 }
 

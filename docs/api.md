@@ -84,7 +84,8 @@ X-CPR-Token-Id: 1001
 逗号合并或重复头不能建立可信身份。CPR 只信任显式配置的转发 Key，来源由该 Key 的配置确定，不接受请求指定来源。
 这些 ID 不包含实际 Token 密钥；持有转发 Key 即具备声明该来源下用户和 Token 的权限，该 Key 只应交给可信分发端
 
-用户亲和以来源、用户、Token 和显式会话共同隔离，同一用户不同 Token 不自动共享会话。
+New API Token 主绑定以来源、用户和 Token 隔离；同一 Token 的不同窗口共用主账号偏好，轮换 CPR Key 不改变该身份。
+会话、轮次及传输关联仍各自隔离，同一用户不同 Token 不共享这些状态。主绑定的选择与迁移见[账号亲和与换号](#账号亲和与换号)
 认证、预算、并发和分组权限仍归 CPR Key；来源停用后关联 Key 无法通过新请求认证。
 身份头在最终出站边界移除，不传给模型上游。HTTP JSON、SSE 与 Responses WebSocket 均使用此身份；
 New API 模式的 Live 创建、挂断和 Realtime sideband 暂不支持，返回 `501`
@@ -1682,43 +1683,50 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 
 ### 账号亲和管理
 
-管理端 `/affinity` 提供会话列表，以及本页用户、Token、账号汇总，可从 Key、账号或请求详情进入对应筛选。
-此页只覆盖已观测且未过期的 OpenAI 会话绑定，不包含全部历史请求；xAI 的确定性选号不产生可管理的持久绑定。
-没有可靠会话标识的请求不推测会话，未知轮次也不会凭空创建绑定
+管理端 `/affinity` 默认按 New API Key 列出主账号及最近请求账号，支持重置偏好、更换或指定主账号。
+用户、账号视图按本页 Key 汇总并批量操作主绑定；会话视图仅查看 New API 续接归属，直连 CPR Key 仍可按会话管理。
+Key 列表与会话归属可按同一来源、用户和 Token 相互定位，也可从账号或请求详情进入对应筛选。
+此页只覆盖已观测且未过期的 OpenAI 绑定，不包含全部历史请求；xAI 的确定性选号不产生可管理的持久绑定。
+New API 已识别 Token 无会话标识时也可建立主绑定；会话绑定仍需可靠会话标识，未知轮次不推测会话
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET` | `/api/admin/affinity/sessions` | 查询会话与绑定版本 |
+| `GET` | `/api/admin/affinity/sessions` | 查询绑定类型与版本 |
 | `GET` | `/api/admin/affinity/sources` | 查询稳定身份来源 |
 | `POST` | `/api/admin/affinity/sources/save` | 保存 `{ id, name, enabled }`，`id` 为 UUID，改名保留原 ID |
-| `POST` | `/api/admin/affinity/preview` | 冻结明确选择的会话与版本，创建 15 分钟预览 |
+| `POST` | `/api/admin/affinity/preview` | 冻结明确选择的绑定与版本，创建 15 分钟预览 |
 | `POST` | `/api/admin/affinity/apply` | 提交 `{ operationId }`，逐项执行或恢复原操作结果 |
 | `GET` | `/api/admin/affinity/operations` | 最近 50 条预览及逐项结果 |
 
-会话查询可组合 `mode`（`direct` / `newApi`）、`sourceId`、`clientKeyId`、`userId`、`tokenId`、
-`provider`、`accountId`、`reference`、`requestId`、`status`（`bound` / `pending`）及 `cursor`。
-`accountId` 筛选主绑定账号，`requestId` 筛选最近观测的请求。每页最多扫描 200 个索引项，筛选后可能为空；
-存在 `nextCursor` 时可继续翻页，不返回全局总数。响应 `coverage: "observedOnly"`，索引或元数据明确缺失时返回 `503`
+绑定查询可组合 `bindingScope`（`token` / `session`）、`mode`（`direct` / `newApi`）、`sourceId`、`clientKeyId`、`userId`、`tokenId`、
+`provider`、`accountId`、`reference`、`requestId`、`status`（`bound` / `pending` / `primary` / `spillover`）及 `cursor`。
+`accountId` 筛选主绑定账号，`requestId` 筛选最近观测的请求。
+`primary` / `spillover` 仅筛选无待执行指令的 Token 绑定，分别表示最近请求使用主账号或其他账号，不表示当前健康状态。
+每页最多扫描 200 个索引项，筛选后可能为空；
+存在 `nextCursor` 时可继续翻页，不返回全局总数。`observation.bindingScope` 区分 Token 主绑定与会话绑定；
+缺少该字段的既有观测按 `session` 解释，省略筛选时返回两类绑定。响应 `coverage: "observedOnly"`，索引或元数据明确缺失时返回 `503`
 
 预览示例：
 
 ```json
 {
   "operationId": "9bd88c29-d2e1-44fa-a46c-c8de30d6de61",
-  "selection": [{"provider":"openai","reference":"<会话不透明引用>","revision":"<32 位绑定版本>"}],
+  "selection": [{"provider":"openai","reference":"<绑定不透明引用>","revision":"<32 位绑定版本>"}],
   "directive": {"action":"reassign"}
 }
 ```
 
-每次须显式选择 1～200 个会话，不提供不受限的全用户清理。
+每次须显式选择 1～200 个绑定，不提供不受限的全用户清理。New API 会话绑定拒绝管理操作，须选择对应 Key 的 Token 主绑定。
 `directive` 为 `{action:"clear"}`、`{action:"reassign"}` 或 `{action:"target",accountId:"..."}`：
-清除允许下一次选号仍选原账号，重新分配排除原账号，指定目标只允许目标账号。
-目标须属于当前 Key 的启用普通账号范围；模型、健康、容量和其他调度条件仍在实际请求时检查，预览不预留容量
+清除允许下一次选号仍选原账号，重新分配指令生效时排除原账号，指定目标指令仅在选中目标账号时生效。
+目标须属于当前 Key 的启用普通账号范围；模型、健康、容量和其他调度条件仍在实际请求时检查，预览不预留容量。
+Token 指令暂时没有合格目标时保留指令，本次请求按原偏好在当前范围内选号，不为管理偏好新增错误；所有候选都不可用时仍遵守现有失败和等待规则
 
 预览不会修改绑定。执行按完整绑定和版本比较，结果以 `provider:reference` 为键，状态为
 `applied`、`conflict`、`rejected` 或可重试的 `failed`。过期或冲突项不覆盖新状态，已执行项重试返回原结果。
 成功只挂起下一次安全选号的指令；请求取得租约并成功更新绑定后消耗该指令。
-已准入请求继续完成，原生续接不迁移账号；存在待执行指令的原生续接要求客户端提交完整历史开始新链
+已准入请求继续完成，原生续接不迁移账号。Token 主绑定指令只由普通阶段的安全新链消耗，
+传输重试、重放、恢复轮询、保底及旧 owner 续接保留待执行指令；会话绑定存在待执行指令时，原生续接要求客户端提交完整历史开始新链
 
 `auditRecorded:false` 表示审计尚未持久化，可使用同一 `operationId` 重试补写；补写依赖主动重试，没有后台自动对账。
 Redis 操作回执保留 30 天；预览日志在到期 30 天后随新预览按批回收，独立管理审计遵守审计保留期。
@@ -1893,11 +1901,21 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 - `preferred`（优先）：会话内所有可关联请求优先主账号，并发已满、额度耗尽、停用、限流冷却或不支持当前模型时临时分流，保留会话绑定，后续请求仍优先主账号
 - `strict`（严格）：同一会话共用账号，后代请求等待当前账号并跟随根请求换号
 
+New API 已识别 Token 在 `preferred` 与 `strict` 下额外保留一个主账号偏好，跨窗口及无会话标识请求均可使用。
+仅首次 attempt、无续接或重放的普通请求可以认领或迁移 Token 主绑定，并优先主账号；主账号不支持模型、繁忙、额度耗尽或冷却时，允许在当前 Key 授权范围内临时分流，保留主绑定。
+所有候选均不可用时按原有错误或排队规则结束，不修改主绑定，也不替换请求模型。
+主账号已删除、停用、封禁、凭据明确无效、移出当前范围或不再是普通账号时，下次安全新链可迁移到可用普通账号。
+`relaxed` 不使用或更新 Token 主绑定；直连及身份识别失败后的降级行为保持其会话规则
+
+原生续写、replay owner、显式固定账号和严格模式后代跟随约束优先于 Token 偏好，原增量只能发往其 owner。
+同账号重试、轮询和保底沿用已有预算及安全重放限制，不能把临时账号写成 Token 主账号。
+改绑 Token 不迁移旧响应或连接状态；跨渠道自包含历史继续遵守 [可移植历史](#7-client-key) 的密文恢复规则
+
 原生续写的状态归属约束在三种模式下仍然生效
 
-`openaiSessionAffinityTtlHours` 是账号绑定及其会话关联的滑动保留时长，单位小时，默认 24，取值 1～720。
-各类请求统一在发送前成功准入时按请求冻结值续期。
-响应完成不回写或续期。调整时长不扫描已有 Redis 键，已有记录保留原到期时间，下一次成功准入时使用新值；
+`openaiSessionAffinityTtlHours` 是 Token 主绑定、会话绑定及其关联的滑动保留时长，单位小时，默认 24，取值 1～720。
+会话绑定在发送前成功准入时按请求冻结值续期。Token 主绑定由普通账号准入续期；恢复请求只续期无待执行指令的既有主绑定，保底账号不续期 Token 主绑定。
+响应完成不回写或续期。调整时长不扫描已有 Redis 键，已有记录保留原到期时间，下一次符合续期条件的准入使用新值；
 真正过期或丢失后按缺失绑定处理，存储读取错误不会被当作过期
 
 `maxAccountRotations` 是连接、传输、续接等其他恢复路径的最大换号次数，默认 3，取值 0～31；0 表示禁止这些路径换号。

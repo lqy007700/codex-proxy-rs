@@ -366,6 +366,7 @@ async fn management_directives_are_versioned_idempotent_and_preserve_remaining_t
             &provider,
             &key,
             ProviderSessionObservation {
+                binding_scope: Default::default(),
                 caller: CallerIdentity::direct(&ClientApiKeyId::new("key_a").unwrap()),
                 client_key_id: "key_a".into(),
                 request_id: "req_observed".into(),
@@ -507,6 +508,7 @@ async fn missing_affinity_index_or_metadata_is_unavailable_and_unidentified_is_n
     .await
     .unwrap();
     let mut observation = ProviderSessionObservation {
+        binding_scope: Default::default(),
         caller: CallerIdentity::Unidentified {
             request_id: "probe".into(),
         },
@@ -562,4 +564,69 @@ async fn missing_affinity_index_or_metadata_is_unavailable_and_unidentified_is_n
         .await
         .unwrap();
     assert!(repo.session("openai", key.expose_to_store()).await.is_err());
+}
+
+#[tokio::test]
+async fn token_primary_and_session_observations_are_independently_filterable() {
+    use gateway_admin::{
+        model::affinity::AffinityQuery, ports::affinity::AffinityBindingStore as _,
+    };
+    use gateway_core::{
+        policy::CallerIdentity,
+        provider_ports::{ProviderAffinityScope, ProviderSessionObservation},
+    };
+    let Some((repo, _, _)) = affinity_repository().await else {
+        return;
+    };
+    let provider = ProviderKind::new("openai").unwrap();
+    for (name, scope) in [
+        ("token", ProviderAffinityScope::Token),
+        ("session", ProviderAffinityScope::Session),
+    ] {
+        let key = ProviderSessionAffinityKey::try_new(name).unwrap();
+        repo.compare_and_bind(
+            &provider,
+            &key,
+            None,
+            &ProviderAccountId::new("acct_primary").unwrap(),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        repo.observe(
+            &provider,
+            &key,
+            ProviderSessionObservation {
+                binding_scope: scope,
+                caller: CallerIdentity::NewApi {
+                    source_id: "source".into(),
+                    user_id: "1".into(),
+                    token_id: "2".into(),
+                },
+                client_key_id: "key_shared".into(),
+                request_id: "req_spillover".into(),
+                actual_account_id: "acct_spillover".into(),
+            },
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
+    }
+    for scope in [ProviderAffinityScope::Token, ProviderAffinityScope::Session] {
+        let page = repo
+            .list(&AffinityQuery {
+                binding_scope: Some(scope),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].observation.binding_scope, scope);
+        assert_eq!(page.items[0].account_id, "acct_primary");
+        assert_eq!(
+            page.items[0].observation.actual_account_id,
+            "acct_spillover"
+        );
+    }
 }

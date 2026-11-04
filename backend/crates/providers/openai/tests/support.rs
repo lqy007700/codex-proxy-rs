@@ -801,6 +801,7 @@ impl ProviderLeasePort for TestLeaseCoordinator {
 
 #[derive(Default)]
 pub(crate) struct MemorySessionAffinity {
+    observations: Mutex<BTreeMap<String, gateway_core::provider_ports::ProviderSessionObservation>>,
     operation_delay: Duration,
     initial_claim_barrier: Option<Arc<tokio::sync::Barrier>>,
     aliases: Mutex<BTreeMap<(String, String), gateway_core::provider_ports::ProviderSessionAlias>>,
@@ -812,6 +813,24 @@ pub(crate) struct MemorySessionAffinity {
 }
 
 impl MemorySessionAffinity {
+    pub(crate) fn binding_for_scope(
+        &self,
+        scope: gateway_core::provider_ports::ProviderAffinityScope,
+    ) -> (
+        (String, String),
+        gateway_core::provider_ports::ProviderSessionBinding,
+    ) {
+        let observations = self.observations.lock().unwrap();
+        self.bindings_snapshot()
+            .into_iter()
+            .find(|((_, key), _)| {
+                observations
+                    .get(key)
+                    .is_some_and(|observation| observation.binding_scope == scope)
+            })
+            .expect("observed affinity binding")
+    }
+
     pub(crate) fn with_operation_delay(operation_delay: Duration) -> Self {
         Self {
             operation_delay,
@@ -916,6 +935,22 @@ impl MemorySessionAffinity {
 }
 
 impl ProviderSessionAffinityPort for MemorySessionAffinity {
+    fn observe<'a>(
+        &'a self,
+        _provider: &'a ProviderKind,
+        key: &'a ProviderSessionAffinityKey,
+        observation: gateway_core::provider_ports::ProviderSessionObservation,
+        _ttl: Duration,
+    ) -> BoxFuture<'a, Result<(), ProviderStoreError>> {
+        Box::pin(async move {
+            self.observations
+                .lock()
+                .unwrap()
+                .insert(key.expose_to_store().to_owned(), observation);
+            Ok(())
+        })
+    }
+
     fn load<'a>(
         &'a self,
         provider: &'a ProviderKind,

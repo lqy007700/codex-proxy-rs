@@ -11,6 +11,15 @@ use crate::transport::request::derive_conversation_anchor;
 
 const AFFINITY_KEY_HASH_LENGTH: usize = 12;
 
+/// Token 主绑定独立于会话、轮次和传输身份，更换 CPR 接入 Key 不改变归属
+pub(crate) fn derive_newapi_token_affinity(
+    caller: &gateway_core::policy::CallerIdentity,
+) -> Option<ProviderSessionAffinityKey> {
+    matches!(caller, gateway_core::policy::CallerIdentity::NewApi { .. })
+        .then(|| opaque_affinity_key("newapi-token-primary", &caller.session_namespace()))
+        .flatten()
+}
+
 /// 一次请求派生出的账号亲和键及其结构化日志上下文
 pub(crate) struct CodexSessionAffinity {
     key: ProviderSessionAffinityKey,

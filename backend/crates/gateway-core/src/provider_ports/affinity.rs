@@ -50,10 +50,21 @@ pub enum SessionBindingDirective {
     },
 }
 
+/// 管理索引中的绑定层级，缺省值兼容已有会话观测
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderAffinityScope {
+    #[default]
+    Session,
+    Token,
+}
+
 /// 一次发送前观测，用于管理索引；不保存原始会话 ID 或凭据
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderSessionObservation {
+    #[serde(default)]
+    pub binding_scope: ProviderAffinityScope,
     pub caller: crate::policy::CallerIdentity,
     pub client_key_id: String,
     pub request_id: String,

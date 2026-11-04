@@ -420,6 +420,100 @@ async fn start_history(
         .await
 }
 
+#[tokio::test]
+async fn newapi_token_affinity_keeps_portable_history_recovery_on_the_selected_account() {
+    use gateway_core::provider_ports::ProviderAffinityScope;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(|request: &wiremock::Request| {
+            if captured_request_body(request)["input"]
+                .as_array()
+                .is_some_and(|input| input.iter().any(|item| item["id"] == "rs_channel_a"))
+            {
+                encrypted_failure(400)
+            } else {
+                ResponseTemplate::new(200).set_body_raw(CAPTURE_COMPLETED_SSE, "text/event-stream")
+            }
+        })
+        .expect(3)
+        .mount(&server)
+        .await;
+    let accounts = Arc::new(MemoryAccountStore::default());
+    create_account(&accounts, "acct_provider_contract").await;
+    let affinity = Arc::new(MemorySessionAffinity::default());
+    let cache = Arc::new(HistoryCache::default());
+    let provider = with_cache(
+        provider_with_affinity_and_base_url(&accounts, affinity.clone(), server.uri()),
+        cache.clone(),
+    );
+    let settings = || {
+        SettingsValues::new(1, "smart", Default::default(), None, None)
+            .with_request_location(global_request_location(), true)
+    };
+    let scope = || {
+        Arc::new(
+            contract_account_scope()
+                .as_ref()
+                .clone()
+                .with_portable_history(true),
+        )
+    };
+    super::trusted_execution::start(
+        provider.clone(),
+        history_operation(json!({"model":"gpt-5.4","input":"hello"}), false, false),
+        settings(),
+        scope(),
+        "key_shared",
+    )
+    .await
+    .collect_uncommitted()
+    .await
+    .unwrap();
+    create_account(&accounts, "acct_scope_new").await;
+    super::trusted_execution::start(
+        provider,
+        history_operation(mixed_history(), false, false),
+        settings(),
+        scope(),
+        "key_rotated",
+    )
+    .await
+    .collect_uncommitted()
+    .await
+    .unwrap();
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests[1].headers.get("authorization"),
+        requests[2].headers.get("authorization")
+    );
+    let replay = captured_request_body(&requests[2]);
+    assert!(
+        replay["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["type"] != "reasoning")
+    );
+    assert!(
+        replay["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["type"] == "function_call_output")
+    );
+    assert_eq!(
+        affinity
+            .binding_for_scope(ProviderAffinityScope::Token)
+            .1
+            .account_id()
+            .as_str(),
+        "acct_provider_contract"
+    );
+    assert_eq!(cache.writes.load(Ordering::SeqCst), 1);
+    server.verify().await;
+}
+
 fn with_cache(provider: Arc<CodexProvider>, cache: Arc<HistoryCache>) -> Arc<CodexProvider> {
     Arc::new(
         Arc::try_unwrap(provider)

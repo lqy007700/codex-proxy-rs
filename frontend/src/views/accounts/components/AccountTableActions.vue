@@ -63,7 +63,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             <template #icon>
               <Network class="size-3.5 text-cp-text-quaternary" />
             </template>
-            查看关联会话
+            查看账号亲和
           </ZMenuItem>
           <ZMenuItem
             :loading="testing"

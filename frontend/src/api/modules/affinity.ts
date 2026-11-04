@@ -3,12 +3,13 @@ import request from '../request'
 
 export type CallerIdentityPolicy = { mode: 'direct' } | { mode: 'newApi', sourceId: string, allowUnidentified: boolean }
 export type CallerIdentity = { mode: 'direct', keyId: string } | { mode: 'newApi', sourceId: string, userId: string, tokenId: string } | { mode: 'unidentified', requestId: string }
+export type AffinityScope = 'session' | 'token'
 export type BindingDirective = { action: 'clear' } | { action: 'reassign' } | { action: 'target', accountId: string }
 export interface IdentitySource { id: string, name: string, enabled: boolean }
 export interface AffinitySession {
   reference: string
   provider: string
-  observation: { caller: CallerIdentity, clientKeyId: string, requestId: string, actualAccountId: string }
+  observation: { bindingScope?: AffinityScope, caller: CallerIdentity, clientKeyId: string, requestId: string, actualAccountId: string }
   accountId: string
   revision: string
   directive: BindingDirective | null
@@ -20,6 +21,7 @@ export interface AffinitySession {
   expiresAt: string
 }
 export interface AffinityFilters {
+  bindingScope?: AffinityScope
   mode?: string
   sourceId?: string
   clientKeyId?: string
