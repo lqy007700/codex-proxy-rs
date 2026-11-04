@@ -10,6 +10,44 @@ const INPUT_ITEM_SAMPLE: usize = 16;
 const INPUT_BLOCK_SIZE: usize = 16;
 const MAX_INPUT_BLOCKS: usize = 32;
 
+fn input_structure(items: &[Value]) -> Value {
+    // 只保留有界结构和独立指纹，正文超出检查上限时仍能核对 ID 与密文的变化
+    let mut types: Vec<(Option<&str>, usize, usize)> = Vec::new();
+    let mut omitted_type_items = 0;
+    let mut reasoning = Vec::new();
+    let mut reasoning_count: usize = 0;
+    for (index, item) in items.iter().enumerate() {
+        let kind = item.get("type").and_then(Value::as_str);
+        if let Some((_, count, _)) = types.iter_mut().find(|(known, _, _)| *known == kind) {
+            *count += 1;
+        } else if types.len() < INPUT_ITEM_SAMPLE {
+            types.push((kind, 1, index));
+        } else {
+            omitted_type_items += 1;
+        }
+        if kind == Some("reasoning") {
+            reasoning_count += 1;
+            if reasoning.len() < INPUT_ITEM_SAMPLE {
+                reasoning.push(json!({
+                    "index": index,
+                    "id": item.get("id").map(json_fingerprint),
+                    "encryptedContent": item.get("encrypted_content").map(json_fingerprint),
+                }));
+            }
+        }
+    }
+    json!({
+        "types": types.into_iter().map(|(kind, count, first_index)| json!({
+            "fingerprint": kind.map(|kind| body_fingerprint(kind.as_bytes())),
+            "count": count,
+            "firstIndex": first_index,
+        })).collect::<Vec<_>>(),
+        "omittedTypeItems": omitted_type_items,
+        "reasoning": reasoning,
+        "omittedReasoningItems": reasoning_count.saturating_sub(INPUT_ITEM_SAMPLE),
+    })
+}
+
 pub(crate) fn record_request(
     trace: &TraceContext,
     stage: &'static str,
@@ -74,6 +112,7 @@ pub(crate) fn record_request(
         "input": {
             "fingerprint": input.map(json_fingerprint),
             "items": items.map(Vec::len),
+            "structure": items.map(|items| input_structure(items)),
             "itemHashes": item_hashes,
             "blockSize": INPUT_BLOCK_SIZE,
             "blockHashes": block_hashes,

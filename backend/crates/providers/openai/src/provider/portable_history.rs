@@ -96,7 +96,7 @@ fn filter(request: &mut CodexResponsesRequest, excluded: &BTreeSet<String>) -> u
     before - input.len()
 }
 
-/// 只能校验请求自包含，无法证明客户端没有省略早先消息
+/// 只拒绝已知缺失的历史依赖，未改写的扩展项和业务密文交给上游解释
 fn replay_eligibility(
     request: &CodexResponsesRequest,
     context: &AttemptContext,
@@ -119,24 +119,18 @@ fn replay_eligibility(
     let mut calls = BTreeSet::new();
     let mut message_seen = false;
     for item in input {
+        let Some(object) = item.as_object() else {
+            return Err("invalid_history_item");
+        };
         let kind = item.get("type").and_then(Value::as_str);
         if kind == Some("reasoning") {
             continue;
         }
-        if ["encrypted_content", "encrypted_function_args"]
-            .iter()
-            .any(|key| item.get(key).is_some_and(|value| !value.is_null()))
-            || ["content", "output"].iter().any(|key| {
-                item.get(key)
-                    .and_then(Value::as_array)
-                    .is_some_and(|parts| {
-                        parts.iter().any(|part| {
-                            part.get("type").and_then(Value::as_str) == Some("encrypted_content")
-                        })
-                    })
-            })
+        // 省略 type 的纯 ID 对象也是 Responses item 引用，不能冒充完整历史
+        if kind == Some("item_reference")
+            || (kind.is_none() && object.len() == 1 && object.contains_key("id"))
         {
-            return Err("encrypted_business_content");
+            return Err("item_reference");
         }
         match kind {
             Some("message") | None if item.get("role").and_then(Value::as_str).is_some() => {
@@ -161,17 +155,15 @@ fn replay_eligibility(
                 | "custom_tool_call_output"
                 | "local_shell_call_output"
                 | "computer_call_output",
-            ) => {
-                if !item
-                    .get("call_id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| calls.remove(id))
-                {
-                    return Err("tool_call_missing");
-                }
+            ) if !item
+                .get("call_id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| calls.remove(id)) =>
+            {
+                return Err("tool_call_missing");
             }
-            // 未知项也可能依赖服务器状态，恢复时不猜测其可迁移性
-            _ => return Err("opaque_history"),
+            // 恢复只移除 reasoning，不丢弃或重建新版工具、压缩和未知扩展项
+            _ => (),
         }
     }
     if !calls.is_empty() {
@@ -224,6 +216,10 @@ impl HistoryAttempt {
         )
         .map_err(|_| unavailable("history_scope"))?;
         let eligibility = replay_eligibility(request, context);
+        context.trace().record_evidence(
+            "provider.history_prepared",
+            json!({"eligible":eligibility.is_ok(), "reason":eligibility.err(), "candidateItems":initial_candidates.len(), "requestRecovery":context.request_recovery().is_some()}),
+        );
         let ttl = context
             .account_selection_policy()
             .openai_session_affinity_ttl()
@@ -299,16 +295,30 @@ impl HistoryAttempt {
                     .eq_ignore_ascii_case("invalid_encrypted_content")
             }) && matches!(fields.status, None | Some(200 | 400 | 409 | 422))
         });
-        if !explicit_rejection
-            || replay_closed
-            || error.send_state() == UpstreamSendState::Ambiguous
-            || error.retry_is_prohibited()
-            || context.cancellation().is_cancelled()
-            || context.deadline().is_elapsed()
-        {
+        if !explicit_rejection {
+            return error;
+        }
+        let blocker = [
+            (replay_closed, "output_delivered"),
+            (
+                error.send_state() == UpstreamSendState::Ambiguous,
+                "send_ambiguous",
+            ),
+            (error.retry_is_prohibited(), "retry_prohibited"),
+            (context.cancellation().is_cancelled(), "cancelled"),
+            (context.deadline().is_elapsed(), "deadline_elapsed"),
+        ]
+        .into_iter()
+        .find_map(|(blocked, reason)| blocked.then_some(reason));
+        if let Some(reason) = blocker {
+            context.trace().record_evidence(
+                "provider.history_recovery",
+                json!({"eligible":false,"reason":reason}),
+            );
             return error;
         }
         if self.incremental {
+            context.trace().record_evidence("provider.history_recovery", json!({"eligible":false,"reason":"incremental_history","action":"client_full_replay"}));
             return project_continuation_replay_error(
                 error,
                 "encrypted_history_requires_full_input",
@@ -322,12 +332,22 @@ impl HistoryAttempt {
             return error;
         }
         if self.candidates.is_empty() || context.request_recovery().is_some() {
+            let reason = if context.request_recovery().is_some() {
+                "recovery_already_attempted"
+            } else {
+                "encrypted_reasoning_missing"
+            };
+            context.trace().record_evidence(
+                "provider.history_recovery",
+                json!({"eligible":false,"reason":reason}),
+            );
             return error;
         }
         let mut recovery = self.recovery.clone();
         recovery
             .fingerprints
             .extend(self.candidates.iter().cloned());
+        context.trace().record_evidence("provider.history_recovery", json!({"eligible":true,"action":"same_account_recovery","excludedItems":recovery.fingerprints.len()}));
         error.with_request_recovery(RequestRecoveryData::new(recovery))
     }
 

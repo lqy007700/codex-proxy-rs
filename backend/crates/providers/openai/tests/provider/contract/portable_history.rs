@@ -22,6 +22,92 @@ fn mixed_history() -> Value {
     })
 }
 
+fn extended_history() -> Value {
+    let mut body = mixed_history();
+    let input = body["input"].as_array_mut().unwrap();
+    input.insert(0, json!({"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]}));
+    input.push(json!({"type":"agent_message","id":"amsg_original","author":"helper","recipient":"main","content":[{"type":"input_text","text":"Preserve the helper result"}]}));
+    input.push(json!({"type":"tool_search_call","id":"tsc_original","call_id":"search_original","arguments":"{}","status":"completed"}));
+    input.push(json!({"type":"tool_search_output","call_id":"search_original","tools":[]}));
+    input.push(json!({"type":"configuration_update","reasoning":{"effort":"high"}}));
+    input.push(json!({"type":"compaction","id":"cmp_original","encrypted_content":"preserve-compacted-context"}));
+    input.push(json!({"type":"future_history_item","id":"future_original","encrypted_content":"preserve-opaque-business-context","future":{"unchanged":true}}));
+    input.push(json!({"type":"reasoning","id":"rs_plaintext","summary":[{"type":"summary_text","text":"Preserve readable reasoning"}]}));
+    input[5]["encrypted_content"] = json!("preserve-encrypted-tool-output");
+    body
+}
+
+#[tokio::test]
+async fn portable_history_recovers_extended_history_and_keeps_later_turns() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(|request: &wiremock::Request| {
+            let body = captured_request_body(request);
+            if body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["id"] == "rs_channel_a")
+            {
+                encrypted_failure(400)
+            } else {
+                ResponseTemplate::new(200).set_body_raw(CAPTURE_COMPLETED_SSE, "text/event-stream")
+            }
+        })
+        .expect(4)
+        .mount(&server)
+        .await;
+    let accounts = Arc::new(MemoryAccountStore::default());
+    create_account(&accounts, "acct_provider_contract").await;
+    let cache = Arc::new(HistoryCache::default());
+    let provider = with_cache(
+        provider_with_base_url(&accounts, server.uri()),
+        cache.clone(),
+    );
+    let mut body = extended_history();
+    body["thread_id"] = json!("thread-extended-history");
+    let mut expected_inputs = Vec::new();
+    for turn in 0..3 {
+        if turn > 0 {
+            let input = body["input"].as_array_mut().unwrap();
+            input.push(json!({"type":"reasoning","id":format!("rs_new_{turn}"),"encrypted_content":format!("new-ciphertext-{turn}"),"summary":[]}));
+            input.push(json!({"type":"function_call","id":format!("fc_{turn}"),"call_id":format!("call_{turn}"),"name":"lookup","arguments":"{}"}));
+            input.push(json!({"type":"function_call_output","call_id":format!("call_{turn}"),"output":"blue"}));
+            input.push(
+                json!({"type":"message","role":"user","content":format!("Continue turn {turn}")}),
+            );
+            input
+                .push(json!({"type":format!("new_extension_{turn}"),"content":{"unchanged":true}}));
+        }
+        let expected = body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["id"] != "rs_channel_a" && item["id"] != "rs_channel_b")
+            .cloned()
+            .collect::<Vec<_>>();
+        expected_inputs.push(expected);
+        run_history(
+            provider.clone(),
+            history_operation(body.clone(), false, false),
+            1,
+            true,
+        )
+        .await
+        .unwrap();
+    }
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(
+        captured_request_body(&requests[0])["input"],
+        extended_history()["input"]
+    );
+    for (request, expected) in requests[1..].iter().zip(expected_inputs) {
+        assert_eq!(captured_request_body(request)["input"], json!(expected));
+    }
+    assert_eq!(cache.writes.load(Ordering::SeqCst), 1);
+}
+
 #[tokio::test]
 async fn portable_history_preserves_normal_reasoning_before_http_and_ws_send() {
     for api_key in [false, true] {
@@ -46,6 +132,104 @@ async fn portable_history_preserves_normal_reasoning_before_http_and_ws_send() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn portable_history_large_recovery_records_bounded_private_structure() {
+    let server = MockServer::start().await;
+    let calls = AtomicUsize::new(0);
+    Mock::given(method("POST"))
+        .respond_with(move |_: &wiremock::Request| {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                encrypted_failure(400)
+            } else {
+                ResponseTemplate::new(200).set_body_raw(CAPTURE_COMPLETED_SSE, "text/event-stream")
+            }
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    let accounts = Arc::new(MemoryAccountStore::default());
+    create_account(&accounts, "acct_provider_contract").await;
+    let cache = Arc::new(HistoryCache::default());
+    let provider = with_cache(
+        provider_with_base_url(&accounts, server.uri()),
+        cache.clone(),
+    );
+    let mut body = extended_history();
+    let input = body["input"].as_array_mut().unwrap();
+    for index in 0..32 {
+        input.push(
+            json!({"type":format!("private-extension-{index}"),"content":"private-extension-body"}),
+        );
+        input.push(json!({"type":"reasoning","id":format!("rs_private_{index}"),"encrypted_content":format!("private-ciphertext-{index}"),"summary":[]}));
+    }
+    input.push(
+        json!({"type":"message","role":"user","content":"private-transcript".repeat(32_000)}),
+    );
+    let expected = input
+        .iter()
+        .filter(|item| item["type"] != "reasoning" || item.get("encrypted_content").is_none())
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut session = start_history(
+        provider,
+        history_operation(body.clone(), false, false),
+        1,
+        true,
+        "key_openai_contract",
+    )
+    .await
+    .unwrap();
+    let trace = session.trace();
+    session.collect_uncommitted().await.unwrap();
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(captured_request_body(&requests[0])["input"], body["input"]);
+    assert_eq!(
+        captured_request_body(&requests[1])["input"],
+        json!(expected)
+    );
+    let snapshot = trace.snapshot().unwrap();
+    let evidence = snapshot["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["stage"] == "provider.request.input")
+        .map(|event| &event["data"])
+        .collect::<Vec<_>>();
+    assert!(!evidence.is_empty());
+    let structure = &evidence[0]["input"]["structure"];
+    assert_eq!(structure["types"].as_array().unwrap().len(), 16);
+    assert!(structure["omittedTypeItems"].as_u64().unwrap() > 0);
+    assert_eq!(structure["reasoning"].as_array().unwrap().len(), 16);
+    assert_eq!(structure["omittedReasoningItems"], 19);
+    assert_eq!(
+        structure["reasoning"][0]["id"],
+        gateway_core::diagnostics::json_fingerprint(&json!("rs_channel_a"))
+    );
+    assert_eq!(
+        structure["reasoning"][0]["encryptedContent"],
+        gateway_core::diagnostics::json_fingerprint(&json!("ciphertext-bound-to-different-id"))
+    );
+    for data in evidence {
+        assert!(data.to_string().len() < 16 * 1024);
+    }
+    let serialized = snapshot.to_string();
+    for secret in [
+        "private-transcript",
+        "private-extension-",
+        "private-extension-body",
+        "rs_private_",
+        "private-ciphertext-",
+        "rs_channel_a",
+        "ciphertext-bound-to-different-id",
+    ] {
+        assert!(
+            !serialized.contains(secret),
+            "unexpected raw evidence: {secret}"
+        );
+    }
+    assert_eq!(cache.writes.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -147,6 +331,45 @@ async fn run_history(
     concurrency: u32,
     enabled: bool,
 ) -> Result<Vec<ProviderEvent>, EngineError> {
+    start_history(
+        provider,
+        operation,
+        concurrency,
+        enabled,
+        "key_openai_contract",
+    )
+    .await?
+    .collect_uncommitted()
+    .await
+}
+
+async fn run_history_committed(
+    provider: Arc<CodexProvider>,
+    operation: Operation,
+) -> Result<Vec<ProviderEvent>, EngineError> {
+    let mut session = start_history(provider, operation, 1, true, "key_openai_contract").await?;
+    let mut events = Vec::new();
+    while let Some(batch) = session.next_event().await? {
+        if batch.commit_requirement()
+            == gateway_core::engine::CommitRequirement::CommitBeforeDelivery
+        {
+            session.commit_downstream(Some(200)).await?;
+        }
+        events.extend(batch.into_provider_events());
+    }
+    Ok(events)
+}
+
+async fn start_history(
+    provider: Arc<CodexProvider>,
+    operation: Operation,
+    concurrency: u32,
+    enabled: bool,
+    client_key: &str,
+) -> Result<
+    gateway_core::engine::ResponseExecutionSession<super::selection_retry::NoopExecutionStore>,
+    EngineError,
+> {
     let kind = ProviderKind::new("openai").unwrap();
     let snapshot = RuntimeSnapshot::new(
         ConfigRevision::new(1).unwrap(),
@@ -179,21 +402,22 @@ async fn run_history(
         Arc::new(super::selection_retry::NoopExecutionStore),
         registry,
     ));
-    let mut session = coordinator
+    let mut request = super::selection_retry::execution_request(
+        "req_history_recovery",
+        &operation,
+        Duration::from_secs(30),
+    );
+    request.client_api_key_ref = ClientApiKeyId::new(client_key).unwrap();
+    coordinator
         .start(
-            super::selection_retry::execution_request(
-                "req_history_recovery",
-                &operation,
-                Duration::from_secs(30),
-            ),
+            request,
             operation,
             plan,
             None,
             None,
             CancellationToken::new(),
         )
-        .await?;
-    session.collect_uncommitted().await
+        .await
 }
 
 fn with_cache(provider: Arc<CodexProvider>, cache: Arc<HistoryCache>) -> Arc<CodexProvider> {
@@ -386,6 +610,78 @@ async fn portable_history_filters_only_old_items_and_isolates_threads() {
 }
 
 #[tokio::test]
+async fn portable_history_cache_preserves_changed_pairs_and_other_callers() {
+    let server = MockServer::start().await;
+    let calls = AtomicUsize::new(0);
+    Mock::given(method("POST"))
+        .respond_with(move |_: &wiremock::Request| {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                encrypted_failure(400)
+            } else {
+                ResponseTemplate::new(200).set_body_raw(CAPTURE_COMPLETED_SSE, "text/event-stream")
+            }
+        })
+        .expect(6)
+        .mount(&server)
+        .await;
+    let accounts = Arc::new(MemoryAccountStore::default());
+    create_account(&accounts, "acct_provider_contract").await;
+    let cache = Arc::new(HistoryCache::default());
+    let provider = with_cache(
+        provider_with_base_url(&accounts, server.uri()),
+        cache.clone(),
+    );
+    let mut original = extended_history();
+    original["thread_id"] = json!("thread-cache-isolation");
+    run_history(
+        provider.clone(),
+        history_operation(original.clone(), false, false),
+        1,
+        true,
+    )
+    .await
+    .unwrap();
+    let mut expected = Vec::new();
+    for case in ["ciphertext", "id", "caller", "disabled"] {
+        let mut body = original.clone();
+        match case {
+            "ciphertext" => body["input"][2]["encrypted_content"] = json!("replacement-ciphertext"),
+            "id" => body["input"][2]["id"] = json!("rs_replacement"),
+            _ => (),
+        }
+        let mut expected_input = body["input"].clone();
+        if matches!(case, "ciphertext" | "id") {
+            expected_input
+                .as_array_mut()
+                .unwrap()
+                .retain(|item| item["id"] != "rs_channel_b");
+        }
+        expected.push(expected_input);
+        start_history(
+            provider.clone(),
+            history_operation(body, false, false),
+            1,
+            case != "disabled",
+            if case == "caller" {
+                "key_other_caller"
+            } else {
+                "key_openai_contract"
+            },
+        )
+        .await
+        .unwrap()
+        .collect_uncommitted()
+        .await
+        .unwrap();
+    }
+    let requests = server.received_requests().await.unwrap();
+    for (request, expected) in requests[2..].iter().zip(expected) {
+        assert_eq!(captured_request_body(request)["input"], expected);
+    }
+    assert_eq!(cache.writes.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn portable_history_never_converts_unrelated_errors_or_non_self_contained_history() {
     for case in [
         "disabled",
@@ -393,8 +689,12 @@ async fn portable_history_never_converts_unrelated_errors_or_non_self_contained_
         "409_without_code",
         "missing_call",
         "only_reasoning",
-        "compaction",
-        "encrypted_tool",
+        "item_reference",
+        "implicit_reference",
+        "conversation",
+        "missing_output",
+        "duplicate_call",
+        "invalid_item",
     ] {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -424,11 +724,15 @@ async fn portable_history_never_converts_unrelated_errors_or_non_self_contained_
                 .as_array_mut()
                 .unwrap()
                 .retain(|item| item["type"] == "reasoning"),
-            "compaction" => body["input"]
+            "item_reference" => body["input"]
                 .as_array_mut()
                 .unwrap()
-                .push(json!({"type":"compaction","encrypted_content":"state"})),
-            "encrypted_tool" => body["input"][4]["encrypted_content"] = json!("state"),
+                .push(json!({"type":"item_reference","id":"msg_external"})),
+            "implicit_reference" => body["input"].as_array_mut().unwrap().push(json!({"id":"msg_external"})),
+            "conversation" => body["conversation"] = json!({"id":"conv_external"}),
+            "missing_output" => body["input"].as_array_mut().unwrap().retain(|item| item["type"] != "function_call_output"),
+            "duplicate_call" => body["input"].as_array_mut().unwrap().insert(4, json!({"type":"function_call","call_id":"call_original","name":"lookup","arguments":"{}"})),
+            "invalid_item" => body["input"].as_array_mut().unwrap().push(json!(42)),
             _ => (),
         }
         assert!(
@@ -597,11 +901,9 @@ async fn portable_history_http_and_websocket_stream_errors_respect_delivery_barr
                         with_cache(provider_with_base_url(&accounts, base), cache.clone());
                     let result = timeout(
                         Duration::from_secs(5),
-                        run_history(
+                        run_history_committed(
                             provider,
-                            history_operation(mixed_history(), websocket, lite),
-                            1,
-                            true,
+                            history_operation(extended_history(), websocket, lite),
                         ),
                     )
                     .await
@@ -615,13 +917,16 @@ async fn portable_history_http_and_websocket_stream_errors_respect_delivery_barr
                         let values = captured.lock().unwrap();
                         assert_eq!(values.len(), if semantic_output { 1 } else { 2 });
                         if !semantic_output {
-                            assert!(
-                                !values[1]["input"]
-                                    .as_array()
-                                    .unwrap()
-                                    .iter()
-                                    .any(|item| item["type"] == "reasoning")
-                            );
+                            let expected = extended_history()["input"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .filter(|item| {
+                                    item["id"] != "rs_channel_a" && item["id"] != "rs_channel_b"
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            assert_eq!(values[1]["input"], json!(expected));
                         }
                         assert_eq!(
                             cache.writes.load(Ordering::SeqCst),
