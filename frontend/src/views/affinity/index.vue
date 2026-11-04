@@ -38,6 +38,8 @@ const showOperation = ref(false)
 const action = ref('clear')
 const targetAccount = ref<string>()
 const targetAccounts = shallowRef<Account[]>([])
+const accountNames = shallowRef(new Map<string, string>())
+const accountNamesQuery = useRequestState()
 const accountQuery = useRequestState()
 const { loading: accountsLoading, error: accountsError } = accountQuery
 const source = reactive<IdentitySource>({ id: '', name: '', enabled: true })
@@ -94,7 +96,7 @@ const groups = computed<Group[]>(() => {
           ])
         : JSON.stringify([caller.mode, session.observation.clientKeyId])
     const label = view.value === 'accounts'
-      ? session.accountId
+      ? accountLabel(session.accountId)
       : caller.mode === 'newApi'
         ? `用户 ${caller.userId}${view.value === 'tokens'
           ? ` · Token ${caller.tokenId}`
@@ -182,7 +184,39 @@ function directiveLabel(directive: BindingDirective) {
     ? '清除后重新选号'
     : directive.action === 'reassign'
       ? '排除原账号重选'
-      : `指定账号 ${directive.accountId}`
+      : `指定账号 ${accountLabel(directive.accountId)}`
+}
+function accountLabel(id: string) {
+  const target = targetAccounts.value.find(account => account.id === id)
+  return accountNames.value.get(id) || target?.name?.trim() || target?.email?.trim() || id
+}
+async function loadAccountNames() {
+  const requestId = accountNamesQuery.start()
+  const options = { signal: accountNamesQuery.signal, silent: true }
+  try {
+    const first = await getAccounts({ page: 1, pageSize: 200 }, options)
+    if (!accountNamesQuery.isCurrent(requestId))
+      return
+    const names = new Map<string, string>()
+    for (const account of first.items)
+      names.set(account.id, account.name?.trim() || account.email?.trim() || account.id)
+    for (let page = 2; page <= first.page.totalPages; page += 1) {
+      const result = await getAccounts({ page, pageSize: first.page.pageSize }, options)
+      if (!accountNamesQuery.isCurrent(requestId))
+        return
+      for (const account of result.items)
+        names.set(account.id, account.name?.trim() || account.email?.trim() || account.id)
+    }
+    accountNames.value = names
+  }
+  catch {
+    // 名称仅辅助展示，目录不可用时保留 ID，不阻断亲和查询或操作
+  }
+  finally { accountNamesQuery.finish(requestId) }
+}
+function refresh() {
+  void loadAccountNames()
+  void load()
 }
 function toggle(items: AffinitySession[], checked: boolean) {
   const next = new Set(selected.value)
@@ -350,14 +384,17 @@ watch(view, () => {
   void load()
 })
 watch(() => route.query, applyRoute)
-onMounted(applyRoute)
+onMounted(() => {
+  void loadAccountNames()
+  applyRoute()
+})
 </script>
 
 <template>
   <div class="w-full">
     <ZPageHeader title="账号亲和" description="按调用方管理会话绑定，查看实际请求账号与调度结果">
       <template #actions>
-        <ZButton :loading="loading" :disabled="saving" @click="load">
+        <ZButton :loading="loading" :disabled="saving" @click="refresh">
           刷新
         </ZButton>
       </template>
@@ -419,7 +456,7 @@ onMounted(applyRoute)
           <template #id="{ row }">
             {{ row.plan.operationId }}
           </template><template #directive="{ row }">
-            {{ directiveLabel(row.plan.directive) }}
+            <span :title="row.plan.directive.action === 'target' ? row.plan.directive.accountId : undefined">{{ directiveLabel(row.plan.directive) }}</span>
           </template><template #count="{ row }">
             {{ row.plan.items.length }}
           </template><template #time="{ row }">
@@ -434,7 +471,11 @@ onMounted(applyRoute)
           <div class="my-4 flex flex-wrap items-center gap-2">
             <span class="mr-2 text-cp-sm text-cp-text-secondary">已选 {{ selectedSessions.length }} 个本页会话</span>
             <ZSelect v-model="action" class="w-48" aria-label="亲和操作" :disabled="saving" :options="[{ label: '清除后重新选号', value: 'clear' }, { label: '排除原账号重选', value: 'reassign' }, { label: '指定目标账号', value: 'target' }]" />
-            <ZSelect v-if="action === 'target'" v-model="targetAccount" class="sm:w-72" aria-label="目标账号" placeholder="搜索账号名称、邮箱或 ID" filterable remote :loading="accountsLoading" :disabled="saving" :options="targetAccounts.map(account => ({ label: `${account.name || account.email || account.id} · ${account.id}`, value: account.id, disabled: !account.enabled || account.schedulingRole === 'fallback' }))" @query-change="loadTargetAccounts" />
+            <ZSelect v-if="action === 'target'" v-model="targetAccount" class="sm:w-72" aria-label="目标账号" :title="targetAccount" placeholder="搜索账号名称、邮箱或 ID" filterable remote :loading="accountsLoading" :disabled="saving" :options="targetAccounts.map(account => ({ label: accountLabel(account.id), value: account.id, disabled: !account.enabled || account.schedulingRole === 'fallback' }))" @query-change="loadTargetAccounts">
+              <template #option="{ option }">
+                <span :title="String(option.value)">{{ option.label }}</span>
+              </template>
+            </ZSelect>
             <span v-if="action === 'target' && accountsError" role="alert" class="text-cp-xs text-cp-error">{{ accountsError }}<ZButton size="small" @click="loadTargetAccounts()">重试</ZButton></span>
             <ZButton type="primary" :disabled="!canPreview" :loading="saving" @click="preview">
               预览操作
@@ -458,7 +499,7 @@ onMounted(applyRoute)
               <span class="block truncate font-mono text-cp-xs" :title="row.reference">{{ row.reference }}</span><span class="text-cp-xs text-cp-text-tertiary">{{ row.provider }}</span>
             </template>
             <template #account="{ row }">
-              <span class="block truncate font-mono text-cp-xs" :title="row.accountId">{{ row.accountId }}</span><span class="mt-1 block truncate font-mono text-cp-xs text-cp-text-tertiary" :title="row.observation.actualAccountId">{{ row.observation.actualAccountId }}</span>
+              <span class="block truncate" :title="row.accountId">{{ accountLabel(row.accountId) }}</span><span class="mt-1 block truncate text-cp-xs text-cp-text-tertiary" :title="row.observation.actualAccountId">{{ accountLabel(row.observation.actualAccountId) }}</span>
             </template>
             <template #status="{ row }">
               <ZTag :type="row.directive ? 'warning' : 'success'" :title="row.directive ? directiveLabel(row.directive) : undefined">
@@ -476,6 +517,9 @@ onMounted(applyRoute)
             </template>
           </ZTable>
           <ZTable v-else :columns="groupColumns" :data="groups" :loading="loading" empty-text="当前页没有匹配的分组">
+            <template #label="{ row }">
+              <span class="block truncate" :title="view === 'accounts' ? row.sessions[0]?.accountId : row.label">{{ row.label }}</span>
+            </template>
             <template #header-selection>
               <ZCheckbox :model-value="allSelected" :indeterminate="selectedSessions.length > 0 && !allSelected" :disabled="saving" aria-label="选择本页全部会话" @update:model-value="toggle(sessions, $event)" />
             </template>
@@ -502,7 +546,7 @@ onMounted(applyRoute)
     </ZCard>
     <ZDialog v-model="showOperation" title="亲和操作预览与结果" width="56rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
       <template v-if="operation">
-        <p class="mt-0">
+        <p class="mt-0" :title="operation.plan.directive.action === 'target' ? operation.plan.directive.accountId : undefined">
           {{ directiveLabel(operation.plan.directive) }} · {{ operation.plan.items.length }} 个会话
         </p>
         <p class="text-cp-sm text-cp-text-secondary">
@@ -511,7 +555,7 @@ onMounted(applyRoute)
         <ul class="m-0 grid max-h-96 list-none gap-3 overflow-auto p-0">
           <li v-for="item in operation.plan.items" :key="key(item.session)" class="rounded-cp-lg border border-cp-border p-3">
             <p class="m-0 text-cp-sm">
-              {{ callerLabel(item.session) }} · {{ item.session.accountId }}
+              {{ callerLabel(item.session) }} · <span :title="item.session.accountId">{{ accountLabel(item.session.accountId) }}</span>
             </p><p class="my-1 truncate font-mono text-cp-xs text-cp-text-tertiary" :title="item.session.reference">
               {{ item.session.reference }}
             </p>
