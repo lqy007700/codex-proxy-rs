@@ -97,7 +97,26 @@ impl ForwardedCallerHeaders {
         let [value] = self.token_names.as_slice() else {
             return None;
         };
-        normalize_caller_token_name(value).map(str::to_owned)
+        // New API 使用 PathEscape，入口只解码一次，存储与展示层不重复解码
+        if value.len() > 256 * 3 {
+            return None;
+        }
+        let mut bytes = value.iter().copied();
+        let mut decoded = Vec::with_capacity(value.len().min(256));
+        while let Some(byte) = bytes.next() {
+            let byte = if byte == b'%' {
+                let high = char::from(bytes.next()?).to_digit(16)?;
+                let low = char::from(bytes.next()?).to_digit(16)?;
+                u8::try_from((high << 4) | low).ok()?
+            } else {
+                byte
+            };
+            decoded.push(byte);
+            if decoded.len() > 256 {
+                return None;
+            }
+        }
+        normalize_caller_token_name(&decoded).map(str::to_owned)
     }
 }
 

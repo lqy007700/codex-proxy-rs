@@ -148,7 +148,19 @@ fn optional_token_names_never_change_caller_identity_and_only_trusted_callers_us
         (Vec::new(), None),
         (vec![b"  developer  ".to_vec()], Some("developer")),
         (vec!["中文名称".as_bytes().to_vec()], Some("中文名称")),
-        (vec![b"literal%20name".to_vec()], Some("literal%20name")),
+        (
+            vec![b"%E4%B8%AD%E6%96%87+Key%20100%25".to_vec()],
+            Some("中文+Key 100%"),
+        ),
+        (vec![b"literal%2520name".to_vec()], Some("literal%20name")),
+        (vec![b"%20name%20".to_vec()], Some("name")),
+        (vec![b"%e4%b8%ad".to_vec()], Some("中")),
+        (vec![b"%".to_vec()], None),
+        (vec![b"%2".to_vec()], None),
+        (vec![b"%GG".to_vec()], None),
+        (vec![b"%FF".to_vec()], None),
+        (vec![b"%0D%0AX-Injected:%20yes".to_vec()], None),
+        (vec![b"%20%20".to_vec()], None),
         (vec![b"  ".to_vec()], None),
         (vec![b"bad\tname".to_vec()], None),
         (vec![vec![0xff]], None),
@@ -174,4 +186,29 @@ fn optional_token_names_never_change_caller_identity_and_only_trusted_callers_us
         let caller = proxy(allow_unidentified).resolve(&key, &raw).unwrap();
         assert_eq!(raw.token_name(&caller), None);
     }
+}
+
+#[test]
+fn forwarded_token_name_limits_apply_after_decoding_without_reinterpreting_stored_names() {
+    let key = ClientApiKeyId::new("key_shared").unwrap();
+    let caller = proxy(false)
+        .resolve(&key, &headers(&["1"], &["2"]))
+        .unwrap();
+    let name = format!("{}a", "中".repeat(85));
+    let raw = ForwardedCallerHeaders {
+        token_names: vec![format!("{}a", "%E4%B8%AD".repeat(85)).into_bytes()],
+        ..headers(&["1"], &["2"])
+    };
+    assert_eq!(raw.token_name(&caller).as_deref(), Some(name.as_str()));
+    for value in [format!("{}ab", "%E4%B8%AD".repeat(85)), "%41".repeat(257)] {
+        let raw = ForwardedCallerHeaders {
+            token_names: vec![value.into_bytes()],
+            ..headers(&["1"], &["2"])
+        };
+        assert_eq!(raw.token_name(&caller), None);
+    }
+    assert_eq!(
+        gateway_core::policy::normalize_caller_token_name(b"literal%20name"),
+        Some("literal%20name")
+    );
 }

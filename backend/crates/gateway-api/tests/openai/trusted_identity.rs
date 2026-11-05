@@ -650,6 +650,13 @@ async fn optional_token_names_cross_http_and_sse_without_changing_identity_or_re
             (vec![], None),
             (vec![b"Developer".to_vec()], Some("Developer")),
             (vec!["开发用 Key".as_bytes().to_vec()], Some("开发用 Key")),
+            (
+                vec![b"%E5%BC%80%E5%8F%91%E7%94%A8%20Key+100%25".to_vec()],
+                Some("开发用 Key+100%"),
+            ),
+            (vec![b"%25E4%25B8%25AD".to_vec()], Some("%E4%B8%AD")),
+            (vec![b"bad%2".to_vec()], None),
+            (vec![b"bad%0Avalue".to_vec()], None),
             (vec![b" ".to_vec()], None),
             (vec![b"bad\tvalue".to_vec()], None),
             (vec![vec![0xff]], None),
@@ -684,11 +691,18 @@ async fn optional_token_names_cross_http_and_sse_without_changing_identity_or_re
 #[tokio::test]
 async fn websocket_optional_names_do_not_change_session_identity_or_block_followup_turns() {
     use axum::http::HeaderValue;
-    for names in [
-        vec![],
-        vec!["中文 Key".as_bytes().to_vec()],
-        vec![vec![0xff]],
-        vec![b"one".to_vec(), b"two".to_vec()],
+    for (names, expected) in [
+        (vec![], None),
+        (vec!["中文 Key".as_bytes().to_vec()], Some("中文 Key")),
+        (
+            vec![b"%E4%B8%AD%E6%96%87%20Key+1".to_vec()],
+            Some("中文 Key+1"),
+        ),
+        (vec![b"%25E4%25B8%25AD".to_vec()], Some("%E4%B8%AD")),
+        (vec![b"bad%GG".to_vec()], None),
+        (vec![b"bad%0D%0Avalue".to_vec()], None),
+        (vec![vec![0xff]], None),
+        (vec![b"one".to_vec(), b"two".to_vec()], None),
     ] {
         let fixture = fixture(proxy(false)).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -730,11 +744,6 @@ async fn websocket_optional_names_do_not_change_session_identity_or_block_follow
             }
         }
         let values = fixture.provider.1.lock().unwrap();
-        let expected = if names.len() == 1 {
-            std::str::from_utf8(&names[0]).ok()
-        } else {
-            None
-        };
         assert_eq!(
             values.iter().map(Option::as_deref).collect::<Vec<_>>(),
             vec![expected, expected]
