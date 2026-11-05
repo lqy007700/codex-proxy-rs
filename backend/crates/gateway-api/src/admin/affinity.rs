@@ -73,7 +73,40 @@ async fn list<S: SessionState + Send + Sync>(
     State(state): State<S>,
     AdminQuery(query): AdminQuery<AffinityQuery>,
 ) -> Result<Json<AdminEnvelope<serde_json::Value>>, AdminError> {
-    present(&state, service(&state)?.list(&query).await.map_err(map)?)
+    let page = service(&state)?.list(&query).await.map_err(map)?;
+    // 列表投影携带名称，审计计划仍使用原持久化合同
+    let items: Vec<_> = page
+        .items
+        .into_iter()
+        .map(|session| AffinityListItem {
+            token_name: session.observation.token_name.clone(),
+            session,
+        })
+        .collect();
+    present(
+        &state,
+        AffinityListPage {
+            items,
+            next_cursor: page.next_cursor,
+            coverage: page.coverage,
+        },
+    )
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AffinityListItem {
+    #[serde(flatten)]
+    session: gateway_admin::model::affinity::AffinitySession,
+    token_name: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AffinityListPage {
+    items: Vec<AffinityListItem>,
+    next_cursor: Option<String>,
+    coverage: &'static str,
 }
 
 async fn sources<S: SessionState + Send + Sync>(

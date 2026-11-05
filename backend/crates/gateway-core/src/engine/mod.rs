@@ -322,6 +322,7 @@ pub struct RequestAttemptContext {
     request_id: ModelRequestId,
     client_api_key_ref: ClientApiKeyId,
     caller_identity: Option<crate::policy::CallerIdentity>,
+    caller_token_name: Option<String>,
     timing_started_at: Instant,
     trace: crate::diagnostics::TraceContext,
     concurrency_wait_budget: crate::concurrency::ConcurrencyWaitBudget,
@@ -338,6 +339,12 @@ pub struct RequestAttemptContext {
 }
 
 impl RequestAttemptContext {
+    #[must_use]
+    pub fn with_caller_token_name(mut self, name: Option<String>) -> Self {
+        self.caller_token_name = name;
+        self
+    }
+
     #[must_use]
     pub fn with_caller_identity(mut self, caller: crate::policy::CallerIdentity) -> Self {
         self.caller_identity = Some(caller);
@@ -440,6 +447,7 @@ impl RequestAttemptContext {
             request_id,
             client_api_key_ref,
             caller_identity: None,
+            caller_token_name: None,
             request_profile: None,
             pricing: Arc::default(),
             fast_mode: FastMode::Default,
@@ -593,6 +601,11 @@ pub struct AttemptContext {
 }
 
 impl AttemptContext {
+    #[must_use]
+    pub fn caller_token_name(&self) -> Option<&str> {
+        self.request.caller_token_name.as_deref()
+    }
+
     #[must_use]
     pub fn caller_identity(&self) -> crate::policy::CallerIdentity {
         self.request

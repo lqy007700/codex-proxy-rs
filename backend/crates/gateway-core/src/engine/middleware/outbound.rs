@@ -51,6 +51,7 @@ impl Request {
         for header in &self.headers {
             if header.name().eq_ignore_ascii_case("x-cpr-user-id")
                 || header.name().eq_ignore_ascii_case("x-cpr-token-id")
+                || header.name().eq_ignore_ascii_case("x-cpr-token-name")
             {
                 continue;
             }

@@ -114,6 +114,7 @@ pub(super) async fn start(
             )
             .unwrap()
             .with_forwarded_caller(ForwardedCallerHeaders {
+                token_names: vec!["开发用 Key".as_bytes().to_vec()],
                 users: vec!["1".into()],
                 tokens: vec!["11".into()],
             }),
@@ -224,6 +225,13 @@ async fn trusted_token_keeps_primary_across_same_account_retry_rotation_and_fall
     )
     .await;
     assert!(session.collect_uncommitted().await.is_err());
+    let observations = affinity.observations_snapshot();
+    assert!(!observations.is_empty());
+    assert!(
+        observations
+            .iter()
+            .all(|observation| observation.token_name.as_deref() == Some("开发用 Key"))
+    );
     let requests = server.received_requests().await.unwrap();
     let accounts: Vec<_> = requests
         .iter()

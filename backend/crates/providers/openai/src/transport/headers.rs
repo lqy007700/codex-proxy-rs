@@ -19,7 +19,7 @@ use super::protocol::responses::CodexResponsesRequest;
 pub(super) fn is_managed_identity_header(name: &str) -> bool {
     matches!(
         name,
-        "x-cpr-user-id" | "x-cpr-token-id" | "authorization"
+        "x-cpr-user-id" | "x-cpr-token-id" | "x-cpr-token-name" | "authorization"
             | "x-api-key"
             | "x-openai-actor-authorization"
             | "cookie"

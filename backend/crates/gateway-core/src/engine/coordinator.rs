@@ -54,6 +54,7 @@ enum AccountSelection {
 
 pub(super) struct CoordinationExtensions {
     caller_identity: Option<crate::policy::CallerIdentity>,
+    caller_token_name: Option<String>,
     response_control: Option<super::response_control::ResponseControl>,
     continuation: Option<ContinuationBinding>,
     observation: Option<RequestObservationDispatch>,
@@ -69,6 +70,11 @@ pub(super) struct CoordinationExtensions {
 }
 
 impl CoordinationExtensions {
+    pub(super) fn with_caller_token_name(mut self, name: Option<String>) -> Self {
+        self.caller_token_name = name;
+        self
+    }
+
     pub(super) fn with_caller_identity(mut self, caller: crate::policy::CallerIdentity) -> Self {
         self.caller_identity = Some(caller);
         self
@@ -97,6 +103,7 @@ impl CoordinationExtensions {
         Self {
             continuation,
             caller_identity: None,
+            caller_token_name: None,
             response_control: None,
             observation,
             request_policy: None,
@@ -259,6 +266,7 @@ where
     ) -> Result<ResponseExecutionSession<S>, EngineError> {
         let CoordinationExtensions {
             caller_identity,
+            caller_token_name,
             response_control,
             continuation,
             observation: request_observation,
@@ -330,6 +338,7 @@ where
             request_id,
             caller_identity: caller_identity
                 .unwrap_or_else(|| crate::policy::CallerIdentity::direct(&client_api_key_ref)),
+            caller_token_name,
             client_api_key_ref,
             concurrency_wait_budget: ConcurrencyWaitBudget::default(),
             connection_budget: super::connection::ConnectionBudget::default(),
@@ -494,6 +503,7 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     request_id: ModelRequestId,
     client_api_key_ref: crate::policy::ClientApiKeyId,
     caller_identity: crate::policy::CallerIdentity,
+    caller_token_name: Option<String>,
     concurrency_wait_budget: ConcurrencyWaitBudget,
     connection_budget: super::connection::ConnectionBudget,
     connection_retries: u32,
@@ -1171,6 +1181,7 @@ where
         let context = AttemptContext::new(
             RequestAttemptContext::new(self.request_id.clone(), self.client_api_key_ref.clone())
                 .with_caller_identity(self.caller_identity.clone())
+                .with_caller_token_name(self.caller_token_name.clone())
                 .with_account_error_protection(
                     (!self.account_selection.is_diagnostic()
                         && self.plan.account_error_protection().policy().enabled)

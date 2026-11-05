@@ -441,6 +441,12 @@ async fn attempt_middleware_overrides_resolved_settings_and_headers() {
                     observed: Arc::clone(&observed),
                     replacement: ("service_tier".to_owned(), json!("priority")),
                     request_headers: vec![
+                        MiddlewareHeader::new("X-CPR-User-Id", Bytes::from_static(b"1")),
+                        MiddlewareHeader::new("x-cpr-token-id", Bytes::from_static(b"2")),
+                        MiddlewareHeader::new(
+                            "X-CPR-Token-Name",
+                            Bytes::from_static(b"must-not-leak"),
+                        ),
                         MiddlewareHeader::new(
                             "authorization",
                             Bytes::from_static(b"Bearer plugin-override"),
@@ -472,6 +478,9 @@ async fn attempt_middleware_overrides_resolved_settings_and_headers() {
     }
     let requests = server.received_requests().await.unwrap();
     let sent = captured_request_body(&requests[0]);
+    for name in ["x-cpr-user-id", "x-cpr-token-id", "x-cpr-token-name"] {
+        assert!(!requests[0].headers.contains_key(name));
+    }
     assert_eq!(sent["service_tier"], "priority");
     assert_eq!(
         captured_header_values(&requests[0], "authorization"),

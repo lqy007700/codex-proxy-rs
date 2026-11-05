@@ -770,6 +770,7 @@ fn outbound_boundary_removes_trusted_caller_headers_even_when_reintroduced_by_mi
         headers: vec![
             MiddlewareHeader::new("X-CPR-User-Id", Bytes::from_static(b"1")),
             MiddlewareHeader::new("x-cpr-token-id", Bytes::from_static(b"2")),
+            MiddlewareHeader::new("X-CPR-Token-Name", Bytes::from_static(b"must-not-leak")),
             MiddlewareHeader::new("x-request-id", Bytes::from_static(b"safe-request")),
         ],
         body: Bytes::new(),
@@ -777,5 +778,6 @@ fn outbound_boundary_removes_trusted_caller_headers_even_when_reintroduced_by_mi
     let headers = prepared.header_map().unwrap();
     assert!(!headers.contains_key("x-cpr-user-id"));
     assert!(!headers.contains_key("x-cpr-token-id"));
+    assert!(!headers.contains_key("x-cpr-token-name"));
     assert_eq!(headers["x-request-id"], "safe-request");
 }

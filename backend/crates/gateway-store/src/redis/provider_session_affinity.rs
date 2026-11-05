@@ -110,6 +110,18 @@ impl ProviderSessionAffinityPort for RedisProviderSessionAffinityRepository {
             if observation.caller.is_unidentified() {
                 return Ok(());
             }
+            let token_name = observation
+                .token_name
+                .as_deref()
+                .filter(|_| {
+                    matches!(
+                        observation.caller,
+                        gateway_core::policy::CallerIdentity::NewApi { .. }
+                    )
+                })
+                .and_then(|name| gateway_core::policy::normalize_caller_token_name(name.as_bytes()))
+                .unwrap_or_default()
+                .to_owned();
             let record = serde_json::to_string(&IndexRecord {
                 observation,
                 first_observed_ms: 0,
@@ -123,8 +135,10 @@ impl ProviderSessionAffinityPort for RedisProviderSessionAffinityRepository {
                 .key(self.index_key())
                 .key(format!("{}:initialized", self.index_key()))
                 .key(format!("{}:expiry", self.index_key()))
+                .key(format!("{binding_key}:token-name"))
                 .arg(format!("{}:{}", provider.as_str(), key.expose_to_store()))
                 .arg(record)
+                .arg(token_name)
                 .invoke_async::<i64>(&mut self.connection.clone())
                 .await
                 .map_err(|error| crate::provider_unavailable("observe affinity session", error))?;
@@ -276,6 +290,12 @@ local old = redis.call('GET', KEYS[2])
 record.firstObservedMs = old and cjson.decode(old).firstObservedMs or now
 record.lastAdmissionMs = now
 redis.call('PSETEX', KEYS[2], ttl, cjson.encode(record))
+-- 名称不参与准入，独立命令失败不能影响已完成的观测
+if ARGV[3] ~= '' then
+  redis.pcall('PSETEX', KEYS[6], ttl, ARGV[3])
+else
+  redis.pcall('PEXPIRE', KEYS[6], ttl)
+end
 redis.call('ZADD', KEYS[3], 0, '', 0, ARGV[1])
 redis.call('SET', KEYS[4], '1')
 redis.call('ZADD', KEYS[5], now+ttl, ARGV[1])
@@ -359,25 +379,43 @@ return redis.call('ZRANGEBYLEX', KEYS[1], ARGV[1], '+', 'LIMIT', 0, 201)
         let provider = ProviderKind::new(provider).map_err(admin_unavailable)?;
         let key = ProviderSessionAffinityKey::try_new(reference).map_err(admin_unavailable)?;
         let binding_key = self.key(&provider, &key).map_err(admin_unavailable)?;
-        let values: Vec<String> = redis::Script::new(r#"
+        let values: Vec<Vec<u8>> = redis::Script::new(r#"
 local binding=redis.call('GET', KEYS[1])
 if not binding then return {} end
 local metadata=redis.call('GET', KEYS[2])
 if not metadata then return redis.error_reply('affinity metadata missing') end
 local ttl=redis.call('PTTL', KEYS[1])
 local time=redis.call('TIME')
-return {binding, metadata, tostring(ttl), tostring(tonumber(time[1])*1000+math.floor(tonumber(time[2])/1000))}
-"#).key(&binding_key).key(format!("{binding_key}:metadata")).invoke_async(&mut self.connection.clone()).await.map_err(admin_unavailable)?;
+local name=redis.pcall('GET', KEYS[3])
+if type(name) ~= 'string' then name='' end
+return {binding, metadata, tostring(ttl), tostring(tonumber(time[1])*1000+math.floor(tonumber(time[2])/1000)), name}
+"#).key(&binding_key).key(format!("{binding_key}:metadata")).key(format!("{binding_key}:token-name")).invoke_async(&mut self.connection.clone()).await.map_err(admin_unavailable)?;
         if values.is_empty() {
             return Ok(None);
         }
-        if values.len() != 4 {
+        if values.len() != 5 {
             return Err(admin_unavailable("incomplete affinity snapshot"));
         }
-        let binding = BindingRecord::decode(&values[0]).map_err(admin_unavailable)?;
-        let record: IndexRecord = serde_json::from_str(&values[1]).map_err(admin_unavailable)?;
-        let ttl = values[2].parse::<i64>().map_err(admin_unavailable)?;
-        let now = values[3].parse::<i64>().map_err(admin_unavailable)?;
+        let binding =
+            BindingRecord::decode(std::str::from_utf8(&values[0]).map_err(admin_unavailable)?)
+                .map_err(admin_unavailable)?;
+        let mut record: IndexRecord =
+            serde_json::from_slice(&values[1]).map_err(admin_unavailable)?;
+        if matches!(
+            record.observation.caller,
+            gateway_core::policy::CallerIdentity::NewApi { .. }
+        ) {
+            record.observation.token_name =
+                gateway_core::policy::normalize_caller_token_name(&values[4]).map(str::to_owned);
+        }
+        let ttl = std::str::from_utf8(&values[2])
+            .map_err(admin_unavailable)?
+            .parse::<i64>()
+            .map_err(admin_unavailable)?;
+        let now = std::str::from_utf8(&values[3])
+            .map_err(admin_unavailable)?
+            .parse::<i64>()
+            .map_err(admin_unavailable)?;
         if ttl <= 0 {
             return Ok(None);
         }

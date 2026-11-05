@@ -53,7 +53,10 @@ fn identity_snapshot(policy: CallerIdentityPolicy, revision: u64) -> RuntimeSnap
     )]))))
 }
 #[derive(Default)]
-struct CapturingProvider(Mutex<Vec<(CallerIdentity, String)>>);
+struct CapturingProvider(
+    Mutex<Vec<(CallerIdentity, String)>>,
+    Mutex<Vec<Option<String>>>,
+);
 #[async_trait]
 impl Provider for CapturingProvider {
     fn name(&self) -> &'static str {
@@ -76,6 +79,10 @@ impl Provider for CapturingProvider {
             context.caller_identity(),
             context.client_api_key_ref().as_str().into(),
         ));
+        self.1
+            .lock()
+            .unwrap()
+            .push(context.caller_token_name().map(str::to_owned));
         let response_id = format!("resp_{}", context.request_id());
         let response = ResponseMeta::new(response_id.clone(), "model-a");
         let events = [
@@ -631,4 +638,109 @@ async fn unsupported_live_ownership_paths_reject_proxy_callers_before_provider_e
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     }
     assert!(fixture.provider.0.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn optional_token_names_cross_http_and_sse_without_changing_identity_or_rejecting_bad_names()
+{
+    use axum::http::HeaderValue;
+    for policy in [CallerIdentityPolicy::Direct, proxy(false)] {
+        let fixture = fixture(policy.clone()).await;
+        let cases: Vec<(Vec<Vec<u8>>, Option<&str>)> = vec![
+            (vec![], None),
+            (vec![b"Developer".to_vec()], Some("Developer")),
+            (vec!["开发用 Key".as_bytes().to_vec()], Some("开发用 Key")),
+            (vec![b" ".to_vec()], None),
+            (vec![b"bad\tvalue".to_vec()], None),
+            (vec![vec![0xff]], None),
+            (vec![vec![b'x'; 257]], None),
+            (vec![b"a".to_vec(), b"a".to_vec()], None),
+        ];
+        for (index, (values, name)) in cases.into_iter().enumerate() {
+            let mut request = request(index % 2 == 0, Some("1"), Some("11"));
+            for value in values {
+                request
+                    .headers_mut()
+                    .append("x-cpr-token-name", HeaderValue::from_bytes(&value).unwrap());
+            }
+            let response = fixture.app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+            let expected = if matches!(policy, CallerIdentityPolicy::NewApi { .. }) {
+                name
+            } else {
+                None
+            };
+            assert_eq!(
+                fixture.provider.1.lock().unwrap()[index].as_deref(),
+                expected
+            );
+        }
+        let calls = fixture.provider.0.lock().unwrap();
+        assert!(calls.iter().all(|call| call.0 == calls[0].0));
+    }
+}
+
+#[tokio::test]
+async fn websocket_optional_names_do_not_change_session_identity_or_block_followup_turns() {
+    use axum::http::HeaderValue;
+    for names in [
+        vec![],
+        vec!["中文 Key".as_bytes().to_vec()],
+        vec![vec![0xff]],
+        vec![b"one".to_vec(), b"two".to_vec()],
+    ] {
+        let fixture = fixture(proxy(false)).await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, fixture.app).await.unwrap() });
+        let mut request = format!("ws://{address}/v1/responses")
+            .into_client_request()
+            .unwrap();
+        request.headers_mut().insert(
+            "authorization",
+            HeaderValue::from_static("Bearer synthetic-shared-key"),
+        );
+        request
+            .headers_mut()
+            .insert("x-cpr-user-id", HeaderValue::from_static("1"));
+        request
+            .headers_mut()
+            .insert("x-cpr-token-id", HeaderValue::from_static("11"));
+        for name in &names {
+            request
+                .headers_mut()
+                .append("x-cpr-token-name", HeaderValue::from_bytes(name).unwrap());
+        }
+        let (mut socket, _) = connect_async(request).await.unwrap();
+        for token_name in ["attempted rename", "another name"] {
+            socket.send(Message::text(json!({"type":"response.create","model":"model-a","input":"synthetic","stream":true,"token_name":token_name}).to_string())).await.unwrap();
+            loop {
+                let frame = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                if let Message::Text(text) = frame {
+                    let event: Value = serde_json::from_str(&text).unwrap();
+                    if event["type"] == "response.completed" {
+                        break;
+                    }
+                }
+            }
+        }
+        let values = fixture.provider.1.lock().unwrap();
+        let expected = if names.len() == 1 {
+            std::str::from_utf8(&names[0]).ok()
+        } else {
+            None
+        };
+        assert_eq!(
+            values.iter().map(Option::as_deref).collect::<Vec<_>>(),
+            vec![expected, expected]
+        );
+        let calls = fixture.provider.0.lock().unwrap();
+        assert_eq!(calls[0].0, calls[1].0);
+        server.abort();
+    }
 }

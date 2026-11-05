@@ -173,6 +173,7 @@ fn session(provider: &str, reference: &str) -> AffinitySession {
         reference: reference.into(),
         provider: provider.into(),
         observation: ProviderSessionObservation {
+            token_name: None,
             binding_scope: Default::default(),
             caller: CallerIdentity::Direct {
                 key_id: "key_direct".into(),

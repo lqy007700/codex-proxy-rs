@@ -366,6 +366,7 @@ async fn management_directives_are_versioned_idempotent_and_preserve_remaining_t
             &provider,
             &key,
             ProviderSessionObservation {
+                token_name: None,
                 binding_scope: Default::default(),
                 caller: CallerIdentity::direct(&ClientApiKeyId::new("key_a").unwrap()),
                 client_key_id: "key_a".into(),
@@ -508,6 +509,7 @@ async fn missing_affinity_index_or_metadata_is_unavailable_and_unidentified_is_n
     .await
     .unwrap();
     let mut observation = ProviderSessionObservation {
+        token_name: None,
         binding_scope: Default::default(),
         caller: CallerIdentity::Unidentified {
             request_id: "probe".into(),
@@ -598,6 +600,7 @@ async fn token_primary_and_session_observations_are_independently_filterable() {
             &provider,
             &key,
             ProviderSessionObservation {
+                token_name: None,
                 binding_scope: scope,
                 caller: CallerIdentity::NewApi {
                     source_id: "source".into(),
@@ -629,4 +632,247 @@ async fn token_primary_and_session_observations_are_independently_filterable() {
             "acct_spillover"
         );
     }
+}
+
+#[tokio::test]
+async fn token_name_sidecar_preserves_names_and_binding_contract_while_ignoring_corruption() {
+    use gateway_admin::{
+        model::affinity::{AffinityPlan, AffinityPlanItem, AffinitySession},
+        ports::affinity::AffinityBindingStore as _,
+    };
+    use gateway_core::{
+        policy::CallerIdentity,
+        provider_ports::{
+            ProviderAffinityScope, ProviderSessionObservation, SessionBindingDirective,
+        },
+    };
+    let Some((repo, mut connection, namespace)) = affinity_repository().await else {
+        return;
+    };
+    let provider = ProviderKind::new("openai").unwrap();
+    let key = ProviderSessionAffinityKey::try_new("named-token").unwrap();
+    let binding = repo
+        .compare_and_bind(
+            &provider,
+            &key,
+            None,
+            &ProviderAccountId::new("acct_primary").unwrap(),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let mut observation = ProviderSessionObservation {
+        token_name: Some(" 开发用 Key ".into()),
+        binding_scope: ProviderAffinityScope::Token,
+        caller: CallerIdentity::NewApi {
+            source_id: "source".into(),
+            user_id: "1".into(),
+            token_id: "2".into(),
+        },
+        client_key_id: "key_shared".into(),
+        request_id: "req_name".into(),
+        actual_account_id: "acct_spillover".into(),
+    };
+    repo.observe(
+        &provider,
+        &key,
+        observation.clone(),
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    let metadata: Vec<String> = redis::cmd("KEYS")
+        .arg(format!("{namespace}:scheduler:session-binding:*:metadata"))
+        .query_async(&mut connection)
+        .await
+        .unwrap();
+    assert_eq!(metadata.len(), 1);
+    let binding_key = metadata[0].strip_suffix(":metadata").unwrap();
+    let name_key = format!("{binding_key}:token-name");
+    let session = repo
+        .session("openai", key.expose_to_store())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        session.observation.token_name.as_deref(),
+        Some("开发用 Key")
+    );
+    assert_eq!(session.account_id, "acct_primary");
+    assert_eq!(session.observation.actual_account_id, "acct_spillover");
+    let record: String = redis::cmd("GET")
+        .arg(&metadata[0])
+        .query_async(&mut connection)
+        .await
+        .unwrap();
+    assert!(!record.contains("tokenName"));
+    assert!(!record.contains("开发用 Key"));
+    // 名称不进入持久化操作快照，旧版本的严格反序列化合同保持不变
+    let plan = AffinityPlan {
+        operation_id: Uuid::new_v4().to_string(),
+        directive: SessionBindingDirective::Clear,
+        items: vec![AffinityPlanItem {
+            session: session.clone(),
+            next_revision: "next".into(),
+            rejection: None,
+        }],
+        created_at: chrono::Utc::now(),
+        expires_at: chrono::Utc::now() + chrono::Duration::seconds(60),
+    };
+    let encoded = serde_json::to_string(&plan).unwrap();
+    assert!(!encoded.contains("tokenName"));
+    let restored: AffinityPlan = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(restored.items[0].session.revision, session.revision);
+    assert!(restored.items[0].session.observation.token_name.is_none());
+    let restored_session: AffinitySession =
+        serde_json::from_value(serde_json::to_value(&session).unwrap()).unwrap();
+    assert!(restored_session.observation.token_name.is_none());
+
+    for name in [
+        None,
+        Some("   ".into()),
+        Some("bad\tname".into()),
+        Some("x".repeat(257)),
+    ] {
+        redis::cmd("PEXPIRE")
+            .arg(&name_key)
+            .arg(1_000)
+            .query_async::<i64>(&mut connection)
+            .await
+            .unwrap();
+        observation.token_name = name;
+        repo.observe(
+            &provider,
+            &key,
+            observation.clone(),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
+        let observed = repo
+            .session("openai", key.expose_to_store())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            observed.observation.token_name.as_deref(),
+            Some("开发用 Key")
+        );
+        assert_eq!(
+            repo.load(&provider, &key).await.unwrap(),
+            Some(binding.clone())
+        );
+        let name_ttl: i64 = redis::cmd("PTTL")
+            .arg(&name_key)
+            .query_async(&mut connection)
+            .await
+            .unwrap();
+        let binding_ttl: i64 = redis::cmd("PTTL")
+            .arg(binding_key)
+            .query_async(&mut connection)
+            .await
+            .unwrap();
+        assert!(name_ttl > 1_000 && name_ttl <= binding_ttl + 20);
+    }
+    observation.token_name = Some("重命名".into());
+    repo.observe(
+        &provider,
+        &key,
+        observation.clone(),
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        repo.session("openai", key.expose_to_store())
+            .await
+            .unwrap()
+            .unwrap()
+            .observation
+            .token_name
+            .as_deref(),
+        Some("重命名")
+    );
+    redis::cmd("SET")
+        .arg(&name_key)
+        .arg(vec![0xff_u8])
+        .query_async::<()>(&mut connection)
+        .await
+        .unwrap();
+    assert!(
+        repo.session("openai", key.expose_to_store())
+            .await
+            .unwrap()
+            .unwrap()
+            .observation
+            .token_name
+            .is_none()
+    );
+    redis::cmd("DEL")
+        .arg(&name_key)
+        .query_async::<i64>(&mut connection)
+        .await
+        .unwrap();
+    redis::cmd("LPUSH")
+        .arg(&name_key)
+        .arg("wrong-type")
+        .query_async::<i64>(&mut connection)
+        .await
+        .unwrap();
+    observation.token_name = None;
+    repo.observe(
+        &provider,
+        &key,
+        observation.clone(),
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    assert!(
+        repo.session("openai", key.expose_to_store())
+            .await
+            .unwrap()
+            .unwrap()
+            .observation
+            .token_name
+            .is_none()
+    );
+    observation.token_name = Some("恢复名称".into());
+    repo.observe(
+        &provider,
+        &key,
+        observation.clone(),
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        repo.session("openai", key.expose_to_store())
+            .await
+            .unwrap()
+            .unwrap()
+            .observation
+            .token_name
+            .as_deref(),
+        Some("恢复名称")
+    );
+
+    observation.caller = CallerIdentity::Direct {
+        key_id: "key_shared".into(),
+    };
+    observation.token_name = Some("伪造名称".into());
+    repo.observe(&provider, &key, observation, Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert!(
+        repo.session("openai", key.expose_to_store())
+            .await
+            .unwrap()
+            .unwrap()
+            .observation
+            .token_name
+            .is_none()
+    );
+    assert_eq!(repo.load(&provider, &key).await.unwrap(), Some(binding));
 }

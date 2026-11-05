@@ -130,24 +130,35 @@ impl AdminTestFixture {
     }
 
     pub async fn with_system(system: Arc<dyn SystemOperations>) -> Self {
-        Self::with_dependencies(system, None, Default::default()).await
+        Self::with_dependencies(system, None, Default::default(), None).await
     }
 
     pub async fn with_key_verifier(
         verifier: Arc<dyn ClientKeyVerifier>,
         system: Arc<dyn SystemOperations>,
     ) -> Self {
-        Self::with_dependencies(system, Some(verifier), Default::default()).await
+        Self::with_dependencies(system, Some(verifier), Default::default(), None).await
     }
 
     pub async fn with_timezone(timezone: gateway_core::time::DeploymentTimeZone) -> Self {
-        Self::with_dependencies(Arc::new(UnusedSystem), None, timezone).await
+        Self::with_dependencies(Arc::new(UnusedSystem), None, timezone, None).await
+    }
+
+    async fn with_affinity(stores: gateway_admin::ports::affinity::AffinityStorePorts) -> Self {
+        Self::with_dependencies(
+            Arc::new(UnusedSystem),
+            None,
+            Default::default(),
+            Some(stores),
+        )
+        .await
     }
 
     async fn with_dependencies(
         system: Arc<dyn SystemOperations>,
         verifier: Option<Arc<dyn ClientKeyVerifier>>,
         timezone: gateway_core::time::DeploymentTimeZone,
+        affinity: Option<gateway_admin::ports::affinity::AffinityStorePorts>,
     ) -> Self {
         let api_key = Arc::new(Mutex::new(None));
         let auth = Arc::new(MemoryAuthStore::new(api_key.clone()));
@@ -191,6 +202,10 @@ impl AdminTestFixture {
             Arc::new(usage_data_store::UnusedUsageDataStore),
             Arc::new(alerts::MemoryAlerts::default()),
         );
+        let stores = match affinity {
+            Some(affinity) => stores.with_affinity(affinity),
+            None => stores,
+        };
         let provider_quota = Arc::new(Mutex::new(None));
         let provider_quota_gate = Arc::new(Mutex::new(None));
         let provider_models = Arc::new(Mutex::new(None));

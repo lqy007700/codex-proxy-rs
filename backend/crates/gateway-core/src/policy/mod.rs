@@ -5,6 +5,7 @@
 mod caller;
 pub use caller::{
     CallerIdentity, CallerIdentityError, CallerIdentityPolicy, ForwardedCallerHeaders,
+    normalize_caller_token_name,
 };
 
 mod client_version;
@@ -132,6 +133,7 @@ pub struct ClientSettings {
 pub struct ClientPolicy {
     identity_policy: CallerIdentityPolicy,
     caller_identity: Option<CallerIdentity>,
+    caller_token_name: Option<String>,
     name_snapshot: Option<String>,
     defaults: Arc<ClientSettings>,
     key_id: ClientApiKeyId,
@@ -157,7 +159,9 @@ impl ClientPolicy {
         mut self,
         headers: &ForwardedCallerHeaders,
     ) -> Result<Self, CallerIdentityError> {
-        self.caller_identity = Some(self.identity_policy.resolve(&self.key_id, headers)?);
+        let caller = self.identity_policy.resolve(&self.key_id, headers)?;
+        self.caller_token_name = headers.token_name(&caller);
+        self.caller_identity = Some(caller);
         Ok(self)
     }
 
@@ -166,6 +170,11 @@ impl ClientPolicy {
         self.caller_identity
             .clone()
             .unwrap_or_else(|| CallerIdentity::direct(&self.key_id))
+    }
+
+    #[must_use]
+    pub fn caller_token_name(&self) -> Option<&str> {
+        self.caller_token_name.as_deref()
     }
 
     #[must_use]
@@ -205,6 +214,7 @@ impl ClientPolicy {
         Self {
             identity_policy: CallerIdentityPolicy::default(),
             caller_identity: None,
+            caller_token_name: None,
             name_snapshot: None,
             defaults: Arc::new(ClientSettings {
                 request_profiles: account_scope.request_profiles().clone(),

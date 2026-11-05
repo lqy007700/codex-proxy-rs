@@ -13,6 +13,7 @@ fn proxy(allow_unidentified: bool) -> CallerIdentityPolicy {
 }
 fn headers(users: &[&str], tokens: &[&str]) -> ForwardedCallerHeaders {
     ForwardedCallerHeaders {
+        token_names: Vec::new(),
         users: users.iter().map(|value| (*value).into()).collect(),
         tokens: tokens.iter().map(|value| (*value).into()).collect(),
     }
@@ -135,4 +136,42 @@ fn invalid_source_configuration_still_fails_validation() {
     let key = ClientApiKeyId::new("key_shared").unwrap();
     assert!(policy.validate().is_err());
     assert!(policy.resolve(&key, &headers(&[], &[])).is_err());
+}
+
+#[test]
+fn optional_token_names_never_change_caller_identity_and_only_trusted_callers_use_them() {
+    let key = ClientApiKeyId::new("key_shared").unwrap();
+    let expected = proxy(false)
+        .resolve(&key, &headers(&["1"], &["2"]))
+        .unwrap();
+    let cases = [
+        (Vec::new(), None),
+        (vec![b"  developer  ".to_vec()], Some("developer")),
+        (vec!["中文名称".as_bytes().to_vec()], Some("中文名称")),
+        (vec![b"literal%20name".to_vec()], Some("literal%20name")),
+        (vec![b"  ".to_vec()], None),
+        (vec![b"bad\tname".to_vec()], None),
+        (vec![vec![0xff]], None),
+        (vec![vec![b'a'; 257]], None),
+        (vec![b"one".to_vec(), b"two".to_vec()], None),
+    ];
+    for (token_names, name) in cases {
+        let raw = ForwardedCallerHeaders {
+            token_names,
+            ..headers(&["1"], &["2"])
+        };
+        let caller = proxy(false).resolve(&key, &raw).unwrap();
+        assert_eq!(caller, expected);
+        assert_eq!(caller.session_namespace(), expected.session_namespace());
+        assert_eq!(raw.token_name(&caller).as_deref(), name);
+        assert_eq!(raw.token_name(&CallerIdentity::direct(&key)), None);
+    }
+    for allow_unidentified in [false, true] {
+        let raw = ForwardedCallerHeaders {
+            token_names: vec![b"ignored".to_vec()],
+            ..headers(&["1"], &[])
+        };
+        let caller = proxy(allow_unidentified).resolve(&key, &raw).unwrap();
+        assert_eq!(raw.token_name(&caller), None);
+    }
 }

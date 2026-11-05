@@ -123,6 +123,8 @@ impl CodexBackendClient {
         let headers = prepared
             .headers
             .into_iter()
+            // 复用最终头过滤结果，同时保留 opening 的原始顺序和大小写
+            .filter(|header| headers.contains_key(header.name()))
             .map(|header| {
                 let (name, value) = header.into_parts();
                 Ok((

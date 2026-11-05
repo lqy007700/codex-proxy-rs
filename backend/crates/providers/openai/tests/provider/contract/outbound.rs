@@ -85,6 +85,7 @@ async fn outbound_http_sends_final_encoded_bytes_and_target_without_restoring_de
             request.headers.extend([
                 MiddlewareHeader::new("X-CPR-User-Id", Bytes::from_static(b"1")),
                 MiddlewareHeader::new("x-cpr-token-id", Bytes::from_static(b"2")),
+                MiddlewareHeader::new("X-CPR-Token-Name", Bytes::from_static(b"must-not-leak")),
                 MiddlewareHeader::new("x-plugin-values", Bytes::from_static(b"first")),
                 MiddlewareHeader::new("x-plugin-values", Bytes::from_static(b"second")),
                 MiddlewareHeader::new("x-plugin-bytes", Bytes::from_static(b"\x80")),
@@ -113,6 +114,7 @@ async fn outbound_http_sends_final_encoded_bytes_and_target_without_restoring_de
     }
     assert!(!request.headers.contains_key("x-cpr-user-id"));
     assert!(!request.headers.contains_key("x-cpr-token-id"));
+    assert!(!request.headers.contains_key("x-cpr-token-name"));
     // 底层 reqwest 保留自身缺省 Accept，出站准备不承诺禁用该行为
     assert_eq!(request.headers["accept"], "*/*");
     assert_eq!(
@@ -287,6 +289,9 @@ async fn outbound_websocket_keeps_exact_chains_and_reuses_only_matching_final_op
             assert_eq!(request.uri().path(), "/opening-a");
             assert!(!request.headers().contains_key("user-agent"));
             assert!(!request.headers().contains_key("sec-websocket-extensions"));
+            for name in ["x-cpr-user-id", "x-cpr-token-id", "x-cpr-token-name"] {
+                assert!(!request.headers().contains_key(name));
+            }
             assert_eq!(
                 request
                     .headers()
@@ -327,6 +332,9 @@ async fn outbound_websocket_keeps_exact_chains_and_reuses_only_matching_final_op
         let mut second = accept_codex_test_websocket_with(stream, |request, _response| {
             assert_eq!(request.uri().path(), "/opening-b");
             assert!(!request.headers().contains_key("sec-websocket-extensions"));
+            for name in ["x-cpr-user-id", "x-cpr-token-id", "x-cpr-token-name"] {
+                assert!(!request.headers().contains_key(name));
+            }
             assert_eq!(
                 request
                     .headers()
@@ -427,6 +435,11 @@ async fn outbound_websocket_keeps_exact_chains_and_reuses_only_matching_final_op
                     "x-plugin-profile",
                     Bytes::from_static(b"shared"),
                 ));
+                request.headers.extend([
+                    MiddlewareHeader::new("X-CPR-User-Id", Bytes::from_static(b"1")),
+                    MiddlewareHeader::new("x-cpr-token-id", Bytes::from_static(b"2")),
+                    MiddlewareHeader::new("X-CPR-Token-Name", Bytes::from_static(b"must-not-leak")),
+                ]);
                 let mut body: Value = serde_json::from_slice(&request.body).unwrap();
                 assert_eq!(body["type"], "response.create");
                 body["plugin_turn"] = json!(index);
@@ -507,4 +520,66 @@ async fn outbound_websocket_keeps_exact_chains_and_reuses_only_matching_final_op
         .await
         .unwrap()
         .unwrap();
+}
+
+#[tokio::test]
+async fn attempt_middleware_trusted_headers_never_reach_websocket_without_outbound_pipeline() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_provider_contract").await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_codex_test_websocket_with(stream, |request, _response| {
+            for name in ["x-cpr-user-id", "x-cpr-token-id", "x-cpr-token-name"] {
+                assert!(!request.headers().contains_key(name));
+            }
+        })
+        .await;
+        loop {
+            match socket.next().await.unwrap().unwrap() {
+                Message::Text(_) => break,
+                Message::Ping(payload) => socket.send(Message::Pong(payload)).await.unwrap(),
+                message => panic!("unexpected frame: {message:?}"),
+            }
+        }
+        socket.send(Message::Text(json!({"type":"response.completed","response":{"id":"resp_attempt_headers","model":"gpt-5.4","status":"completed","output":[],"store":false}}).to_string().into())).await.unwrap();
+    });
+    let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+        ProtocolPayload::json_object(
+            "openai",
+            json!({"model":"gpt-5.4","input":"synthetic"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        )
+        .unwrap()
+        .with_context(Map::from_iter([("use_websocket".into(), json!(true))])),
+    ));
+    let mut stream = provider_with_base_url(&store, format!("http://{address}"))
+        .execute(
+            planned_request("openai", operation),
+            context_with_middleware(
+                "req_attempt_headers",
+                Arc::new(RecordingMiddleware {
+                    observed: Arc::default(),
+                    replacement: ("service_tier".into(), json!("default")),
+                    request_headers: vec![
+                        MiddlewareHeader::new("X-CPR-User-Id", Bytes::from_static(b"1")),
+                        MiddlewareHeader::new("x-cpr-token-id", Bytes::from_static(b"2")),
+                        MiddlewareHeader::new(
+                            "X-CPR-Token-Name",
+                            Bytes::from_static(b"must-not-leak"),
+                        ),
+                    ],
+                }),
+                FastMode::Default,
+            ),
+        )
+        .await
+        .unwrap();
+    while let Some(event) = stream.next().await {
+        event.unwrap();
+    }
+    server.await.unwrap();
 }

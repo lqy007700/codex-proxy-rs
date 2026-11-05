@@ -770,7 +770,15 @@ impl CodexBackendClient {
         mut self,
         middleware_headers: Vec<gateway_core::engine::middleware::MiddlewareHeader>,
     ) -> Self {
-        self.middleware_headers = middleware_headers;
+        // 可信转发信息既不发送上游，也不进入 WebSocket 连接画像
+        self.middleware_headers = middleware_headers
+            .into_iter()
+            .filter(|header| {
+                !header.name().eq_ignore_ascii_case("x-cpr-user-id")
+                    && !header.name().eq_ignore_ascii_case("x-cpr-token-id")
+                    && !header.name().eq_ignore_ascii_case("x-cpr-token-name")
+            })
+            .collect();
         self
     }
 

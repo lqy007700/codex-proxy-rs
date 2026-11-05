@@ -71,6 +71,34 @@ fn valid_id(value: &str) -> bool {
 pub struct ForwardedCallerHeaders {
     pub users: Vec<String>,
     pub tokens: Vec<String>,
+    pub token_names: Vec<Vec<u8>>,
+}
+
+/// 名称只作展示，非法输入等同未提供，不推断编码或身份
+#[must_use]
+pub fn normalize_caller_token_name(value: &[u8]) -> Option<&str> {
+    if value.len() > 256 {
+        return None;
+    }
+    let value = std::str::from_utf8(value).ok()?;
+    if value.chars().any(char::is_control) {
+        return None;
+    }
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
+}
+
+impl ForwardedCallerHeaders {
+    #[must_use]
+    pub fn token_name(&self, caller: &CallerIdentity) -> Option<String> {
+        if !matches!(caller, CallerIdentity::NewApi { .. }) {
+            return None;
+        }
+        let [value] = self.token_names.as_slice() else {
+            return None;
+        };
+        normalize_caller_token_name(value).map(str::to_owned)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

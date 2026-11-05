@@ -813,6 +813,17 @@ pub(crate) struct MemorySessionAffinity {
 }
 
 impl MemorySessionAffinity {
+    pub(crate) fn observations_snapshot(
+        &self,
+    ) -> Vec<gateway_core::provider_ports::ProviderSessionObservation> {
+        self.observations
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
+    }
+
     pub(crate) fn binding_for_scope(
         &self,
         scope: gateway_core::provider_ports::ProviderAffinityScope,

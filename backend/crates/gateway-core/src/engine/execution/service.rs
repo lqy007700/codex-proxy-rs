@@ -579,6 +579,7 @@ impl DefaultExecutionService {
             let extensions =
                 CoordinationExtensions::new(continuation, request_observation.clone())
                     .with_caller_identity(request.client.policy.caller_identity())
+                    .with_caller_token_name(request.client.policy.caller_token_name().map(str::to_owned))
                     .with_response_control(authorization.response_control.clone())
                     .with_request_policy(request_policy)
                     .with_upstream_adapters(upstream_adapters)

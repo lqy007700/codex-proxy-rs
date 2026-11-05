@@ -119,6 +119,11 @@ fn client_authentication_request(
     let request = ClientAuthenticationRequest::new(raw.to_owned())
         .map_err(|_| ClientApiKeyAuthError::MalformedAuthorization)?;
     let request = request.with_forwarded_caller(gateway_core::policy::ForwardedCallerHeaders {
+        token_names: headers
+            .get_all("x-cpr-token-name")
+            .iter()
+            .map(|value| value.as_bytes().to_vec())
+            .collect(),
         users: headers
             .get_all("x-cpr-user-id")
             .iter()

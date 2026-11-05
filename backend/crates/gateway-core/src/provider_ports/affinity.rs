@@ -63,6 +63,9 @@ pub enum ProviderAffinityScope {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderSessionObservation {
+    // 展示名称独立存储，不能进入旧版严格解析的索引或操作快照 JSON
+    #[serde(skip)]
+    pub token_name: Option<String>,
     #[serde(default)]
     pub binding_scope: ProviderAffinityScope,
     pub caller: crate::policy::CallerIdentity,

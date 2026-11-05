@@ -369,6 +369,7 @@ impl CodexCredentialSelector {
                 &self.provider_kind,
                 key,
                 gateway_core::provider_ports::ProviderSessionObservation {
+                    token_name: attempt.caller_token_name().map(str::to_owned),
                     binding_scope,
                     caller: attempt.caller_identity(),
                     client_key_id: attempt.client_api_key_ref().as_str().to_owned(),

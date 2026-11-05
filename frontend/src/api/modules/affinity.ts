@@ -7,6 +7,7 @@ export type AffinityScope = 'session' | 'token'
 export type BindingDirective = { action: 'clear' } | { action: 'reassign' } | { action: 'target', accountId: string }
 export interface IdentitySource { id: string, name: string, enabled: boolean }
 export interface AffinitySession {
+  tokenName?: string | null
   reference: string
   provider: string
   observation: { bindingScope?: AffinityScope, caller: CallerIdentity, clientKeyId: string, requestId: string, actualAccountId: string }
