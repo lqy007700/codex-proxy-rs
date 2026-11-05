@@ -229,13 +229,12 @@ impl HistoryAttempt {
             .and_then(RequestRecoveryData::downcast_ref::<HistoryRecovery>);
         let mut excluded = BTreeSet::new();
         let mut pending_commit = false;
-        if let Some(approved) =
-            approved.filter(|approved| approved.account_id == lease.account_id().as_str())
-        {
-            if approved.scope != scope {
+        if let Some(approved) = approved {
+            if approved.account_id == lease.account_id().as_str() && approved.scope != scope {
                 return Err(unavailable("history_target_changed"));
             }
             eligibility.map_err(unavailable)?;
+            // 转换归当前逻辑请求，合法换号后仍须沿用；成功缓存仍使用本次目标的作用域
             excluded.clone_from(&approved.fingerprints);
             pending_commit = true;
         } else if eligibility.is_ok() && initial_candidates.len() <= MAX_HISTORY_EXCLUSIONS {

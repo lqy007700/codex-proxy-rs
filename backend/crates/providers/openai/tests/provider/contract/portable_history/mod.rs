@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod rotation;
+
 fn mixed_history() -> Value {
     json!({
         "model":"gpt-5.4", "store":false, "stream":true,
