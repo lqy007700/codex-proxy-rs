@@ -64,12 +64,14 @@ withDefaults(
     </template>
 
     <template #accountEmail="{ row }">
-      <span
-        class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
-        :title="usageAccountText(row)"
-      >
-        {{ usageAccountText(row) }}
-      </span>
+      <slot name="accountEmail" :row="row">
+        <span
+          class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
+          :title="usageAccountText(row)"
+        >
+          {{ usageAccountText(row) }}
+        </span>
+      </slot>
       <span
         v-if="row.accountNotes?.trim()"
         class="mt-1 block max-w-full truncate text-cp-xs font-emphasis text-cp-text-quaternary"

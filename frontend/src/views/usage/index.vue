@@ -9,6 +9,7 @@ import { useRoute, useRouter } from 'vue-router'
 import ProviderFilter from '@/components/ProviderFilter.vue'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
 import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
+import UsageAccountAttemptsCell from './components/UsageAccountAttemptsCell.vue'
 import UsageErrorDetailModal from './components/UsageErrorDetailModal.vue'
 import UsageFilters from './components/UsageFilters.vue'
 import UsageInsightsGrid from './components/UsageInsightsGrid.vue'
@@ -179,6 +180,9 @@ watch(timeRange, () => {
             >
               <template #logicalOutcome="{ row }">
                 <UsageOutcomeCell :record="row" :show-message="recordScope !== 'error'" />
+              </template>
+              <template #accountEmail="{ row }">
+                <UsageAccountAttemptsCell :record="row" />
               </template>
               <template #actions="{ row }">
                 <div class="flex items-center justify-start">
