@@ -2,7 +2,7 @@
 import type { Account } from '@/api'
 import type { AffinityFilters, AffinityOperation, AffinitySession, BindingDirective, IdentitySource } from '@/api/modules/affinity'
 import { defineTableColumns, ZButton, ZCard, ZCheckbox, ZDialog, ZFormItem, ZInput, ZPageHeader, ZSegmented, ZSelect, ZSwitch, ZTable, ZTag } from '@codex-proxy/ui'
-import { computed, onMounted, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAccounts } from '@/api'
 import { applyAffinity, getAffinityOperations, getAffinitySessions, getIdentitySources, previewAffinity, saveIdentitySource } from '@/api/modules/affinity'
@@ -10,6 +10,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
 import { accountIdentityLabel } from '@/utils/accountIdentity'
 import { generateRequestId } from '@/utils/operation'
+import AffinityBindingActions from './components/AffinityBindingActions.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -36,7 +37,9 @@ const mutation = useAsyncAction()
 const { loading: saving } = mutation
 const operation = shallowRef<AffinityOperation | null>(null)
 const showOperation = ref(false)
-const action = ref('clear')
+const operationDialog = useTemplateRef<InstanceType<typeof ZDialog>>('operationDialog')
+const operationSelection = shallowRef<AffinitySession[]>([])
+const action = ref<BindingDirective['action']>('target')
 const targetAccount = ref<string>()
 const targetAccounts = shallowRef<Account[]>([])
 const accountNames = shallowRef(new Map<string, string>())
@@ -64,7 +67,29 @@ const statusCounts = computed(() => ({
   pending: sessions.value.filter(item => item.directive).length,
 }))
 const allSelected = computed(() => selectableSessions.value.length > 0 && selectedSessions.value.length === selectableSessions.value.length)
-const canPreview = computed(() => selectedSessions.value.length > 0 && !loading.value && !saving.value && (action.value !== 'target' || targetAccount.value?.trim()))
+const tokenOperation = computed(() => operation.value
+  ? operation.value.plan.items.every(item => item.session.observation.bindingScope === 'token')
+  : operationSelection.value.every(session => session.observation.bindingScope === 'token'))
+const hasResults = computed(() => operation.value !== null && Object.keys(operation.value.results).length > 0)
+const canApply = computed(() => {
+  const current = operation.value
+  return current !== null && current.plan.items.some((item) => {
+    const result = current.results[key(item.session)]
+    return result
+      ? result.status === 'failed' || !result.auditRecorded
+      : !item.rejection
+  })
+})
+const canPreview = computed(() => operationSelection.value.length > 0 && !saving.value && (action.value !== 'target' || targetAccount.value?.trim()))
+const operationTitle = computed(() => hasResults.value
+  ? '账号调整结果'
+  : operation.value
+    ? '确认账号调整'
+    : action.value === 'target'
+      ? tokenOperation.value ? '设置主账号' : '指定账号'
+      : action.value === 'reassign'
+        ? tokenOperation.value ? '自动换一个账号' : '排除原账号重选'
+        : tokenOperation.value ? '重置账号偏好' : '清除后重新选号')
 const columns = computed(() => defineTableColumns<AffinitySession>([
   { key: 'selection', kind: 'selection' },
   {
@@ -207,12 +232,29 @@ function callerLabel(session: AffinitySession) {
     ? `用户 ${caller.userId} · Token ${caller.tokenId}`
     : `直连 Key ${session.observation.clientKeyId}`
 }
+function bindingContext(session: AffinitySession) {
+  const caller = session.observation.caller
+  const sourceName = caller.mode === 'newApi'
+    ? sourceNames.value.get(caller.sourceId) ?? caller.sourceId
+    : undefined
+  return [
+    sourceName,
+    session.observation.bindingScope === 'token'
+      ? undefined
+      : session.reference,
+  ].filter(Boolean).join(' · ')
+}
 function directiveLabel(directive: BindingDirective, token = false) {
   return directive.action === 'clear'
-    ? token ? '重置主账号偏好' : '清除后重新选号'
+    ? token ? '重置账号偏好' : '清除后重新选号'
     : directive.action === 'reassign'
-      ? token ? '更换主账号' : '排除原账号重选'
+      ? token ? '自动换一个账号' : '排除原账号重选'
       : `${token ? '指定主账号' : '指定账号'} ${accountLabel(directive.accountId)}`
+}
+function pendingLabel(directive: BindingDirective, token = false) {
+  return directive.action === 'target'
+    ? `待切换至 ${accountLabel(directive.accountId)}`
+    : `待执行：${directiveLabel(directive, token)}`
 }
 function statusLabel(session: AffinitySession) {
   if (session.directive)
@@ -223,12 +265,16 @@ function statusLabel(session: AffinitySession) {
     ? '最近使用主账号'
     : '最近使用其他账号'
 }
-function reassign(session: AffinitySession) {
-  selected.value = new Set([
-    key(session),
-  ])
-  action.value = 'reassign'
-  void preview()
+function openOperation(items: AffinitySession[], nextAction: BindingDirective['action']) {
+  if (saving.value || loading.value)
+    return
+  // 固定本次操作对象，行内设置不改变列表的批量选择
+  operationSelection.value = items.filter(canManage)
+  if (!operationSelection.value.length)
+    return
+  operation.value = null
+  action.value = nextAction
+  showOperation.value = true
 }
 function accountLabel(id: string) {
   const target = targetAccounts.value.find(account => account.id === id)
@@ -274,7 +320,7 @@ function toggle(items: AffinitySession[], checked: boolean) {
 async function loadTargetAccounts(search = '') {
   const requestId = accountQuery.start()
   try {
-    const providers = new Set(selectedSessions.value.map(session => session.provider))
+    const providers = new Set(operationSelection.value.map(session => session.provider))
     const page = await getAccounts({
       page: 1,
       pageSize: 50,
@@ -289,13 +335,21 @@ async function loadTargetAccounts(search = '') {
   catch (cause) { accountQuery.fail(requestId, cause) }
   finally { accountQuery.finish(requestId) }
 }
-watch([action, selectedSessions], ([value, items]) => {
-  // 选中项决定目标范围，切换后清理旧目标与尚未返回的目录
+watch([action, operationSelection, showOperation], ([value, items, open]) => {
+  // 弹窗对象决定目标范围，关闭或重开后不接受旧目录响应
   targetAccount.value = undefined
   targetAccounts.value = []
   accountQuery.invalidate()
-  if (value === 'target' && items.length)
+  if (open && value === 'target' && items.length)
     void loadTargetAccounts()
+})
+watch([operation, saving], async ([, busy]) => {
+  if (!showOperation.value || busy)
+    return
+  // 阶段切换或请求结束后，将失去焦点的位置收回弹窗，失败时也能继续键盘操作
+  await nextTick()
+  if (showOperation.value && !saving.value)
+    operationDialog.value?.focus()
 })
 async function load() {
   const requestId = query.start()
@@ -399,13 +453,13 @@ async function preview() {
     operation.value = await previewAffinity({
       operationId: generateRequestId(),
       directive,
-      selection: selectedSessions.value.map(session => ({ provider: session.provider, reference: session.reference, revision: session.revision })),
+      selection: operationSelection.value.map(session => ({ provider: session.provider, reference: session.reference, revision: session.revision })),
     })
     showOperation.value = true
   })
 }
 async function apply() {
-  if (!operation.value)
+  if (!operation.value || !canApply.value)
     return
   await mutation.run(async () => {
     operation.value = await applyAffinity({ operationId: operation.value!.plan.operationId })
@@ -540,7 +594,7 @@ onMounted(() => {
           </template><template #time="{ row }">
             {{ row.plan.createdAtDisplay }}
           </template><template #actions="{ row }">
-            <ZButton size="small" @click="operation = row; showOperation = true">
+            <ZButton size="small" @click="operationSelection = []; operation = row; showOperation = true">
               查看 / 重试
             </ZButton>
           </template>
@@ -549,17 +603,11 @@ onMounted(() => {
           <p v-if="view === 'tokens' || view === 'users' || view === 'accounts'" class="my-3 text-cp-sm text-cp-text-secondary" role="status">
             本页 {{ sessions.length }} 个 Key · 最近使用主账号 {{ statusCounts.primary }} · 最近使用其他账号 {{ statusCounts.spillover }} · 待调整 {{ statusCounts.pending }}
           </p>
-          <div v-if="view !== 'sessions' || selectableSessions.length" class="my-4 flex flex-wrap items-center gap-2">
+          <div v-if="selectedSessions.length" class="my-4 flex flex-wrap items-center gap-2">
             <span class="mr-2 text-cp-sm text-cp-text-secondary">已选 {{ selectedSessions.length }} 个{{ view === 'sessions' ? '会话绑定' : ' New API Key' }}</span>
-            <ZSelect v-model="action" class="w-48" aria-label="亲和操作" :disabled="saving" :options="[{ label: view === 'sessions' ? '清除后重新选号' : '重置主账号偏好', value: 'clear' }, { label: view === 'sessions' ? '排除原账号重选' : '更换主账号', value: 'reassign' }, { label: view === 'sessions' ? '指定目标账号' : '指定主账号', value: 'target' }]" />
-            <ZSelect v-if="action === 'target'" v-model="targetAccount" class="sm:w-72" aria-label="目标账号" :title="targetAccount" placeholder="搜索账号名称、邮箱或 ID" filterable remote :loading="accountsLoading" :disabled="saving" :options="targetAccounts.map(account => ({ label: accountLabel(account.id), value: account.id, disabled: !account.enabled || account.schedulingRole === 'fallback' || ['credential_invalid', 'account_banned'].includes(account.errorReason ?? '') }))" @query-change="loadTargetAccounts">
-              <template #option="{ option }">
-                <span :title="String(option.value)">{{ option.label }}</span>
-              </template>
-            </ZSelect>
-            <span v-if="action === 'target' && accountsError" role="alert" class="text-cp-xs text-cp-error">{{ accountsError }}<ZButton size="small" @click="loadTargetAccounts()">重试</ZButton></span>
-            <ZButton type="primary" :disabled="!canPreview" :loading="saving" @click="preview">
-              预览操作
+            <AffinityBindingActions batch :token="view !== 'sessions'" :disabled="saving || loading" @action="openOperation(selectedSessions, $event)" />
+            <ZButton :disabled="saving" @click="selected = new Set()">
+              取消选择
             </ZButton>
           </div>
           <ZTable v-if="view === 'sessions' || view === 'tokens'" :columns="columns" :data="sessions" :row-key="key" :selected-row-keys="[...selected]" :loading="loading" empty-text="当前页没有匹配的绑定，可尝试重置筛选或继续翻页">
@@ -580,7 +628,7 @@ onMounted(() => {
                 <span>{{ view === 'sessions' ? '会话' : '主账号' }}：{{ accountLabel(row.accountId) }}</span>
                 <span>最近请求：{{ accountLabel(row.observation.actualAccountId) }}</span>
                 <span>{{ statusLabel(row) }}</span>
-                <span v-if="row.directive">{{ directiveLabel(row.directive, row.observation.bindingScope === 'token') }}</span>
+                <span v-if="row.directive">{{ pendingLabel(row.directive, row.observation.bindingScope === 'token') }}</span>
               </div>
             </template>
             <template #session="{ row }">
@@ -595,7 +643,7 @@ onMounted(() => {
                 {{ statusLabel(row) }}
               </ZTag>
               <span v-if="row.directive" class="mt-1 block whitespace-normal text-cp-xs text-cp-text-secondary">
-                {{ directiveLabel(row.directive, row.observation.bindingScope === 'token') }}
+                {{ pendingLabel(row.directive, row.observation.bindingScope === 'token') }}
               </span>
             </template>
             <template #time="{ row }">
@@ -604,9 +652,7 @@ onMounted(() => {
             </template>
             <template #actions="{ row }">
               <div class="flex flex-wrap gap-1">
-                <ZButton v-if="canManage(row)" size="small" :disabled="saving || loading" :aria-label="`更换 ${callerLabel(row)} 的账号`" @click="reassign(row)">
-                  更换
-                </ZButton>
+                <AffinityBindingActions v-if="canManage(row)" :token="row.observation.bindingScope === 'token'" :caller="callerLabel(row)" :disabled="saving || loading" @action="openOperation([row], $event)" />
                 <ZButton size="small" @click="router.push({ path: '/usage', query: { requestId: row.observation.requestId } })">
                   请求
                 </ZButton><ZButton v-if="row.observation.caller.mode === 'newApi'" size="small" @click="inspectCaller(row)">
@@ -645,7 +691,40 @@ onMounted(() => {
         </template>
       </template>
     </ZCard>
-    <ZDialog v-model="showOperation" title="亲和操作预览与结果" width="56rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
+    <ZDialog ref="operationDialog" v-model="showOperation" :title="operationTitle" width="48rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
+      <template v-if="!operation">
+        <p class="mt-0 text-cp-sm text-cp-text-secondary">
+          本次调整 {{ operationSelection.length }} 个{{ tokenOperation ? ' New API Key' : '会话绑定' }}
+        </p>
+        <ZFormItem v-if="action === 'target'" :label="tokenOperation ? '目标主账号' : '目标账号'" required>
+          <ZSelect v-model="targetAccount" class="w-full" aria-label="目标账号" :title="targetAccount" placeholder="搜索账号名称、邮箱或 ID" filterable remote :loading="accountsLoading" :disabled="saving" :options="targetAccounts.map(account => ({ label: accountLabel(account.id), value: account.id, disabled: !account.enabled || account.schedulingRole === 'fallback' || ['credential_invalid', 'account_banned'].includes(account.errorReason ?? '') }))" @query-change="loadTargetAccounts">
+            <template #option="{ option }">
+              <span :title="String(option.value)">{{ option.label }}</span>
+            </template>
+          </ZSelect>
+          <div v-if="accountsError" role="alert" class="mt-2 flex items-center gap-2 text-cp-xs text-cp-error">
+            {{ accountsError }}<ZButton size="small" :disabled="saving" @click="loadTargetAccounts()">
+              重试
+            </ZButton>
+          </div>
+        </ZFormItem>
+        <p v-else class="text-cp-sm text-cp-text-secondary">
+          {{ action === 'reassign' ? '排除当前账号，由系统重新选择可用账号' : '清除当前偏好，重新选号时仍可能选中原账号' }}
+        </p>
+        <ul class="m-0 grid max-h-72 list-none gap-3 overflow-auto p-0">
+          <li v-for="session in operationSelection" :key="key(session)" class="rounded-cp-lg bg-cp-bg-layout p-3">
+            <p class="m-0 text-cp-sm">
+              {{ callerLabel(session) }}
+            </p>
+            <p class="my-1 break-all text-cp-xs text-cp-text-tertiary">
+              {{ bindingContext(session) }}
+            </p>
+            <p class="mb-0 mt-1 break-all text-cp-sm text-cp-text-secondary">
+              {{ accountLabel(session.accountId) }} → {{ action === 'target' ? targetAccount ? accountLabel(targetAccount) : '请选择目标账号' : action === 'reassign' ? '系统重选其他账号' : '重新选号' }}
+            </p>
+          </li>
+        </ul>
+      </template>
       <template v-if="operation">
         <p class="mt-0" :title="operation.plan.directive.action === 'target' ? operation.plan.directive.accountId : undefined">
           {{ directiveLabel(operation.plan.directive, operation.plan.items.every(item => item.session.observation.bindingScope === 'token')) }} · {{ operation.plan.items.length }} 个{{ operation.plan.items.every(item => item.session.observation.bindingScope === 'token') ? ' New API Key' : '会话绑定' }}
@@ -653,21 +732,17 @@ onMounted(() => {
         <p class="text-cp-sm text-cp-text-secondary">
           预览有效至 {{ operation.plan.expiresAtDisplay }}，执行时复核账号范围和绑定版本，冲突项不会覆盖
         </p>
-        <p v-if="operation.plan.items.some(item => item.session.observation.bindingScope === 'token')" class="text-cp-sm text-cp-text-secondary">
-          下次符合条件的普通请求调整主账号，目标暂不可用时保留操作并先用可用账号，重试与原生续接不消耗操作
-        </p>
-        <p v-else class="text-cp-sm text-cp-text-secondary">
-          已准入请求继续完成，原生续接保留其账号归属
-        </p>
         <ul class="m-0 grid max-h-96 list-none gap-3 overflow-auto p-0">
           <li v-for="item in operation.plan.items" :key="key(item.session)" class="rounded-cp-lg border border-cp-border p-3">
             <p class="m-0 text-cp-sm">
-              {{ item.session.observation.bindingScope === 'token' ? 'Token 主绑定' : '会话绑定' }} · {{ callerLabel(item.session) }} · <span :title="item.session.accountId">{{ accountLabel(item.session.accountId) }}</span>
-            </p><p class="my-1 truncate font-mono text-cp-xs text-cp-text-tertiary" :title="item.session.reference">
-              {{ item.session.reference }}
+              {{ callerLabel(item.session) }}
+            </p><p class="my-1 break-all text-cp-xs text-cp-text-tertiary">
+              {{ bindingContext(item.session) }}
+            </p><p class="my-1 break-all text-cp-sm text-cp-text-secondary">
+              {{ accountLabel(item.session.accountId) }} → {{ operation.plan.directive.action === 'target' ? accountLabel(operation.plan.directive.accountId) : operation.plan.directive.action === 'reassign' ? '系统重选其他账号' : '重新选号' }}
             </p>
-            <p v-if="operation.results[key(item.session)]" class="m-0 text-cp-sm" role="status">
-              {{ operation.results[key(item.session)]!.message }}{{ operation.results[key(item.session)]!.auditRecorded ? '' : '（审计待补写，请重试）' }}
+            <p v-if="operation.results[key(item.session)]" class="m-0 text-cp-sm" :class="operation.results[key(item.session)]!.status === 'applied' ? 'text-cp-success' : 'text-cp-error'" role="status">
+              {{ operation.results[key(item.session)]!.status === 'applied' ? '操作已保存，等待生效' : operation.results[key(item.session)]!.message }}{{ operation.results[key(item.session)]!.auditRecorded ? '' : '（审计待补写，请重试）' }}
             </p>
             <p v-else class="m-0 text-cp-sm" :class="item.rejection ? 'text-cp-error' : 'text-cp-text-secondary'">
               {{ item.rejection ?? '待执行' }}
@@ -675,11 +750,22 @@ onMounted(() => {
           </li>
         </ul>
       </template>
+      <p v-if="tokenOperation" class="mb-0 text-cp-sm text-cp-text-secondary">
+        后续符合条件的新请求生效，旧会话不迁移，目标不可用时仍可能分流
+      </p>
+      <p v-else class="mb-0 text-cp-sm text-cp-text-secondary">
+        已准入请求继续完成，原生续接保留其账号归属
+      </p>
       <template #footer>
+        <ZButton v-if="operation && !hasResults && operationSelection.length" :disabled="saving" @click="operation = null">
+          返回修改
+        </ZButton>
         <ZButton :disabled="saving" @click="showOperation = false">
-          关闭
-        </ZButton><ZButton type="primary" :loading="saving" :disabled="!operation" @click="apply">
-          {{ operation && Object.keys(operation.results).length ? '重试 / 补写审计' : '确认执行' }}
+          {{ hasResults ? '关闭' : '取消' }}
+        </ZButton><ZButton v-if="!operation" type="primary" :loading="saving" :disabled="!canPreview" @click="preview">
+          预览变更
+        </ZButton><ZButton v-else-if="canApply" type="primary" :loading="saving" @click="apply">
+          {{ hasResults ? '重试 / 补写审计' : '确认调整' }}
         </ZButton>
       </template>
     </ZDialog>
