@@ -127,6 +127,8 @@ pub(crate) fn push_usage_filter(
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
     "select (select caller_identity_json from model_requests caller_request where caller_request.id=mr.id) as caller_identity_json, mr.id, mr.outcome, mr.attempt_count, mr.provider_error_code as error_code, mr.error_message, mr.client_status_code, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
+            mr.error_kind, mr.error_details, mr.continuation_unavailable_reason, mr.upstream_connection_exit_reason,
+            (mr.recovery_request_id is not null and mr.recovered_at is not null) as recovered,
             mr.provider_kind, mr.provider_account_ref,
             mr.provider_account_name_snapshot as provider_account_name,
             mr.provider_account_email_snapshot as provider_account_email,
@@ -164,6 +166,8 @@ pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
             mr.outcome, mr.client_status_code, mr.upstream_status_code,
             mr.client_response_id, mr.upstream_request_id, mr.upstream_response_id,
             mr.error_kind, mr.provider_error_code, mr.error_message, mr.error_details, mr.retry_after_ms,
+            mr.continuation_unavailable_reason, mr.upstream_connection_exit_reason,
+            (mr.recovery_request_id is not null and mr.recovered_at is not null) as recovered,
             mr.input_tokens, mr.output_tokens, mr.cached_input_tokens, mr.cache_write_input_tokens,
             mr.reasoning_output_tokens, mr.image_input_tokens, mr.image_output_tokens,
             mr.total_tokens, mr.billing_snapshot_json, mr.cost_source, mr.cost_amount::text,

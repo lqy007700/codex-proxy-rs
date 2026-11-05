@@ -13,6 +13,7 @@ const props = withDefaults(defineProps<{
   currentProxyId?: string | null
   endpoint?: string | null
   accountId?: string
+  modelAccountId?: string
   preserveProxy?: boolean
   preserveModelAccess?: boolean
   showScheduling?: boolean
@@ -44,7 +45,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
 
 <template>
   <div class="grid gap-5">
-    <AccountModelAccessField v-model="modelAccess" :account-id="accountId" :disabled="disabled" :allow-preserve="preserveModelAccess" @catalog-change="modelCatalog = $event" />
+    <AccountModelAccessField v-model="modelAccess" :account-id="modelAccountId ?? accountId" :disabled="disabled" :allow-preserve="preserveModelAccess" @catalog-change="modelCatalog = $event" />
     <slot name="model-mappings" :models="modelCatalog" />
     <div v-if="showScheduling" class="flex min-h-6 items-center justify-between gap-3">
       <span class="text-cp leading-none font-medium text-cp-text-secondary">调度</span>

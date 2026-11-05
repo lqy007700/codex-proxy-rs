@@ -1631,7 +1631,9 @@ dependencies = [
  "memchr",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
+ "url",
  "uuid",
 ]
 

@@ -103,6 +103,16 @@ watch(() => !loading.value && route.hash === '#reset-credits', async (ready) => 
 }, { immediate: true })
 
 const disabled = computed(() => saving.value || loading.value || detectingLocation.value || !!error.value)
+const protectionErrorsVisible = shallowRef(false)
+
+function requestSave() {
+  protectionErrorsVisible.value = true
+  void saveSettings()
+}
+
+watch(() => form.accountErrorProtection, () => {
+  protectionErrorsVisible.value = false
+})
 
 watch(section, (value) => {
   visited.add(value)
@@ -137,7 +147,7 @@ watch(section, (value) => {
         <ZIconButton v-if="hasChanges" aria-label="撤销全部基础设置更改" variant="solid" :disabled="saving || loading || detectingLocation" @click="resetSettings">
           <Undo2 class="size-4" />
         </ZIconButton>
-        <ZButton type="primary" :loading="saving" :disabled="disabled || !hasChanges" @click="saveSettings">
+        <ZButton type="primary" :loading="saving" :disabled="disabled || !hasChanges" @click="requestSave">
           <template #icon>
             <Save class="size-4" />
           </template>
@@ -192,7 +202,7 @@ watch(section, (value) => {
             v-model:max-retry-after-seconds="maxRetryAfterSecondsValue"
             v-model:openai-guardian-reserved-concurrency="openaiGuardianReservedConcurrencyValue"
           />
-          <AccountErrorProtectionCard v-model="form.accountErrorProtection" :disabled="disabled" />
+          <AccountErrorProtectionCard v-model="form.accountErrorProtection" :disabled="disabled" :show-errors="protectionErrorsVisible" />
           <AccountWarmupCard
             v-model:enabled="form.accountWarmupEnabled"
             v-model:schedule-time="form.accountWarmupScheduleTime"

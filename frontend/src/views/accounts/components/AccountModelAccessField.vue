@@ -8,6 +8,7 @@ import { computed, ref, watch } from 'vue'
 import { getAccountModels, refreshAccountModels } from '@/api'
 import { useRequestState } from '@/composables/useRequestState'
 import { accountModelAccessError } from '../utils/modelAccess'
+import AccountModelCleanupPopover from './AccountModelCleanupPopover.vue'
 
 const props = withDefaults(defineProps<{
   accountId?: string
@@ -59,6 +60,17 @@ const filteredModels = computed(() => {
   const query = search.value.trim().toLowerCase()
   return (catalog.value ?? []).filter(item => `${item.id} ${item.label}`.toLowerCase().includes(query))
 })
+const missingModels = computed(() => model.value?.mode === 'allowlist' && catalog.value?.length && !error.value && !loading.value
+  ? model.value.models.filter(id => !catalog.value!.some(item => item.id === id))
+  : [])
+function removeMissingModels(ids: string[]) {
+  if (props.disabled || !canEdit.value || model.value?.mode !== 'allowlist')
+    return
+  const remove = new Set(ids.filter(id => missingModels.value.includes(id)))
+  const remaining = model.value.models.filter(id => !remove.has(id))
+  if (remaining.length)
+    model.value = { mode: 'allowlist', models: remaining }
+}
 const selectedCount = computed(() => selectedModelIds.value.length)
 const selectionLimitReached = computed(() => selectedCount.value >= MODEL_LIMIT)
 
@@ -152,6 +164,7 @@ watch(search, () => {
         <div class="grid gap-2">
           <div class="flex min-w-0 items-center justify-between gap-2">
             <span class="text-cp-xs font-medium text-cp-text-secondary">已选择模型</span>
+            <AccountModelCleanupPopover v-if="missingModels.length" :models="missingModels" :model-count="selectedCount" :disabled="disabled || loading" @remove="removeMissingModels" />
             <ZIconButton
               v-if="accountId"
               aria-label="刷新模型目录"

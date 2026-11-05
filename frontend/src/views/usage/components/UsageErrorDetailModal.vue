@@ -3,15 +3,18 @@ import type { UsageRecordDetail } from '@/api'
 import { ZButton, ZDialog } from '@codex-proxy/ui'
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
+import { usageErrorSummary } from '@/components/usage/shared/errors'
 import { usageAccountText, usageModelDisplay, usageTransportType } from '@/components/usage/shared/presenter'
 import { formatDuration } from '@/utils/format'
 import { attemptOutcomeClass, attemptOutcomeText, visibleResponseText } from '../utils/detail'
 import RequestDiagnosticsPanel from './RequestDiagnosticsPanel.vue'
 import UsageDetailCodePanel from './UsageDetailCodePanel.vue'
 import UsageDetailFieldGrid from './UsageDetailFieldGrid.vue'
+import UsageDetailState from './UsageDetailState.vue'
 import UsageStatusCodeBadge from './UsageStatusCodeBadge.vue'
 
-const props = defineProps<{ record: UsageRecordDetail | null }>()
+const props = defineProps<{ record: UsageRecordDetail | null, loading?: boolean, error?: string }>()
+const emit = defineEmits<{ retry: [] }>()
 const open = defineModel<boolean>({ default: false })
 
 const panelClass = 'min-w-0 rounded-cp-card bg-cp-fill-quaternary px-4 py-3.5'
@@ -23,6 +26,29 @@ const errorMessage = computed(() => {
     ? message
     : '未记录具体错误消息'
 })
+const errorSummary = computed(() => props.record
+  ? usageErrorSummary(props.record)
+  : null)
+const upstreamMessage = computed(() => props.record?.upstreamError?.message)
+const errorItems = computed(() => [
+  { label: 'Code', value: props.record?.upstreamError?.code ?? props.record?.errorCode },
+  { label: 'Type', value: props.record?.upstreamError?.errorType },
+  { label: 'Param', value: props.record?.upstreamError?.param },
+  {
+    label: 'WS 关闭码',
+    value: props.record?.websocketCloseCode,
+  },
+  {
+    label: '最后事件',
+    value: props.record?.upstreamError?.lastEventType,
+  },
+  {
+    label: '重试等待',
+    value: props.record?.retryAfterMs == null
+      ? null
+      : formatDuration(props.record.retryAfterMs),
+  },
+].filter(item => item.value != null && item.value !== '').map(item => ({ ...item, mono: true, wrap: true })))
 const responseText = computed(() => props.record
   ? visibleResponseText(props.record)
   : '')
@@ -93,12 +119,16 @@ const identifierItems = computed(() => [
     mono: true,
     fullWidth: true,
   },
-  {
-    label: '上游请求 ID',
-    value: props.record?.upstreamRequestId,
-    mono: true,
-    fullWidth: true,
-  },
+  ...(props.record?.upstreamRequestId
+    ? [
+        {
+          label: '上游请求 ID',
+          value: props.record.upstreamRequestId,
+          mono: true,
+          fullWidth: true,
+        },
+      ]
+    : []),
   {
     label: '响应 ID',
     value: props.record?.responseId,
@@ -144,17 +174,45 @@ const attempts = computed(() => (props.record?.attempts ?? []).map(attempt => ({
 
 <template>
   <ZDialog v-model="open" title="错误详情" description="失败原因与请求上下文" type="danger" width="64rem">
-    <div v-if="record" class="grid min-w-0 gap-3">
+    <UsageDetailState v-if="loading || error" :loading="!!loading" :error="error" variant="error" @retry="emit('retry')" />
+    <div v-else-if="record" class="grid min-w-0 gap-3">
       <section class="min-w-0 rounded-cp-card bg-cp-error-container px-4 py-3.5 text-cp-error-on-container">
         <div class="flex items-center gap-3">
           <h3 class="m-0 text-cp-sm leading-none font-heavy">
             {{ record.logicalOutcome === 'incomplete' ? '响应未完成' : '请求失败' }}
           </h3>
-          <UsageStatusCodeBadge v-if="record.statusCode !== null" :status-code="record.statusCode" />
+          <span v-if="record.recovered" class="rounded-cp-sm bg-cp-success-container px-2 py-1 text-cp-xs font-emphasis text-cp-success-on-container">
+            后续已恢复
+          </span>
         </div>
         <p class="mt-3 mb-0 wrap-anywhere whitespace-pre-wrap font-mono text-cp-sm leading-relaxed">
-          {{ errorMessage }}
+          {{ errorSummary || errorMessage }}
         </p>
+        <UsageDetailFieldGrid v-if="errorItems.length" :items="errorItems" />
+        <template v-if="upstreamMessage">
+          <p class="mt-3 mb-1 text-cp-xs text-cp-text-secondary">
+            Message
+          </p>
+          <p class="m-0 wrap-anywhere whitespace-pre-wrap font-mono text-cp-sm leading-relaxed" translate="no">
+            {{ upstreamMessage }}
+          </p>
+        </template>
+        <template v-if="record.upstreamError?.closeReason">
+          <p class="mt-3 mb-1 text-cp-xs text-cp-text-secondary">
+            关闭原因
+          </p>
+          <p class="m-0 wrap-anywhere whitespace-pre-wrap font-mono text-cp-sm leading-relaxed" translate="no">
+            {{ record.upstreamError.closeReason }}
+          </p>
+        </template>
+        <template v-if="!upstreamMessage || upstreamMessage !== errorMessage">
+          <p class="mt-3 mb-1 text-cp-xs text-cp-text-secondary">
+            网关摘要
+          </p>
+          <p class="m-0 wrap-anywhere whitespace-pre-wrap font-mono text-cp-sm leading-relaxed" translate="no">
+            {{ errorMessage }}
+          </p>
+        </template>
       </section>
 
       <section class="grid min-w-0 gap-3 lg:grid-cols-2">

@@ -195,6 +195,6 @@ watch(search, () => {
         将自动解除关联账号，关联账号的新请求将改为直连
       </p>
     </ZConfirmDialog>
-    <ProxyAccountsModal v-model="showAccounts" :proxy="inspected" @removed="loadProxies({ silent: true })" />
+    <ProxyAccountsModal v-model="showAccounts" :proxy="inspected" @changed="loadProxies({ silent: true })" />
   </div>
 </template>

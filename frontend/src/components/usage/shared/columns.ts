@@ -20,8 +20,8 @@ export const usageDataColumns = [
   },
   { key: 'route', label: '端点', kind: 'mono' },
   {
-    key: 'upstreamTransport',
-    label: '上游',
+    key: 'transport',
+    label: '传输',
     kind: 'status',
     size: 'sm',
     fixedWidth: true,

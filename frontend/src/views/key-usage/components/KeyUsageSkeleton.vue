@@ -36,7 +36,7 @@ const metrics = [
   </section>
 
   <div class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(400px,1fr)]">
-    <ZCard title="使用趋势" description="用量随时间的变化" aria-busy="true">
+    <ZCard title="使用趋势" aria-busy="true">
       <div class="flex h-71.25 flex-col" aria-hidden="true">
         <div class="flex h-12 shrink-0 flex-wrap content-start justify-end gap-3">
           <ZSkeleton v-for="item in 6" :key="item" shape="text" class="h-2 w-10" />

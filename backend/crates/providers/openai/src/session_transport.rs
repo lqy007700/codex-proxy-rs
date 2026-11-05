@@ -8,6 +8,11 @@ use gateway_core::account::ProviderAccountId;
 use gateway_core::provider_ports::ProviderSessionAffinityKey;
 use tokio::time::Instant;
 
+// 在上游 WS 帧边界前预留余量，并使用回差避免传输频繁切换
+const MIB: usize = 1024 * 1024;
+pub(crate) const WS_PAYLOAD_LIMIT: usize = 15 * MIB + MIB / 2;
+const WS_PAYLOAD_RESUME: usize = WS_PAYLOAD_LIMIT - 2 * MIB;
+
 const SESSION_IDLE_RETENTION: Duration = Duration::from_secs(8 * 60 * 60);
 const MAX_SESSION_TRANSPORTS: usize = 16_384;
 
@@ -24,6 +29,7 @@ struct TransportRecoveryState {
 
 struct SessionTransport {
     state: TransportState,
+    oversized: bool,
     last_used: Instant,
 }
 
@@ -87,25 +93,51 @@ impl CodexSessionTransportRecovery {
         scope: &SessionTransportScope,
         max_retries: u32,
     ) -> bool {
-        self.update(scope, |state| match state {
-            TransportState::WebSocket { failures } if failures < max_retries => {
-                TransportState::WebSocket {
-                    failures: failures + 1,
+        self.update(scope, |session| {
+            session.state = match session.state {
+                TransportState::WebSocket { failures } if failures < max_retries => {
+                    TransportState::WebSocket {
+                        failures: failures + 1,
+                    }
                 }
-            }
-            TransportState::WebSocket { .. } | TransportState::Http => TransportState::Http,
+                _ => TransportState::Http,
+            };
+            matches!(session.state, TransportState::Http)
         })
     }
 
     pub(crate) fn disable_websocket(&self, scope: &SessionTransportScope) {
-        self.update(scope, |_| TransportState::Http);
+        self.update(scope, |session| {
+            session.state = TransportState::Http;
+            true
+        });
     }
 
     pub(crate) fn websocket_succeeded(&self, scope: &SessionTransportScope) {
-        let mut state = self.lock();
-        if scope.is_current(&state) {
-            state.sessions.remove(&scope.key);
-        }
+        // 增量或预热成功不能证明下一份完整请求可以放入 WS，保留大小偏好
+        self.update(scope, |session| {
+            session.state = TransportState::WebSocket { failures: 0 };
+            false
+        });
+    }
+
+    /// 大小偏好与失败预算使用相同账号、会话和管理恢复代次隔离
+    pub(crate) fn http_for_full_payload(
+        &self,
+        scope: Option<&SessionTransportScope>,
+        bytes: usize,
+    ) -> bool {
+        let Some(scope) = scope else {
+            return bytes >= WS_PAYLOAD_LIMIT;
+        };
+        self.update(scope, |session| {
+            if bytes >= WS_PAYLOAD_LIMIT {
+                session.oversized = true;
+            } else if bytes < WS_PAYLOAD_RESUME {
+                session.oversized = false;
+            }
+            session.oversized
+        })
     }
 
     pub(crate) fn account_is_degraded(&self, account_id: &ProviderAccountId) -> bool {
@@ -132,22 +164,30 @@ impl CodexSessionTransportRecovery {
     fn update(
         &self,
         scope: &SessionTransportScope,
-        update: impl FnOnce(TransportState) -> TransportState,
+        update: impl FnOnce(&mut SessionTransport) -> bool,
     ) -> bool {
         let now = Instant::now();
         let mut state = self.lock();
         if !scope.is_current(&state) {
             return false;
         }
-        let previous = state
+        let mut session = state
             .sessions
             .remove(&scope.key)
             .filter(|session| {
                 now.saturating_duration_since(session.last_used) < SESSION_IDLE_RETENTION
             })
-            .map_or(TransportState::WebSocket { failures: 0 }, |session| {
-                session.state
+            .unwrap_or(SessionTransport {
+                state: TransportState::WebSocket { failures: 0 },
+                oversized: false,
+                last_used: now,
             });
+        let result = update(&mut session);
+        if !session.oversized && matches!(session.state, TransportState::WebSocket { failures: 0 })
+        {
+            return result;
+        }
+        session.last_used = now;
         if state.sessions.len() >= MAX_SESSION_TRANSPORTS {
             retain_active_sessions(&mut state.sessions, now);
             if state.sessions.len() >= MAX_SESSION_TRANSPORTS
@@ -160,16 +200,8 @@ impl CodexSessionTransportRecovery {
                 state.sessions.remove(&oldest);
             }
         }
-        let next_state = update(previous);
-        let uses_http = matches!(next_state, TransportState::Http);
-        state.sessions.insert(
-            scope.key.clone(),
-            SessionTransport {
-                state: next_state,
-                last_used: now,
-            },
-        );
-        uses_http
+        state.sessions.insert(scope.key.clone(), session);
+        result
     }
 
     fn lock(&self) -> MutexGuard<'_, TransportRecoveryState> {

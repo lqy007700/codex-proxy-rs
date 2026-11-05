@@ -31,7 +31,7 @@ export function useKeyConfig() {
   }
 
   function copyConfig(text: string) {
-    return copyText(text, { successText: '已复制到剪贴板', emptyErrorText: '复制失败' })
+    return copyText(text, { successText: '已复制到剪贴板', notifyWhenEmpty: true })
   }
 
   // 明文只随弹窗保存在内存中，不进入登录状态或浏览器持久化存储。

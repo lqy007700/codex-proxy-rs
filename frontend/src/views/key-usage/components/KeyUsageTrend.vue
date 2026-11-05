@@ -130,7 +130,7 @@ const option = computed<EChartsOption>(() => {
 </script>
 
 <template>
-  <ZCard title="使用趋势" description="用量随时间的变化">
+  <ZCard title="使用趋势">
     <BaseChart v-if="points.some(point => point.requests > 0)" :option="option" :height="285" />
     <ZEmpty
       v-else

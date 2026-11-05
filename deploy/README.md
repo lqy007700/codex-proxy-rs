@@ -205,7 +205,8 @@ docker compose -f deploy/compose.yaml ps
 curl -i http://127.0.0.1:8080/healthz
 ```
 
-`204 No Content` 表示应用、PostgreSQL、Redis 和后台任务的健康检查通过，不代表每个上游账号都可用
+`/healthz` 的 `204 No Content` 表示应用、PostgreSQL、Redis 和关键后台任务健康，不代表每个上游账号都可用。
+负载均衡接流可使用 `/readyz`，只检查必要的 Core、存储与配置快照，不因后台任务单独异常退出接流
 
 `503 Service Unavailable` 的失败组件与原因保存在运维错误记录中，组件为 `health`，关联标识以
 `probe:` 或 `worker:` 开头；探针超时也会指明组件。连续相同故障去重，恢复后再次失败重新记录，
@@ -524,7 +525,8 @@ Provider schema 以明文 JSON 保存于 PostgreSQL。Redis 只保存可重建�
 
 报文开关为 `host.logging.request_dump`，默认关闭；开启时原始报文按块写入独立文件，
 缓冲拒收或写入失败可能造成缺块，需结合 `file_logging` 健康状态判断完整性。
-数据库请求诊断仍是有界摘要，不能用摘要事件数代替全量报文完整性
+HTTP 入口结束记录中的 `bodyState` 区分 `complete`、`unconsumed`、`incomplete` 与 `read_failed`，
+入口不会为转储主动消费剩余正文；数据库请求诊断仍是有界摘要，不能用摘要事件数代替全量报文完整性
 
 OAuth 恢复开关为 `host.logging.oauth_recovery`，默认关闭，与普通文件日志开关分别控制：
 

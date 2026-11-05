@@ -36,6 +36,11 @@ export function useProxyAccounts(options: {
       void query.execute({ page: 1, pageSize: size })
   }
 
+  function reloadAccounts() {
+    if (options.isOpen() && options.proxyId())
+      return query.execute()
+  }
+
   async function removeAccount(accountId: string) {
     const proxyId = options.proxyId()
     if (!proxyId)
@@ -89,5 +94,6 @@ export function useProxyAccounts(options: {
     setPageSize,
     removing: removeAction.loading,
     removeAccount,
+    reloadAccounts,
   }
 }

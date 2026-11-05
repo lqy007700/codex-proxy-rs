@@ -2,10 +2,9 @@
 import type { AccountAuthorizationView } from '../../composables/useAccountAuthorization'
 import { ZButton, ZForm, ZFormItem, ZIconButton, ZScrollbar, ZTextarea } from '@codex-proxy/ui'
 import { Copy, KeyRound } from '@lucide/vue'
-import { computed } from 'vue'
 import { useCopyText } from '@/composables/useCopyText'
 
-const props = defineProps<{
+defineProps<{
   authUrl: string
   panelTitle: string
   panelDescription: string
@@ -19,13 +18,6 @@ const props = defineProps<{
 const emit = defineEmits<{ regenerate: [] }>()
 const callback = defineModel<string>({ required: true })
 const copyWithToast = useCopyText()
-const statusText = computed(() => {
-  if (props.authorization.status === 'expired')
-    return '授权已过期，可重新开始或检查已完成的授权结果'
-  if (props.authorization.status === 'paused')
-    return '查询已暂停，可检查授权结果后继续'
-  return ''
-})
 </script>
 
 <template>
@@ -82,13 +74,6 @@ const statusText = computed(() => {
         </ZScrollbar>
       </ZFormItem>
     </ZForm>
-
-    <p v-if="statusText" class="m-0 text-cp-sm text-cp-text-secondary" role="status">
-      {{ statusText }}
-    </p>
-    <p v-if="authorization.error" class="m-0 text-cp-sm text-cp-error" role="alert">
-      {{ authorization.error }}
-    </p>
 
     <ZForm v-if="authorization.flow">
       <ZFormItem :label="callbackLabel" required>

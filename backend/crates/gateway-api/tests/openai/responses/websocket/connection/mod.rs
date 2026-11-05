@@ -48,6 +48,7 @@ use crate::openai::{api_router, authenticated_client};
 
 #[derive(Default)]
 struct CrossingLimitTrace {
+    reconnect_for_replay: AtomicBool,
     release_terminal: tokio::sync::Notify,
     starts: AtomicUsize,
     inputs: Mutex<Vec<Value>>,
@@ -73,7 +74,9 @@ impl ExecutionSession for CrossingLimitSession {
             if !self.terminal_emitted {
                 self.trace.release_terminal.notified().await;
                 self.terminal_emitted = true;
-                return Ok(Some(crossing_limit_terminal_batch()));
+                return Ok(Some(crossing_limit_terminal_batch(
+                    self.trace.reconnect_for_replay.load(Ordering::Acquire),
+                )));
             }
             self.finalized = true;
             self.trace.finalized.store(true, Ordering::Release);
@@ -196,8 +199,8 @@ fn crossing_limit_started_batch() -> CoordinatedEvent {
         .expect("started WebSocket batch")
 }
 
-fn crossing_limit_terminal_batch() -> CoordinatedEvent {
-    let completed = ProviderEvent::wire(
+fn crossing_limit_terminal_batch(reconnect: bool) -> CoordinatedEvent {
+    let mut completed = ProviderEvent::wire(
         ProtocolWireEvent::json(
             "openai",
             Some("response.completed".to_owned()),
@@ -206,12 +209,20 @@ fn crossing_limit_terminal_batch() -> CoordinatedEvent {
                 "response": {
                     "id": "resp_ws_crossing_limit",
                     "model": "model-a",
+                    "output": [],
                     "status": "completed"
                 }
             }),
         )
         .expect("completed wire"),
     );
+    if reconnect {
+        completed.attach_session_update(
+            gateway_core::operation::ProviderSessionState::new("openai", serde_json::Map::new())
+                .unwrap()
+                .with_websocket_reconnect(),
+        );
+    }
     CoordinatedEvent::try_batch(vec![completed], CommitRequirement::AlreadyCommitted)
         .expect("terminal WebSocket batch")
 }
@@ -797,6 +808,16 @@ async fn start_active_response() -> (
     TestClientSocket,
     tokio::task::JoinHandle<()>,
 ) {
+    start_active_response_with_agent("integration-test").await
+}
+
+async fn start_active_response_with_agent(
+    user_agent: &str,
+) -> (
+    Arc<CrossingLimitTrace>,
+    TestClientSocket,
+    tokio::task::JoinHandle<()>,
+) {
     let trace = Arc::new(CrossingLimitTrace::default());
     let execution = Arc::new(CrossingLimitExecution {
         client: authenticated_client("sk_ws_crossing_limit"),
@@ -822,6 +843,9 @@ async fn start_active_response() -> (
             .parse()
             .expect("authorization"),
     );
+    request
+        .headers_mut()
+        .insert("user-agent", user_agent.parse().unwrap());
     let (mut socket, _) = connect_async(request).await.expect("upgrade WebSocket");
     let response_create = ClientMessage::Text(
         json!({
@@ -855,8 +879,9 @@ async fn start_active_response() -> (
 }
 
 #[tokio::test]
-async fn requests_received_during_an_active_response_should_execute_in_order() {
+async fn replay_reconnect_waits_for_queued_requests_and_writes_the_last_terminal() {
     let (trace, mut socket, server) = start_active_response().await;
+    trace.reconnect_for_replay.store(true, Ordering::Release);
     for input in ["second", "third"] {
         socket
             .send(ClientMessage::Text(
@@ -913,7 +938,13 @@ async fn requests_received_during_an_active_response_should_execute_in_order() {
         vec![json!("hello"), json!("second"), json!("third")]
     );
     assert!(!trace.cancelled.load(Ordering::Acquire));
-    socket.close(None).await.expect("close WebSocket");
+    let next = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .expect("replay close timeout")
+        .unwrap()
+        .unwrap();
+    assert!(matches!(next, ClientMessage::Close(Some(frame))
+        if frame.code == CloseCode::Normal && frame.reason == "Reconnect with full input."));
     server.abort();
 }
 

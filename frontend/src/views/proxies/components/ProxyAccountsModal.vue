@@ -1,26 +1,28 @@
 <script setup lang="ts">
 import type { OutboundProxyAccount, OutboundProxyRecord } from '@/api'
-import { defineTableColumns, ZConfirmDialog, ZDialog, ZIconButton, ZInput, ZPagination, ZTable } from '@codex-proxy/ui'
-import { Search, Unlink } from '@lucide/vue'
+import { defineTableColumns, ZButton, ZConfirmDialog, ZDialog, ZIconButton, ZInput, ZPagination, ZTable } from '@codex-proxy/ui'
+import { Plus, Search, Unlink } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import AccountGroupMarks from '@/components/AccountGroupMarks.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { stablePresetVisualToneClass } from '@/utils/color'
 import { useProxyAccounts } from '../composables/useProxyAccounts'
+import ProxyAssignAccountsModal from './ProxyAssignAccountsModal.vue'
 
 const props = defineProps<{
   proxy: OutboundProxyRecord | null
 }>()
-const emit = defineEmits<{ removed: [] }>()
+const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>({ required: true })
 const pendingRemove = shallowRef<OutboundProxyAccount | null>(null)
 const showRemove = shallowRef(false)
+const showAssign = shallowRef(false)
 const removeProxyName = shallowRef('')
-const { accounts, loading, error, pagination, search, setPage, setPageSize, removing, removeAccount } = useProxyAccounts({
+const { accounts, loading, error, pagination, search, setPage, setPageSize, removing, removeAccount, reloadAccounts } = useProxyAccounts({
   isOpen: () => open.value,
   proxyId: () => props.proxy?.id,
-  onRemoved: () => emit('removed'),
+  onRemoved: () => emit('changed'),
 })
 const columns = defineTableColumns<OutboundProxyAccount>([
   {
@@ -93,22 +95,33 @@ function requestRemove(account: OutboundProxyAccount) {
   showRemove.value = true
 }
 
+function onAssigned() {
+  emit('changed')
+  void reloadAccounts()
+}
+
 watch([
   open,
   () => props.proxy?.id,
 ], () => {
   showRemove.value = false
+  showAssign.value = false
 })
 </script>
 
 <template>
   <ZDialog v-model="open" title="关联账号" :description="description" width="48rem" :show-close="!removing" :close-on-click-modal="!removing" :close-on-press-escape="!removing">
     <div class="flex min-h-0 flex-col">
-      <ZInput v-model="search" class="mb-4 shrink-0 sm:w-80" :disabled="removing" aria-label="搜索关联账号" placeholder="搜索账号名称或邮箱">
-        <template #prefix>
-          <Search class="size-4.5 text-cp-text-tertiary" />
-        </template>
-      </ZInput>
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <ZButton :disabled="removing || !proxy" @click="showAssign = true">
+          <Plus class="size-4" />关联账号
+        </ZButton>
+        <ZInput v-model="search" class="mb-4 shrink-0 sm:w-80" :disabled="removing" aria-label="搜索关联账号" placeholder="搜索账号名称或邮箱">
+          <template #prefix>
+            <Search class="size-4.5 text-cp-text-tertiary" />
+          </template>
+        </ZInput>
+      </div>
       <ZTable :key="proxy?.id" class="min-h-0 shrink-0 [--cp-table-row-height:64px]" :style="{ height: tableHeight }" :columns="columns" :data="rows" :loading="loading" :empty-text="emptyText">
         <template #identity="{ row }">
           <div class="flex min-w-0 items-center gap-3">
@@ -157,4 +170,5 @@ watch([
       将“{{ pendingRemove?.name }}”从“{{ removeProxyName }}”移除后，该账号将改为直连
     </p>
   </ZConfirmDialog>
+  <ProxyAssignAccountsModal v-model="showAssign" :proxy="proxy" @assigned="onAssigned" />
 </template>

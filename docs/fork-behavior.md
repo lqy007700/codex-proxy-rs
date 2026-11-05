@@ -129,9 +129,9 @@ Responses 与 Chat 文本生成统一向客户端投影入口请求模型名，�
 复用 Client Key、模型映射、账号范围、并发、额度和费用结算，不维护独立的推理调度链。
 请求中间件看到 Chat 合同，Provider 和 attempt 中间件仍使用 Responses 合同
 
-消息、图片、函数工具、拒答、JSON 输出和推理参数的范围见 [Chat Completions](api.md#chat-completions)。
+消息、图片、文件、音频输入、函数与自定义工具、拒答、JSON 输出和公开推理的范围见 [Chat Completions](api.md#chat-completions)。
 `max_tokens` 和 `max_completion_tokens` 映射为 `max_output_tokens`，同时提供时后者优先，Codex 路径按自身合同移除该字段，不能把它当成费用上限。
-不支持的非空参数按字段返回 `400`；Chat 响应 ID 不用于 Responses 原生续接。
+明确不支持的执行模式按字段返回 `400`；无对应 Responses 控制的选项按协议说明处理，Chat 响应 ID 不用于 Responses 原生续接。
 SSE 等待复用注释心跳，流开始后的错误保留 Chat 错误表达，不补造成功终态
 
 ### 三方模型目录格式
@@ -154,8 +154,8 @@ API Key 上游支持标准 OpenAI `data[].id` 列表和完整 Codex `models[]` �
 账号级模型映射与全局映射共同冻结在路由计划中，重试和保底使用各自账号的目标模型与能力，
 账号映射按左侧请求模型检查本地模型政策，实际目标仍受上游目录、能力与权限约束。
 配置 revision 竞争时完整重读，不将旧授权与新模型映射混用，详见 [路由与账号范围](architecture.md#6-路由账号范围与-continuation)。
-同轮全量请求只回传已验证归属的 turn state，不放宽原生续接或跨账号状态复用；
-客户端 trace 保持原值，安装身份仍由选中账号持有，见 [请求头与身份](api.md#请求头与身份)
+同轮全量请求在缺少本地记录时保留客户端 turn state，确认换轮或换号时清除，不放宽原生续接或跨账号状态复用；
+客户端 trace 在未确认换号时保持原值，安装身份默认由选中账号持有，Key 可显式覆盖，见 [请求头与身份](api.md#请求头与身份)
 
 原生 OpenAI 和 xAI 账号先满足有效目录与本地模型政策，再参与权重、亲和或固定账号选择。
 OpenAI OAuth 按已知套餐隔离目录，API Key 按账号及凭据版本隔离；未知套餐或没有有效目录时交由上游验证。

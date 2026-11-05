@@ -25,7 +25,7 @@ fn preserves_ordered_instruction_messages_and_image_parts() {
             {"type":"message","role":"system","content":[{"type":"input_text","text":"first"}]},
             {"type":"message","role":"developer","content":[{"type":"input_text","text":"second"}]},
             {"type":"message","role":"user","content":[{"type":"input_text","text":"describe"},{"type":"input_image","image_url":"data:image/png;base64,synthetic","detail":"high"}]},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"previous"}]}
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"previous","annotations":[]}],"id":"msg_chat_3","status":"completed"}
         ])
     );
     assert_eq!(result["store"], false);
@@ -75,11 +75,10 @@ fn preserves_non_strict_tools_and_maps_named_choice_and_json_schema() {
 fn refuses_parameters_that_cannot_be_honored_instead_of_silently_dropping_them() {
     for (field, value) in [
         ("n", json!(2)),
-        ("stop", json!(["END"])),
-        ("logprobs", json!(true)),
         ("store", json!(true)),
-        ("functions", json!([])),
-        ("unknown", json!(true)),
+        ("functions", json!([{"name":"legacy"}])),
+        ("previous_response_id", json!("resp_forbidden")),
+        ("modalities", json!(["audio"])),
     ] {
         let mut request = json!({"model":"model-a","messages":[{"role":"user","content":"hello"}]});
         request[field] = value;

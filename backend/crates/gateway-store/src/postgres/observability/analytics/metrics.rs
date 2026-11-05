@@ -320,6 +320,16 @@ impl MetricState {
             p99_ms: percentile(0.99)?,
         })
     }
+    pub fn request_health(&self) -> admin_observability::RequestHealth {
+        admin_observability::RequestHealth::from_counts(
+            self.count("success_count"),
+            self.count("failure_count"),
+            self.count("cancelled_count"),
+            self.count("incomplete_count"),
+            self.count("caller_error_count"),
+        )
+    }
+
     pub fn request_metrics(&self) -> StoreResult<RequestMetrics> {
         let latency = self.histogram("latency_ms");
         let first = self.histogram("first_token_ms");

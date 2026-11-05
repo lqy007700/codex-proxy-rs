@@ -36,8 +36,8 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::account::{
-    AccountCandidate, AccountSelection, AccountSelectionContext, AccountSelectionPolicy, FastMode,
-    ProviderAccountId,
+    AccountCandidate, AccountEligibilityPolicy, AccountSelection, AccountSelectionContext,
+    AccountSelectionPolicy, FastMode, ProviderAccountId,
 };
 use crate::engine::continuation::{ContinuationBinding, NativeContinuationPin};
 use crate::error::{
@@ -129,7 +129,7 @@ pub struct AccountAttemptContext {
     required_account: Option<ProviderAccountId>,
     state_owner: Option<ProviderAccountStateOwner>,
     credential_recovery_attempted: bool,
-    diagnostic_required_account: bool,
+    eligibility: AccountEligibilityPolicy,
     account_scope: Option<Arc<crate::account::scope::FrozenAccountScope>>,
     routing_candidate: Option<Arc<crate::routing::ProviderCandidate>>,
     recovery_stage: recovery::AccountRecoveryStage,
@@ -147,7 +147,7 @@ impl AccountAttemptContext {
             required_account,
             state_owner,
             credential_recovery_attempted: false,
-            diagnostic_required_account: false,
+            eligibility: AccountEligibilityPolicy::Enforce,
             recovery_stage: recovery::AccountRecoveryStage::Initial,
             account_scope: None,
             routing_candidate: None,
@@ -158,17 +158,18 @@ impl AccountAttemptContext {
     ///
     /// 诊断只绕过本地的被动可用性投影，不能换号，并继续受账号租约保护
     #[must_use]
-    pub const fn diagnostic(
+    pub fn diagnostic(
         excluded_accounts: BTreeSet<ProviderAccountId>,
-        required_account: ProviderAccountId,
+        target: probe::AccountProbeTarget,
         state_owner: Option<ProviderAccountStateOwner>,
     ) -> Self {
+        let (required_account, eligibility) = target.into_selection();
         Self {
             excluded_accounts,
             required_account: Some(required_account),
             state_owner,
             credential_recovery_attempted: false,
-            diagnostic_required_account: true,
+            eligibility,
             recovery_stage: recovery::AccountRecoveryStage::Initial,
             account_scope: None,
             routing_candidate: None,
@@ -226,12 +227,6 @@ impl AccountAttemptContext {
     #[must_use]
     pub const fn credential_recovery_attempted(&self) -> bool {
         self.credential_recovery_attempted
-    }
-
-    /// 此尝试是否要由真实上游而非本地投影确认固定账号的可用性
-    #[must_use]
-    pub const fn is_diagnostic_required_account(&self) -> bool {
-        self.diagnostic_required_account
     }
 
     #[must_use]
@@ -1033,7 +1028,12 @@ impl AttemptContext {
     /// 管理端固定账号诊断会跳过本地可用性投影，保留全部租约约束
     #[must_use]
     pub const fn is_diagnostic_required_account(&self) -> bool {
-        self.account.is_diagnostic_required_account()
+        self.account_eligibility().bypasses_local_eligibility()
+    }
+
+    #[must_use]
+    pub const fn account_eligibility(&self) -> AccountEligibilityPolicy {
+        self.account.eligibility
     }
 
     /// 当前路由候选的冻结账号范围；管理端诊断为 `None`

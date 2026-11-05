@@ -3,6 +3,7 @@ import { usageTransportType, usageTransportTypeClass } from './shared/presenter'
 
 defineProps<{
   transport?: string | null
+  joined?: boolean
 }>()
 </script>
 

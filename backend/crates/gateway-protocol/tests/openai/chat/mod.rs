@@ -3,3 +3,5 @@
 mod request;
 mod response;
 mod stream;
+
+mod compatibility;

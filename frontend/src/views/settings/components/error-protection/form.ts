@@ -66,18 +66,22 @@ export function protectionConditionError(condition: ProtectionCondition): string
   return ''
 }
 
-export function protectionRuleStructureError(rule: ProtectionRule): string {
-  if (!trimProtectionText(rule.name) || rule.name !== trimProtectionText(rule.name) || /\p{Cc}/u.test(rule.name) || exceedsCharacters(rule.name, protectionLimits.name))
+export function protectionRuleNameError(name: string): string {
+  if (!trimProtectionText(name) || name !== trimProtectionText(name) || /\p{Cc}/u.test(name) || exceedsCharacters(name, protectionLimits.name))
     return `名称需为 1～${protectionLimits.name} 个字符，不能包含首尾空白或控制字符`
-  if (!rule.conditions.length || rule.conditions.length > protectionLimits.conditions)
+  return ''
+}
+
+export function protectionRuleConditionsError(conditions: ProtectionCondition[]): string {
+  if (!conditions.length || conditions.length > protectionLimits.conditions)
     return `每条规则需有 1～${protectionLimits.conditions} 个条件`
-  if (rule.conditions.every(condition => condition.field === 'provider'))
+  if (conditions.every(condition => condition.field === 'provider'))
     return '请添加状态码、错误码、错误类型或错误信息条件'
   return ''
 }
 
 export function protectionRuleError(rule: ProtectionRule): string {
-  const error = protectionRuleStructureError(rule)
+  const error = protectionRuleNameError(rule.name) || protectionRuleConditionsError(rule.conditions)
   if (error)
     return error
   for (const condition of rule.conditions) {

@@ -18,6 +18,7 @@ use crate::engine::continuation::{
     ContinuationBinding, NativeContinuationPin, NativeContinuationScope, PreviousResponseId,
 };
 
+use crate::engine::probe::AccountProbeTarget;
 use crate::engine::provider::{Provider, ProviderCallMetadata, ProviderRequest, ProviderStream};
 use crate::engine::{
     AccountAttemptContext, AttemptContext, AttemptRecord, AttemptTransport, AttemptTrigger,
@@ -49,7 +50,7 @@ pub struct AttemptCoordinator<S: ?Sized> {
 #[derive(Debug, Clone)]
 enum AccountSelection {
     Scheduled(Option<crate::account::ProviderAccountId>),
-    Diagnostic(crate::account::ProviderAccountId),
+    Diagnostic(AccountProbeTarget),
 }
 
 pub(super) struct CoordinationExtensions {
@@ -167,7 +168,7 @@ impl AccountSelection {
     fn required_account(&self) -> Option<&crate::account::ProviderAccountId> {
         match self {
             Self::Scheduled(account) => account.as_ref(),
-            Self::Diagnostic(account) => Some(account),
+            Self::Diagnostic(target) => Some(target.account_id()),
         }
     }
 
@@ -240,7 +241,7 @@ where
         request: NewModelRequest,
         operation: Operation,
         plan: RoutingPlan,
-        required_account: crate::account::ProviderAccountId,
+        target: AccountProbeTarget,
         continuation: Option<ContinuationBinding>,
         cancellation: CancellationToken,
     ) -> Result<ResponseExecutionSession<S>, EngineError> {
@@ -248,7 +249,7 @@ where
             request,
             operation,
             plan,
-            AccountSelection::Diagnostic(required_account),
+            AccountSelection::Diagnostic(target),
             CoordinationExtensions::new(continuation, None),
             cancellation,
         )
@@ -1115,8 +1116,8 @@ where
             (recovery.account, recovery.transport)
         } else {
             match &self.account_selection {
-                AccountSelection::Diagnostic(account) => {
-                    (Some(account.clone()), AttemptTransport::Default)
+                AccountSelection::Diagnostic(target) => {
+                    (Some(target.account_id().clone()), AttemptTransport::Default)
                 }
                 AccountSelection::Scheduled(_) => (
                     self.recovery_account
@@ -1129,9 +1130,9 @@ where
             }
         };
         let account_context = match &self.account_selection {
-            AccountSelection::Diagnostic(account) => AccountAttemptContext::diagnostic(
+            AccountSelection::Diagnostic(target) => AccountAttemptContext::diagnostic(
                 self.excluded_accounts.clone(),
-                account.clone(),
+                target.clone(),
                 self.account_state_owner.clone(),
             ),
             AccountSelection::Scheduled(_) => AccountAttemptContext::new(

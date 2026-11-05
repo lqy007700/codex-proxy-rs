@@ -146,7 +146,7 @@ fn representative_quota_should_prefer_account_wide_window_over_model_specific_wi
 }
 
 #[test]
-fn usage_window_should_not_use_daily_rolling_usage_for_weekly_statistics() {
+fn rolling_daily_usage_is_displayed_without_becoming_a_weekly_or_monthly_forecast() {
     let usage = AccountUsage {
         account_id: "acct_xai".to_owned(),
         request_count: 5,
@@ -191,7 +191,23 @@ fn usage_window_should_not_use_daily_rolling_usage_for_weekly_statistics() {
         provider_data: None,
     };
 
-    assert_eq!(quota.usage_window(), None);
+    let (window, period) = quota.usage_window().expect("daily display window");
+    assert_eq!(window.key, "free-rolling-24h");
+    assert_eq!(
+        period,
+        gateway_admin::model::provider_credentials::AccountUsagePeriod::Daily
+    );
+    assert_eq!(window.local_usage.as_ref().unwrap().request_count, 5);
+    let forecasts = gateway_admin::model::quota_forecast::account_quota_forecasts(
+        &quota,
+        Utc::now() - TimeDelta::days(60),
+        Utc::now(),
+        &[],
+    );
+    assert!(forecasts.iter().all(|forecast| forecast.source.is_none()
+        && forecast.estimated_tokens.is_none()
+        && forecast.estimated_usd.is_none()
+        && forecast.unavailable_reason.is_some()));
 }
 
 #[test]

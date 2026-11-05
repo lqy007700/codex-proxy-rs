@@ -89,8 +89,8 @@ const recordColumns = computed<TableColumn<UsageListRecord>[]>(() => recordScope
   : requestColumns)
 const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(recordColumns, 'usage-requests')
 
-const { showDetailModal, selectedUsageRecord, handleViewDetail } = useUsageRecordDetail()
-const detailComponent = computed(() => isErrorUsageRecord(selectedUsageRecord.value)
+const { showDetailModal, selectedUsageRecord, handleViewDetail, detailIsError, detailLoading, detailError, reloadDetail } = useUsageRecordDetail()
+const detailComponent = computed(() => detailIsError.value
   ? UsageErrorDetailModal
   : UsageRecordDetailModal)
 
@@ -226,6 +226,6 @@ watch(timeRange, () => {
       </template>
     </details>
 
-    <component :is="detailComponent" v-model="showDetailModal" :record="selectedUsageRecord" />
+    <component :is="detailComponent" v-model="showDetailModal" :record="selectedUsageRecord" :loading="detailLoading" :error="detailError" @retry="reloadDetail" />
   </div>
 </template>

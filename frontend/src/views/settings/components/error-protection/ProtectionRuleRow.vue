@@ -2,24 +2,31 @@
 import type { ProtectionRule } from '@/api/modules/settings/protection'
 import { ZIconButton, ZInput } from '@codex-proxy/ui'
 import { ChevronDown, Trash2 } from '@lucide/vue'
-import { computed, useId } from 'vue'
-import { protectionRuleError, protectionRuleSummary } from './form'
+import { computed, shallowRef, useId } from 'vue'
+import { protectionRuleError, protectionRuleNameError, protectionRuleSummary } from './form'
 import ProtectionRuleEditor from './ProtectionRuleEditor.vue'
 
-const props = defineProps<{ rule: ProtectionRule, expanded: boolean, disabled: boolean }>()
+const props = defineProps<{ rule: ProtectionRule, expanded: boolean, disabled: boolean, showErrors: boolean }>()
 const emit = defineEmits<{ toggle: [], remove: [], update: [rule: ProtectionRule] }>()
 const editorId = useId()
+const errorId = useId()
+const nameEdited = shallowRef(false)
+const nameError = computed(() => props.showErrors || nameEdited.value
+  ? protectionRuleNameError(props.rule.name)
+  : '')
 // 折叠行独立缓存摘要，输入时只更新当前规则的条件
 const summary = computed(() => props.expanded
   ? ''
   : protectionRuleSummary(props.rule))
-const error = computed(() => props.expanded
-  ? ''
-  : protectionRuleError(props.rule))
+const error = computed(() => !props.expanded && props.showErrors
+  ? protectionRuleError(props.rule)
+  : nameError.value)
 
 function updateName(name: string) {
-  if (!props.disabled)
+  if (!props.disabled) {
+    nameEdited.value = true
     emit('update', { ...props.rule, name })
+  }
 }
 </script>
 
@@ -40,6 +47,8 @@ function updateName(name: string) {
           :model-value="rule.name"
           :disabled="disabled"
           aria-label="规则名称"
+          :aria-invalid="Boolean(nameError)"
+          :aria-describedby="error ? errorId : undefined"
           placeholder="输入规则名称"
           class="max-w-lg"
           @update:model-value="updateName"
@@ -52,6 +61,6 @@ function updateName(name: string) {
         <Trash2 class="size-4" />
       </ZIconButton>
     </div>
-    <ProtectionRuleEditor v-if="expanded" :id="editorId" :model-value="rule" :disabled="disabled" @update:model-value="emit('update', $event)" />
+    <ProtectionRuleEditor v-if="expanded" :id="editorId" :model-value="rule" :disabled="disabled" :show-errors="showErrors" @update:model-value="emit('update', $event)" />
   </div>
 </template>

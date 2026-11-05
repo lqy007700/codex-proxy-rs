@@ -10,7 +10,7 @@ import { generateRequestId } from '@/utils/operation'
 import { createProtectionCondition, protectionLimits } from './form'
 import ProtectionRuleRow from './ProtectionRuleRow.vue'
 
-const props = defineProps<{ disabled: boolean }>()
+const props = defineProps<{ disabled: boolean, showErrors: boolean }>()
 
 const policy = defineModel<ProtectionDraft>({ required: true })
 const expandedId = shallowRef<string | null>(null)
@@ -91,7 +91,7 @@ function removeRule(id: string) {
         @update:model-value="update({ enabled: $event })"
       />
 
-      <section class="col-span-full grid min-w-0 gap-3" aria-label="匹配规则">
+      <section class="grid min-w-0 gap-3" aria-label="匹配规则">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex min-w-0 items-center gap-1">
             <span class="text-cp-sm font-emphasis text-cp-text-secondary">命中任意规则后累计</span>
@@ -135,6 +135,7 @@ function removeRule(id: string) {
             <ProtectionRuleRow
               :rule="rule"
               :expanded="expandedId === rule.id"
+              :show-errors="showErrors"
               :disabled="disabled"
               @toggle="expandedId = expandedId === rule.id ? null : rule.id"
               @remove="removeRule(rule.id)"
@@ -142,7 +143,7 @@ function removeRule(id: string) {
             />
           </template>
         </div>
-        <p v-if="rulesError" class="m-0 text-cp-sm text-cp-error-text" role="alert">
+        <p v-if="showErrors && rulesError" class="m-0 text-cp-sm text-cp-error-text" role="alert">
           {{ rulesError }}
         </p>
       </section>

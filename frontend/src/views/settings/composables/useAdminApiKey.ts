@@ -63,7 +63,7 @@ export function useAdminApiKey() {
   }
 
   async function copyGeneratedKey() {
-    await copyText(generatedKey.value, { successText: '已复制', errorFromException: true })
+    await copyText(generatedKey.value, { successText: '已复制' })
   }
 
   return {

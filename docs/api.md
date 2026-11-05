@@ -219,7 +219,8 @@ Codex PAT 验证服务不可用和身份响应无效分别返回 `50301`、`5020
 
 | 方法 | 路由 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
-| `GET` | `/healthz` | 无 | Core、Store 和后台任务健康时返回 `204`，否则返回 `503` |
+| `GET` | `/healthz` | 无 | Core、Store 和关键后台任务健康时返回 `204`，否则返回 `503` |
+| `GET` | `/readyz` | 无 | 接流所需 Core、PostgreSQL、Redis 和配置快照可用时返回 `204`，否则返回 `503`；不包含后台任务健康状态 |
 
 ## 3. OpenAI 数据面与模型目录
 
@@ -293,18 +294,18 @@ Codex 的 review 等子代理请求仍使用 `/v1/responses`，并通过 `x-open
 | 字段或能力 | 合同 |
 | --- | --- |
 | 消息 | 支持 `system`、`developer`、`user`、`assistant`、`tool`，保留历史顺序；多轮请求提交完整 `messages` |
-| 内容 | 字符串与 `text` 内容块，`assistant` 支持拒答；`user` 支持 `image_url: {url, detail?}`，包括 URL 与 data URL，图片能力由上游模型决定 |
-| 工具 | 支持 `tools[].type=function`、`tool_choice`、`parallel_tool_calls`；工具未声明 `strict` 时保持非严格模式 |
+| 内容 | 支持文本、拒答、用户图片、`file` 文件与 `input_audio` 音频输入；文件与音频转换为 Responses 对应内容，实际能力由上游模型决定 |
+| 工具 | 支持 `function` 和 `custom` 工具调用及结果、`tool_choice`、`parallel_tool_calls`；函数未声明 `strict` 时保持非严格模式；`web_search_options` 映射为强制搜索，不能与非空工具列表或其他显式工具选择混用 |
 | 工具历史 | `assistant.tool_calls[].id` 与 `tool.tool_call_id` 成对回填；流式工具使用稳定的 `index` 和客户端 `call_id` |
 | 输出格式 | 支持 `response_format.type=text/json_object/json_schema`，转换为 Responses `text.format` |
-| 推理 | `reasoning_effort` 转为 `reasoning.effort`；推理内容和加密推理项不混入 assistant 正文 |
-| 输出预算 | `max_tokens` 和 `max_completion_tokens` 的正整数值映射为 Responses `max_output_tokens`，同时提供时 `max_completion_tokens` 优先；`null` 不覆盖另一字段，是否执行上限取决于 Provider，不能依赖它限制费用 |
-| 用量 | JSON 返回 `usage`；`stream_options.include_usage=true` 在结束标记前返回 `choices: []` 的用量块，其他块 `usage=null` |
+| 推理与扩展输出 | `reasoning_effort` 覆盖 `reasoning.effort`；公开推理输出为 `reasoning_content`，图片输出为 `images`，引用输出为 `annotations`，加密推理与压缩项不作为正文 |
+| 输出预算 | 正整数参数按 `max_completion_tokens`、`max_tokens`、`max_output_tokens` 的优先级映射为 Responses `max_output_tokens`；`null` 不覆盖其他值，是否执行上限取决于 Provider，不能依赖它限制费用 |
+| 用量与概率 | JSON 返回实际 Token 明细；`stream_options.include_usage=true` 在结束标记前返回 `choices: []` 的用量块，其他块 `usage=null`；`logprobs=true` 请求并投影 Responses 文本概率，支持 `top_logprobs` |
 | 其他参数 | 支持 `metadata`、`service_tier`、`temperature`、`top_p`、`verbosity`、`prompt_cache_key`、`prompt_cache_retention`、`prompt_cache_options`、`moderation`、`user`、`safety_identifier`；`n` 仅支持 `1`，`store` 仅支持 `false` |
 
-`stop`、`logprobs`、
-`n>1`、旧版 `functions/function_call`、消息 `name`、音频及未知非空参数返回 `400`，
-错误的 `param` 指明字段。
+支持 Responses 的 `instructions`、`text`、`reasoning`、`include`、`max_tool_calls`、`truncation` 与 `context_management`。
+`stop`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias` 及未知扩展被接受但不转为 Responses 控制，不能保证生效。
+`n>1`、非空旧版 `functions/function_call`、音频输出、服务端历史续接及后台执行返回 `400`，错误的 `param` 指明字段。
 不提供 Chat 对象存储与查询，也不把 Chat 响应 ID 用作 Responses 原生续接状态
 
 鉴权与准入失败保留 HTTP 错误状态；SSE 已开始后失败使用 `data: {"error": ...}` 与结束标记，
@@ -347,7 +348,7 @@ API Key 与 OAuth 共用模拟客户端画像（`User-Agent`、`originator`、`v
 包括会话、线程、Lite 和其他业务扩展头。
 上游认证只来自选中的账号；API Key 不携带 OAuth Cookie、ChatGPT 账号身份或下游的
 `X-OpenAI-Actor-Authorization` 托管认证声明。
-`x-codex-installation-id` 使用选中账号已持久化的安装身份，与正文 `client_metadata` 中的值一致。
+`x-codex-installation-id` 默认使用选中账号已持久化的安装身份，Key 可显式固定安装 ID；请求头与正文 `client_metadata` 中的值一致。
 `x-openai-internal-codex-residency` 和 `x-openai-account-routing-override` 分别由部署配置
 `openai.residency`、`openai.account_routing_override` 控制，配置值覆盖客户端同名头，
 省略或 `null` 时不发送，配置说明见 [部署与运维](../deploy/README.md#启动后的运行设置)。
@@ -361,7 +362,7 @@ Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和
 `prompt_cache_key` 不受这条请求头规则影响。
 `thread-id`、turn metadata 等 Codex 协议字段及未知业务扩展不受下游环境头过滤规则影响；
 `traceparent`、`tracestate`、`sentry-trace`、`baggage` 及 WS metadata 中对应的
-`ws_request_header_*` 副本保持原值
+`ws_request_header_*` 副本在未确认换号时保持原值；明确换号时清除这些追踪字段与 `x-openai-fedramp` 的各 wire 副本
 
 会话、线程、窗口及父子线程引用在出站时按本次安装身份稳定映射为 UUID；
 默认使用账号安装身份，同账号保留引用关系，换账号使用不同标识。HTTP 请求头、正文 metadata、WS 副本及
@@ -375,9 +376,8 @@ Images 的 `x-codex-image-turn-id` 和 Desktop 自动 Git 上下文的 `clientUs
 该处理减少显式追踪标识的跨账号复用，不保证会话内容或业务 metadata 无法关联
 
 `x-codex-turn-state` 是上游返回的轮次路由 token，同一轮内应原样回传，开始新轮次时清除。
-全量请求没有 `previous_response_id` 时，也会保留已确认属于当前 Client Key、账号、会话、线程和轮次的回传值；
-未知归属、跨账号或跨轮次的值仍会清除。该证明只用于 turn state，不授权其他账号状态或原生续接。
-归属证明保存在进程内，实例切换、重启、过期或淘汰后，缺少其他可信会话状态的请求按未知归属处理
+全量请求缺少本地续接记录时仍保留客户端回传值，不要求进程内 token 证明；明确换号或已确认开始新轮次时清除。
+该 token 只用于上游轮次路由，不作为 response ID、其他账号状态或原生续接的授权依据
 
 #### 正文兼容
 
@@ -1020,7 +1020,7 @@ Images、独立 Search、Live 和管理员连接测试不应用账号模型映�
 | `POST` | `/api/admin/proxies/accounts/remove` | `{ proxyId, accountId }` | `{ configRevision }` |
 | `POST` | `/api/admin/proxies/create` | `[{ name, proxyUrl, location?, autoLocation?, maxWebsocketConnections? }]` | 逐项结果数组，成功项的 `data` 为 `{ record, configRevision }` |
 | `POST` | `/api/admin/proxies/update` | `{ id, revision, name, enabled?, proxyUrl?, location?, autoLocation?, maxWebsocketConnections? }` | `{ record, configRevision }` |
-| `POST` | `/api/admin/proxies/probe` | `{ proxyUrl, detectLocation? }` | 测试未保存的地址，返回连通性及可选位置结果，不创建代理 |
+| `POST` | `/api/admin/proxies/probe` | `{ proxyUrl, detectLocation? }` | 测试未保存的地址，空字符串表示直连，返回连通性及可选位置结果，不创建代理 |
 | `POST` | `/api/admin/proxies/probe/direct` | 无 | 解析网关服务器的直连出口位置，返回同一探测结果结构，不修改配置 |
 | `POST` | `/api/admin/proxies/test` | `[{ id, revision, detectLocation? }]` | 逐项结果数组，成功项的 `data` 为最新代理记录 |
 | `POST` | `/api/admin/proxies/delete` | `{ id, revision }` | `{ configRevision }` |
@@ -1350,10 +1350,11 @@ OAuth start 使用：
 - 正常 Responses 请求会解析上游响应的 rate-limit headers，合并进同一 quota 快照并同步状态。Free、
   K12 等套餐共用该状态机；套餐只参与账号展示和按套餐隔离的模型目录 cache，不存在 K12 专属额度路径
 - 账号详情的 Token 统计、模型排行和列表 Token 汇总优先使用账号级周额度窗口，无可统计的周窗口时
-  使用月额度窗口；`usage.windowLabelDisplay` 随选中的窗口返回“周额度窗口”或“月额度窗口”。查询边界
+  使用月额度窗口；xAI 无完整周/月窗口时使用独立的近 24 小时滚动统计，不依赖上游额度快照。
+  `usage.windowLabelDisplay` 随选中窗口返回“周额度窗口”“月额度窗口”或“近 24 小时”。周/月查询边界
   严格为 `[resetAt - windowSeconds, resetAt)`，不是自然周/月或最近 7/30 天；额度刷新若返回了更早的
   重置时间，会按新边界重新聚合。没有边界完整、可归属到账号的周/月窗口时显示无数据，标签为
-  “周/月额度窗口”，不回退到 5 小时、日窗口或历史累计。
+  “周/月额度窗口”，不回退到 5 小时限流窗口或历史累计。滚动日统计不参与周/月额度预测。
   金额原值保持完整精度，USD 展示值
   小于 1 美元时最多保留四位小数，其余保留两位
 
@@ -1602,7 +1603,10 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 
 `providerRequestProfileOverrides` 按 Provider ID 保存身份选择，列表返回同名对象。创建时各项为完整配置对象，
 未提供的 Provider 跟随通用设置；更新时省略某项保留原值，设为 `null` 清除该项覆盖。最多 256 项，每项最多 64 KiB。
-独立配置整体覆盖通用设置，不逐字段继承；切换全局配置不会影响独立 Key。目录与选择规则见 [Provider 客户端身份](#provider-客户端身份)
+独立配置整体覆盖通用设置，不逐字段继承；OpenAI 也支持 `{ "inherit": { "installationId": "<UUID>" } }`，
+只固定安装 ID 并继续继承通用 UA。完整 OpenAI 画像也可附加 `installationId`；省略、`null` 或空字符串使用账号默认身份。
+固定值须为带连字符的 UUID，生成与清除均由管理员显式操作；修改安装身份后不复用旧 WS 握手。
+本地调用方、续接与亲和隔离仍使用原始身份，固定安装 ID 不放宽授权。目录与选择规则见 [Provider 客户端身份](#provider-客户端身份)
 
 兼容字段 `openaiClientProfileOverride` 和 `xaiClientProfileOverride` 分别对应上述映射中的 `openai`、`xai`。
 创建时省略或 `null` 表示无覆盖；更新时省略保留、`null` 清除。与通用字段同时提交时必须一致，否则拒绝整个请求；
@@ -1684,8 +1688,8 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 预算检查超时、存储不可用或待结算队列无法接受新请求时返回 `503`、`key_budget_unavailable`
 
 自动结算按网关请求 ID 幂等执行，响应交付不等待费用落库，额度查询中的已用金额在后台写入后可见。
-账本独立于使用统计日志，记录保留至删除 Key，
-不受 `usageRetentionDays` 影响
+账本独立于使用统计日志，删除 Key 保留预算窗口与费用事件，在途请求继续按原 Key ID 幂等结算，
+已删除 Key 不允许新准入，同名新 Key 不继承其费用；不受 `usageRetentionDays` 影响
 
 ### 账号亲和管理
 
@@ -2407,6 +2411,10 @@ OpenAI 优先采用服务端 `openai-model` / `x-openai-model` 报告（流内�
 运维错误列表的 `search` 使用字面量包含匹配，`%`、`_` 和 `\` 按普通字符处理
 
 ### 记录范围与统计口径
+
+账号模型排行的 `successRate` 使用逻辑结果的成功数除以成功、服务失败与未完成之和；
+仅失败为 `0`，无有效样本为 `null`，取消、调用方错误和已恢复中间失败不计入分母。
+请求数、Token、费用及 `lastUsedAt` 继续采用成功用量口径，不由成功率分母推导
 
 请求健康可用性与服务成功率按 `成功 /（成功 + 服务失败 + 未完成）` 计算
 未完成保留独立计数，客户端取消与调用方错误不计入该分母，中间尝试失败不重复计为最终失败请求

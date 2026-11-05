@@ -70,7 +70,7 @@ const schedulingOptions = [
         show-scheduling-role
         preserve-scheduling-role
         preserve-model-access
-        :account-id="catalogAccountId"
+        :model-account-id="catalogAccountId"
         :groups="groups"
         :groups-loading="groupsLoading"
         :disabled="saving"

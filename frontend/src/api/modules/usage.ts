@@ -79,12 +79,21 @@ export interface UsageRecordMetadata {
   [key: string]: unknown
 }
 
-export interface UsageListRecord {
+export interface UsageErrorFacts {
   callerIdentity: CallerIdentity | null
   logicalOutcome: string
   attemptCount: number
   message: string | null
   errorCode: string | null
+  errorKind: string | null
+  websocketCloseCode: number | null
+  continuationUnavailableReason: string | null
+  upstreamConnectionExitReason: string | null
+  recovered: boolean
+}
+
+export interface UsageListRecord extends UsageErrorFacts {
+  logicalOutcome: string
   errorMessage: string | null
   clientApiKeyName: string | null
   id: string
@@ -119,7 +128,17 @@ export interface UsageListRecord {
   userAgent: string | null
 }
 
-export interface UsageRecord {
+export interface UsageRecord extends UsageErrorFacts {
+  upstreamError: {
+    code: string | null
+    errorType: string | null
+    message: string | null
+    param: string | null
+    closeReason: string | null
+    lastEventType: string | null
+  } | null
+  retryAfterMs: number | null
+
   callerIdentity: CallerIdentity | null
   errorDetails: string | null
   failureClass: string | null

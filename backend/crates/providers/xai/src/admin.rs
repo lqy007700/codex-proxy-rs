@@ -1182,19 +1182,9 @@ fn project_quota(
     refresh_token_expires_at: Option<DateTime<Utc>>,
     rolling_usage: Option<gateway_admin::model::accounts::AccountUsage>,
 ) -> ProviderQuota {
-    let Some(snapshot) = snapshot else {
-        return ProviderQuota {
-            credits: None,
-            plan_type: None,
-            observed_at: None,
-            refresh_token_expires_at,
-            windows: Vec::new(),
-            limit_reached: quota_exhausted,
-            provider_data: None,
-        };
-    };
-    let billing = snapshot.billing();
-    let window = if billing.has_authoritative_quota() {
+    let billing = snapshot.as_ref().map(GrokQuotaSnapshot::billing);
+    let window = if let Some(billing) = billing.filter(|billing| billing.has_authoritative_quota())
+    {
         let period_kind = billing.period_kind();
         let window_seconds = quota_window_seconds(billing.period_start(), billing.period_end());
         let mut data = Map::new();
@@ -1238,6 +1228,7 @@ fn project_quota(
             provider_data: Some(ProviderDocument::new(OpaqueProviderData::new(data))),
         }
     } else {
+        // 本地滚动统计独立于上游额度观察，导入后尚无快照时也保留请求图与日用量
         ProviderQuotaWindow {
             key: "free-rolling-24h".to_owned(),
             group: "shortTerm".to_owned(),
@@ -1256,8 +1247,10 @@ fn project_quota(
     };
     ProviderQuota {
         credits: None,
-        plan_type: billing.plan_type().map(str::to_owned),
-        observed_at: Some(snapshot.observed_at()),
+        plan_type: billing
+            .and_then(|billing| billing.plan_type())
+            .map(str::to_owned),
+        observed_at: snapshot.as_ref().map(GrokQuotaSnapshot::observed_at),
         refresh_token_expires_at,
         windows: vec![window],
         limit_reached: quota_exhausted,

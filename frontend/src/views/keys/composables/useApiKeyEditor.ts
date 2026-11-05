@@ -10,6 +10,7 @@ export interface ApiKeyFormValue {
   identityPolicy: import('@/api/modules/affinity').CallerIdentityPolicy
   portableHistory: boolean
   providerRequestProfileOverrides: ProviderRequestProfiles
+  installationId: string
   customKey: string
   name: string
   label: string
@@ -39,9 +40,20 @@ export function useApiKeyEditor(options: {
 
   function openEdit(key: ApiKey) {
     editingKey.value = key
+    const profiles = cloneDeep(key.providerRequestProfileOverrides)
+    const openai = profiles.openai
+    const identity = (openai?.inherit as Record<string, unknown> | undefined) ?? openai
+    const installationId = typeof identity?.installationId === 'string'
+      ? identity.installationId
+      : ''
+    if (openai?.inherit)
+      delete profiles.openai
+    else if (openai)
+      delete openai.installationId
     form.value = {
       identityPolicy: cloneDeep(key.identityPolicy ?? { mode: 'direct' }),
-      providerRequestProfileOverrides: cloneDeep(key.providerRequestProfileOverrides),
+      providerRequestProfileOverrides: profiles,
+      installationId,
       portableHistory: key.portableHistory,
       customKey: '',
       name: key.name,
@@ -89,6 +101,16 @@ export function useApiKeyEditor(options: {
           dailyLimitUsd: form.value.dailyLimitUsd.trim() || '0',
           weeklyLimitUsd: form.value.weeklyLimitUsd.trim() || '0',
         }
+        const profiles = cloneDeep(form.value.providerRequestProfileOverrides)
+        const installationId = form.value.installationId
+        if (installationId) {
+          // 仅固定安装 ID 时保留对全局 UA 的继承，不在 Key 中复制当前全局值
+          profiles.openai = profiles.openai
+            ? { ...profiles.openai, installationId }
+            : {
+                inherit: { installationId },
+              }
+        }
         const current = editingKey.value
         let created: { key: string, name: string } | undefined
         if (current) {
@@ -97,14 +119,14 @@ export function useApiKeyEditor(options: {
             ...payload,
             providerRequestProfileOverrides: profileOverrideUpdates(
               current.providerRequestProfileOverrides,
-              form.value.providerRequestProfileOverrides,
+              profiles,
             ),
           })
         }
         else {
           const result = await createApiKey({
             ...payload,
-            providerRequestProfileOverrides: cloneDeep(form.value.providerRequestProfileOverrides),
+            providerRequestProfileOverrides: profiles,
             customKey: form.value.customKey || undefined,
           })
           created = { key: result.plaintextKey, name: payload.name }
@@ -149,6 +171,7 @@ function emptyForm(): ApiKeyFormValue {
     identityPolicy: { mode: 'direct' },
     portableHistory: false,
     providerRequestProfileOverrides: {},
+    installationId: '',
     customKey: '',
     name: '',
     label: '',

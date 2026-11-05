@@ -1,14 +1,15 @@
 import type { AccountImportSettings, AccountOAuthStartResponse } from '@/api'
 import { computed, onScopeDispose, shallowRef } from 'vue'
 import { completeAccountOAuth, startAccountOAuth } from '@/api'
+import { ApiError } from '@/api/request'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
-type Status = 'idle' | 'starting' | 'waiting' | 'paused' | 'expired' | 'completing'
+type Status = 'idle' | 'starting' | 'waiting' | 'expired' | 'completing'
 
 export interface AccountAuthorizationView {
   flow: AccountOAuthStartResponse | null
   status: Status
-  error: string
 }
 
 interface AuthorizationRequest {
@@ -19,13 +20,11 @@ interface AuthorizationRequest {
 export function useAccountAuthorization(onComplete: () => Promise<void>) {
   const flow = shallowRef<AccountOAuthStartResponse | null>(null)
   const status = shallowRef<Status>('idle')
-  const error = shallowRef('')
   const callback = shallowRef('')
   const busy = computed(() => status.value === 'starting' || status.value === 'completing')
   const view = computed<AccountAuthorizationView>(() => ({
     flow: flow.value,
     status: status.value,
-    error: error.value,
   }))
   let context: { provider: string, settings?: AccountImportSettings } | undefined
   let controller: AbortController | undefined
@@ -47,7 +46,6 @@ export function useAccountAuthorization(onComplete: () => Promise<void>) {
     cancel()
     flow.value = null
     status.value = 'idle'
-    error.value = ''
     callback.value = ''
   }
 
@@ -61,7 +59,7 @@ export function useAccountAuthorization(onComplete: () => Promise<void>) {
     controller = current
     status.value = 'starting'
     try {
-      const result = await startAccountOAuth(request.start, { signal: current.signal, silent: true })
+      const result = await startAccountOAuth(request.start, { signal: current.signal })
       if (current.signal.aborted)
         return
       const expiresAt = Date.parse(result.expiresAt)
@@ -74,14 +72,22 @@ export function useAccountAuthorization(onComplete: () => Promise<void>) {
         : 'waiting'
       expiryTimer = setTimeout(() => {
         // 不取消正在确认的提交，过期后仍接收服务端已经提交的结果。
-        if (status.value !== 'completing')
+        if (status.value !== 'completing') {
           status.value = 'expired'
+          ZNotification.warning({
+            message: '授权已过期，可重新开始或检查已完成的授权结果',
+          })
+        }
       }, Math.max(0, Math.min(expiresAt - Date.now(), 2_147_483_647)))
     }
     catch (cause) {
       if (!current.signal.aborted) {
-        error.value = errorMessage(cause, '生成授权链接失败')
         status.value = 'idle'
+        if (!(cause instanceof ApiError)) {
+          ZNotification.error({
+            message: errorMessage(cause, '生成授权链接失败'),
+          })
+        }
       }
     }
   }
@@ -92,17 +98,18 @@ export function useAccountAuthorization(onComplete: () => Promise<void>) {
     if (!current || !currentFlow || !context || busy.value)
       return
     if (!callback.value.trim()) {
-      error.value = '请粘贴回调地址或授权码'
+      ZNotification.warning({
+        message: '请粘贴回调地址或授权码',
+      })
       return
     }
     status.value = 'completing'
-    error.value = ''
     try {
       await completeAccountOAuth({
         ...context,
         flowId: currentFlow.flowId,
         callbackUrl: callback.value.trim(),
-      }, { signal: current.signal, silent: true })
+      }, { signal: current.signal })
       if (!current.signal.aborted) {
         clearTimers()
         await onComplete()
@@ -112,8 +119,12 @@ export function useAccountAuthorization(onComplete: () => Promise<void>) {
       if (!current.signal.aborted) {
         status.value = expired()
           ? 'expired'
-          : 'paused'
-        error.value = errorMessage(cause, '完成授权失败，可重试提交')
+          : 'waiting'
+        if (!(cause instanceof ApiError)) {
+          ZNotification.error({
+            message: errorMessage(cause, '完成授权失败，可重试提交'),
+          })
+        }
       }
     }
   }

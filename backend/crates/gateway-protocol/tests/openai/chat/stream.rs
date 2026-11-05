@@ -48,8 +48,9 @@ fn every_chunk_keeps_requested_model_including_terminal_usage() {
 fn interleaved_tools_keep_stable_indices_and_do_not_repeat_arguments() {
     let mut encoder = encoder(true);
     let a =
-        json!({"id":"fc_a","type":"function_call","call_id":"call_a","name":"a","arguments":"{}"});
-    let b = json!({"id":"fc_b","type":"function_call","call_id":"call_b","name":"b","arguments":"{\"x\":1}"});
+        json!({"id":"fc_a","type":"function_call","call_id":"call_a","name":"a","arguments":""});
+    let b =
+        json!({"id":"fc_b","type":"function_call","call_id":"call_b","name":"b","arguments":""});
     for (index, item) in [&a, &b].into_iter().enumerate() {
         let chunks = encoder
             .push(
@@ -87,6 +88,10 @@ fn interleaved_tools_keep_stable_indices_and_do_not_repeat_arguments() {
             .unwrap()
             .is_empty()
     );
+    let mut a = a;
+    a["arguments"] = json!("{}");
+    let mut b = b;
+    b["arguments"] = json!("{\"x\":1}");
     let chunks = encoder
         .push(
             "response.completed",
@@ -186,7 +191,7 @@ fn refuses_unsupported_output_instead_of_claiming_an_empty_success() {
         encoder
             .push(
                 "response.completed",
-                &json!({"response":response(json!([{"type":"image_generation_call"}]))})
+                &json!({"response":response(json!([{"type":"unknown_output"}]))})
             )
             .is_err()
     );

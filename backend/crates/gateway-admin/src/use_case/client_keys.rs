@@ -158,7 +158,7 @@ impl ClientKeyService for DefaultClientKeyService {
         for (provider, profile) in &command.request_profile_overrides {
             self.providers
                 .require(provider)
-                .and_then(|provider| provider.preview_client_profile(profile))
+                .and_then(|provider| provider.preview_key_client_profile(profile, None))
                 .map_err(|error| super::map_provider_error(error, "client profile"))?;
         }
         command
@@ -209,7 +209,7 @@ impl ClientKeyService for DefaultClientKeyService {
             if let Some(profile) = profile {
                 self.providers
                     .require(provider)
-                    .and_then(|provider| provider.preview_client_profile(profile))
+                    .and_then(|provider| provider.preview_key_client_profile(profile, None))
                     .map_err(|error| super::map_provider_error(error, "client profile"))?;
             }
         }

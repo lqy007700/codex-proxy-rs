@@ -23,12 +23,16 @@ import { attemptOutcomeClass, attemptOutcomeText, displayValue, fieldLabelClass,
 import RequestDiagnosticsPanel from './RequestDiagnosticsPanel.vue'
 import UsageDetailCodePanel from './UsageDetailCodePanel.vue'
 import UsageDetailFieldGrid from './UsageDetailFieldGrid.vue'
+import UsageDetailState from './UsageDetailState.vue'
 import UsageStatusCodeBadge from './UsageStatusCodeBadge.vue'
 
 const props = defineProps<{
   record: UsageRecordDetail | null
+  loading?: boolean
+  error?: string
 }>()
 
+const emit = defineEmits<{ retry: [] }>()
 const open = defineModel<boolean>({ default: false })
 
 const { palette } = useChartPalette()
@@ -174,12 +178,16 @@ const identifierItems = computed(() => [
     mono: true,
     wrap: true,
   },
-  {
-    label: '上游请求 ID',
-    value: props.record?.upstreamRequestId,
-    mono: true,
-    wrap: true,
-  },
+  ...(props.record?.upstreamRequestId
+    ? [
+        {
+          label: '上游请求 ID',
+          value: props.record?.upstreamRequestId,
+          mono: true,
+          wrap: true,
+        },
+      ]
+    : []),
   {
     label: '账号 ID',
     value: props.record?.accountId,
@@ -470,7 +478,8 @@ const tokenDonutOption = computed<EChartsOption>(() => {
     type="info"
     width="64rem"
   >
-    <div v-if="record" class="grid min-w-0 gap-3">
+    <UsageDetailState v-if="loading || error" :loading="!!loading" :error="error" @retry="emit('retry')" />
+    <div v-else-if="record" class="grid min-w-0 gap-3">
       <section class="grid min-w-0 gap-3 lg:grid-cols-2">
         <section :class="panelClass">
           <h3 :class="panelTitleClass">

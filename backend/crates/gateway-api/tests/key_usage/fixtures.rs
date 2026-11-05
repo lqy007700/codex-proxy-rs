@@ -96,6 +96,11 @@ fn usage_record() -> UsageListRecord {
     UsageListRecord {
         caller_identity: None,
         error_code: None,
+        error_kind: None,
+        websocket_close_code: None,
+        continuation_unavailable_reason: None,
+        upstream_connection_exit_reason: None,
+        recovered: false,
         client_status_code: None,
         outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
         attempt_count: 1,

@@ -2,6 +2,7 @@
 
 mod account_mappings;
 mod outbound;
+use gateway_core::engine::probe::AccountProbeTarget;
 use gateway_core::routing::extensions::ExtensionSetReference;
 
 use std::{
@@ -2649,7 +2650,9 @@ fn account_probe_should_not_write_to_the_persistent_execution_store() {
 
     let error = block_on(service.probe(
         AccountProbeRequest {
-            account_id: ProviderAccountId::new("acct_probe").expect("account ID"),
+            target: AccountProbeTarget::ConnectionTest(
+                ProviderAccountId::new("acct_probe").expect("account ID"),
+            ),
             provider_kind: ProviderKind::new("openai").expect("provider kind"),
             upstream_model: UpstreamModelId::new("gpt-probe").expect("model ID"),
             operation: probe_operation(),
@@ -2681,7 +2684,9 @@ fn probe_failures_should_be_observable_without_a_model_request_row() {
 
     let error = block_on(service.probe(
         AccountProbeRequest {
-            account_id: ProviderAccountId::new("acct_probe").expect("account ID"),
+            target: AccountProbeTarget::ConnectionTest(
+                ProviderAccountId::new("acct_probe").expect("account ID"),
+            ),
             provider_kind: ProviderKind::new("openai").expect("provider kind"),
             upstream_model: UpstreamModelId::new("gpt-probe").expect("model ID"),
             operation: probe_operation(),
@@ -2727,7 +2732,9 @@ fn provider_local_probe_failure_should_remain_distinct_from_upstream() {
 
     let error = block_on(service.probe(
         AccountProbeRequest {
-            account_id: ProviderAccountId::new("acct_probe").expect("account ID"),
+            target: AccountProbeTarget::ConnectionTest(
+                ProviderAccountId::new("acct_probe").expect("account ID"),
+            ),
             provider_kind: ProviderKind::new("openai").expect("provider kind"),
             upstream_model: UpstreamModelId::new("gpt-probe").expect("model ID"),
             operation: probe_operation(),
@@ -2770,7 +2777,7 @@ fn diagnostic_probe_does_not_apply_data_plane_account_model_policy() {
 
     let error = block_on(service.probe(
         AccountProbeRequest {
-            account_id,
+            target: AccountProbeTarget::ConnectionTest(account_id),
             provider_kind: provider,
             upstream_model: UpstreamModelId::new("gpt-probe").expect("model"),
             operation: probe_operation(),
@@ -2802,7 +2809,9 @@ fn probe_observation_store_failure_preserves_the_provider_error() {
 
     let error = block_on(service.probe(
         AccountProbeRequest {
-            account_id: ProviderAccountId::new("acct_probe").expect("account ID"),
+            target: AccountProbeTarget::ConnectionTest(
+                ProviderAccountId::new("acct_probe").expect("account ID"),
+            ),
             provider_kind: ProviderKind::new("openai").expect("provider kind"),
             upstream_model: UpstreamModelId::new("gpt-probe").expect("model ID"),
             operation: probe_operation(),
@@ -4711,5 +4720,41 @@ fn image_policy_stays_frozen_for_prepared_requests_and_refreshes_for_the_next_tu
             .await;
         assert!(matches!(result, Err(error) if error.kind() == GatewayErrorKind::PolicyDenied));
         assert_eq!(admissions.limits.lock().unwrap().len(), 1);
+    });
+}
+
+#[test]
+fn cancelled_prepared_execution_records_rejection_without_admission_or_model_request() {
+    block_on(async {
+        let store = Arc::new(TrackingExecutionStore::default());
+        let service = DefaultExecutionService::new(
+            RuntimeSnapshotHandle::new(start_snapshot()),
+            store.clone(),
+            ProviderRegistry::default(),
+            Arc::new(UnusedAdmissions),
+            Arc::new(UnusedContinuation),
+            Arc::new(RecordingClientApiKeyUsage::default()),
+            Arc::new(crate::RecordingDiagnostics::default()),
+        );
+        let request = request(&service, ClientTransport::HttpJson);
+        let prepared = service.prepare_execution(request.client).await.unwrap();
+        let id = prepared.request_id().clone();
+        prepared.cancellation().cancel();
+        let result = service
+            .start_prepared(
+                prepared,
+                gateway_core::engine::execution::PreparedExecutionRequest {
+                    public_model: request.public_model,
+                    operation: request.operation,
+                    metadata: request.metadata,
+                },
+            )
+            .await;
+        assert!(matches!(result, Err(error) if error.kind() == GatewayErrorKind::Cancelled));
+        let rejected = store.entry_rejections.lock().unwrap();
+        assert_eq!(rejected.len(), 1);
+        assert_eq!(rejected[0].request_id, id);
+        assert_eq!(rejected[0].error.kind(), GatewayErrorKind::Cancelled);
+        assert!(store.requests.lock().unwrap().is_empty());
     });
 }

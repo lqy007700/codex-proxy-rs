@@ -9,6 +9,7 @@ import AccountGroupCheckboxGrid from '@/components/AccountGroupCheckboxGrid.vue'
 import CallerIdentityFields from '@/components/CallerIdentityFields.vue'
 import ProviderRequestProfilesEditor from '@/components/client-profile/ProviderRequestProfilesEditor.vue'
 import { notification as ZNotification } from '@/utils/notification'
+import { generateRequestId } from '@/utils/operation'
 import { useApiKeyFormRules } from '../composables/useApiKeyFormRules'
 
 const props = defineProps<{
@@ -117,6 +118,15 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
           <p class="text-sm text-cp-text-secondary">
             正常保留推理状态，遇到明确推理密文拒绝时尝试一次同账号恢复
           </p>
+        </div>
+      </ZFormItem>
+
+      <ZFormItem label="安装 ID（可选）">
+        <div class="flex gap-2">
+          <ZInput v-model="form.installationId" aria-label="安装 ID（可选）" placeholder="留空继承全局设置" :disabled="saving" />
+          <ZButton :disabled="saving" @click="updateForm('installationId', generateRequestId())">
+            生成
+          </ZButton>
         </div>
       </ZFormItem>
 

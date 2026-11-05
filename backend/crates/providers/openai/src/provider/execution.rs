@@ -331,6 +331,10 @@ impl CodexProvider {
         ));
         // Standalone Provider 端点没有可证明的账号 owner；Images/Search metadata 必须按
         // 跨账号输入收敛到当前 lease，不能沿用下游声明的账号或 installation identity
+        let client = self.client_for_request(&context)?;
+        let installation_id = client
+            .profile_state()
+            .effective_installation_id(lease.installation_id());
         let turn_metadata = payload
             .context()
             .get("turn_metadata")
@@ -338,13 +342,13 @@ impl CodexProvider {
             .and_then(|metadata| {
                 crate::transport::request::scope_turn_metadata(
                     metadata,
-                    lease.installation_id(),
-                    true,
+                    &installation_id,
+                    RequestAccountScope::Different,
                 )
             });
         let events = cold_json_response_stream(ColdJsonResponse {
-            client: self
-                .client_for_request(&context)?
+            installation_id,
+            client: client
                 .for_account(lease.account())
                 .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
                 .with_responses_api_base_url(lease.authentication().responses_api_base_url())
@@ -385,6 +389,7 @@ struct RawJsonEndpointRequest {
 
 pub(super) struct ColdResponse {
     pub(super) client: CodexBackendClient,
+    pub(super) installation_id: String,
     pub(super) response_origin: Url,
     pub(super) request: CodexResponsesRequest,
     pub(super) upstream_model: UpstreamModelId,
@@ -398,7 +403,6 @@ pub(super) struct ColdResponse {
     pub(super) session_transport_key_hash: Option<String>,
     pub(super) session_transport_recovery: CodexSessionTransportRecovery,
     pub(super) guardian_routing: guardian::GuardianRouting,
-    pub(super) turn_state_scope: Option<turn_state::TurnStateScope>,
     pub(super) websocket_retry_count: u32,
     pub(super) stream_max_retries: u32,
     pub(super) session_capture: Option<OpenAiSessionCapture>,
@@ -406,6 +410,7 @@ pub(super) struct ColdResponse {
 
 pub(super) struct ColdJsonResponse {
     pub(super) client: CodexBackendClient,
+    pub(super) installation_id: String,
     pub(super) response_origin: Url,
     pub(super) endpoint_path: &'static str,
     pub(super) body: Bytes,
@@ -455,6 +460,7 @@ pub(super) struct OpenAiSessionCapture {
     pub(super) client_turn_id: Option<String>,
     pub(super) reasoning_effort_override: Option<String>,
     pub(super) response_store: bool,
+    pub(super) oversized_http: bool,
     pub(super) continuation_scope: Option<OpenAiContinuationScope>,
 }
 
@@ -522,6 +528,13 @@ pub(super) fn attach_openai_session_update(
     };
     let Ok(update) = encode_openai_session_capture(&capture) else {
         return;
+    };
+    let update = if capture.oversized_http
+        && capture.continuation_scope == Some(OpenAiContinuationScope::ReplayRequired)
+    {
+        update.with_websocket_reconnect()
+    } else {
+        update
     };
     events[terminal_index].attach_session_update(update);
 }
@@ -595,7 +608,6 @@ pub(super) fn map_handshake_attempt_error(
 pub(super) async fn create_json_attempt(
     request: &ColdJsonResponse,
     account: &ProviderAccount,
-    installation_id: &str,
     authorization: &SecretString,
     cookie_header: Option<&SecretString>,
     account_selection: CodexAccountSelectionTelemetry<'_>,
@@ -609,7 +621,7 @@ pub(super) async fn create_json_attempt(
         authorization.expose_secret(),
         account.upstream_account_id(),
         request_id,
-        Some(installation_id),
+        Some(&request.installation_id),
     );
     request_context.trace = Some(&trace);
     request_context.cookie_header = cookie_header.map(ExposeSecret::expose_secret);
@@ -661,7 +673,6 @@ pub(super) fn cold_json_response_stream(request: ColdJsonResponse) -> EventStrea
         let response = create_json_attempt(
             &request,
             &active_account,
-            request.lease.installation_id(),
             &authorization,
             cookie_header.as_ref(),
             account_selection,
@@ -781,6 +792,7 @@ fn image_response_metering(
 pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
     let ColdResponse {
         client,
+        installation_id,
         response_origin,
         request,
         upstream_model,
@@ -794,7 +806,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
         session_transport_key_hash,
         session_transport_recovery,
         guardian_routing,
-        turn_state_scope,
         websocket_retry_count,
         stream_max_retries,
         mut session_capture,
@@ -838,7 +849,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 &request,
                 &request_id,
                 &active_account,
-                lease.installation_id(),
+                &installation_id,
                 &authorization,
                 cookie_header.as_ref(),
                 account_selection,
@@ -884,17 +895,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                         },
                     );
                 }
-                if let Some(scope) = &turn_state_scope
-                    && let Some(response) = failure.error.client_visible_upstream_response()
-                {
-                    for header in response.headers() {
-                        if header.name().eq_ignore_ascii_case("x-codex-turn-state")
-                            && let Ok(token) = std::str::from_utf8(header.value().as_ref())
-                        {
-                            scope.remember(token);
-                        }
-                    }
-                }
                 if let Some(observation) = failure.observation.take() {
                     yield ProviderEvent::observation(observation);
                 }
@@ -918,11 +918,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             .await;
             Err(failure.error)?;
             return;
-        }
-        if let Some(scope) = &turn_state_scope
-            && let Some(token) = response.turn_state.as_deref()
-        {
-            scope.remember(token);
         }
         if let Some(capture) = session_capture.as_mut() {
             capture.continuation_scope = Some(if capture.response_store {
@@ -1069,7 +1064,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                         &mut session_capture,
                         &mut observation_state,
                         &mut decoder,
-                        turn_state_scope.as_ref(),
                     )
                     .await;
                     let observation_event = if rate_limits_changed || metadata_merge.is_some()
@@ -1148,7 +1142,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 &mut session_capture,
                 &mut observation_state,
                 &mut decoder,
-                turn_state_scope.as_ref(),
             )
             .await;
             let metadata_changed = metadata_merge.unwrap_or(false);
@@ -1355,7 +1348,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             &mut session_capture,
             &mut observation_state,
             &mut decoder,
-            turn_state_scope.as_ref(),
         )
         .await
         .unwrap_or(false);
@@ -1425,7 +1417,6 @@ async fn merge_response_metadata_updates(
     session_capture: &mut Option<OpenAiSessionCapture>,
     observation_state: &mut OpenAiResponseObservationState,
     decoder: &mut CodexCanonicalDecoder,
-    turn_state_scope: Option<&turn_state::TurnStateScope>,
 ) -> Option<bool> {
     let updates = updates?;
     let mut pending = updates.lock().await;
@@ -1437,9 +1428,6 @@ async fn merge_response_metadata_updates(
     }
     let mut changed = false;
     if let Some(turn_state) = turn_state {
-        if let Some(scope) = turn_state_scope {
-            scope.remember(&turn_state);
-        }
         if let Some(capture) = session_capture.as_mut() {
             capture.turn_state = Some(turn_state.clone());
         }

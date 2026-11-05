@@ -329,6 +329,85 @@ async fn preserves_chat_endpoint_and_converts_images_before_starting_execution()
 }
 
 #[tokio::test]
+async fn extended_chat_contract_passes_http_conversion_and_final_delivery_for_json_and_sse() {
+    for stream in [false, true] {
+        let trace = Arc::new(Trace::default());
+        let mut body = request(stream);
+        body["messages"][0]["content"] = json!([
+            {"type":"file","file":{"file_id":"file_synthetic"}},
+            {"type":"input_audio","input_audio":{"data":"aGk=","format":"wav"}}
+        ]);
+        body["tools"] = json!([{"type":"custom","custom":{"name":"patch"}}]);
+        body["max_output_tokens"] = json!(64);
+        body["reasoning"] = json!({"summary":"auto"});
+        body["logprobs"] = json!(true);
+        body["top_logprobs"] = json!(2);
+        body["stop"] = json!(["END"]);
+        body["seed"] = json!(42);
+        let mut completion = terminal();
+        completion["output"] = json!([
+            {"id":"rs_public","type":"reasoning","summary":[{"type":"summary_text","text":"public summary"}],"encrypted_content":"synthetic-private-cipher"},
+            {"id":"msg_synthetic","type":"message","role":"assistant","content":[{"type":"output_text","text":"link","logprobs":[{"token":"link","logprob":-0.1}],"annotations":[{"type":"url_citation","url":"https://example.invalid","title":"source","start_index":0,"end_index":4}]}]},
+            {"id":"img_a","type":"image_generation_call","result":"aGk=","output_format":"png"},
+            {"id":"ct_a","type":"custom_tool_call","call_id":"call_patch","name":"patch","input":"raw"}
+        ]);
+        let response = app(
+            session(
+                trace.clone(),
+                stream,
+                vec![
+                    Ok(wire(
+                        "response.created",
+                        json!({"response":{"id":"resp_chat","created_at":123,"model":"model-a"}}),
+                    )),
+                    Ok(wire("response.completed", json!({"response":completion}))),
+                ],
+            ),
+            None,
+        )
+        .await
+        .oneshot(http_request(body))
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let delivered = text(response).await;
+        for expected in [
+            "public summary",
+            "data:image/png;base64,aGk=",
+            "call_patch",
+            "url_citation",
+            "logprobs",
+        ] {
+            assert!(
+                delivered.contains(expected),
+                "missing {expected} in {delivered}"
+            );
+        }
+        assert!(!delivered.contains("synthetic-private-cipher"));
+        assert!(!delivered.contains("chat_delivery_invalid"));
+        if stream {
+            assert_eq!(delivered.matches("data: [DONE]").count(), 1);
+            assert_eq!(delivered.matches("\"total_tokens\":12").count(), 1);
+        } else {
+            let value: Value = serde_json::from_str(&delivered).unwrap();
+            assert_eq!(value["choices"][0]["finish_reason"], "tool_calls");
+            assert_eq!(value["usage"]["total_tokens"], 12);
+        }
+        let observed = trace.observed.lock().unwrap();
+        let (_, converted) = observed.as_ref().unwrap();
+        assert_eq!(converted["input"][0]["content"][0]["type"], "input_file");
+        assert_eq!(converted["input"][0]["content"][1]["type"], "input_audio");
+        assert_eq!(converted["max_output_tokens"], 64);
+        assert_eq!(converted["tools"][0]["type"], "custom");
+        assert!(converted.get("stop").is_none());
+        assert!(converted.get("seed").is_none());
+        assert_eq!(trace.commits.load(Ordering::SeqCst), 1);
+        assert_eq!(trace.cancellations.load(Ordering::SeqCst), 0);
+        assert!(trace.finalized.load(Ordering::SeqCst));
+    }
+}
+
+#[tokio::test]
 async fn streaming_delivers_chat_chunks_usage_and_one_done_after_finalization() {
     let trace = Arc::new(Trace::default());
     let response = app(session(trace.clone(), true, events()), None)
@@ -407,11 +486,11 @@ async fn unsupported_parameters_and_authentication_fail_before_execution() {
     let trace = Arc::new(Trace::default());
     let app = app(session(trace.clone(), false, events()), None).await;
     let mut body = request(false);
-    body["stop"] = json!(["END"]);
+    body["modalities"] = json!(["audio"]);
     let response = app.clone().oneshot(http_request(body)).await.unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let value: Value = serde_json::from_str(&text(response).await).unwrap();
-    assert_eq!(value["error"]["param"], "stop");
+    assert_eq!(value["error"]["param"], "modalities");
     let response = app
         .oneshot(
             Request::post(PATH)
@@ -678,43 +757,59 @@ async fn middleware_cannot_deliver_early_missing_or_duplicate_done() {
 
 #[tokio::test]
 async fn function_result_history_and_tool_stream_share_the_same_call_id() {
-    let trace = Arc::new(Trace::default());
-    let item = json!({"type":"function_call","id":"fc_internal","call_id":"call_client","name":"f","arguments":"{}"});
-    let mut end = terminal();
-    end["output"] = json!([item]);
-    let events = vec![
-        Ok(wire(
-            "response.created",
-            json!({"response":{"id":"resp_chat","created_at":123}}),
-        )),
-        Ok(wire(
-            "response.output_item.added",
-            json!({"output_index":0,"item":item}),
-        )),
-        Ok(wire(
-            "response.function_call_arguments.delta",
-            json!({"item_id":"fc_internal","delta":"{}"}),
-        )),
-        Ok(wire("response.completed", json!({"response":end}))),
-    ];
-    let mut body = request(true);
-    body["messages"] = json!([
-        {"role":"assistant","tool_calls":[{"id":"call_previous","type":"function","function":{"name":"f","arguments":"{}"}}]},
-        {"role":"tool","tool_call_id":"call_previous","content":"previous result"}
-    ]);
-    let response = app(session(trace.clone(), true, events), None)
-        .await
-        .oneshot(http_request(body))
-        .await
-        .unwrap();
-    let body = text(response).await;
-    assert!(body.contains("call_client"));
-    assert!(!body.contains("fc_internal"));
-    assert!(body.contains("\"finish_reason\":\"tool_calls\""));
-    assert_eq!(
-        trace.observed.lock().unwrap().as_ref().unwrap().1["input"][1],
-        json!({"type":"function_call_output","call_id":"call_previous","output":"previous result"})
-    );
+    for prefix in ["", "{"] {
+        let trace = Arc::new(Trace::default());
+        let item = json!({"type":"function_call","id":"fc_internal","call_id":"call_client","name":"f","arguments":"{}"});
+        let mut end = terminal();
+        end["output"] = json!([item]);
+        let mut added = item;
+        added["arguments"] = json!(prefix);
+        let events = vec![
+            Ok(wire(
+                "response.created",
+                json!({"response":{"id":"resp_chat","created_at":123}}),
+            )),
+            Ok(wire(
+                "response.output_item.added",
+                json!({"output_index":0,"item":added}),
+            )),
+            Ok(wire(
+                "response.function_call_arguments.delta",
+                json!({"item_id":"fc_internal","delta":if prefix.is_empty() { "{}" } else { "}" }}),
+            )),
+            Ok(wire("response.completed", json!({"response":end}))),
+        ];
+        let mut body = request(true);
+        body["messages"] = json!([
+            {"role":"assistant","tool_calls":[{"id":"call_previous","type":"function","function":{"name":"f","arguments":"{}"}}]},
+            {"role":"tool","tool_call_id":"call_previous","content":"previous result"}
+        ]);
+        let response = app(session(trace.clone(), true, events), None)
+            .await
+            .oneshot(http_request(body))
+            .await
+            .unwrap();
+        let body = text(response).await;
+        assert!(body.contains("call_client"));
+        assert!(!body.contains("fc_internal"));
+        assert!(body.contains("\"finish_reason\":\"tool_calls\""));
+        let arguments: String = parse_sse_events(&body)
+            .unwrap()
+            .iter()
+            .filter_map(|event| serde_json::from_str::<Value>(&event.data).ok())
+            .filter_map(|value| {
+                value
+                    .pointer("/choices/0/delta/tool_calls/0/function/arguments")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect();
+        assert_eq!(arguments, "{}");
+        assert_eq!(
+            trace.observed.lock().unwrap().as_ref().unwrap().1["input"][1],
+            json!({"type":"function_call_output","call_id":"call_previous","output":"previous result"})
+        );
+    }
 }
 
 #[tokio::test]
@@ -767,4 +862,95 @@ async fn real_http_socket_delivers_chat_sse_and_completes_session() {
     assert!(response.contains("data: [DONE]"));
     assert!(trace.finalized.load(Ordering::SeqCst));
     assert_eq!(trace.commits.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn image_sse_never_reports_success_for_unfinished_or_empty_done_images() {
+    for scenario in ["empty_done", "added_only", "preview_only"] {
+        for omitted in [false, true] {
+            let trace = Arc::new(Trace::default());
+            let mut image_events = vec![Ok(wire(
+                "response.created",
+                json!({"response":{"id":"resp_chat","created_at":123}}),
+            ))];
+            if scenario == "preview_only" {
+                image_events.push(Ok(wire(
+                    "response.image_generation_call.partial_image",
+                    json!({"output_index":0,"item_id":"img_a","partial_image_b64":"aGk="}),
+                )));
+            } else {
+                let image = json!({"id":"img_a","type":"image_generation_call"});
+                image_events.push(Ok(wire(
+                    "response.output_item.added",
+                    json!({"output_index":0,"item":image}),
+                )));
+                if scenario == "empty_done" {
+                    image_events.push(Ok(wire(
+                        "response.output_item.done",
+                        json!({"output_index":0,"item":image}),
+                    )));
+                }
+            }
+            let mut completion = terminal();
+            completion["output"] = json!([]);
+            if omitted {
+                completion.as_object_mut().unwrap().remove("output");
+            }
+            image_events.push(Ok(wire(
+                "response.completed",
+                json!({"response":completion}),
+            )));
+            let response = app(session(trace.clone(), true, image_events), None)
+                .await
+                .oneshot(http_request(request(true)))
+                .await
+                .unwrap();
+            let status = response.status();
+            let body = text(response).await;
+            assert!(
+                status.is_server_error() || body.contains("\"error\""),
+                "{scenario}: {body}"
+            );
+            assert!(
+                !body.contains("\"finish_reason\":\"stop\""),
+                "{scenario}: {body}"
+            );
+            assert!(!body.contains("\"finish_reason\":\"length\""));
+        }
+    }
+}
+
+#[tokio::test]
+async fn image_sse_done_only_delivers_one_image_when_the_final_array_is_empty_or_absent() {
+    for omitted in [false, true] {
+        let trace = Arc::new(Trace::default());
+        let mut completion = terminal();
+        completion["output"] = json!([]);
+        if omitted {
+            completion.as_object_mut().unwrap().remove("output");
+        }
+        let image_events = vec![
+            Ok(wire(
+                "response.created",
+                json!({"response":{"id":"resp_chat","created_at":123}}),
+            )),
+            Ok(wire(
+                "response.output_item.done",
+                json!({"output_index":0,"item":{"id":"img_a","type":"image_generation_call","result":"aGk="}}),
+            )),
+            Ok(wire("response.completed", json!({"response":completion}))),
+        ];
+        let response = app(session(trace.clone(), true, image_events), None)
+            .await
+            .oneshot(http_request(request(true)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = text(response).await;
+        assert_eq!(body.matches("data:image/png;base64,aGk=").count(), 1);
+        assert_eq!(body.matches("\"finish_reason\":\"stop\"").count(), 1);
+        assert_eq!(body.matches("data: [DONE]").count(), 1);
+        assert_eq!(trace.commits.load(Ordering::SeqCst), 1);
+        assert_eq!(trace.cancellations.load(Ordering::SeqCst), 0);
+    }
 }

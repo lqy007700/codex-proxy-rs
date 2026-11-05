@@ -476,7 +476,12 @@ async fn quota_plan_changes_survive_inflight_background_and_manual_token_refresh
     assert_eq!(upgraded.plan_type(), Some("pro"));
     assert_eq!(upgraded.revision(), original.revision());
     assert_eq!(current_revision(&database.pool).await, config_revision);
-    // 刷新在额度更新前已准备好旧资料，CAS 提交仍须保留数据库中的新套餐
+    let mut saved_quota = repository
+        .get_quotas(std::slice::from_ref(&id))
+        .await
+        .unwrap();
+
+    // 刷新已准备好旧资料，CAS 提交仍须保留数据库中的新套餐
     let refresh = CredentialCasUpdate::new(
         id.clone(),
         original.revision(),
@@ -507,6 +512,14 @@ async fn quota_plan_changes_survive_inflight_background_and_manual_token_refresh
     ));
     let current = repository.get_account(&id).await.unwrap().unwrap();
     assert_eq!(current.plan_type(), Some("pro"));
+    saved_quota[0].expected_revision = current.revision();
+    assert_eq!(
+        repository
+            .get_quotas(std::slice::from_ref(&id))
+            .await
+            .unwrap(),
+        saved_quota
+    );
     let stale = QuotaObservation {
         plan_type: Some("free".to_owned()),
         ..observation
@@ -536,6 +549,14 @@ async fn quota_plan_changes_survive_inflight_background_and_manual_token_refresh
     assert_eq!(refreshed.plan_type(), Some("pro"));
     assert_eq!(refreshed.name(), original.name());
     assert_eq!(refreshed.email(), original.email());
+    saved_quota[0].expected_revision = refreshed.revision();
+    assert_eq!(
+        repository
+            .get_quotas(std::slice::from_ref(&id))
+            .await
+            .unwrap(),
+        saved_quota
+    );
     let observed_at = SystemTime::now();
     repository
         .compare_and_swap_quota(QuotaObservation {

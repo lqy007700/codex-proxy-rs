@@ -56,7 +56,7 @@ export function useApiKeyUse() {
   }
 
   async function copyToClipboard(text: string) {
-    await copyText(text, { successText: '已复制到剪贴板', emptyErrorText: '复制失败' })
+    await copyText(text, { successText: '已复制到剪贴板', notifyWhenEmpty: true })
   }
 
   async function withPlaintextKey(apiKey: ApiKey, action: KeyRevealAction, use: (key: string) => void | Promise<void>) {
