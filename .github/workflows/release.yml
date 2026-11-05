@@ -283,6 +283,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.release-info.outputs.version }}
+          GIT_SHA: ${{ needs.release-info.outputs.git_sha }}
           DOCKER_VERSION: ${{ needs.release-info.outputs.docker_version }}
           PLATFORM_MATRIX: ${{ needs.release-info.outputs.platform_matrix }}
         run: ruby .github/scripts/package-release.rb archives

@@ -1,12 +1,31 @@
 require 'digest'
 require 'fileutils'
 require 'json'
+require_relative 'release-metadata'
 
 # 归档与镜像消费同一次构建的二进制与 Web 资源
 module ReleasePackage
   APP_NAME = 'codex-proxy-rs'
+
+  def self.legacy_update_manifest
+    version = ReleaseMetadata.version(ENV.fetch('VERSION'))
+    git_sha = ENV.fetch('GIT_SHA')
+    raise 'Invalid release Git SHA' unless git_sha.match?(/\A[0-9a-f]{40}\z/)
+
+    # 旧更新器在替换程序前读取此路径；空合同保留插件风险确认，不声明已移除的能力
+    JSON.pretty_generate(
+      'schema_version' => 1,
+      'sealed' => true,
+      'gateway_version' => version,
+      'gateway_git_sha' => git_sha,
+      'plugin_host' => nil,
+      'plugins' => []
+    ) + "\n"
+  end
+
   def self.archives
     platforms = JSON.parse(ENV.fetch('PLATFORM_MATRIX')).fetch('include')
+    manifest = legacy_update_manifest
     release_dir = 'dist/release'
     FileUtils.rm_rf(release_dir)
     FileUtils.mkdir_p(release_dir)
@@ -30,6 +49,11 @@ module ReleasePackage
       File.chmod(0o755, "#{root}/#{binary}")
       FileUtils.cp_r('dist/frontend/.', "#{root}/web/dist")
       FileUtils.cp(config, "#{root}/deploy")
+      legacy_directory = "#{root}/plugins/official"
+      FileUtils.mkdir_p(legacy_directory)
+      legacy_manifest = "#{legacy_directory}/plugin-release-manifest.json"
+      File.write(legacy_manifest, manifest)
+      File.chmod(0o444, legacy_manifest)
       archive = "#{release_dir}/#{APP_NAME}_#{ENV.fetch('VERSION')}_#{platform['os']}_#{platform['arch']}.tar.gz"
       raise "Failed to create #{archive}" unless system('tar', '-czf', archive, '-C', File.dirname(root), APP_NAME)
     end
