@@ -23,7 +23,6 @@ export const accountColumns = defineTableColumns<Account>([
     label: '账号',
     kind: 'identity',
     size: '3xl',
-    sortable: 'email',
   },
   {
     key: 'provider',

@@ -18,6 +18,7 @@ const props = withDefaults(
     size?: 'md' | 'lg'
     showPlan?: boolean
     showNotes?: boolean
+    nameOnly?: boolean
     titleMode?: 'local-part' | 'email'
     metaPosition?: 'title' | 'secondary'
     metaSize?: 'xs' | 'sm'
@@ -26,6 +27,7 @@ const props = withDefaults(
     size: 'md',
     showPlan: false,
     showNotes: false,
+    nameOnly: false,
     titleMode: 'local-part',
     metaPosition: 'title',
     metaSize: 'sm',
@@ -36,14 +38,16 @@ const emailText = computed(() => accountIdentityLabel(props.account))
 
 const visibleNotes = computed(() => props.showNotes ? props.account.notes : undefined)
 
-const displayTitle = computed(() =>
-  visibleNotes.value || props.titleMode === 'email' || props.account.authenticationKind === 'api_key'
-    ? emailText.value
-    : emailText.value.split('@')[0],
-)
+const displayTitle = computed(() => {
+  if (props.nameOnly)
+    return props.account.name?.trim() || props.account.id
+  if (visibleNotes.value || props.titleMode === 'email' || props.account.authenticationKind === 'api_key')
+    return emailText.value
+  return emailText.value.split('@')[0]
+})
 
 const secondaryText = computed(() =>
-  props.titleMode === 'email' || props.account.authenticationKind === 'api_key'
+  props.nameOnly || props.titleMode === 'email' || props.account.authenticationKind === 'api_key'
     ? null
     : emailText.value,
 )

@@ -297,7 +297,16 @@ const {
             </template>
 
             <template #identity="{ row }">
-              <AccountIdentityCell :account="row" show-notes />
+              <AccountIdentityCell :account="row" show-notes name-only>
+                <template #meta>
+                  <span
+                    class="shrink-0 whitespace-nowrap font-mono text-[10px] font-emphasis tabular-nums text-cp-text-quaternary"
+                    :title="`并发 ${row.concurrencyLimit ?? '默认'} · 权重 ${row.weight}`"
+                  >
+                    并发 {{ row.concurrencyLimit ?? '默认' }} · 权重 {{ row.weight }}
+                  </span>
+                </template>
+              </AccountIdentityCell>
             </template>
 
             <template #provider="{ row }">
@@ -312,7 +321,7 @@ const {
                 <AccountSchedulingSwitch
                   :enabled="row.enabled"
                   :pending="togglingSchedulingAccountIds.has(row.id)"
-                  :account-label="row.email || row.name || row.id"
+                  :account-label="row.name || row.id"
                   @toggle="handleToggleScheduling(row)"
                 />
                 <AccountStatusBadge
