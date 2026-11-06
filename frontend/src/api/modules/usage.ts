@@ -96,6 +96,7 @@ export interface UsageListRecord extends UsageErrorFacts {
   logicalOutcome: string
   errorMessage: string | null
   clientApiKeyName: string | null
+  callerTokenName: string | null
   id: string
   provider: string | null
   authenticationKind: string | null
@@ -140,6 +141,7 @@ export interface UsageRecord extends UsageErrorFacts {
   retryAfterMs: number | null
 
   callerIdentity: CallerIdentity | null
+  callerTokenName: string | null
   errorDetails: string | null
   failureClass: string | null
   providerErrorCode: string | null

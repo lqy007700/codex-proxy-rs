@@ -372,6 +372,7 @@ pub(crate) fn usage_list_record_from_row(
             "caller_identity_json",
         )?
         .map(|value| value.0),
+        caller_token_name: get(row, "caller_token_name")?,
         outcome: request_outcome(&get::<String>(row, "outcome")?)?,
         attempt_count: to_u32(get(row, "attempt_count")?)?,
         error_message: get(row, "error_message")?,
@@ -455,6 +456,7 @@ pub(crate) fn usage_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<
             "caller_identity_json",
         )?
         .map(|value| value.0),
+        caller_token_name: get(row, "caller_token_name")?,
         billing,
         id: get(row, "id")?,
         client_api_key_ref: get(row, "client_api_key_ref")?,

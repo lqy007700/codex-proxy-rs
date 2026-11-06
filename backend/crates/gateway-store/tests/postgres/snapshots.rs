@@ -1223,6 +1223,7 @@ async fn renaming_account_should_not_rewrite_historical_snapshots() {
 fn new_request(id: &str, started_at: DateTime<Utc>) -> NewModelRequest {
     NewModelRequest {
         caller_identity: None,
+        caller_token_name_snapshot: None,
         admission_decision_ms: None,
         id: id.to_owned(),
         client_api_key_name_snapshot: None,

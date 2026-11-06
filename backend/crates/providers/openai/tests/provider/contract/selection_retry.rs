@@ -343,6 +343,7 @@ async fn server_busy_retries_same_account_then_rotates_with_shared_budget_after_
         .unwrap();
     let request = NewModelRequest {
         caller_identity: None,
+        caller_token_name_snapshot: None,
         admission_decision_ms: None,
         id: ModelRequestId::new("req_server_busy_budget").unwrap(),
         client_api_key_name_snapshot: None,
@@ -774,6 +775,7 @@ pub(super) fn execution_request(
 ) -> NewModelRequest {
     NewModelRequest {
         caller_identity: None,
+        caller_token_name_snapshot: None,
         admission_decision_ms: None,
         id: ModelRequestId::new(id).unwrap(),
         client_api_key_name_snapshot: None,

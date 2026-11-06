@@ -31,6 +31,8 @@ pub(super) struct RequestObservation {
 struct RequestContext {
     config_revision: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    caller_token_name_snapshot: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     client_api_key_name_snapshot: Option<String>,
     protocol: String,
     endpoint: String,
@@ -170,6 +172,7 @@ impl RequestObservation {
         let observation = Self {
             request: Some(RequestContext {
                 config_revision: request.config_revision,
+                caller_token_name_snapshot: request.caller_token_name_snapshot.clone(),
                 client_api_key_name_snapshot: request.client_api_key_name_snapshot.clone(),
                 protocol: request.protocol.clone(),
                 endpoint: request.endpoint.clone(),

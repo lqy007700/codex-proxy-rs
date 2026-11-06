@@ -2390,6 +2390,8 @@ New API `{mode:"newApi",sourceId,userId,tokenId}`，无身份探测 `{mode:"unid
 
 `/api/admin/usage/records` 与 `/api/admin/operations/errors` 的 `clientApiKeyName` 来自请求保存的 Key 名称快照，
 未保存时为 `null`，不影响记录返回，不包含密钥原文
+使用统计请求列表与详情接口的 `callerTokenName` 是完整可信 New API 请求在请求开始时保存的 Token 名称快照；直连、匿名、身份不完整或名称校验失败时为 `null`，旧记录也保持为 `null`。
+它只用于展示，不参与 `callerIdentity`、续接归属、重试隔离或账号亲和；Token 改名不会改写已有请求记录。
 
 查询不关联当前配置，改名、修改订阅或删除配置不改变已有快照。补写的历史 Key 名称与订阅取自补写时仍存在的配置，
 不保证等于请求发生时的值；无法补齐的字段保持未知

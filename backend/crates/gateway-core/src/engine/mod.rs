@@ -1131,6 +1131,8 @@ impl AttemptContext {
 #[derive(Debug, Clone)]
 pub struct NewModelRequest {
     pub caller_identity: Option<crate::policy::CallerIdentity>,
+    /// New API Token 在请求开始时冻结的展示名称，不参与身份匹配
+    pub caller_token_name_snapshot: Option<String>,
     pub client_api_key_name_snapshot: Option<String>,
     pub id: ModelRequestId,
     pub client_api_key_ref: ClientApiKeyId,

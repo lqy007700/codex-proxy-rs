@@ -109,6 +109,16 @@ const identifierItems = computed(() => [
           mono: true,
           wrap: true,
         },
+        ...(props.record.callerTokenName
+          ? [
+              {
+                label: 'New API Token 名称',
+                value: props.record.callerTokenName,
+                mono: true,
+                wrap: true,
+              },
+            ]
+          : []),
       ]
     : []),
   { label: '客户端状态码', value: props.record?.clientStatusCode, mono: true },

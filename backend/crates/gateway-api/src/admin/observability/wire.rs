@@ -87,6 +87,7 @@ pub struct ImageBillingView {
 #[serde(rename_all = "camelCase")]
 pub struct UsageListRecordView {
     pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
+    pub caller_token_name: Option<String>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub error_kind: Option<String>,
@@ -147,6 +148,7 @@ pub struct UsageUpstreamErrorView {
 #[serde(rename_all = "camelCase")]
 pub struct UsageRecordView {
     pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
+    pub caller_token_name: Option<String>,
     pub error_details: Option<String>,
     pub failure_class: Option<String>,
     pub provider_error_code: Option<String>,

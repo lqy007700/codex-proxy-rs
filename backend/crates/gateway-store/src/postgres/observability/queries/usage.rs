@@ -126,7 +126,7 @@ pub(crate) fn push_usage_filter(
 }
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
-    "select (select caller_identity_json from model_requests caller_request where caller_request.id=mr.id) as caller_identity_json, mr.id, mr.outcome, mr.attempt_count, mr.provider_error_code as error_code, mr.error_message, mr.client_status_code, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
+    "select (select caller_identity_json from model_requests caller_request where caller_request.id=mr.id) as caller_identity_json, mr.id, mr.outcome, mr.attempt_count, mr.provider_error_code as error_code, mr.error_message, mr.client_status_code, mr.client_api_key_name_snapshot as client_api_key_name, mr.caller_token_name_snapshot as caller_token_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
             mr.error_kind, mr.error_details, mr.continuation_unavailable_reason, mr.upstream_connection_exit_reason,
             (mr.recovery_request_id is not null and mr.recovered_at is not null) as recovered,
             mr.provider_kind, mr.provider_account_ref,
@@ -151,7 +151,7 @@ pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
      from model_request_observations mr";
 
 pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
-    "select (select caller_identity_json from model_requests caller_request where caller_request.id=mr.id) as caller_identity_json, mr.id, mr.client_api_key_ref, mr.config_revision,
+    "select (select caller_identity_json from model_requests caller_request where caller_request.id=mr.id) as caller_identity_json, mr.id, mr.client_api_key_ref, mr.caller_token_name_snapshot as caller_token_name, mr.config_revision,
             mr.routing_scope, mr.routing_group_refs, mr.routing_group_names_snapshot,
             mr.protocol, mr.operation,
             mr.endpoint, mr.client_transport, mr.requested_model_id,

@@ -771,6 +771,7 @@ pub struct DashboardObservation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageListRecord {
     pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
+    pub caller_token_name: Option<String>,
     pub outcome: RequestOutcome,
     pub attempt_count: u32,
     pub error_code: Option<String>,
@@ -858,6 +859,7 @@ impl std::fmt::Debug for UsageUpstreamError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageRecord {
     pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
+    pub caller_token_name: Option<String>,
     pub id: String,
     pub client_api_key_ref: String,
     pub config_revision: u64,

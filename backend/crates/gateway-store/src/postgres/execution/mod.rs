@@ -90,6 +90,7 @@ impl CostSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewModelRequest {
     pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
+    pub caller_token_name_snapshot: Option<String>,
     pub id: String,
     pub client_api_key_name_snapshot: Option<String>,
     pub client_api_key_ref: String,
@@ -1274,6 +1275,7 @@ fn new_model_request_row(request: CoreNewModelRequest) -> NewModelRequest {
         routing_snapshot_row(&request.routing);
     NewModelRequest {
         caller_identity: request.caller_identity,
+        caller_token_name_snapshot: request.caller_token_name_snapshot,
         id: request.id.as_str().to_owned(),
         client_api_key_name_snapshot: request.client_api_key_name_snapshot,
         client_api_key_ref: request.client_api_key_ref.as_str().to_owned(),

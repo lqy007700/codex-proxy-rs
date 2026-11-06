@@ -1441,6 +1441,7 @@ fn total_record(
 ) -> UsageListRecord {
     UsageListRecord {
         caller_identity: None,
+        caller_token_name: None,
         error_code: None,
         error_kind: None,
         websocket_close_code: None,

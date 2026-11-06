@@ -745,6 +745,7 @@ pub(super) fn usage_record_with_account(
 
     UsageRecord {
         caller_identity: None,
+        caller_token_name: None,
         upstream_error: None,
         id: id.to_owned(),
         client_api_key_ref: "key_detail".to_owned(),
@@ -888,6 +889,7 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         .expect("usage records")
         .push(UsageListRecord {
             caller_identity: None,
+            caller_token_name: None,
             error_code: None,
             error_kind: None,
             websocket_close_code: None,

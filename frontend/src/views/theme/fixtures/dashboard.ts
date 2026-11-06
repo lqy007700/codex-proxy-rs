@@ -114,6 +114,7 @@ function previewUsageRecord(options: PreviewUsageRecordOptions): UsageListRecord
 
   return {
     callerIdentity: null,
+    callerTokenName: null,
     id: options.id,
     logicalOutcome: 'succeeded',
     attemptCount: 1,
