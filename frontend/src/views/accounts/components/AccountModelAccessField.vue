@@ -9,6 +9,7 @@ import { getAccountModels, refreshAccountModels } from '@/api'
 import { useRequestState } from '@/composables/useRequestState'
 import { accountModelAccessError } from '../utils/modelAccess'
 import AccountModelCleanupPopover from './AccountModelCleanupPopover.vue'
+import AccountModelOption from './AccountModelOption.vue'
 
 const props = withDefaults(defineProps<{
   accountId?: string
@@ -221,20 +222,15 @@ watch(search, () => {
 
           <ZScrollbar v-if="filteredModels.length" max-height="16rem" class="min-w-0 -m-1">
             <div class="flex flex-wrap gap-1.5 p-1" role="group" aria-label="全部可用模型" :aria-busy="loading || undefined">
-              <button
+              <AccountModelOption
                 v-for="item in filteredModels"
                 :key="item.id"
-                type="button"
-                class="rounded-cp border-0 bg-transparent p-0 text-left outline-none transition-opacity duration-150 hover:opacity-85 focus-visible:ring-2 focus-visible:ring-cp-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-cp-bg-container disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
-                :disabled="disabled || (!selectedIds.has(item.id) && selectionLimitReached)"
-                :aria-pressed="selectedIds.has(item.id)"
+                :model-value="selectedIds.has(item.id)"
+                :label="item.id"
                 :title="item.label && item.label !== item.id ? `${item.id} · ${item.label}` : item.id"
-                @click="select(item.id, !selectedIds.has(item.id))"
-              >
-                <ZTag size="small" :type="selectedIds.has(item.id) ? 'primary' : 'default'" :disabled="disabled || (!selectedIds.has(item.id) && selectionLimitReached)">
-                  <span class="max-w-48 truncate">{{ item.id }}</span>
-                </ZTag>
-              </button>
+                :disabled="disabled || (!selectedIds.has(item.id) && selectionLimitReached)"
+                @update:model-value="select(item.id, $event)"
+              />
             </div>
           </ZScrollbar>
           <p v-else-if="loading" class="m-0 py-4 text-center text-cp-sm text-cp-text-tertiary" role="status">

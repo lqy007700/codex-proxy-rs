@@ -442,6 +442,7 @@ impl<'a> AnalyticsSnapshot<'a> {
                         "latency_ms_sum",
                         "cancelled_count",
                         "incomplete_count",
+                        "caller_error_count",
                         "retry_count",
                         "retried_request_count",
                         "provider_reported_count",
@@ -489,10 +490,9 @@ impl<'a> AnalyticsSnapshot<'a> {
                 first_token_p95_ms: state
                     .percentile("first_token_ms", 0.95)
                     .map(|value| value.round() as u64),
-                non_completion_count: metrics
-                    .cancelled_count
-                    .checked_add(metrics.incomplete_count)
-                    .ok_or_else(|| invalid("non-completion count overflow"))?,
+                cancelled_count: metrics.cancelled_count,
+                incomplete_count: metrics.incomplete_count,
+                caller_error_count: metrics.caller_error_count,
                 retry_count: state.count("retry_count"),
                 retried_request_count: state.count("retried_request_count"),
                 cost_coverage: state.coverage(),
@@ -835,7 +835,7 @@ impl<'a> AnalyticsSnapshot<'a> {
                 } else {
                     "'{}'::jsonb as distributions"
                 };
-                query.push(format!(" as output_bucket,{name} as name,counts,{costs},{distributions},last_used_at from {table} a where collection="))
+                query.push(format!(" as output_bucket,{name} as name,outcome,counts,{costs},{distributions},last_used_at from {table} a where collection="))
                     .push_bind(collection).push(" and schema_version=").push_bind(SCHEMA_VERSION)
                     .push(" and histogram_version=").push_bind(HISTOGRAM_VERSION);
                 push_summary_buckets(&mut query, &buckets, seconds);

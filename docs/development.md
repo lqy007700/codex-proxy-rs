@@ -41,7 +41,8 @@ git config remote.pushDefault origin
 
 沿用 Stable、Alpha、Beta、RC、Exp 通道，不增加自定义预发行后缀。
 发布前完成检查并准备本次说明，明确发布时再执行 `release/publish <version>`：
-该入口会更新版本文件、提交、打 tag、推送到当前分支的跟踪仓库，并触发 Release 工作流，不能作为只读检查使用。
+该入口会更新版本文件、提交、打 tag、推送到当前分支的跟踪仓库，并触发 Release 工作流。
+仅核对发行准备时使用 `release/publish --check <version>`，该模式不修改文件、Git 引用或远端状态，也不代替 CI 验证。
 已发布 tag 不移动或覆盖，后续修复使用新版本
 
 首次发布前在 fork 的 Actions 页面启用工作流，并确认可以向本仓库写入 Release 与 GHCR 包。

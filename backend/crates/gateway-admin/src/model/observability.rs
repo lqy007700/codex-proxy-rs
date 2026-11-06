@@ -516,10 +516,20 @@ impl RequestHealth {
         )
     }
 
+    /// 账号与健康时间线使用百分数，洞察接口使用 0 到 1 的比例
     #[must_use]
     pub fn success_rate(self) -> Option<f64> {
+        self.success_ratio().map(|ratio| ratio * 100.0)
+    }
+
+    pub(crate) fn success_ratio(self) -> Option<f64> {
         let total = self.eligible_requests();
-        (total > 0).then(|| self.success_requests as f64 / total as f64 * 100.0)
+        (total > 0).then(|| self.success_requests as f64 / total as f64)
+    }
+
+    pub(crate) fn error_ratio(self) -> Option<f64> {
+        let total = self.eligible_requests();
+        (total > 0).then(|| self.non_success_requests() as f64 / total as f64)
     }
 
     // 未完成保留交付终态，但上游失败、超时和进程中断都不能视为服务成功
@@ -1038,7 +1048,9 @@ pub struct DiagnosticObservation {
     pub average_latency_ms: Option<u64>,
     pub latency_p95_ms: Option<u64>,
     pub first_token_p95_ms: Option<u64>,
-    pub non_completion_count: u64,
+    pub cancelled_count: u64,
+    pub incomplete_count: u64,
+    pub caller_error_count: u64,
     pub retry_count: u64,
     pub retried_request_count: u64,
     pub cost_coverage: CostCoverage,
@@ -1126,7 +1138,7 @@ pub struct TrendPoint {
     pub bucket_start: DateTime<Utc>,
     pub granularity: Granularity,
     pub metrics: RequestMetrics,
-    pub service_failure_count: u64,
+    pub error_count: u64,
     pub average_latency_ms: Option<u64>,
     pub average_first_token_latency_ms: Option<u64>,
     pub cached_token_rate: f64,
@@ -1144,7 +1156,7 @@ pub struct TrendSummary {
     pub output_tokens: u64,
     pub cached_input_tokens: u64,
     pub total_tokens: u64,
-    pub service_failure_count: u64,
+    pub error_count: u64,
     pub average_latency_ms: Option<u64>,
     pub max_latency_ms: Option<u64>,
     pub min_latency_ms: Option<u64>,
@@ -1308,7 +1320,7 @@ pub struct UsageInsightsHealthPoint {
     pub cancelled_requests: u64,
     pub incomplete_requests: u64,
     pub caller_error_requests: u64,
-    pub error_rate: f64,
+    pub error_rate: Option<f64>,
 }
 
 /// 洞察健康汇总；失败数已排除调用方错误
@@ -1320,7 +1332,7 @@ pub struct UsageInsightsHealth {
     pub cancelled_requests: u64,
     pub incomplete_requests: u64,
     pub caller_error_requests: u64,
-    pub success_rate: f64,
+    pub success_rate: Option<f64>,
     pub completion_rate: f64,
     pub points: Vec<UsageInsightsHealthPoint>,
 }
@@ -1439,7 +1451,7 @@ pub struct DiagnosticsItem {
     pub request_count: u64,
     pub success_count: u64,
     pub error_count: u64,
-    pub error_rate: f64,
+    pub error_rate: Option<f64>,
     pub request_share: f64,
     pub average_latency_ms: Option<u64>,
     pub latency_p95_ms: Option<u64>,

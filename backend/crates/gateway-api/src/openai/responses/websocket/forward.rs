@@ -179,6 +179,7 @@ pub(super) async fn forward_response(
         })
         .collect::<Vec<_>>();
     let mut interrupt = super::interrupt::ResponseInterrupt::default();
+    let mut reconnect_after_terminal = false;
     let first = match next_body_input(
         connection,
         body.as_mut(),
@@ -186,6 +187,7 @@ pub(super) async fn forward_response(
         &mut interrupt,
         &request_id,
         false,
+        &mut reconnect_after_terminal,
     )
     .await
     {
@@ -240,6 +242,7 @@ pub(super) async fn forward_response(
                     &mut interrupt,
                     &request_id,
                     terminal_write.is_some(),
+                    &mut reconnect_after_terminal,
                 )
                 .await
                 {
@@ -261,7 +264,11 @@ pub(super) async fn forward_response(
                             .filter(|_| terminal_write == Some(WriteOutcome::Written));
                         let outcome = replay.commit(&capture, delivered);
                         body.close().await;
-                        return outcome;
+                        return if reconnect_after_terminal {
+                            ForwardOutcome::ReconnectIfIdle
+                        } else {
+                            outcome
+                        };
                     }
                     BodyInput::Frame(Ok(None)) => {
                         return fail_body(
@@ -357,6 +364,7 @@ async fn next_body_input(
     interrupt: &mut super::interrupt::ResponseInterrupt,
     request_id: &Arc<str>,
     terminal_seen: bool,
+    reconnect_after_terminal: &mut bool,
 ) -> BodyInput {
     // 处理控制帧时继续持有同一个读取 future，不能取消正在加工正文的中间件
     let frame = body.next_frame();
@@ -392,8 +400,11 @@ async fn next_body_input(
                 }
             }
             event = response_control.receive(), if terminal_seen => {
-                if forward_control_event(connection, response_control, event).await == ForwardOutcome::Disconnect {
-                    return BodyInput::Disconnect;
+                match forward_control_event(connection, response_control, event).await {
+                    ForwardOutcome::Disconnect => return BodyInput::Disconnect,
+                    // 终态写出后仍需完成结算，失效通知留到响应收尾后再触发空闲关闭
+                    ForwardOutcome::ReconnectIfIdle => *reconnect_after_terminal = true,
+                    ForwardOutcome::Continue => {}
                 }
             }
             frame = &mut frame => return BodyInput::Frame(frame),
@@ -833,7 +844,7 @@ pub(super) async fn forward_control_event(
 ) -> ForwardOutcome {
     let Ok(payload) = event else {
         control.clear();
-        return ForwardOutcome::Continue;
+        return ForwardOutcome::ReconnectIfIdle;
     };
     if connection
         .send_text(payload, WriteContext::connection(FramePhase::Data))

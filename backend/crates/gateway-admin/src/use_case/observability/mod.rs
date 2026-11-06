@@ -323,9 +323,16 @@ impl ObservabilityService for DefaultObservabilityService {
             .items
             .into_iter()
             .map(|item| {
-                let error_rate = rate_or_zero(item.failure_count, item.request_count);
-                let non_completion_rate =
-                    rate_or_zero(item.non_completion_count, item.request_count);
+                let health = RequestHealth::from_counts(
+                    item.success_count,
+                    item.failure_count,
+                    item.cancelled_count,
+                    item.incomplete_count,
+                    item.caller_error_count,
+                );
+                let non_completion_count =
+                    item.cancelled_count.saturating_add(item.incomplete_count);
+                let non_completion_rate = rate_or_zero(non_completion_count, item.request_count);
                 let retry_rate = rate_or_zero(item.retried_request_count, item.request_count);
                 DiagnosticsItem {
                     key: item.key,
@@ -339,8 +346,8 @@ impl ObservabilityService for DefaultObservabilityService {
                     account_plan_type: item.account_plan_type,
                     request_count: item.request_count,
                     success_count: item.success_count,
-                    error_count: item.failure_count,
-                    error_rate,
+                    error_count: health.non_success_requests(),
+                    error_rate: health.error_ratio(),
                     request_share: rate_or_zero(
                         item.request_count,
                         observation.total_request_count,
@@ -348,7 +355,7 @@ impl ObservabilityService for DefaultObservabilityService {
                     average_latency_ms: item.average_latency_ms,
                     latency_p95_ms: item.latency_p95_ms,
                     first_token_p95_ms: item.first_token_p95_ms,
-                    non_completion_count: item.non_completion_count,
+                    non_completion_count,
                     non_completion_rate,
                     retry_count: item.retry_count,
                     retry_rate,
@@ -399,7 +406,6 @@ fn build_usage_insights(
     let requests = &overview.requests;
     let health_window = RequestHealth::from_metrics(requests);
     let failed_requests = health_window.failed_requests;
-    let health_requests = health_window.eligible_requests();
     let health = UsageInsightsHealth {
         total_requests: requests.request_count,
         success_requests: requests.success_count,
@@ -407,7 +413,7 @@ fn build_usage_insights(
         cancelled_requests: requests.cancelled_count,
         incomplete_requests: requests.incomplete_count,
         caller_error_requests: requests.caller_error_count,
-        success_rate: rate_or_zero(requests.success_count, health_requests),
+        success_rate: health_window.success_ratio(),
         completion_rate: rate_or_zero(
             requests
                 .success_count
@@ -426,10 +432,7 @@ fn build_usage_insights(
                     cancelled_requests: point.metrics.cancelled_count,
                     incomplete_requests: point.metrics.incomplete_count,
                     caller_error_requests: point.metrics.caller_error_count,
-                    error_rate: rate_or_zero(
-                        health_window.non_success_requests(),
-                        health_window.eligible_requests(),
-                    ),
+                    error_rate: health_window.error_ratio(),
                 }
             })
             .collect(),
@@ -1019,11 +1022,9 @@ fn trend(
         }
     }
     let average_latency_ms = average(metrics.latency_sum_ms, metrics.latency_count);
-    let service_failure_count = RequestHealth::from_metrics(&metrics).failed_requests;
-    let success_rate = ratio(
-        metrics.success_count,
-        RequestHealth::from_metrics(&metrics).eligible_requests(),
-    );
+    let health = RequestHealth::from_metrics(&metrics);
+    let error_count = health.non_success_requests();
+    let success_rate = health.success_ratio();
     let cache_hit_request_rate = ratio(
         metrics.cache_hit_request_count,
         metrics.cache_eligible_request_count,
@@ -1052,7 +1053,7 @@ fn trend(
             output_tokens: metrics.output_tokens,
             cached_input_tokens: metrics.cached_input_tokens,
             total_tokens: metrics.total_tokens,
-            service_failure_count,
+            error_count,
             average_latency_ms,
             max_latency_ms: metrics.max_latency_ms,
             min_latency_ms: metrics.min_latency_ms,
@@ -1071,11 +1072,11 @@ fn trend(
 }
 
 fn trend_point(point: RequestMetricPoint) -> TrendPoint {
-    let service_failure_count = RequestHealth::from_metrics(&point.metrics).failed_requests;
+    let health = RequestHealth::from_metrics(&point.metrics);
     TrendPoint {
         bucket_start: point.bucket_start,
         granularity: point.granularity,
-        service_failure_count,
+        error_count: health.non_success_requests(),
         average_latency_ms: average(point.metrics.latency_sum_ms, point.metrics.latency_count),
         average_first_token_latency_ms: average(
             point.metrics.first_token_latency_sum_ms,
@@ -1089,10 +1090,7 @@ fn trend_point(point: RequestMetricPoint) -> TrendPoint {
             point.metrics.cache_hit_request_count,
             point.metrics.cache_eligible_request_count,
         ),
-        success_rate: ratio(
-            point.metrics.success_count,
-            RequestHealth::from_metrics(&point.metrics).eligible_requests(),
-        ),
+        success_rate: health.success_ratio(),
         metrics: point.metrics,
         cost_coverage: point.cost_coverage,
         costs: point.costs,

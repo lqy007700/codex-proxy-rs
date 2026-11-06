@@ -8,7 +8,6 @@ import { use } from 'echarts/core'
 import { computed } from 'vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { tooltipIndex, tooltipRows } from '@/components/charts/tooltip'
-import { healthEligibleRequestCount } from '@/components/usage/shared/health'
 import { useChartPalette } from '@/composables/useChartPalette'
 import { formatLocalizedCompactNumber as formatCompactNumber, formatPercent } from '@/utils/format'
 
@@ -123,12 +122,9 @@ function requestCount(point: HealthPoint) {
 }
 
 function serviceSuccessRate(point: HealthPoint) {
-  const total = healthEligibleRequestCount(point)
-  if (total > 0)
-    return 1 - point.errorRate
-  return requestCount(point) === 0
-    ? 0
-    : null
+  return point.errorRate == null
+    ? null
+    : 1 - point.errorRate
 }
 
 function outcomeSeries(name: string, data: number[], color: string) {
@@ -161,7 +157,7 @@ function formatTooltip(params: unknown) {
     usageTooltipItem(
       '服务成功率',
       successRate == null
-        ? '无服务结果'
+        ? '无样本'
         : formatPercent(successRate),
       theme.success,
     ),
@@ -182,7 +178,7 @@ function formatTooltip(params: unknown) {
           <div class="grid gap-1 px-2">
             <span class="text-[10px] font-bold text-cp-text-quaternary">服务成功率</span>
             <strong class="font-mono text-cp-base font-heavy tabular-nums text-cp-green-text">
-              {{ formatPercent(health.successRate) }}
+              {{ health.successRate == null ? '无样本' : formatPercent(health.successRate) }}
             </strong>
           </div>
           <div class="grid gap-1 px-2">

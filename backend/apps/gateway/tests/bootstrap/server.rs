@@ -146,3 +146,39 @@ fn generate_proxy_test_certificates(directory: &std::path::Path) {
         "extensions",
     ]);
 }
+
+#[test]
+fn restart_handoff_should_wait_before_processing_cli_arguments() {
+    use std::{process::Stdio, time::Duration};
+
+    let directory = tempfile::tempdir().expect("isolated CLI directory");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_codex-proxy-rs"))
+        .args(["--restart-handoff", "--help"])
+        .current_dir(directory.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("replacement process");
+    let input = child.stdin.take().expect("handoff pipe");
+    // 未交接时不能初始化运行时或处理 CLI，即使只是无需配置的帮助命令
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(child.try_wait().expect("waiting process").is_none());
+    drop(input);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while child.try_wait().expect("replacement status").is_none() {
+        if std::time::Instant::now() >= deadline {
+            child.kill().expect("stop timed-out replacement");
+            child.wait().expect("reap timed-out replacement");
+            panic!("replacement did not resume after handoff");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().expect("replacement output");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Usage: codex-proxy-rs"));
+}

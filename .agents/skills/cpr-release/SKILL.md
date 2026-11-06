@@ -31,7 +31,7 @@ description: Codex Proxy RS 的版本规划、发布说明、正式或预发行�
 
 ## 必须保持的边界
 
-- `release/publish` 会提交、打 tag、推送并触发工作流，没有只读预演模式，不能用于探测或演练
+- `release/publish <version>` 会提交、打 tag、推送并触发工作流；只读准备核对使用 `release/publish --check <version>`，不代替 CI 或发行验证
 - 同名版本、超时或中断先查本地与远端状态，不删已发布 tag、不移动 tag、不强推掩盖冲突
 - 预发行不得覆盖 GitHub Latest 或镜像 `latest`，完成后回读核对
 - `release/notes.md` 只承载当前发行的说明，常规文档只写当前状态，不追加版本历史；其变更执行[文档检查](../cpr-dev-guide/references/documentation.md)

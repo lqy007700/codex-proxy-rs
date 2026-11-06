@@ -166,11 +166,11 @@ async fn model_success_rates_preserve_usage_across_source_summary_and_pending_re
         ("health_retry", "mixed", "succeeded", 200),
         ("health_failed", "mixed", "failed", 502),
         ("health_incomplete", "mixed", "incomplete", 200),
-        ("health_cancelled", "mixed", "cancelled", 200),
+        ("health_cancelled", "mixed", "cancelled", 499),
         ("health_caller", "mixed", "failed", 400),
         ("health_recovered", "mixed", "failed", 502),
         ("health_only_failed", "failed-only", "failed", 502),
-        ("health_only_cancelled", "no-sample", "cancelled", 200),
+        ("health_only_cancelled", "no-sample", "cancelled", 499),
         ("health_only_caller", "no-sample", "failed", 400),
     ]
     .into_iter()
@@ -185,7 +185,13 @@ async fn model_success_rates_preserve_usage_across_source_summary_and_pending_re
                 model,
                 total_tokens: 11,
                 cost_amount: "2.5",
-                started_at: start + TimeDelta::minutes(5 + index as i64 * 5),
+                // 取消请求同时覆盖整桶和非整刻窗口的边界事实查询
+                started_at: start
+                    + TimeDelta::minutes(if id == "health_cancelled" {
+                        6
+                    } else {
+                        5 + index as i64 * 5
+                    }),
             },
         )
         .await
@@ -228,6 +234,7 @@ async fn model_success_rates_preserve_usage_across_source_summary_and_pending_re
         assert_eq!(mixed.health.success_rate(), Some(50.0));
         assert_eq!(mixed.health.success_requests, 2);
         assert_eq!(mixed.health.failed_requests, 1);
+        assert_eq!(mixed.health.caller_error_requests, 1);
         assert_eq!(mixed.health.incomplete_requests, 1);
         let failed = usage
             .models
@@ -245,6 +252,16 @@ async fn model_success_rates_preserve_usage_across_source_summary_and_pending_re
         assert_eq!(excluded.health.success_rate(), None);
     }
     drain_analytics(&database.pool).await;
+    // 模拟升级前已投影的取消 499 计数，查询必须按终态忽略，不能要求重建历史桶
+    for table in ["request_analytics_15m", "request_analytics_1h"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "update {table} set counts=jsonb_set(counts,'{{caller_error_count}}',counts->'cancelled_count') where collection='account_model' and dimensions[1]='acct_health' and outcome='cancelled'"
+        )))
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    }
+
     assert_eq!(
         store.load_account_usage_by_windows(&windows).await.unwrap(),
         source
@@ -275,6 +292,9 @@ async fn model_success_rates_preserve_usage_across_source_summary_and_pending_re
         .execute(&database.pool)
         .await
         .unwrap();
+    // 旧事实仍为取消 499，新源版本改为 200；撤销必须与已过滤桶及新 MetricState 相同口径
+    sqlx::query("update model_requests set client_status_code=200 where id in ('health_cancelled','health_only_cancelled')")
+        .execute(&database.pool).await.unwrap();
     let pending = store.load_account_usage_by_windows(&windows).await.unwrap();
     for result in &pending {
         assert_eq!(

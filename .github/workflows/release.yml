@@ -43,6 +43,7 @@ jobs:
       build_type: ${{ steps.version.outputs.build_type }}
       rust: ${{ steps.toolchains.outputs.rust }}
       rust_image: ${{ steps.toolchains.outputs.rust_image }}
+      run_backend: ${{ steps.quality.outputs.run_backend }}
 
     steps:
       - name: Checkout
@@ -61,11 +62,26 @@ jobs:
         id: toolchains
         run: ruby .github/scripts/toolchains.rb >> "$GITHUB_OUTPUT"
 
+      - name: Load quality tooling for recovery
+        if: inputs.reuse_run_id != ''
+        env:
+          QUALITY_TOOLING_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$QUALITY_TOOLING_SHA"
+          git restore --source="$QUALITY_TOOLING_SHA" -- .github/scripts/release-quality.rb
+
+      - name: Check reusable backend CI evidence
+        id: quality
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ruby .github/scripts/release-quality.rb >> "$GITHUB_OUTPUT"
+
       - name: Validate recovery source
         if: inputs.reuse_run_id != ''
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           SOURCE_RUN_ID: ${{ inputs.reuse_run_id }}
+          RUN_BACKEND: ${{ steps.quality.outputs.run_backend }}
           DOCKER_MATRIX: ${{ steps.version.outputs.docker_matrix }}
         with:
           script: |
@@ -88,7 +104,7 @@ jobs:
             });
             const platforms = JSON.parse(process.env.DOCKER_MATRIX).include;
             const requiredJobs = [
-              'release-info', 'frontend', 'quality / backend', 'quality / workflow-lint',
+              'release-info', 'frontend', 'quality / workflow-lint',
               ...platforms.map(p => `build-docker-binary (${p.os}-${p.arch})`),
               ...platforms.map(p => `build-docker-image (${p.dockerPlatform})`),
             ];
@@ -98,6 +114,12 @@ jobs:
               if (matches.length !== 1 || matches[0].conclusion !== 'success') {
                 throw new Error(`Source run has no successful job: ${name}`);
               }
+            }
+            // 后端允许复用同一源码的主分支 CI；本轮重新核实证据，不能仅相信 skipped
+            const backend = jobs.filter(job => job.name === 'quality / backend');
+            if (backend.length !== 1 || (backend[0].conclusion !== 'success'
+                && !(backend[0].conclusion === 'skipped' && process.env.RUN_BACKEND === 'false'))) {
+              throw new Error('Source run has no successful job: quality / backend');
             }
             const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
               ...params, per_page: 100,
@@ -150,7 +172,7 @@ jobs:
           name: release-identity
           path: dist/release-identity
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   quality:
     needs: [release-info]
@@ -158,8 +180,17 @@ jobs:
     with:
       # 恢复时核对本轮工作流，业务源码检查复用来源运行的同一提交
       ref: ${{ inputs.reuse_run_id != '' && github.sha || needs.release-info.outputs.git_sha }}
-      run_backend: ${{ inputs.reuse_run_id == '' }}
+      run_backend: ${{ inputs.reuse_run_id == '' && needs.release-info.outputs.run_backend == 'true' }}
       run_frontend: false
+
+  security:
+    needs: release-info
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      ref: ${{ needs.release-info.outputs.git_sha }}
 
   frontend:
     if: inputs.reuse_run_id == ''
@@ -195,40 +226,15 @@ jobs:
         with:
           ref: ${{ needs.release-info.outputs.git_sha }}
 
-      - name: Cache Cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            backend/target
-          # 按目标、工具链和依赖保存，不为每个发行提交复制整个 target
-          key: cargo-v3-${{ runner.os }}-${{ matrix.target }}-${{ needs.release-info.outputs.rust_image }}-${{ hashFiles('backend/Cargo.lock', 'backend/rust-toolchain.toml', 'backend/**/Cargo.toml', 'backend/.cargo/config.toml') }}
-          restore-keys: |
-            cargo-v3-${{ runner.os }}-${{ matrix.target }}-
-
       - name: Build binary
-        shell: bash
-        run: |
-          mkdir -p "$HOME/.cargo" "../dist/binaries/${{ matrix.os }}-${{ matrix.arch }}"
-          docker run --rm \
-            --platform "${{ matrix.dockerPlatform }}" \
-            --user "$(id -u):$(id -g)" \
-            -e CARGO_HOME=/cargo \
-            -e HOME=/tmp \
-            -e CPR_VERSION="${CPR_VERSION}" \
-            -e CPR_GIT_SHA="${CPR_GIT_SHA}" \
-            -e CPR_BUILD_TIME="${CPR_BUILD_TIME}" \
-            -e CPR_BUILD_TYPE="${CPR_BUILD_TYPE}" \
-            -v "$HOME/.cargo:/cargo" \
-            -v "$PWD/..:/workspace" \
-            -w /workspace/backend \
-            "${RUST_IMAGE}" \
-            cargo build --release --locked --target "${{ matrix.target }}" --bin codex-proxy-rs
-          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "../dist/binaries/${{ matrix.os }}-${{ matrix.arch }}/${{ matrix.binary }}"
-        working-directory: backend
+        uses: ./.github/actions/build-binary
+        with:
+          rust: ${{ needs.release-info.outputs.rust }}
+          target: ${{ matrix.target }}
+          platform: ${{ matrix.os }}-${{ matrix.arch }}
+          binary: ${{ matrix.binary }}
+          rust-image: ${{ needs.release-info.outputs.rust_image }}
         env:
-          RUST_IMAGE: ${{ needs.release-info.outputs.rust_image }}
           CPR_VERSION: ${{ needs.release-info.outputs.version }}
           CPR_GIT_SHA: ${{ needs.release-info.outputs.git_sha }}
           CPR_BUILD_TIME: ${{ needs.release-info.outputs.build_time }}
@@ -240,7 +246,7 @@ jobs:
           name: codex-proxy-rs-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/binaries/${{ matrix.os }}-${{ matrix.arch }}/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   package-assets:
     needs: [release-info, frontend, build-docker-binary]
@@ -299,7 +305,7 @@ jobs:
           name: release-assets
           path: dist/release
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
           # tar.gz 已压缩，Actions 只负责传递原始发行字节。
           compression-level: 0
 
@@ -406,17 +412,18 @@ jobs:
           name: image-digest-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/digests/*.txt
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   publish:
     concurrency:
       group: release-publication
       queue: max
     # 产物准备可与测试重叠，版本标签和 GitHub Release 必须等全部质量与镜像验证通过
-    needs: [release-info, quality, package-assets, build-docker-image]
+    needs: [release-info, quality, security, package-assets, build-docker-image]
     if: >-
       ${{ !cancelled() && needs.release-info.result == 'success' &&
-          needs.quality.result == 'success' && needs.package-assets.result == 'success' &&
+          needs.quality.result == 'success' && needs.security.result == 'success' &&
+          needs.package-assets.result == 'success' &&
           ((inputs.reuse_run_id != '' && needs.build-docker-image.result == 'skipped') ||
            (inputs.reuse_run_id == '' && needs.build-docker-image.result == 'success')) }}
     runs-on: ubuntu-26.04

@@ -112,7 +112,7 @@ impl AnalyticsSnapshot<'_> {
                 continue;
             }
             let mut query = QueryBuilder::<Postgres>::new(format!(
-                "with selected as materialized (select dimensions[1] as account_id,{model} as model,counts,costs,last_used_at from {table} a where collection='{collection}' and schema_version="
+                "with selected as materialized (select dimensions[1] as account_id,{model} as model,outcome,counts,costs,last_used_at from {table} a where collection='{collection}' and schema_version="
             ));
             query
                 .push_bind(SCHEMA_VERSION)
@@ -129,7 +129,15 @@ impl AnalyticsSnapshot<'_> {
                 currencies as (select account_id,model,c.key,sum(c.value::numeric)::text as amount from selected cross join lateral jsonb_each_text(costs) c where c.key not in ('standard_usd','no_cache_usd') group by account_id,model,c.key),
                 costs as (select account_id,model,jsonb_object_agg(key,amount) as costs from currencies group by account_id,model)
                 select totals.*,coalesce(costs.costs,'{{}}'::jsonb) as costs,'{{}}'::jsonb as distributions from totals left join costs using(account_id,model)",
-                counters.iter().map(|name| format!("'{name}',coalesce(sum(metric.{name}),0)")).collect::<Vec<_>>().join(","),
+                counters.iter().map(|name| {
+                    // 旧统计桶可能把取消的 499 记入调用方错误，按终态筛选无需重建
+                    let sum = if name == "caller_error_count" {
+                        "coalesce(sum(metric.caller_error_count) filter(where outcome='failed'),0)".to_owned()
+                    } else {
+                        format!("coalesce(sum(metric.{name}),0)")
+                    };
+                    format!("'{name}',{sum}")
+                }).collect::<Vec<_>>().join(","),
                 counters.iter().map(|name| format!("{name} numeric")).collect::<Vec<_>>().join(",")
             ));
             let rows = query
@@ -523,7 +531,7 @@ fn usage_fact_aggregate_sql(table: &str, by_model: bool) -> String {
     if by_model {
         counters.push("'request_count',count(*)".to_owned());
         counters.push(
-            "'caller_error_count',count(*) filter(where client_status_code between 400 and 499)"
+            "'caller_error_count',count(*) filter(where outcome='failed' and client_status_code between 400 and 499)"
                 .to_owned(),
         );
         for (outcome, name) in [

@@ -115,8 +115,8 @@ export function dashboardTrendView(trend: DashboardTrendResponse | null) {
   for (const item of trend.summary) {
     summary.push({
       label: item.label,
-      value: trend.kind === 'errors' && item.ratio !== null
-        ? item.ratio
+      value: trend.kind === 'errors' && item.label === '成功率'
+        ? item.ratio ?? '无样本'
         : item.value,
       tone: trendSummaryTone(item.label),
       colorVar: trendSummaryColorVar(trend.kind, item.label),

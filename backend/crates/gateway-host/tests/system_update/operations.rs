@@ -92,10 +92,12 @@ async fn assert_system_operations_rejected(service: &ProcessSystemOperations, re
 }
 
 #[tokio::test]
-async fn restart_should_spawn_replacement_before_shutdown_outside_docker() {
+async fn restart_should_wait_for_service_release_before_starting_replacement() {
     let fixture = Fixture::new();
     let replacement_marker = fixture.root.path().join("replacement-ran");
-    fixture.write_executable("#!/bin/sh\n: > \"${0%/*}/replacement-ran\"\n");
+    fixture.write_executable(
+        "#!/bin/sh\nif [ \"$1\" = --help ]; then exit 0; fi\n: > \"${0%/*}/replacement-ran\"\n",
+    );
     let mut config = fixture.config("http://127.0.0.1:1/repos");
     config.self_restart_enabled = true;
     let shutdown = CancellationToken::new();
@@ -111,6 +113,11 @@ async fn restart_should_spawn_replacement_before_shutdown_outside_docker() {
     tokio::time::timeout(Duration::from_secs(2), shutdown.cancelled())
         .await
         .expect("shutdown requested after spawn");
+    // 关闭信号已经发出，慢速收尾期间仍必须等待旧服务释放资源
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!replacement_marker.exists());
+    assert!(fixture.lock().exists());
+    drop(service);
     tokio::time::timeout(Duration::from_secs(2), async {
         while !replacement_marker.is_file() {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -137,7 +144,6 @@ async fn restart_should_use_startup_path_after_running_executable_is_renamed() {
                 "system_update::restart_should_use_startup_path_after_running_executable_is_renamed",
             ])
             .env(CHILD_ENV, "1")
-            .env("CPR_RESTART_DELAY_MS", "1200")
             .output()
             .expect("isolated restart test");
         assert!(
@@ -169,9 +175,12 @@ async fn restart_should_use_startup_path_after_running_executable_is_renamed() {
     let service = ProcessSystemOperations::new(CancellationToken::new(), config);
     let backup = fixture.root.path().join("codex-proxy-rs.backup");
     fs::rename(fixture.executable(), &backup).expect("back up running executable");
-    fixture.write_executable("#!/bin/sh\nprintf new > \"${0%/*}/replacement-version\"\n");
+    fixture.write_executable(
+        "#!/bin/sh\nif [ \"$1\" = --help ]; then exit 0; fi\nprintf new > \"${0%/*}/replacement-version\"\n",
+    );
     assert_eq!(std::env::current_exe().expect("renamed executable"), backup);
     service.restart().await.expect("restart accepted");
+    drop(service);
     let marker = fixture.root.path().join("replacement-version");
     tokio::time::timeout(Duration::from_secs(5), async {
         while !marker.is_file() {
@@ -864,4 +873,114 @@ async fn host_shutdown_should_finish_an_accepted_update_and_release_its_lock() {
         fs::read(fixture.executable()).expect("binary"),
         b"old-binary"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn restart_should_keep_legacy_cli_arguments_across_repeated_handoffs() {
+    let fixture = Fixture::new();
+    // 模拟旧发行的真实 CLI 边界：支持 --help，拒绝未知内部参数
+    fixture.write_executable(
+        "#!/bin/sh\nfor arg in \"$@\"; do if [ \"$arg\" = --restart-handoff ]; then exit 64; fi; done\nif [ \"$1\" = --help ]; then exit 0; fi\nprintf 'started\\n' >> \"${0%/*}/legacy-starts\"\n",
+    );
+    let marker = fixture.root.path().join("legacy-starts");
+    let mut config = fixture.config("http://127.0.0.1:1/repos");
+    config.self_restart_enabled = true;
+    for expected in 1..=2 {
+        let shutdown = CancellationToken::new();
+        let service = ProcessSystemOperations::new(shutdown.clone(), config.clone());
+        service
+            .restart()
+            .await
+            .expect("legacy replacement scheduled");
+        tokio::time::timeout(Duration::from_secs(2), shutdown.cancelled())
+            .await
+            .expect("shutdown requested");
+        assert_eq!(
+            fs::read_to_string(&marker)
+                .unwrap_or_default()
+                .lines()
+                .count(),
+            expected - 1,
+            "legacy CLI must not run before resource release"
+        );
+        drop(service);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while fs::read_to_string(&marker)
+                .unwrap_or_default()
+                .lines()
+                .count()
+                != expected
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("legacy CLI resumed without an internal argument");
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn restart_should_not_shutdown_when_target_interpreter_is_missing() {
+    let fixture = Fixture::new();
+    fixture.write_executable("#!/missing/cpr-test-interpreter\n");
+    let mut config = fixture.config("http://127.0.0.1:1/repos");
+    config.self_restart_enabled = true;
+    let shutdown = CancellationToken::new();
+    let service = ProcessSystemOperations::new(shutdown.clone(), config);
+    assert!(service.restart().await.is_err());
+    assert!(!shutdown.is_cancelled());
+    assert!(!fixture.lock().exists());
+}
+
+#[cfg(unix)]
+#[tokio::test(start_paused = true)]
+async fn restart_should_not_shutdown_when_target_startup_check_times_out() {
+    let fixture = Fixture::new();
+    fixture.write_executable("#!/bin/sh\nexec sleep 30\n");
+    let mut config = fixture.config("http://127.0.0.1:1/repos");
+    config.self_restart_enabled = true;
+    let shutdown = CancellationToken::new();
+    let service = ProcessSystemOperations::new(shutdown.clone(), config);
+    let error = service
+        .restart()
+        .await
+        .expect_err("startup check times out");
+    assert!(error.message().contains("启动检查超时"));
+    assert!(!shutdown.is_cancelled());
+    assert!(!fixture.lock().exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn restart_should_not_launch_replacement_when_shutdown_arrives_during_check() {
+    let fixture = Fixture::new();
+    fixture.write_executable(
+        "#!/bin/sh\nif [ \"$1\" = --help ]; then\n: > \"${0%/*}/probe-started\"\nwhile [ ! -f \"${0%/*}/probe-release\" ]; do sleep 0.01; done\nexit 0\nfi\n: > \"${0%/*}/replacement-ran\"\n",
+    );
+    let mut config = fixture.config("http://127.0.0.1:1/repos");
+    config.self_restart_enabled = true;
+    let shutdown = CancellationToken::new();
+    let service = Arc::new(ProcessSystemOperations::new(shutdown.clone(), config));
+    let request = {
+        let service = Arc::clone(&service);
+        tokio::spawn(async move { service.restart().await })
+    };
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !fixture.root.path().join("probe-started").is_file() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("startup check running");
+    shutdown.cancel();
+    fs::write(fixture.root.path().join("probe-release"), "continue").unwrap();
+    let error = request
+        .await
+        .unwrap()
+        .expect_err("shutdown rejects restart");
+    assert_eq!(error.kind(), SystemOperationErrorKind::Conflict);
+    assert!(!fixture.root.path().join("replacement-ran").exists());
+    assert!(!fixture.lock().exists());
 }

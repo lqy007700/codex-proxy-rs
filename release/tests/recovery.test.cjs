@@ -19,6 +19,7 @@ const validate = new (Object.getPrototypeOf(async function () {}).constructor)(
 function fixture() {
   return {
     sourceId: '101',
+    runBackend: 'true',
     source: { id: 101, workflow_id: 7, event: 'workflow_dispatch', status: 'completed', conclusion: 'failure' },
     current: { id: 102, workflow_id: 7 },
     jobs: [
@@ -52,6 +53,7 @@ async function runValidation(data) {
   await validate(github, { repo: { owner: 'owner', repo: 'gateway' }, runId: 102 }, { info() {} }, {
     env: {
       SOURCE_RUN_ID: data.sourceId,
+      RUN_BACKEND: data.runBackend,
       DOCKER_MATRIX: JSON.stringify({ include: [{ os: 'linux', arch: 'amd64', dockerPlatform: 'linux/amd64' }] }),
     },
   });
@@ -82,7 +84,17 @@ for (const [label, mutate] of [
   });
 }
 
-test('封口清单必须同时匹配版本和提交', () => {
+test('后端跳过仅在本轮重新确认同源码CI证据时允许恢复', async () => {
+  const data = fixture();
+  data.jobs.find(job => job.name === 'quality / backend').conclusion = 'skipped';
+  await assert.rejects(runValidation(data));
+  data.runBackend = 'false';
+  await runValidation(data);
+  data.jobs.find(job => job.name === 'quality / backend').conclusion = 'failure';
+  await assert.rejects(runValidation(data));
+});
+
+test('封口清单必须同时匹配版本和提交' , () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'cpr-recovery-'));
   try {
     mkdirSync(path.join(directory, 'reuse-manifest'));
@@ -120,12 +132,12 @@ test('新版本要求构建成功，恢复允许跳过构建，来源失败或�
 });
 
 test('发布需要本轮质量检查和打包成功，恢复模式只接受约定的镜像跳过', () => {
-  const results = { 'release-info': 'success', quality: 'success', 'package-assets': 'success', 'build-docker-image': 'success' };
+  const results = { 'release-info': 'success', quality: 'success', security: 'success', 'package-assets': 'success', 'build-docker-image': 'success' };
   assert.equal(allowed('publish', false, results), true);
   assert.equal(allowed('publish', false, { ...results, 'build-docker-image': 'skipped' }), false);
   const recovery = { ...results, 'build-docker-image': 'skipped' };
   assert.equal(allowed('publish', true, recovery), true);
-  for (const name of ['release-info', 'quality', 'package-assets', 'build-docker-image']) {
+  for (const name of ['release-info', 'quality', 'security', 'package-assets', 'build-docker-image']) {
     assert.equal(allowed('publish', true, { ...recovery, [name]: 'failure' }), false);
   }
   assert.equal(allowed('publish', true, recovery, true), false);

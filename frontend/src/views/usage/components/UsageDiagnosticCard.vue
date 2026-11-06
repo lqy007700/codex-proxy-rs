@@ -71,7 +71,7 @@ const diagnosticColumns = computed(() => defineTableColumns<DiagnosticDisplayIte
   },
   {
     key: 'errorCount',
-    label: '失败',
+    label: '错误',
     kind: 'numeric',
     size: 'xs',
   },
@@ -203,8 +203,8 @@ function diagnosticNameDisplay(name: string) {
           <strong
             class="font-mono font-bold tabular-nums"
             :class="row.errorCount > 0 ? 'text-cp-error-text' : 'text-cp-text-quaternary'"
-            :aria-label="`失败 ${formatCompactNumber(row.errorCount)} 次`"
-            :title="`失败率 ${formatPercent(row.errorRate)}`"
+            :aria-label="`错误 ${formatCompactNumber(row.errorCount)} 次`"
+            :title="`错误率 ${row.errorRate == null ? '无样本' : formatPercent(row.errorRate)}`"
           >
             {{ formatCompactNumber(row.errorCount) }}
           </strong>
