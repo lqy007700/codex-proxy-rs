@@ -13,3 +13,10 @@ export function accountIdentityLabel(account: AccountIdentity): string {
     return account.accountId
   return String(account.id)
 }
+
+export function accountCompactIdentityLabel(account: AccountIdentity): string {
+  const label = accountIdentityLabel(account)
+  if (account.authenticationKind === 'api_key' || !account.email?.trim())
+    return label
+  return label.split('@')[0]
+}

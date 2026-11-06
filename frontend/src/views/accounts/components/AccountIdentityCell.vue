@@ -4,7 +4,7 @@ import type { Account } from '@/api'
 import { computed } from 'vue'
 
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
-import { accountIdentityLabel } from '@/utils/accountIdentity'
+import { accountCompactIdentityLabel, accountIdentityLabel } from '@/utils/accountIdentity'
 import { stablePresetVisualToneClass } from '@/utils/color'
 import AccountFallbackIndicator from './AccountFallbackIndicator.vue'
 import AccountNotesPopover from './AccountNotesPopover.vue'
@@ -40,7 +40,7 @@ const visibleNotes = computed(() => props.showNotes ? props.account.notes : unde
 
 const displayTitle = computed(() => {
   if (props.nameOnly)
-    return props.account.name?.trim() || props.account.id
+    return accountCompactIdentityLabel(props.account)
   if (visibleNotes.value || props.titleMode === 'email' || props.account.authenticationKind === 'api_key')
     return emailText.value
   return emailText.value.split('@')[0]
@@ -86,7 +86,7 @@ const avatarToneClass = computed(() => {
     </span>
     <div class="min-w-0 flex-1">
       <div class="flex min-w-0 items-center gap-2">
-        <span class="min-w-0 flex-1 truncate text-cp font-heavy text-cp-text" :title="displayTitle">
+        <span class="min-w-0 truncate text-cp font-heavy text-cp-text" :class="{ 'flex-1': !nameOnly }" :title="displayTitle">
           {{ displayTitle }}
         </span>
         <AccountFallbackIndicator v-if="account.schedulingRole === 'fallback'" />

@@ -9,6 +9,7 @@ import AccountGroupMarks from '@/components/AccountGroupMarks.vue'
 import LastUsedAtCell from '@/components/LastUsedAtCell.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { useAccountGroupCatalog } from '@/composables/useAccountGroupCatalog'
+import { accountCompactIdentityLabel } from '@/utils/accountIdentity'
 import AccountCreateModal from './components/account-create-modal/index.vue'
 import AccountImportTasks from './components/account-import-tasks/index.vue'
 import AccountQuotaPanel from './components/account-quota-panel/index.vue'
@@ -303,7 +304,7 @@ const {
                     class="shrink-0 whitespace-nowrap font-mono text-[10px] font-emphasis tabular-nums text-cp-text-quaternary"
                     :title="`并发 ${row.concurrencyLimit ?? '默认'} · 权重 ${row.weight}`"
                   >
-                    并发 {{ row.concurrencyLimit ?? '默认' }} · 权重 {{ row.weight }}
+                    {{ row.concurrencyLimit ?? '默认' }}/{{ row.weight }}
                   </span>
                 </template>
               </AccountIdentityCell>
@@ -321,7 +322,7 @@ const {
                 <AccountSchedulingSwitch
                   :enabled="row.enabled"
                   :pending="togglingSchedulingAccountIds.has(row.id)"
-                  :account-label="row.name || row.id"
+                  :account-label="accountCompactIdentityLabel(row)"
                   @toggle="handleToggleScheduling(row)"
                 />
                 <AccountStatusBadge
