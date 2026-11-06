@@ -745,6 +745,14 @@ impl CodexCredentialSelector {
                         SystemTime::now(),
                     );
                 }
+                if let Some(scope) = request.attempt.account_scope() {
+                    // 只解除同账号精确白名单的目录遗漏，认证、冷却与续接门禁仍继续检查
+                    catalog_excluded.retain(|id| {
+                        !model
+                            .for_account(request.attempt, id)
+                            .allows_catalog_omission(scope, id, request.attempt)
+                    });
+                }
             }
             let mut catalog_rejected = 0_usize;
             let mut native_accounts = std::collections::BTreeSet::new();

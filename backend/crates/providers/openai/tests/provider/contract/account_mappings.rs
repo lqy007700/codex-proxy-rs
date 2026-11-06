@@ -8,6 +8,15 @@ fn mapped_request(
     required: &str,
     continuation: Option<ContinuationBinding>,
 ) -> (ProviderRequest, AttemptContext) {
+    mapped_request_with_requested_model(operation, required, continuation, Some("alias"))
+}
+
+fn mapped_request_with_requested_model(
+    operation: Operation,
+    required: &str,
+    continuation: Option<ContinuationBinding>,
+    requested_model: Option<&str>,
+) -> (ProviderRequest, AttemptContext) {
     let provider = ProviderKind::new("openai").unwrap();
     let directory = Arc::new(RuntimeAccountDirectory::new(BTreeMap::from([
         (
@@ -81,7 +90,7 @@ fn mapped_request(
             ModelRequestId::new("req_account_mapping").unwrap(),
             ClientApiKeyId::new("key_openai_contract").unwrap(),
         )
-        .with_requested_model(Some(public)),
+        .with_requested_model(requested_model.map(|model| PublicModelId::new(model).unwrap())),
         NonZeroU32::MIN,
         SystemTime::now() + Duration::from_secs(30),
         account_policy(),
@@ -119,7 +128,7 @@ fn operation(previous: Option<(&str, Option<&str>)>) -> Operation {
 }
 
 #[tokio::test]
-async fn selected_accounts_send_their_own_target_and_report_the_same_model() {
+async fn mapped_allowlists_send_their_own_unlisted_target_and_report_the_same_model() {
     let store = Arc::new(MemoryAccountStore::default());
     let first = MockServer::start().await;
     let second = MockServer::start().await;
@@ -134,6 +143,14 @@ async fn selected_accounts_send_their_own_target_and_report_the_same_model() {
                 provider_openai::credential::ResponsesTransport::Http,
             )
             .await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [{"id":"catalog-only-model"}]
+            })))
+            .expect(1)
+            .mount(server)
+            .await;
         Mock::given(method("POST"))
             .and(path("/responses"))
             .respond_with(
@@ -143,7 +160,14 @@ async fn selected_accounts_send_their_own_target_and_report_the_same_model() {
             .mount(server)
             .await;
     }
-    let provider = provider_with_base_url(&store, first.uri());
+    let leases = Arc::new(TestLeaseCoordinator::default());
+    let provider = provider_with_affinity_and_base_url_and_leases(
+        &store,
+        Arc::default(),
+        first.uri(),
+        leases.clone(),
+    );
+    provider.query_model_capabilities().await.unwrap();
     for (id, server, target) in [
         ("acct_provider_contract", &first, "gpt-5.4"),
         ("acct_scope_new", &second, "gpt-5.5"),
@@ -160,6 +184,96 @@ async fn selected_accounts_send_their_own_target_and_report_the_same_model() {
             target
         );
     }
+    let (_, mapped_context) = mapped_request(operation(None), "acct_provider_contract", None);
+    let scope = mapped_context.account_scope().unwrap().clone();
+    let acquisitions = leases.requests.lock().unwrap().len();
+    for target in ["gpt-5.4", "gpt-5.5"] {
+        let payload = ProtocolPayload::json_object(
+            "openai",
+            json!({"model":target,"input":"hello"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        )
+        .unwrap()
+        .with_context(Map::from_iter([("use_websocket".to_owned(), json!(false))]));
+        let direct = Operation::Generate(GenerateRequest::from_protocol_payload(payload));
+        let context = AttemptContext::new(
+            RequestAttemptContext::new(
+                ModelRequestId::new("req_direct_mapped_target").unwrap(),
+                ClientApiKeyId::new("key_openai_contract").unwrap(),
+            )
+            .with_requested_model(Some(PublicModelId::new(target).unwrap())),
+            NonZeroU32::MIN,
+            SystemTime::now() + Duration::from_secs(30),
+            account_policy(),
+            AccountAttemptContext::new(BTreeSet::new(), None, None)
+                .with_account_scope(scope.clone()),
+            None,
+            CancellationToken::new(),
+        );
+        let error = provider
+            .clone()
+            .execute(planned_request_for_model("openai", direct, target), context)
+            .await
+            .err()
+            .expect("target IDs are not independently authorized");
+        assert_eq!(error.kind(), ProviderErrorKind::NoEligibleAccount);
+    }
+    assert_eq!(leases.requests.lock().unwrap().len(), acquisitions);
+}
+
+#[tokio::test]
+async fn mapped_catalog_exception_requires_the_frozen_request_name() {
+    let upstream = MockServer::start().await;
+    let store = Arc::new(MemoryAccountStore::default());
+    store
+        .seed_api_key(
+            "acct_provider_contract",
+            upstream.uri(),
+            provider_openai::credential::ResponsesTransport::Http,
+        )
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data":[{"id":"catalog-only-model"}]
+        })))
+        .expect(1)
+        .mount(&upstream)
+        .await;
+    let leases = Arc::new(TestLeaseCoordinator::default());
+    let provider = provider_with_affinity_and_base_url_and_leases(
+        &store,
+        Arc::default(),
+        upstream.uri(),
+        leases.clone(),
+    );
+    provider.query_model_capabilities().await.unwrap();
+    for requested_model in [None, Some("unapproved-alias")] {
+        let (request, context) = mapped_request_with_requested_model(
+            operation(None),
+            "acct_provider_contract",
+            None,
+            requested_model,
+        );
+        let error = provider
+            .clone()
+            .execute(request, context)
+            .await
+            .err()
+            .expect("mapping must not borrow authorization from another request name");
+        assert_eq!(error.kind(), ProviderErrorKind::NoEligibleAccount);
+    }
+    assert!(leases.requests.lock().unwrap().is_empty());
+    assert!(
+        upstream
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| request.method != "POST")
+    );
 }
 
 #[tokio::test]

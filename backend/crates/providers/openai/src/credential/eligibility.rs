@@ -40,6 +40,34 @@ impl<'a> CodexSelectionModel<'a> {
         }
     }
 
+    pub(crate) fn allows_catalog_omission(
+        self,
+        scope: &FrozenAccountScope,
+        account: &ProviderAccountId,
+        attempt: &gateway_core::engine::AttemptContext,
+    ) -> bool {
+        let Self::Requested(target) = self else {
+            return false;
+        };
+        let Some(policy) = scope.directory().account(account) else {
+            return false;
+        };
+        if !scope.allows(account)
+            || policy.model_access().mode() != AccountModelAccessMode::Allowlist
+        {
+            return false;
+        }
+        // 账号映射按已冻结的请求名授权，不能把目标当作第二条客户端权限
+        let authorized_model = match attempt.account_model_override(account) {
+            Some(mapped) if mapped == target => {
+                attempt.requested_model().map(|model| model.as_str())
+            }
+            Some(_) => None,
+            None => Some(target),
+        };
+        authorized_model.is_some_and(|model| policy.model_access().models().contains(model))
+    }
+
     pub(crate) fn allows_account(self, account: &ProviderAccount) -> bool {
         if account.authentication_kind() != CODEX_AUTHENTICATION_KIND_OAUTH {
             // Live 绑定 ChatGPT OAuth 身份；API Key 不套用 ChatGPT 套餐资格

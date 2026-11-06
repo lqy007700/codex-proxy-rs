@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import type { AccountModelAccess } from '@/api'
 
-import { ZEmpty, ZFormItem, ZIconButton, ZInput, ZScrollbar, ZTag } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZFormItem, ZIconButton, ZInput, ZScrollbar, ZTag } from '@codex-proxy/ui'
 
-import { RefreshCw, Search, TriangleAlert } from '@lucide/vue'
-import { computed, ref, watch } from 'vue'
+import { ListChecks, ListMinus, Plus, RefreshCw, Search } from '@lucide/vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { getAccountModels, refreshAccountModels } from '@/api'
 import { useRequestState } from '@/composables/useRequestState'
-import { accountModelAccessError } from '../utils/modelAccess'
+import { accountModelAccessError, accountModelIdError } from '../utils/modelAccess'
 import AccountModelCleanupPopover from './AccountModelCleanupPopover.vue'
 import AccountModelOption from './AccountModelOption.vue'
 
@@ -25,7 +25,8 @@ const model = defineModel<AccountModelAccess | undefined>({ required: true })
 const catalog = ref<Array<{ id: string, label: string }>>()
 const catalogObservedAtDisplay = ref<string>()
 const search = ref('')
-const inputError = ref('')
+const selectionError = ref('')
+const searchInput = useTemplateRef<InstanceType<typeof ZInput>>('searchInput')
 const request = useRequestState()
 const { loading, error } = request
 
@@ -49,6 +50,8 @@ const selectedModelIds = computed(() => {
     .filter(id => !blocked.has(id))
 })
 const selectedIds = computed(() => new Set(selectedModelIds.value))
+const selectedCount = computed(() => selectedModelIds.value.length)
+const selectionLimitReached = computed(() => selectedCount.value >= MODEL_LIMIT)
 const selectedModels = computed(() => {
   const catalogById = new Map((catalog.value ?? []).map(item => [item.id, item]))
   return selectedModelIds.value.map(id => ({
@@ -57,10 +60,32 @@ const selectedModels = computed(() => {
     unavailable: catalog.value !== undefined && !catalogById.has(id),
   }))
 })
+const selectedGroups = computed(() => [
+  {
+    key: 'custom',
+    label: catalog.value === undefined
+      ? '已选择模型'
+      : '自定义模型',
+    models: selectedModels.value.filter(item => item.unavailable || catalog.value === undefined),
+  },
+  {
+    key: 'catalog',
+    label: '目录内模型',
+    models: selectedModels.value.filter(item => !item.unavailable && catalog.value !== undefined),
+  },
+].filter(group => group.models.length))
 const filteredModels = computed(() => {
   const query = search.value.trim().toLowerCase()
   return (catalog.value ?? []).filter(item => `${item.id} ${item.label}`.toLowerCase().includes(query))
 })
+const allResultsSelected = computed(() => filteredModels.value.length > 0 && filteredModels.value.every(item => selectedIds.value.has(item.id)))
+const newModelId = computed(() => filteredModels.value.length || selectedIds.value.has(search.value.trim())
+  ? ''
+  : search.value.trim())
+const inputError = computed(() => selectionError.value || (newModelId.value
+  ? accountModelIdError(newModelId.value)
+  : ''))
+const canAdd = computed(() => Boolean(newModelId.value) && !inputError.value && !selectionLimitReached.value)
 const missingModels = computed(() => model.value?.mode === 'allowlist' && catalog.value?.length && !error.value && !loading.value
   ? model.value.models.filter(id => !catalog.value!.some(item => item.id === id))
   : [])
@@ -72,31 +97,41 @@ function removeMissingModels(ids: string[]) {
   if (remaining.length)
     model.value = { mode: 'allowlist', models: remaining }
 }
-const selectedCount = computed(() => selectedModelIds.value.length)
-const selectionLimitReached = computed(() => selectedCount.value >= MODEL_LIMIT)
-
-function select(id: string, selected: boolean) {
+function select(modelIds: string[], selected: boolean) {
   if (props.disabled || !canEdit.value)
     return
   const ids = new Set(selectedModelIds.value)
-  if (selected) {
-    if (ids.size >= MODEL_LIMIT && !ids.has(id)) {
-      inputError.value = `最多选择 ${MODEL_LIMIT} 个模型`
-      return
-    }
-    ids.add(id)
-  }
-  else {
-    ids.delete(id)
+  for (const id of modelIds) {
+    if (selected)
+      ids.add(id)
+    else ids.delete(id)
   }
   const next: AccountModelAccess = {
     mode: 'allowlist',
     models: [...ids],
   }
-  inputError.value = selected
+  selectionError.value = selected
     ? accountModelAccessError(next) ?? ''
     : ''
-  model.value = next
+  if (!selectionError.value)
+    model.value = next
+}
+
+function addModel() {
+  if (!canAdd.value || props.disabled || !canEdit.value)
+    return
+  select([newModelId.value], true)
+  if (!selectionError.value) {
+    search.value = ''
+    searchInput.value?.focus()
+  }
+}
+
+function handleSearchEnter(event: KeyboardEvent) {
+  if (event.isComposing)
+    return
+  event.preventDefault()
+  addModel()
 }
 
 async function load(refresh = false) {
@@ -132,13 +167,13 @@ watch([
   emit('catalogChange', [])
   catalogObservedAtDisplay.value = undefined
   search.value = ''
-  inputError.value = ''
+  selectionError.value = ''
   error.value = ''
   void load()
 }, { immediate: true })
 
 watch(search, () => {
-  inputError.value = ''
+  selectionError.value = ''
 })
 </script>
 
@@ -184,44 +219,67 @@ watch(search, () => {
 
           <div
             v-if="selectedModels.length"
-            class="flex max-h-28 min-h-10 flex-wrap content-start gap-1.5 overflow-y-auto rounded-cp bg-cp-fill-quaternary p-2"
+            class="grid max-h-36 min-h-10 gap-2 overflow-y-auto rounded-cp bg-cp-fill-quaternary p-2"
             aria-label="已选择模型"
           >
-            <ZTag
-              v-for="item in selectedModels"
-              :key="item.id"
-              :type="item.unavailable ? 'warning' : 'primary'"
-              size="small"
-              closable
-              :title="item.unavailable ? `${item.id}（当前目录未返回）` : item.id"
-              :disabled="disabled"
-              @close="select(item.id, false)"
-            >
-              <span class="max-w-48 truncate">{{ item.id }}</span>
-              <TriangleAlert v-if="item.unavailable" class="ml-1 inline-block size-3 align-[-2px]" aria-hidden="true" />
-            </ZTag>
+            <div v-for="group in selectedGroups" :key="group.key" class="grid min-w-0 gap-1.5" role="group" :aria-label="group.label">
+              <span class="text-cp-xs text-cp-text-secondary">{{ group.label }}</span>
+              <div class="flex flex-wrap gap-1.5">
+                <ZTag
+                  v-for="item in group.models"
+                  :key="item.id"
+                  type="primary"
+                  size="small"
+                  closable
+                  :title="item.id"
+                  :disabled="disabled"
+                  @close="select([item.id], false)"
+                >
+                  <span class="max-w-48 truncate">{{ item.id }}</span>
+                </ZTag>
+              </div>
+            </div>
           </div>
           <div v-else class="rounded-cp bg-cp-fill-quaternary px-3 py-2 text-cp-xs text-cp-text-tertiary">
-            暂未选择模型，请在下方目录中选择
+            暂未选择模型，请在下方选择或添加
           </div>
 
           <div class="flex items-center justify-between gap-2 pt-1">
-            <span class="text-cp-xs font-medium text-cp-text-secondary">全部可用模型</span>
-            <span v-if="catalog" class="text-cp-xs text-cp-text-tertiary tabular-nums">
-              {{ filteredModels.length }} 个
-            </span>
+            <span class="text-cp-xs font-medium text-cp-text-secondary">上游目录</span>
+            <div class="flex items-center gap-2">
+              <span v-if="catalog" class="text-cp-xs text-cp-text-tertiary tabular-nums">
+                {{ filteredModels.length }} 个
+              </span>
+              <ZIconButton
+                v-if="filteredModels.length"
+                :aria-label="allResultsSelected ? '取消全选搜索结果' : '全选搜索结果'"
+                variant="link"
+                size="small"
+                :disabled="disabled || loading"
+                @click="select(filteredModels.map(item => item.id), !allResultsSelected)"
+              >
+                <ListMinus v-if="allResultsSelected" class="size-4" />
+                <ListChecks v-else class="size-4" />
+              </ZIconButton>
+            </div>
           </div>
-          <ZInput v-model="search" aria-label="搜索模型" placeholder="搜索模型 ID" :disabled="disabled || loading" :aria-invalid="Boolean(inputError)">
-            <template #prefix>
-              <Search class="size-4" aria-hidden="true" />
-            </template>
-          </ZInput>
+          <div class="flex min-w-0 items-center gap-2">
+            <ZInput ref="searchInput" v-model="search" class="min-w-0 flex-1" aria-label="搜索或添加模型" placeholder="搜索模型或输入完整 ID" :disabled="disabled || !canEdit" :aria-invalid="Boolean(inputError)" @keydown.enter="handleSearchEnter">
+              <template #prefix>
+                <Search class="size-4" aria-hidden="true" />
+              </template>
+            </ZInput>
+            <ZButton class="shrink-0" :disabled="disabled || !canEdit || !canAdd" @click="addModel">
+              <Plus class="size-4" aria-hidden="true" />
+              添加模型
+            </ZButton>
+          </div>
           <p v-if="inputError" class="m-0 text-cp-xs text-cp-error-text" role="alert">
             {{ inputError }}
           </p>
 
           <ZScrollbar v-if="filteredModels.length" max-height="16rem" class="min-w-0 -m-1">
-            <div class="flex flex-wrap gap-1.5 p-1" role="group" aria-label="全部可用模型" :aria-busy="loading || undefined">
+            <div class="flex flex-wrap gap-1.5 p-1" role="group" aria-label="上游目录模型" :aria-busy="loading || undefined">
               <AccountModelOption
                 v-for="item in filteredModels"
                 :key="item.id"
@@ -229,14 +287,14 @@ watch(search, () => {
                 :label="item.id"
                 :title="item.label && item.label !== item.id ? `${item.id} · ${item.label}` : item.id"
                 :disabled="disabled || (!selectedIds.has(item.id) && selectionLimitReached)"
-                @update:model-value="select(item.id, $event)"
+                @update:model-value="select([item.id], $event)"
               />
             </div>
           </ZScrollbar>
           <p v-else-if="loading" class="m-0 py-4 text-center text-cp-sm text-cp-text-tertiary" role="status">
             加载模型目录中
           </p>
-          <ZEmpty v-else-if="!error" :title="search ? '无匹配模型' : '暂无可用模型'" :icon="search ? Search : undefined" size="small" surface="none" />
+          <ZEmpty v-else-if="!error && !canAdd" :title="search ? '无匹配模型' : '暂无可用模型'" :icon="search ? Search : undefined" size="small" surface="none" />
           <ZEmpty v-if="error" title="模型目录加载失败" description="请刷新后重试" size="small" surface="none" role="alert" />
         </div>
       </template>
