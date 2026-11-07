@@ -89,6 +89,7 @@ impl AffinityBindingStore for NamedBindings {
                     first_observed_at: now,
                     last_admission_at: now,
                     expires_at: now + chrono::Duration::hours(1),
+                    active: false,
                 })
                 .collect(),
             next_cursor: Some("next-page".into()),

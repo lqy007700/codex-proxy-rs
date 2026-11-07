@@ -16,6 +16,7 @@ use super::{namespace, resource_fingerprint};
 
 const MAX_SESSION_AFFINITY_TTL: Duration =
     Duration::from_secs(gateway_core::account::MAX_SESSION_AFFINITY_TTL_HOURS as u64 * 3600);
+const ACTIVE_SESSION_TTL: Duration = Duration::from_secs(120);
 
 // 比较完整记录而非账号 ID；冲突时既不改绑定，也不续期
 const COMPARE_AND_BIND_SCRIPT: &str = r#"
@@ -136,9 +137,11 @@ impl ProviderSessionAffinityPort for RedisProviderSessionAffinityRepository {
                 .key(format!("{}:initialized", self.index_key()))
                 .key(format!("{}:expiry", self.index_key()))
                 .key(format!("{binding_key}:token-name"))
+                .key(self.active_index_key())
                 .arg(format!("{}:{}", provider.as_str(), key.expose_to_store()))
                 .arg(record)
                 .arg(token_name)
+                .arg(ACTIVE_SESSION_TTL.as_millis() as u64)
                 .invoke_async::<i64>(&mut self.connection.clone())
                 .await
                 .map_err(|error| crate::provider_unavailable("observe affinity session", error))?;
@@ -304,6 +307,13 @@ for _, member in ipairs(expired) do
   redis.call('ZREM', KEYS[3], member)
   redis.call('ZREM', KEYS[5], member)
 end
+if record.observation.bindingScope == 'session' then
+  redis.call('ZADD', KEYS[7], now + tonumber(ARGV[4]), ARGV[1])
+  local active_expired=redis.call('ZRANGEBYSCORE', KEYS[7], '-inf', now, 'LIMIT', 0, 64)
+  for _, member in ipairs(active_expired) do
+    redis.call('ZREM', KEYS[7], member)
+  end
+end
 return 1
 "#;
 
@@ -318,6 +328,10 @@ struct IndexRecord {
 impl RedisProviderSessionAffinityRepository {
     fn index_key(&self) -> String {
         format!("{}:scheduler:affinity-index", self.namespace)
+    }
+
+    fn active_index_key(&self) -> String {
+        format!("{}:scheduler:affinity-active", self.namespace)
     }
 }
 
@@ -388,12 +402,13 @@ local ttl=redis.call('PTTL', KEYS[1])
 local time=redis.call('TIME')
 local name=redis.pcall('GET', KEYS[3])
 if type(name) ~= 'string' then name='' end
-return {binding, metadata, tostring(ttl), tostring(tonumber(time[1])*1000+math.floor(tonumber(time[2])/1000)), name}
-"#).key(&binding_key).key(format!("{binding_key}:metadata")).key(format!("{binding_key}:token-name")).invoke_async(&mut self.connection.clone()).await.map_err(admin_unavailable)?;
+local active=redis.call('ZSCORE', KEYS[4], ARGV[1])
+return {binding, metadata, tostring(ttl), tostring(tonumber(time[1])*1000+math.floor(tonumber(time[2])/1000)), name, tostring(active or '')}
+"#).key(&binding_key).key(format!("{binding_key}:metadata")).key(format!("{binding_key}:token-name")).key(self.active_index_key()).arg(format!("{}:{}", provider.as_str(), reference)).invoke_async(&mut self.connection.clone()).await.map_err(admin_unavailable)?;
         if values.is_empty() {
             return Ok(None);
         }
-        if values.len() != 5 {
+        if values.len() != 6 {
             return Err(admin_unavailable("incomplete affinity snapshot"));
         }
         let binding =
@@ -416,9 +431,16 @@ return {binding, metadata, tostring(ttl), tostring(tonumber(time[1])*1000+math.f
             .map_err(admin_unavailable)?
             .parse::<i64>()
             .map_err(admin_unavailable)?;
+        let active_until = std::str::from_utf8(&values[5])
+            .map_err(admin_unavailable)?
+            .parse::<i64>()
+            .ok();
         if ttl <= 0 {
             return Ok(None);
         }
+        let active = record.observation.binding_scope
+            == gateway_core::provider_ports::ProviderAffinityScope::Session
+            && active_until.is_some_and(|value| value > now);
         let datetime = |value| {
             chrono::DateTime::from_timestamp_millis(value)
                 .ok_or_else(|| admin_unavailable("invalid affinity timestamp"))
@@ -433,6 +455,7 @@ return {binding, metadata, tostring(ttl), tostring(tonumber(time[1])*1000+math.f
             first_observed_at: datetime(record.first_observed_ms)?,
             last_admission_at: datetime(record.last_admission_ms)?,
             expires_at: datetime(now.saturating_add(ttl))?,
+            active,
         }))
     }
 

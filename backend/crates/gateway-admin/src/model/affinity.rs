@@ -17,6 +17,9 @@ pub struct AffinitySession {
     pub first_observed_at: DateTime<Utc>,
     pub last_admission_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+    /// 请求观测后短时间内仍在运行窗口中的会话标记
+    #[serde(default)]
+    pub active: bool,
 }
 
 impl AffinitySession {

@@ -20,6 +20,7 @@ export interface AffinitySession {
   firstObservedAt: string
   lastAdmissionAt: string
   expiresAt: string
+  active?: boolean
 }
 export interface AffinityFilters {
   bindingScope?: AffinityScope

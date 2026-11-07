@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
 import type { AffinityFilters, AffinityOperation, AffinitySession, BindingDirective, IdentitySource } from '@/api/modules/affinity'
-import { defineTableColumns, ZButton, ZCard, ZCheckbox, ZDialog, ZFormItem, ZInput, ZMenuItem, ZPageHeader, ZPopover, ZSegmented, ZSelect, ZSwitch, ZTable, ZTag } from '@codex-proxy/ui'
+import { defineTableColumns, ZButton, ZCard, ZCheckbox, ZDialog, ZFormItem, ZInput, ZPageHeader, ZSegmented, ZSelect, ZSwitch, ZTable, ZTag } from '@codex-proxy/ui'
 import { ChevronDown } from '@lucide/vue'
 import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -25,12 +25,17 @@ const managementViews = [
   { label: '操作记录', value: 'operations' },
   { label: '身份来源', value: 'sources' },
 ]
+const views = [
+  ...tabs,
+  ...managementViews,
+]
 const viewLabel = computed(() => [
   ...tabs,
   ...managementViews,
 ].find(item => item.value === view.value)?.label ?? '按 K 查看')
 const filters = reactive<AffinityFilters>({})
 const sessions = shallowRef<AffinitySession[]>([])
+const sessionWindows = shallowRef<AffinitySession[]>([])
 const sources = shallowRef<IdentitySource[]>([])
 const operations = shallowRef<AffinityOperation[]>([])
 const nextCursor = shallowRef<string | null>(null)
@@ -65,6 +70,39 @@ const accountRows = computed<AccountAffinityRow[]>(() => accountCatalog.value.ma
   account,
   bindings: sessions.value.filter(session => session.accountId === account.id),
 })))
+function callerGroupKey(session: AffinitySession) {
+  const caller = session.observation.caller
+  return caller.mode === 'newApi'
+    ? `newApi:${caller.sourceId}:${caller.userId}:${caller.tokenId}`
+    : caller.mode === 'direct'
+      ? `direct:${session.observation.clientKeyId}`
+      : ''
+}
+const sessionStats = computed(() => {
+  const stats = new Map<string, { total: number, active: number }>()
+  for (const session of sessionWindows.value) {
+    const group = callerGroupKey(session)
+    if (!group)
+      continue
+    const current = stats.get(group) ?? { total: 0, active: 0 }
+    current.total += 1
+    if (session.active)
+      current.active += 1
+    stats.set(group, current)
+  }
+  return stats
+})
+function statsFor(session: AffinitySession) {
+  return sessionStats.value.get(callerGroupKey(session)) ?? { total: 0, active: 0 }
+}
+function statsForBindings(bindings: AffinitySession[]) {
+  return bindings.reduce((summary, binding) => {
+    const stats = statsFor(binding)
+    summary.total += stats.total
+    summary.active += stats.active
+    return summary
+  }, { total: 0, active: 0 })
+}
 const selectableSessions = computed(() => sessions.value.filter(canManage))
 const selectedSessions = computed(() => selectableSessions.value.filter(session => selected.value.has(key(session))))
 const allSelected = computed(() => selectableSessions.value.length > 0 && selectedSessions.value.length === selectableSessions.value.length)
@@ -118,6 +156,12 @@ const columns = computed(() => defineTableColumns<AffinitySession>([
       : '主账号 / 最近请求账号',
     kind: 'custom',
     size: 'xl',
+  },
+  {
+    key: 'sessions',
+    label: '会话窗口',
+    kind: 'custom',
+    size: 'md',
   },
   {
     key: 'status',
@@ -190,6 +234,12 @@ const accountColumns = defineTableColumns<AccountAffinityRow>([
     label: '当前绑定 K',
     kind: 'custom',
     size: '3xl',
+  },
+  {
+    key: 'sessionStats',
+    label: '会话窗口',
+    kind: 'custom',
+    size: 'lg',
   },
   {
     key: 'status',
@@ -352,7 +402,7 @@ async function load() {
   selected.value = new Set()
   sessions.value = []
   try {
-    const [page, sourceList, history] = await Promise.all([
+    const [page, sourceList, history, windows] = await Promise.all([
       view.value === 'sources' || view.value === 'operations'
         ? Promise.resolve({ items: [], nextCursor: null })
         : view.value === 'accounts'
@@ -373,6 +423,9 @@ async function load() {
       view.value === 'operations'
         ? getAffinityOperations({ signal: query.signal })
         : Promise.resolve(operations.value),
+      view.value === 'tokens' || view.value === 'accounts'
+        ? loadAllSessionAffinity()
+        : Promise.resolve([] as AffinitySession[]),
     ])
     if (!query.isCurrent(requestId))
       return
@@ -380,9 +433,25 @@ async function load() {
     nextCursor.value = page.nextCursor
     sources.value = sourceList
     operations.value = history
+    sessionWindows.value = windows
   }
   catch (cause) { query.fail(requestId, cause) }
   finally { query.finish(requestId) }
+}
+
+async function loadAllSessionAffinity() {
+  const items: AffinitySession[] = []
+  let nextCursor: string | undefined
+  do {
+    const page = await getAffinitySessions({
+      bindingScope: 'session',
+      mode: 'newApi',
+      cursor: nextCursor,
+    }, { signal: query.signal })
+    items.push(...page.items)
+    nextCursor = page.nextCursor ?? undefined
+  } while (nextCursor)
+  return items
 }
 async function loadAllTokenAffinity() {
   const items: AffinitySession[] = []
@@ -578,21 +647,6 @@ function openTokenView(session: AffinitySession) {
   <div class="w-full">
     <ZPageHeader title="账号亲和" description="管理 New API Key 与 CPR 主账号的绑定">
       <template #actions>
-        <ZSegmented v-model="view" aria-label="账号亲和视图" :options="tabs" :disabled="saving || loading" @update:model-value="selectView" />
-        <ZPopover placement="bottom-end">
-          <template #reference="{ open }">
-            <ZButton :disabled="saving || loading" :aria-expanded="open" aria-label="更多亲和管理">
-              更多管理
-            </ZButton>
-          </template>
-          <template #default="{ close }">
-            <div class="w-44 p-1.5">
-              <ZMenuItem v-for="item in managementViews" :key="item.value" :disabled="item.value === view || saving || loading" @click="(close(), selectView(item.value))">
-                {{ item.label }}
-              </ZMenuItem>
-            </div>
-          </template>
-        </ZPopover>
         <ZButton :loading="loading" :disabled="saving" @click="refresh">
           刷新
         </ZButton>
@@ -600,7 +654,10 @@ function openTokenView(session: AffinitySession) {
     </ZPageHeader>
     <ZCard class="mt-5">
       <template #header>
-        <span class="text-cp-sm font-medium">{{ viewLabel }}</span>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span class="text-cp-sm font-medium">{{ viewLabel }}</span>
+          <ZSegmented v-model="view" aria-label="账号亲和视图" :options="views" :disabled="saving || loading" @update:model-value="selectView" />
+        </div>
       </template>
       <template #body>
         <div v-if="filterContext && view !== 'sources' && view !== 'operations' && view !== 'accounts'" class="mb-4 flex flex-wrap items-center gap-2 text-cp-xs text-cp-text-secondary">
@@ -683,6 +740,13 @@ function openTokenView(session: AffinitySession) {
               </div>
               <span v-else class="text-cp-xs text-cp-text-tertiary">暂无已观测绑定</span>
             </template>
+            <template #sessionStats="{ row }">
+              <template v-if="statsForBindings(row.bindings).total">
+                <span>{{ statsForBindings(row.bindings).total }} 个窗口</span>
+                <span class="mt-1 block text-cp-xs text-cp-text-tertiary">进行中 {{ statsForBindings(row.bindings).active }}</span>
+              </template>
+              <span v-else class="text-cp-xs text-cp-text-tertiary">暂无会话</span>
+            </template>
             <template #status="{ row }">
               <ZTag :type="row.bindings.length ? 'success' : 'default'">
                 {{ row.bindings.length ? `${row.bindings.length} 个 K` : '未绑定' }}
@@ -693,7 +757,7 @@ function openTokenView(session: AffinitySession) {
                 <div v-if="!row.bindings.length" class="text-cp-sm text-cp-text-tertiary">
                   当前账号没有已观测且未过期的 K 绑定
                 </div>
-                <div v-for="binding in row.bindings" :key="key(binding)" class="grid gap-2 rounded-cp bg-cp-fill-quaternary p-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+                <div v-for="binding in row.bindings" :key="key(binding)" class="grid gap-2 rounded-cp bg-cp-fill-quaternary p-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_auto] md:items-center">
                   <div class="min-w-0">
                     <div class="truncate text-cp-sm" :title="tokenLabel(binding)">
                       {{ tokenLabel(binding) }}
@@ -712,6 +776,10 @@ function openTokenView(session: AffinitySession) {
                     <div class="mt-1 text-cp-xs text-cp-text-tertiary">
                       到期 {{ binding.expiresAtDisplay }}
                     </div>
+                  </div>
+                  <div class="text-cp-xs text-cp-text-secondary">
+                    <span>{{ statsFor(binding).total }} 个窗口</span>
+                    <span class="mt-1 block text-cp-xs text-cp-text-tertiary">进行中 {{ statsFor(binding).active }}</span>
                   </div>
                   <ZButton size="small" @click="openTokenView(binding)">
                     查看 K
@@ -766,6 +834,10 @@ function openTokenView(session: AffinitySession) {
                   {{ row.directive ? pendingLabel(row.directive, true) : '最近使用其他账号' }}
                 </ZTag>
               </div>
+            </template>
+            <template #sessions="{ row }">
+              <span>{{ statsFor(row).total }} 个窗口</span>
+              <span class="mt-1 block text-cp-xs text-cp-text-tertiary">进行中 {{ statsFor(row).active }}</span>
             </template>
             <template #status="{ row }">
               <ZTag :type="row.directive || (row.observation.bindingScope === 'token' && row.observation.actualAccountId !== row.accountId) ? 'warning' : 'success'">

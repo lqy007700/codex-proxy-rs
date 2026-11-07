@@ -188,6 +188,7 @@ fn session(provider: &str, reference: &str) -> AffinitySession {
         first_observed_at: Utc::now(),
         last_admission_at: Utc::now(),
         expires_at: Utc::now() + Duration::hours(1),
+        active: false,
     }
 }
 fn fixture() -> (Arc<Stores>, AffinityService) {

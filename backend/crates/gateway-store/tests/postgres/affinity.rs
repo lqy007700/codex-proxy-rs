@@ -44,6 +44,7 @@ fn plan() -> AffinityPlan {
                 first_observed_at: now,
                 last_admission_at: now,
                 expires_at: now + Duration::hours(1),
+                active: false,
             },
             next_revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
             rejection: None,
