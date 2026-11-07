@@ -390,5 +390,9 @@ fn push_contains_search(statement: &mut QueryBuilder<Postgres>, columns: &[&str]
         .push(" or mr.client_api_key_name_snapshot ilike ")
         .push_bind(pattern)
         .push(" escape '\\'");
+    statement
+        .push(" or mr.caller_token_name_snapshot ilike ")
+        .push_bind(literal_contains_pattern(value))
+        .push(" escape '\\'");
     statement.push(")");
 }
