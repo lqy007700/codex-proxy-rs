@@ -105,11 +105,16 @@ pub(crate) async fn verify_checksum(
             response.status().as_u16()
         )));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| super::error::http("校验文件读取失败", error))?;
-    if bytes.len() > MAX_CHECKSUM_SIZE as usize || bytes.len() as u64 != checksum_size {
+    let mut bytes = Vec::with_capacity(checksum_size as usize);
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| super::error::http("校验文件读取失败", error))?;
+        if chunk.len() > checksum_size as usize - bytes.len() {
+            return Err(invalid("校验文件大小与发行信息不一致"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    if bytes.len() as u64 != checksum_size {
         return Err(invalid("校验文件大小与发行信息不一致"));
     }
     let body =

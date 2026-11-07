@@ -121,6 +121,10 @@ pub(crate) fn push_usage_filter(
             .push(format!(" or {alias}.client_api_key_name_snapshot ilike "))
             .push_bind(pattern)
             .push(" escape '\\'");
+        query
+            .push(format!(" or {alias}.caller_token_name_snapshot ilike "))
+            .push_bind(literal_contains_pattern(value))
+            .push(" escape '\\'");
         query.push(")");
     }
 }

@@ -4,6 +4,8 @@ use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use futures::StreamExt as _;
 use gateway_admin::model::system::{
     SystemDowngradeVersion, SystemUpdateChannel as UpdateChannel, SystemUpdateDetail,
     SystemUpdatePolicy,
@@ -16,6 +18,8 @@ use super::{OperationError, SystemUpdateConfig, conflict, invalid, upstream};
 const APP_BINARY_NAME: &str = "codex-proxy-rs";
 const MAX_DOWNGRADE_VERSIONS: usize = 5;
 const CACHE_TTL: Duration = Duration::from_secs(20 * 60);
+const MAX_RELEASE_PAGES: usize = 5;
+const MAX_RELEASE_RESPONSE_SIZE: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct GitHubRelease {
@@ -202,6 +206,9 @@ pub(crate) async fn fetch_releases(
                 downgrades: downgrades.into_iter().map(|(_, release)| release).collect(),
             });
         }
+        if page >= MAX_RELEASE_PAGES {
+            return Err(upstream("GitHub 发行历史超过查询上限，请稍后重试"));
+        }
         page += 1;
     }
 }
@@ -218,15 +225,52 @@ async fn fetch_release_json<T: serde::de::DeserializeOwned>(
         .await
         .map_err(|error| super::error::http("无法查询 GitHub 发行版本", error))?;
     if !response.status().is_success() {
-        return Err(upstream(format!(
-            "GitHub 发行查询失败（HTTP {}）",
-            response.status().as_u16()
-        )));
+        let status = response.status();
+        let retry_at = if matches!(
+            status,
+            reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::TOO_MANY_REQUESTS
+        ) {
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<i64>().ok())
+                .filter(|seconds| *seconds > 0);
+            let reset = response
+                .headers()
+                .get("x-ratelimit-reset")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<i64>().ok())
+                .and_then(|timestamp| DateTime::<Utc>::from_timestamp(timestamp, 0))
+                .map(|at| (at - Utc::now()).num_seconds().max(1));
+            retry_after
+                .into_iter()
+                .chain(reset)
+                .max()
+                .map(|seconds| Utc::now() + ChronoDuration::seconds(seconds.clamp(1, 86_400)))
+        } else {
+            None
+        };
+        let error = upstream(format!("GitHub 发行查询失败（HTTP {}）", status.as_u16()));
+        return Err(retry_at.map_or(error.clone(), |at| error.with_retry_at(at)));
     }
-    response
-        .json::<T>()
-        .await
-        .map_err(|error| super::error::http("GitHub 发行信息格式无效", error))
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_RELEASE_RESPONSE_SIZE)
+    {
+        return Err(upstream("GitHub 发行信息超出大小限制"));
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| super::error::http("读取 GitHub 发行信息失败", error))?;
+        if chunk.len() as u64 > MAX_RELEASE_RESPONSE_SIZE.saturating_sub(bytes.len() as u64) {
+            return Err(upstream("GitHub 发行信息超出大小限制"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes)
+        .map_err(|error| upstream("GitHub 发行信息格式无效").with_source(error))
 }
 
 pub(crate) fn detail_from_release(
@@ -326,7 +370,7 @@ pub(crate) fn download_client(
     reqwest::Client::builder()
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
-            if download_url_allowed(attempt.url(), &api_base) {
+            if attempt.previous().len() < 5 && download_url_allowed(attempt.url(), &api_base) {
                 attempt.follow()
             } else {
                 attempt.error(std::io::Error::other(
@@ -343,6 +387,8 @@ pub(crate) fn validate_repository(repository: &str) -> Result<(), OperationError
     let owner = segments.next().unwrap_or_default();
     let name = segments.next().unwrap_or_default();
     if owner.is_empty()
+        || matches!(owner, "." | "..")
+        || matches!(name, "." | "..")
         || name.is_empty()
         || segments.next().is_some()
         || !owner.chars().all(repository_character)

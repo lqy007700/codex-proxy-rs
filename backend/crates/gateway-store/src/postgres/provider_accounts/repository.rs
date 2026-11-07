@@ -494,7 +494,15 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
             .await?;
             if let Some(allow_credits) = command.allow_credits {
                 sqlx::query(
-                    "update provider_accounts set allow_credits = $2 where id = any($1::text[])",
+                    "update provider_accounts
+                     set allow_credits = $2,
+                         quota_access_state = case
+                           when not $2 and quota_evidence = 'credits_available' then 'exhausted'
+                           else quota_access_state end,
+                         quota_evidence = case
+                           when not $2 and quota_evidence = 'credits_available' then 'account_limit_reached'
+                           else quota_evidence end
+                     where id = any($1::text[])",
                 )
                 .bind(&command.account_ids)
                 .bind(allow_credits)

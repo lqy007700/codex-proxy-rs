@@ -3,6 +3,7 @@
 use std::pin::Pin;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use futures::Stream;
 
 use crate::model::system::{
@@ -25,6 +26,7 @@ pub enum SystemOperationErrorKind {
 pub struct SystemOperationError {
     kind: SystemOperationErrorKind,
     message: String,
+    retry_at: Option<DateTime<Utc>>,
     source: Option<gateway_core::error::ErrorSource>,
     sensitive_context_redacted: bool,
 }
@@ -35,9 +37,21 @@ impl SystemOperationError {
         Self {
             kind,
             message: message.into(),
+            retry_at: None,
             source: None,
             sensitive_context_redacted: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_retry_at(mut self, retry_at: DateTime<Utc>) -> Self {
+        self.retry_at = Some(retry_at);
+        self
+    }
+
+    #[must_use]
+    pub const fn retry_at(&self) -> Option<DateTime<Utc>> {
+        self.retry_at
     }
 
     #[must_use]

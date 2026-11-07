@@ -84,8 +84,8 @@ impl CodexCredentialQuotaService {
             observed_at,
             &Value::Object(quota.clone()),
         )?;
-        // 推理成功可能已经消费点数，不能据此解除套餐耗尽后的本地点数限制
-        let state = if snapshot.quota().evidence() == Some(QuotaEvidence::CreditsAvailable) {
+        // 成功响应不能覆盖同一响应明确携带的窗口耗尽事实
+        let state = if snapshot.quota().is_exhausted() {
             snapshot.quota()
         } else {
             QuotaState::allowed(observed_at)

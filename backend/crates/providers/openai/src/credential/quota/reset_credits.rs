@@ -205,6 +205,7 @@ impl CodexCredentialQuotaService {
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn list_reset_credits_once(
     client: &CodexBackendClient,
     prepared: &PreparedCodexRuntimeCredential,
@@ -228,6 +229,7 @@ async fn list_reset_credits_once(
         .map_err(ResetCreditAttemptError::Upstream)
 }
 
+#[allow(clippy::result_large_err)]
 async fn consume_reset_credit_once(
     client: &CodexBackendClient,
     prepared: &PreparedCodexRuntimeCredential,

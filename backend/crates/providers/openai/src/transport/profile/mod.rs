@@ -69,7 +69,10 @@ pub struct CodexWireProfile {
     /// 入口专属或自定义的完整值；存在时不得用默认预设重新拼接
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exact_user_agent: Option<String>,
-    /// Key 独立配置的安装身份；省略时保留当前调用的账号基线
+    /// Key 的安装身份种子，仅在本地按 Key 与账号派生出站身份
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation_seed: Option<String>,
+    /// 旧版 Key 直接指定的安装身份，保留双模式兼容
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installation_id: Option<String>,
     /// 未配置时不发送 residency 头；不随制品版本更新而改变
@@ -93,6 +96,7 @@ impl Default for CodexWireProfile {
             arch: "arm64".to_owned(),
             terminal: "unknown".to_owned(),
             exact_user_agent: None,
+            installation_seed: None,
             installation_id: None,
             residency: None,
             account_routing_override: None,
@@ -209,14 +213,16 @@ impl CodexWireProfileState {
         state
     }
 
-    pub(crate) fn effective_installation_id(&self, account_installation_id: &str) -> String {
+    pub(crate) fn effective_installation_id(
+        &self,
+        client_key_id: &gateway_core::policy::ClientApiKeyId,
+        account_id: &gateway_core::account::ProviderAccountId,
+        account_installation_id: &str,
+    ) -> String {
         self.profile
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .installation_id
-            .as_deref()
-            .unwrap_or(account_installation_id)
-            .to_owned()
+            .effective_installation_id(client_key_id, account_id, account_installation_id)
     }
 
     /// 返回当前画像的独立快照，避免持锁执行网络请求

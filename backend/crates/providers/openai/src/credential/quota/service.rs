@@ -124,7 +124,7 @@ impl CodexCredentialQuotaService {
     ) -> Result<(), CodexCredentialQuotaError> {
         // 已发出的并发请求成功可以恢复普通耗尽事实，但点数支出成功不能解除本地限制
         if account.quota().access() == QuotaAccessState::Exhausted
-            && account.quota().evidence() != Some(QuotaEvidence::CreditsAvailable)
+            && account.quota_fact().evidence() != Some(QuotaEvidence::CreditsAvailable)
         {
             let outcome = self
                 .store
@@ -524,8 +524,8 @@ impl CodexCredentialQuotaService {
             None
         };
         // 失败后回读只允许明确可用的点数恢复访问，套餐 allowed 仍可能滞后
-        let observe_access =
-            matches!(authority, QuotaRefreshAuthority::ObserveAccess) || snapshot.credits_usable();
+        let observe_access = matches!(authority, QuotaRefreshAuthority::ObserveAccess)
+            || (account.allow_credits() && snapshot.credits_usable());
         if account.quota().is_exhausted() && !observe_access {
             if self
                 .store
@@ -635,6 +635,7 @@ impl CodexCredentialQuotaService {
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn fetch_usage_once(
     client: &CodexBackendClient,
     prepared: &PreparedCodexRuntimeCredential,
@@ -661,6 +662,7 @@ async fn fetch_usage_once(
 /// 对 5xx 上游拒绝做有限次指数退避重试（1s/2s），吞掉瞬时抖动
 ///
 /// 4xx（含 402/429）不重试：它们已经走额度状态转换，重试只会放大上游负载
+#[allow(clippy::result_large_err)]
 async fn fetch_usage_with_5xx_retry(
     client: &CodexBackendClient,
     prepared: &PreparedCodexRuntimeCredential,

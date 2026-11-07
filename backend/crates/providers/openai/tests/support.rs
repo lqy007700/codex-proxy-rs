@@ -155,6 +155,14 @@ impl MemoryAccountStore {
             .map(|stored| stored.account.clone())
     }
 
+    pub(crate) fn enable_quota_credits(&self, id: &str) {
+        let mut accounts = self.accounts.lock().unwrap();
+        let stored = accounts
+            .get_mut(&ProviderAccountId::new(id).unwrap())
+            .unwrap();
+        stored.account = stored.account.clone().with_allow_credits(true);
+    }
+
     pub(crate) fn set_model_access(
         &self,
         id: &str,

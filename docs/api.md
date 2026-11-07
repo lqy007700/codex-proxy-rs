@@ -240,6 +240,107 @@ WebSocket message 和 frame 不设置网关私有长度上限；协议可接受�
 | `POST` | `/v1/providers/{provider}/models/{model}/count_tokens` | 调用指定 Provider/model 声明的精确 Token 计数；请求和响应均为 JSON |
 | `GET` / `POST` | `/v1/providers/{provider}/http/{endpoint}` | 调用指定 Provider 预先声明的固定 HTTP 操作；不是任意 URL 代理 |
 | `GET` | `/v1/usage` | 查询当前 Client Key 的日与周额度，仅使用网关已结算的 USD 账本 |
+| `GET` | `/v1/cpr/link` | 返回当前 Key 获准公开的预算及直连账号池观测 |
+
+### Chat Completions 请求
+
+`POST /v1/chat/completions` 接受 Chat 消息历史，转换为 Responses 请求执行，再交付 Chat 格式结果。
+每次请求须提供非空字符串 `model` 和非空数组 `messages`，多轮对话由客户端携带完整历史；
+没有 Chat 查询、删除或服务端历史续接接口。`stream` 省略、`null` 或 `false` 时返回 JSON，`true` 时返回 SSE
+
+官方 OpenAI SDK 可使用 Chat Completions 方法，将 `base_url` 指向网关的 `/v1`。
+下面的 `CPR_CLIENT_KEY` 为管理端创建的 Client Key，`CPR_MODEL` 为当前 Key 可用的模型 ID，可通过 `/v1/models` 查询：
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://gateway.example.com/v1",
+    api_key=os.environ["CPR_CLIENT_KEY"],
+)
+completion = client.chat.completions.create(
+    model=os.environ["CPR_MODEL"],
+    messages=[{"role": "user", "content": "你好"}],
+)
+print(completion.choices[0].message.content)
+```
+
+#### 请求字段
+
+入口负责将 Chat 结构映射为 Responses；同语义字段的模型支持范围、取值范围与业务有效性由 Provider 和上游判断。
+只有结构无法解码或不能正确表达的语义在本地返回 `400`，错误中的 `param` 指向字段，不回显字段值
+
+| 字段 | 支持与映射 |
+| --- | --- |
+| `messages[].role` | `system`、`developer`、`user`、`assistant`、`tool`，保持顺序；assistant 文本历史转为 `output_text` |
+| `messages[].content` | 字符串或内容块数组；user 和 tool 可包含图片、文件与音频，assistant 支持文本与拒绝内容 |
+| `image_url` 内容块 | HTTP(S) URL 或非空 `data:image/...;base64,...`，保留 `detail`，网关不代取图片 |
+| `file` 内容块 | `file.file_id`、`file.file_data`、`file.file_url` 至少提供一种，保留可选 `filename`；URL 和非 PDF 文件为网关的 Responses 扩展，实际支持由上游判断 |
+| `input_audio` 内容块 | Chat 的 `data` 和 `format` 转为 Responses `audio_url` data URL；原生音频引用与 `input_text`、`input_image`、`input_file` 内容块也可携带 |
+| `messages[].refusal`、assistant 的 `refusal` 内容块 | 保留拒绝历史；assistant 同时有工具调用或拒绝内容时，`content` 可省略或为 `null` |
+| `messages[].tool_calls`、`messages[].tool_call_id` | function 和 custom 调用分别映射到对应 Responses 调用及结果；保留 ID、参数或输入字符串，不解析或执行工具；custom 结果须携带前序调用历史 |
+| `messages[].name` | tool 消息的工具名随结果携带；其他角色的名称作为辅助信息忽略 |
+| `tools` | 展开 function/custom 定义，保留 schema、format 及原生工具对象；function 的 `strict` 省略或 `null` 时使用 `false` |
+| `tool_choice`、`parallel_tool_calls` | 展开指定 function/custom 和 `allowed_tools` 选择；原生选择与并行布尔值交给上游 |
+| `web_search_options` | `{}` 即要求上游执行 `web_search`；支持 `search_context_size` 与 `user_location.approximate` |
+| `response_format` | 映射到 `text.format`，保留 JSON Schema；未知格式交给上游 |
+| `reasoning_effort`、`verbosity` | 覆盖 `reasoning.effort`、`text.verbosity`，不固定枚举档位 |
+| `max_completion_tokens`、`max_tokens`、`max_output_tokens` | 映射到 `max_output_tokens`，按本行从左到右的顺序优先 |
+| `temperature`、`top_p` | 原值进入 Provider；是否生效见下文正文兼容规则 |
+| `user`、`safety_identifier`、`service_tier`、`prompt_cache_key`、`prompt_cache_retention` | 同语义字段保留原值 |
+| `metadata`、`prompt_cache_options`、`moderation` | 同结构对象原样携带，不递归清理业务字段 |
+| `instructions`、`reasoning`、`text`、`include`、`max_tool_calls`、`truncation`、`context_management` | Responses 原生扩展，保留原值；`reasoning`、`text` 须为对象 |
+| `logprobs`、`top_logprobs` | `logprobs: true` 请求输出文本 logprobs，并携带 `top_logprobs`；返回值位于 Chat 的 `choices[].logprobs` |
+| 内容块的 `prompt_cache_breakpoint` | 对象原样携带；assistant 输出消息不支持此选项 |
+
+可选映射参数为 `null` 时按未提供处理。`stop`、`seed`、`frequency_penalty`、`presence_penalty`、
+`logit_bias` 和 `prediction` 没有对应的 Responses 控制语义，接受后忽略，不保证生效。
+消息的 `reasoning_content` 和 `reasoning` 作为辅助历史忽略，不转为用户正文
+
+本地保留以下限制：`n` 只能为 `1`，`store` 和 `background` 只能为 `false`，
+`modalities` 只能为 `["text"]`，旧式 `functions` 只能为空数组；这些字段也可省略或为 `null`。
+非空旧式函数定义、`function_call`、旧式 `function` 角色、音频输出以及无法映射的内容类型会被拒绝。
+入口不接收 `input`、`previous_response_id` 或 `conversation`；需要服务端续接时使用 `/v1/responses`
+
+未知客户端附加字段在协议包装对象中忽略，不据名称自动转交 Responses；schema、metadata、工具参数和
+已识别的原生对象内部不做递归过滤。新工具声明可交给上游，但返回的业务输出仍须具有明确的 Chat 映射
+
+#### 响应与共用规则
+
+非流式响应包含一个 `choices` 项，支持文本、拒绝及 function/custom 工具调用；流式响应交付对应的 Chat delta。
+两种响应的 `id` 均由网关生成，`model` 保留客户端请求的模型 ID；流内各块使用同一身份。
+正常完成的 `finish_reason` 为 `stop`，包含工具调用时为 `tool_calls`；上游明确因输出长度或内容过滤而未完成时，
+分别为 `length` 或 `content_filter`
+
+联网搜索使用请求指定的模型，能否搜索取决于上游。搜索请求不接受非空 `tools`，`tool_choice` 可省略或使用 `auto`。
+需要由模型在搜索和其他工具之间选择时使用 `/v1/responses`。非流式结果的 URL 引用位于 `choices[0].message.annotations`，
+索引对应合并后的消息正文。流式结果保留正文中的行内链接，并在结束前通过 `delta.annotations` 交付结构化引用，
+索引对应实际交付的合并正文
+
+`stream_options` 仅在 `stream: true` 时可提供，
+`include_usage: true` 在完整上游用量可用时于结束前追加 `choices: []` 的用量块，其余块的 `usage` 为 `null`。
+未提供完整用量时不补造 Token 数；缺省不启用流长度混淆，`include_obfuscation: true` 不受支持，`false` 可接受
+
+响应对象的额外普通属性、非必要事件不影响已有内容映射；无法表达的业务输出、缺少必要终态或终态冲突会失败，
+不补造成功终态。SSE 已开始后通过 `data: {"error": ...}` 交付错误，再以 `[DONE]` 结束，
+因此 `[DONE]` 仅表示流结束，不能单独作为成功依据。
+OpenAI 是此入口的兼容目标，混合分组沿用账号范围内的选路与 fallback 规则，
+不能据此推导所有 Provider 都具备相同的 Chat 能力
+
+公开的推理摘要和推理文本投影到 `message.reasoning_content` / `delta.reasoning_content`；
+推理和上下文压缩的 `encrypted_content` 不作为可读内容返回，密文回放应使用原生 Responses。实际推理用量与上游 Token 明细保留
+
+原生 `image_generation` 工具的图片结果通过网关扩展 `message.images` / `delta.images` 返回，
+每项为 `type: "image_url"` 和包含 data URL 的 `image_url` 对象；流中带图片 `index`，预览与最终结果可能更新同一项。
+这是 Chat 扩展，需要客户端支持；音频输出和需要客户端执行的其他未映射动作不受支持
+
+Chat 沿用 [Client Key 鉴权](#openai-数据面客户端接口)、[请求期限](#请求期限)、[请求解压](#请求解压)、
+[请求头与身份](#请求头与身份)及[隐私策略](#隐私策略)。隐私策略的 `request_body` 面向转换后的 Responses 正文，
+例如 `$.input`，不需要另外维护一套针对 `messages` 的规则
+
+转换后的请求按选中的 Provider 执行。OpenAI 的字段处理见[正文兼容](#正文兼容)；
+输出上限原值交给上游校验，低于模型下限时会收到上游错误
 
 ### Images 请求
 
@@ -396,6 +497,14 @@ Grok 客户端经 Codex/OAuth 上游执行时，仅在带有 `x-grok-model-overr
 `x-grok-session-id` 标记的请求中，移除 `developer` 消息首个文本块开头的
 `You are Grok released by xAI.`。其余内容、用户消息和顶层 `instructions` 保留；
 普通 Codex 请求与 API Key 上游不应用这条兼容规则
+发往 Codex/OAuth 的 Responses 请求另按下表处理；API Key 上游保留这些字段。规则只匹配表中列出的位置
+
+| 请求字段 | Codex/OAuth 出站行为 |
+| --- | --- |
+| `top_p`、`frequency_penalty`、`presence_penalty`、`chat_template_kwargs`、`user`、`metadata`、`safety_identifier` | 省略；采样参数取默认值时也省略 |
+| `stream_options.include_usage` | 省略该成员，保留其他流式选项 |
+| `truncation`、`stop_sequences`、`prompt_cache_options` | 分别仅在值为 `"disabled"`、`[]`、`{}` 时省略；显式策略交给上游校验 |
+| `max_completion_tokens`、`max_tokens` | 转为 `max_output_tokens`。原生字段优先，其次按左列顺序取首个非 `null` 值 |
 
 Codex/OAuth 上游的历史回填按字段形状兼容，不以 User-Agent 品牌区分：显式 `type: "reasoning"`
 的 `input` 项移除顶层 `status`；该项具有非空字符串 `encrypted_content` 时，还会移除非空数组

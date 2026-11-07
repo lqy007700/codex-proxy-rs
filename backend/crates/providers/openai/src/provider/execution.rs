@@ -332,9 +332,11 @@ impl CodexProvider {
         // Standalone Provider 端点没有可证明的账号 owner；Images/Search metadata 必须按
         // 跨账号输入收敛到当前 lease，不能沿用下游声明的账号或 installation identity
         let client = self.client_for_request(&context)?;
-        let installation_id = client
-            .profile_state()
-            .effective_installation_id(lease.installation_id());
+        let installation_id = client.profile_state().effective_installation_id(
+            context.client_api_key_ref(),
+            lease.account_id(),
+            lease.installation_id(),
+        );
         let turn_metadata = payload
             .context()
             .get("turn_metadata")
@@ -566,6 +568,7 @@ pub(super) enum CodexHandshakeAttemptError {
     Timeout,
 }
 
+#[allow(clippy::result_large_err)]
 pub(super) async fn create_response_attempt(
     client: &CodexBackendClient,
     request: &CodexResponsesRequest,
@@ -605,6 +608,7 @@ pub(super) fn map_handshake_attempt_error(
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub(super) async fn create_json_attempt(
     request: &ColdJsonResponse,
     account: &ProviderAccount,

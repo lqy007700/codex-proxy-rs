@@ -1787,10 +1787,18 @@ impl CodexCredentialSelector {
                 "OpenAI credential recovery after successful upstream response failed"
             );
         }
-        if let Err(error) = self
-            .quota
-            .record_successful_inference(&current, observed_at)
-            .await
+        // 被动响应可能已在本次成功之后写入更晚的窗口耗尽事实，不能用成功回调覆盖它
+        let newer_quota = current.quota_fact().observed_at().is_some_and(|current| {
+            account
+                .quota_fact()
+                .observed_at()
+                .is_none_or(|selected| current > selected)
+        });
+        if !newer_quota
+            && let Err(error) = self
+                .quota
+                .record_successful_inference(&current, observed_at)
+                .await
         {
             tracing::warn!(
                 account_id = %account.id(),

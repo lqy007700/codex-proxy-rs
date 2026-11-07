@@ -24,6 +24,7 @@ impl Provider for AccountCatalogProvider {
 
     async fn query_client_model_catalog(
         &self,
+        _: &ClientApiKeyId,
         _: &FrozenAccountScope,
         _: &str,
         _: &str,

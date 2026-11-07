@@ -482,9 +482,20 @@ impl QuotaState {
         }
     }
 
+    /// 点数是唯一放行依据时保留套餐重置时间，开关变化不伪造新的观测
+    #[must_use]
+    pub const fn credits_only(observed_at: SystemTime, reset_at: Option<SystemTime>) -> Self {
+        Self {
+            access: QuotaAccessState::Allowed,
+            evidence: Some(QuotaEvidence::CreditsAvailable),
+            observed_at: Some(observed_at),
+            reset_at,
+        }
+    }
+
     /// 从持久化列恢复额度状态；非法组合返回 `None`
     #[must_use]
-    pub const fn from_persisted(
+    pub fn from_persisted(
         access: QuotaAccessState,
         evidence: Option<QuotaEvidence>,
         observed_at: Option<SystemTime>,
@@ -498,7 +509,9 @@ impl QuotaState {
                 reset_at,
             }),
             QuotaAccessState::Allowed
-                if evidence.is_none() && observed_at.is_some() && reset_at.is_none() =>
+                if (evidence.is_none() && observed_at.is_some() && reset_at.is_none())
+                    || (matches!(evidence, Some(QuotaEvidence::CreditsAvailable))
+                        && observed_at.is_some()) =>
             {
                 Some(Self {
                     access,
@@ -549,17 +562,21 @@ impl QuotaState {
 
     /// 点数可用性是上游事实，是否允许支出由账号设置独立决定
     #[must_use]
-    pub const fn with_credits_policy(self, allow_credits: bool) -> Self {
-        if allow_credits && matches!(self.evidence, Some(QuotaEvidence::CreditsAvailable)) {
-            Self {
-                access: QuotaAccessState::Allowed,
-                evidence: None,
-                reset_at: None,
-                ..self
+    pub fn with_credits_policy(self, allow_credits: bool) -> Self {
+        if matches!(self.evidence, Some(QuotaEvidence::CreditsAvailable)) {
+            if allow_credits {
+                return Self::credits_only(
+                    self.observed_at.unwrap_or(SystemTime::UNIX_EPOCH),
+                    self.reset_at,
+                );
             }
-        } else {
-            self
+            return Self::exhausted(
+                QuotaEvidence::AccountLimitReached,
+                self.observed_at.unwrap_or(SystemTime::UNIX_EPOCH),
+                self.reset_at,
+            );
         }
+        self
     }
 
     /// 判断已耗尽额度是否到达 Provider 的下一次复核时间
@@ -1088,7 +1105,7 @@ impl ProviderAccount {
 
     #[must_use]
     /// 将上游条件访问事实与本地支出设置组合为当前调度额度
-    pub const fn quota(&self) -> QuotaState {
+    pub fn quota(&self) -> QuotaState {
         self.quota.with_credits_policy(self.allow_credits)
     }
 

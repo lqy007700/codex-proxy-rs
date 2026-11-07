@@ -139,6 +139,7 @@ fn test_wire_profile() -> CodexWireProfileState {
         arch: "x86_64".to_owned(),
         terminal: "transport-test".to_owned(),
         exact_user_agent: None,
+        installation_seed: None,
         installation_id: None,
         residency: None,
         account_routing_override: None,
@@ -246,6 +247,7 @@ impl CodexBackendClientTestExt for CodexBackendClient {
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn collect_backend_response(
     response: CodexBackendStreamingResponse,
     started_at: Instant,
@@ -313,6 +315,7 @@ async fn collect_backend_response(
     })
 }
 
+#[allow(clippy::result_large_err)]
 async fn execute_response_create_request(
     request: &CodexWebSocketRequest,
 ) -> CodexClientResult<CollectedBackendResponse> {

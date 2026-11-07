@@ -58,6 +58,7 @@ fn search_request(downstream_ws: bool, overrides: Value) -> CodexResponsesReques
     request
 }
 
+#[allow(clippy::result_large_err)]
 async fn send(
     client: &CodexBackendClient,
     request: &CodexResponsesRequest,

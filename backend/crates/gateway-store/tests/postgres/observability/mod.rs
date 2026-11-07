@@ -1015,6 +1015,70 @@ async fn usage_and_error_search_match_key_names_instead_of_credentials() {
 }
 
 #[tokio::test]
+async fn usage_and_error_search_should_match_upstream_key_names() {
+    let Some(database) = TestDatabase::create("usage_upstream_key_search").await else {
+        return;
+    };
+    let now = Utc::now();
+    seed_observability_facts(&database.pool, now)
+        .await
+        .expect("seed observability facts");
+    sqlx::query("update model_requests set request_observation_json = jsonb_set(request_observation_json, '{request}', (request_observation_json->'request') || jsonb_build_object('callerTokenNameSnapshot', 'Production_上游%Key'))")
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    let range = ObservabilityRange::new(now - TimeDelta::hours(1), now + TimeDelta::hours(1))
+        .expect("observability range");
+
+    super::drain_analytics(&database.pool).await;
+    let repository = observability_repository(&database.pool);
+    for (search, expected) in [
+        ("production", 1),
+        ("上游%", 1),
+        ("Key", 1),
+        ("ProductionX", 0),
+    ] {
+        let page = repository
+            .list_usage_records(UsageRecordQuery {
+                scope: Default::default(),
+                range,
+                filter: UsageRecordFilter {
+                    search: Some(search.to_owned()),
+                    ..UsageRecordFilter::default()
+                },
+                current_page: 1,
+                page_size: ObservabilityPageSize::new(10).expect("page size"),
+            })
+            .await
+            .expect("search usage by upstream key name");
+        assert_eq!(page.total, expected, "search: {search}");
+        if expected == 1 {
+            assert_eq!(page.items[0].id, "req_observe_success");
+            assert_eq!(
+                page.items[0].caller_token_name.as_deref(),
+                Some("Production_上游%Key")
+            );
+        }
+
+        super::drain_analytics(&database.pool).await;
+        let errors = repository
+            .list_ops_errors(OpsErrorQuery {
+                range,
+                filter: OpsErrorFilter {
+                    search: Some(search.to_owned()),
+                    ..Default::default()
+                },
+                current_page: 1,
+                page_size: ObservabilityPageSize::new(10).expect("page size"),
+            })
+            .await
+            .expect("search errors by upstream key name");
+        assert_eq!(errors.total, expected * 2, "error search: {search}");
+    }
+    database.close().await;
+}
+
+#[tokio::test]
 async fn ops_search_should_match_literal_substrings_from_both_sources() {
     let Some(database) = TestDatabase::create("ops_literal_contains_search").await else {
         return;

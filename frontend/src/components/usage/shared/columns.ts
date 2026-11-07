@@ -81,7 +81,7 @@ export const usageRecordColumns = defineTableColumns<UsageListRecord>([
   },
   {
     key: 'callerTokenName',
-    label: 'New API Token 名称',
+    label: '上游key',
     kind: 'identity',
     size: 'lg',
     hideable: true,

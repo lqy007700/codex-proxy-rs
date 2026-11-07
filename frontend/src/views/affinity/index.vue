@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
 import type { AffinityFilters, AffinityOperation, AffinitySession, BindingDirective, IdentitySource } from '@/api/modules/affinity'
-import { defineTableColumns, ZButton, ZCard, ZCheckbox, ZDialog, ZFormItem, ZInput, ZMenuItem, ZPageHeader, ZPopover, ZSelect, ZSwitch, ZTable, ZTag } from '@codex-proxy/ui'
+import { defineTableColumns, ZButton, ZCard, ZCheckbox, ZDialog, ZFormItem, ZInput, ZMenuItem, ZPageHeader, ZPopover, ZSegmented, ZSelect, ZSwitch, ZTable, ZTag } from '@codex-proxy/ui'
+import { ChevronDown } from '@lucide/vue'
 import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAccounts } from '@/api'
@@ -15,13 +16,16 @@ import AffinityBindingActions from './components/AffinityBindingActions.vue'
 const route = useRoute()
 const router = useRouter()
 const view = ref('tokens')
-const views = [
-  { label: 'New API Key', value: 'tokens' },
+const tabs = [
+  { label: '按 K 查看', value: 'tokens' },
+  { label: '按账号查看', value: 'accounts' },
+]
+const managementViews = [
   { label: '直连会话管理', value: 'sessions' },
   { label: '操作记录', value: 'operations' },
   { label: '身份来源', value: 'sources' },
 ]
-const viewLabel = computed(() => views.find(item => item.value === view.value)?.label ?? 'New API Key')
+const viewLabel = computed(() => [...tabs, ...managementViews].find(item => item.value === view.value)?.label ?? '按 K 查看')
 const filters = reactive<AffinityFilters>({})
 const sessions = shallowRef<AffinitySession[]>([])
 const sources = shallowRef<IdentitySource[]>([])
@@ -42,12 +46,22 @@ const action = ref<BindingDirective['action']>('target')
 const targetAccount = ref<string>()
 const targetAccounts = shallowRef<Account[]>([])
 const accountNames = shallowRef(new Map<string, string>())
+const accountCatalog = shallowRef<Account[]>([])
 const accountNamesQuery = useRequestState()
 const accountQuery = useRequestState()
 const { loading: accountsLoading, error: accountsError } = accountQuery
 const source = reactive<IdentitySource>({ id: '', name: '', enabled: true })
 const showSource = ref(false)
 const sourceNames = computed(() => new Map(sources.value.map(item => [item.id, item.name])))
+interface AccountAffinityRow {
+  account: Account
+  bindings: AffinitySession[]
+}
+const expandedAccountIds = ref(new Set<string>())
+const accountRows = computed<AccountAffinityRow[]>(() => accountCatalog.value.map(account => ({
+  account,
+  bindings: sessions.value.filter(session => session.accountId === account.id),
+})))
 const selectableSessions = computed(() => sessions.value.filter(canManage))
 const selectedSessions = computed(() => selectableSessions.value.filter(session => selected.value.has(key(session))))
 const allSelected = computed(() => selectableSessions.value.length > 0 && selectedSessions.value.length === selectableSessions.value.length)
@@ -154,6 +168,18 @@ const operationColumns = defineTableColumns<AffinityOperation>([
   { key: 'time', label: '预览时间', kind: 'datetime' },
   { key: 'actions', label: '结果', kind: 'actions' },
 ])
+const accountColumns = defineTableColumns<AccountAffinityRow>([
+  { key: 'expander', kind: 'expander', hideable: false },
+  {
+    key: 'identity',
+    label: '账号',
+    kind: 'identity',
+    size: '3xl',
+  },
+  { key: 'provider', label: '平台/类型', kind: 'meta', size: 'md' },
+  { key: 'bindings', label: '当前绑定 K', kind: 'custom', size: '3xl' },
+  { key: 'status', label: '状态', kind: 'custom', size: 'lg' },
+])
 function canManage(session: AffinitySession) {
   return session.observation.bindingScope === 'token' || session.observation.caller.mode === 'direct'
 }
@@ -228,6 +254,7 @@ async function loadAccountNames() {
     const first = await getAccounts({ page: 1, pageSize: 200 }, options)
     if (!accountNamesQuery.isCurrent(requestId))
       return
+    const accounts = [...first.items]
     const names = new Map<string, string>()
     for (const account of first.items)
       names.set(account.id, accountIdentityLabel(account))
@@ -237,8 +264,10 @@ async function loadAccountNames() {
         return
       for (const account of result.items)
         names.set(account.id, accountIdentityLabel(account))
+      accounts.push(...result.items)
     }
     accountNames.value = names
+    accountCatalog.value = accounts
   }
   catch {
     // 名称仅辅助展示，目录不可用时保留 ID，不阻断亲和查询或操作
@@ -248,6 +277,14 @@ async function loadAccountNames() {
 function refresh() {
   void loadAccountNames()
   void load()
+}
+function toggleAccount(accountId: string) {
+  const next = new Set(expandedAccountIds.value)
+  if (next.has(accountId))
+    next.delete(accountId)
+  else
+    next.add(accountId)
+  expandedAccountIds.value = next
 }
 function toggle(items: AffinitySession[], checked: boolean) {
   const next = new Set(selected.value)
@@ -300,16 +337,14 @@ async function load() {
     const [page, sourceList, history] = await Promise.all([
       view.value === 'sources' || view.value === 'operations'
         ? Promise.resolve({ items: [], nextCursor: null })
-        : getAffinitySessions({
-            ...Object.fromEntries(Object.entries(filters).map(([name, value]) => [name, value?.trim() || undefined])),
-            bindingScope: view.value === 'sessions'
-              ? 'session'
-              : 'token',
-            mode: view.value === 'sessions'
-              ? filters.mode ?? 'direct'
-              : 'newApi',
-            cursor: cursor.value,
-          }, { signal: query.signal }),
+        : view.value === 'accounts'
+          ? loadAllTokenAffinity()
+          : getAffinitySessions({
+              ...Object.fromEntries(Object.entries(filters).map(([name, value]) => [name, value?.trim() || undefined])),
+              bindingScope: view.value === 'sessions' ? 'session' : 'token',
+              mode: view.value === 'sessions' ? filters.mode ?? 'direct' : 'newApi',
+              cursor: cursor.value,
+            }, { signal: query.signal }),
       view.value === 'operations'
         ? Promise.resolve(sources.value)
         : getIdentitySources({ signal: query.signal }),
@@ -326,6 +361,20 @@ async function load() {
   }
   catch (cause) { query.fail(requestId, cause) }
   finally { query.finish(requestId) }
+}
+async function loadAllTokenAffinity() {
+  const items: AffinitySession[] = []
+  let nextCursor: string | undefined
+  do {
+    const page = await getAffinitySessions({
+      bindingScope: 'token',
+      mode: 'newApi',
+      cursor: nextCursor,
+    }, { signal: query.signal })
+    items.push(...page.items)
+    nextCursor = page.nextCursor ?? undefined
+  } while (nextCursor)
+  return { items, nextCursor: null }
 }
 function search() {
   cursor.value = undefined
@@ -365,7 +414,9 @@ function selectView(value: string) {
   // 管理入口显式切换范围，保留路由深链的筛选直到用户主动返回全部
   void router.replace({
     path: '/affinity',
-    query: value === 'sessions'
+    query: value === 'accounts'
+      ? { view: 'accounts' }
+      : value === 'sessions'
       ? { mode: 'direct' }
       : value === 'tokens'
         ? {}
@@ -375,7 +426,9 @@ function selectView(value: string) {
 function clearFilters() {
   void router.replace({
     path: '/affinity',
-    query: view.value === 'sessions'
+    query: view.value === 'accounts'
+      ? { view: 'accounts' }
+      : view.value === 'sessions'
       ? { mode: 'direct' }
       : {},
   })
@@ -445,7 +498,10 @@ function applyRoute() {
   filters.mode = route.query.mode === 'direct' || route.query.mode === 'newApi'
     ? route.query.mode
     : undefined
-  if (route.query.bindingScope === 'session' || route.query.mode === 'direct') {
+  if (route.query.view === 'accounts') {
+    view.value = 'accounts'
+  }
+  else if (route.query.bindingScope === 'session' || route.query.mode === 'direct') {
     view.value = 'sessions'
   }
   else {
@@ -472,12 +528,35 @@ onMounted(() => {
   void loadAccountNames()
   applyRoute()
 })
+
+function bindingStatusLabel(session: AffinitySession) {
+  if (session.directive)
+    return pendingLabel(session.directive, true)
+  return session.accountId === session.observation.actualAccountId
+    ? '主账号'
+    : '最近请求使用其他账号'
+}
+
+function openTokenView(session: AffinitySession) {
+  const caller = session.observation.caller
+  void router.replace({
+    path: '/affinity',
+    query: caller.mode === 'newApi'
+      ? {
+          sourceId: caller.sourceId,
+          userId: caller.userId,
+          tokenId: caller.tokenId,
+        }
+      : { accountId: session.accountId },
+  })
+}
 </script>
 
 <template>
   <div class="w-full">
     <ZPageHeader title="账号亲和" description="管理 New API Key 与 CPR 主账号的绑定">
       <template #actions>
+        <ZSegmented v-model="view" aria-label="账号亲和视图" :options="tabs" :disabled="saving || loading" @update:model-value="selectView" />
         <ZPopover placement="bottom-end">
           <template #reference="{ open }">
             <ZButton :disabled="saving || loading" :aria-expanded="open" aria-label="更多亲和管理">
@@ -486,7 +565,7 @@ onMounted(() => {
           </template>
           <template #default="{ close }">
             <div class="w-44 p-1.5">
-              <ZMenuItem v-for="item in views" :key="item.value" :disabled="item.value === view || saving || loading" @click="(close(), selectView(item.value))">
+              <ZMenuItem v-for="item in managementViews" :key="item.value" :disabled="item.value === view || saving || loading" @click="(close(), selectView(item.value))">
                 {{ item.label }}
               </ZMenuItem>
             </div>
@@ -502,7 +581,7 @@ onMounted(() => {
         <span class="text-cp-sm font-medium">{{ viewLabel }}</span>
       </template>
       <template #body>
-        <div v-if="filterContext && view !== 'sources' && view !== 'operations'" class="mb-4 flex flex-wrap items-center gap-2 text-cp-xs text-cp-text-secondary">
+        <div v-if="filterContext && view !== 'sources' && view !== 'operations' && view !== 'accounts'" class="mb-4 flex flex-wrap items-center gap-2 text-cp-xs text-cp-text-secondary">
           <span class="break-all">当前范围：{{ filterContext }}</span>
           <ZButton size="small" :disabled="saving || loading" @click="clearFilters">
             {{ view === 'sessions' ? '查看全部直连绑定' : '查看全部 Key' }}
@@ -549,6 +628,57 @@ onMounted(() => {
             </ZButton>
           </template>
         </ZTable>
+        <template v-else-if="view === 'accounts'">
+          <p class="mb-4 text-cp-sm text-cp-text-secondary">
+            按账号查看当前绑定的 New API Key，仅展示已观测且未过期的主绑定
+          </p>
+          <ZTable :columns="accountColumns" :data="accountRows" :row-key="row => row.account.id" :expanded-row-keys="[...expandedAccountIds]" :loading="loading" empty-text="暂无账号数据">
+            <template #expander="{ row }">
+              <button type="button" class="inline-flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-cp-text-secondary transition hover:bg-cp-bg-text-hover hover:text-cp-text" :title="expandedAccountIds.has(row.account.id) ? '收起绑定 K' : '展开绑定 K'" @click.stop="toggleAccount(row.account.id)">
+                <ChevronDown class="size-3.5 transition-transform" :class="expandedAccountIds.has(row.account.id) ? '' : '-rotate-90'" />
+              </button>
+            </template>
+            <template #identity="{ row }">
+              <div class="truncate" :title="accountIdentityLabel(row.account)">{{ accountIdentityLabel(row.account) }}</div>
+              <div class="mt-1 truncate text-cp-xs text-cp-text-tertiary">{{ row.account.email || row.account.id }}</div>
+            </template>
+            <template #provider="{ row }">
+              <span>{{ row.account.provider }}</span>
+              <span class="mt-1 block text-cp-xs text-cp-text-tertiary">{{ row.account.authenticationKind }}</span>
+            </template>
+            <template #bindings="{ row }">
+              <div v-if="row.bindings.length" class="flex flex-wrap gap-1">
+                <ZTag v-for="binding in row.bindings.slice(0, 3)" :key="key(binding)" type="info">
+                  {{ tokenLabel(binding) }}
+                </ZTag>
+                <ZTag v-if="row.bindings.length > 3" type="default">+{{ row.bindings.length - 3 }}</ZTag>
+              </div>
+              <span v-else class="text-cp-xs text-cp-text-tertiary">暂无已观测绑定</span>
+            </template>
+            <template #status="{ row }">
+              <ZTag :type="row.bindings.length ? 'success' : 'default'">
+                {{ row.bindings.length ? `${row.bindings.length} 个 K` : '未绑定' }}
+              </ZTag>
+            </template>
+            <template #expanded="{ row }">
+              <div class="grid gap-2 p-4">
+                <div v-if="!row.bindings.length" class="text-cp-sm text-cp-text-tertiary">当前账号没有已观测且未过期的 K 绑定</div>
+                <div v-for="binding in row.bindings" :key="key(binding)" class="grid gap-2 rounded-cp bg-cp-fill-quaternary p-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+                  <div class="min-w-0">
+                    <div class="truncate text-cp-sm" :title="tokenLabel(binding)">{{ tokenLabel(binding) }}</div>
+                    <div class="mt-1 truncate text-cp-xs text-cp-text-tertiary">Token #{{ binding.observation.caller.mode === 'newApi' ? binding.observation.caller.tokenId : '-' }} · 用户 #{{ binding.observation.caller.mode === 'newApi' ? binding.observation.caller.userId : '-' }}</div>
+                  </div>
+                  <div class="text-cp-xs text-cp-text-secondary">{{ binding.provider }}</div>
+                  <div>
+                    <ZTag :type="binding.directive || binding.accountId !== binding.observation.actualAccountId ? 'warning' : 'success'">{{ bindingStatusLabel(binding) }}</ZTag>
+                    <div class="mt-1 text-cp-xs text-cp-text-tertiary">到期 {{ binding.expiresAtDisplay }}</div>
+                  </div>
+                  <ZButton size="small" @click="openTokenView(binding)">查看 K</ZButton>
+                </div>
+              </div>
+            </template>
+          </ZTable>
+        </template>
         <template v-else>
           <div v-if="view === 'sessions' && selectedSessions.length" class="my-4 flex flex-wrap items-center gap-2">
             <span class="mr-2 text-cp-sm text-cp-text-secondary">已选 {{ selectedSessions.length }} 个{{ view === 'sessions' ? '会话绑定' : ' New API Key' }}</span>

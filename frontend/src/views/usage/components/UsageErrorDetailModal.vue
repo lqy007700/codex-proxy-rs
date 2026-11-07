@@ -112,7 +112,7 @@ const identifierItems = computed(() => [
         ...(props.record.callerTokenName
           ? [
               {
-                label: 'New API Token 名称',
+                label: '上游key',
                 value: props.record.callerTokenName,
                 mono: true,
                 wrap: true,
