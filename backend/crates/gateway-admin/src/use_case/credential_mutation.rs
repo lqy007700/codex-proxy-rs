@@ -29,10 +29,26 @@ pub(super) async fn publish_credentials_and_observe_quota(
     provider.account_facts_changed(account_ids).await;
     publish_committed(snapshot, revision).await?;
     // 凭据已经提交；额度只是可重建的观察，不能拖住管理请求或回滚提交结果
+    observe_account_quotas(
+        provider,
+        accounts,
+        account_ids.to_vec(),
+        request_id.to_owned(),
+    );
+    Ok(())
+}
+
+/// 配置提交后异步复查指定账号额度
+///
+/// 额度观察失败不能回滚已经提交的账号设置
+pub(super) fn observe_account_quotas(
+    provider: &std::sync::Arc<dyn crate::ports::provider::ProviderAdmin>,
+    accounts: &std::sync::Arc<dyn AccountStore>,
+    account_ids: Vec<ProviderAccountId>,
+    request_id: String,
+) {
     let provider = provider.clone();
     let accounts = accounts.clone();
-    let account_ids = account_ids.to_vec();
-    let request_id = request_id.to_owned();
     tokio::spawn(async move {
         for account_id in account_ids {
             let request = ProviderQuotaRequest {
@@ -44,7 +60,7 @@ pub(super) async fn publish_credentials_and_observe_quota(
                 Ok(Some(account)) => account,
                 Ok(None) => continue,
                 Err(error) => {
-                    tracing::warn!(request_id, account_id = %account_id, error = %error, "initial quota account lookup failed");
+                    tracing::warn!(request_id, account_id = %account_id, error = %error, "quota observation account lookup failed");
                     continue;
                 }
             };
@@ -56,19 +72,17 @@ pub(super) async fn publish_credentials_and_observe_quota(
             {
                 continue;
             }
-            let result = provider.quota(request).await;
-            if let Err(error) = result {
+            if let Err(error) = provider.quota(request).await {
                 tracing::warn!(
                     request_id,
                     provider = %provider.provider_kind().as_str(),
                     account_id = %account_id.as_str(),
                     quota_error = ?error.kind(),
-                    "initial quota observation failed"
+                    "account quota observation failed"
                 );
             }
         }
     });
-    Ok(())
 }
 
 pub(super) async fn required_credential(

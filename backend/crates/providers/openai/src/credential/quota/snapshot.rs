@@ -395,10 +395,13 @@ fn has_usable_credits(usage: &Map<String, Value>) -> bool {
         == Some(true);
     let other_limit_reached = usage
         .get("rate_limit_reached_type")
-        .and_then(|reason| reason.get("type"))
-        .and_then(Value::as_str)
+        .and_then(|reason| reason.as_str().or_else(|| reason.get("type")?.as_str()))
         .is_some_and(|reason| reason != "rate_limit_reached");
-    available && !spend_reached && !other_limit_reached
+    let overage_reached = credits
+        .get("overage_limit_reached")
+        .and_then(Value::as_bool)
+        == Some(true);
+    available && !spend_reached && !other_limit_reached && !overage_reached
 }
 
 /// 只有默认 `codex` 桶能提供账号级套餐访问结论，具名桶只保留展示事实

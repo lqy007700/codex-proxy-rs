@@ -298,13 +298,14 @@ impl CodexCredentialQuotaService {
             observed_at,
             &Value::Object(object.clone()),
         )?;
-        let previous = if account.quota().is_exhausted() {
+        let previous = if account.quota_fact().is_exhausted() {
             self.read_snapshot_for(account).await?
         } else {
             None
         };
         let state = reconcile_refresh(
-            account.quota(),
+            account.quota_fact(),
+            account.allow_credits(),
             &mut snapshot,
             previous.as_ref(),
             &mut object,
@@ -518,7 +519,7 @@ impl CodexCredentialQuotaService {
             observed_at,
             &Value::Object(object.clone()),
         )?;
-        let previous = if account.quota().is_exhausted() {
+        let previous = if account.quota_fact().is_exhausted() {
             self.read_snapshot_for(&account).await?
         } else {
             None
@@ -552,7 +553,8 @@ impl CodexCredentialQuotaService {
         }
         let state = if observe_access {
             reconcile_refresh(
-                account.quota(),
+                account.quota_fact(),
+                account.allow_credits(),
                 &mut snapshot,
                 previous.as_ref(),
                 &mut object,

@@ -790,6 +790,7 @@ impl AccountsService for DefaultAccountsService {
             (
                 std::sync::Arc<dyn crate::ports::provider::ProviderAdmin>,
                 Vec<ProviderAccountId>,
+                Vec<ProviderAccountId>,
             ),
         >::new();
         for account_id in &account_ids {
@@ -800,11 +801,16 @@ impl AccountsService for DefaultAccountsService {
             {
                 return Err(AdminError::invalid("仅 OpenAI OAuth 账号支持额度点数设置"));
             }
-            providers
+            let (_, selected, exhausted) = providers
                 .entry(item.account.provider_kind)
-                .or_insert_with(|| (provider, Vec::new()))
-                .1
-                .push(account_id.clone());
+                .or_insert_with(|| (provider, Vec::new(), Vec::new()));
+            selected.push(account_id.clone());
+            if command.allow_credits == Some(true)
+                && !item.account.allow_credits
+                && item.account.quota.is_exhausted()
+            {
+                exhausted.push(account_id.clone());
+            }
         }
         let enabled = command.enabled;
         let result = self
@@ -812,7 +818,7 @@ impl AccountsService for DefaultAccountsService {
             .batch_update_accounts(command, context)
             .await
             .map_err(|error| map_store_error(error, "provider accounts"))?;
-        for (provider, provider_ids) in providers.values() {
+        for (provider, provider_ids, _) in providers.values() {
             if enabled == Some(false) {
                 for account_id in provider_ids {
                     provider.account_unavailable(account_id).await;
@@ -821,6 +827,17 @@ impl AccountsService for DefaultAccountsService {
             provider.account_facts_changed(provider_ids).await;
         }
         publish_committed(self.snapshot.as_ref(), result.config_revision).await?;
+        for (provider, _, exhausted) in providers.into_values() {
+            if exhausted.is_empty() {
+                continue;
+            }
+            super::credential_mutation::observe_account_quotas(
+                &provider,
+                &self.accounts,
+                exhausted,
+                context.request_id.clone(),
+            );
+        }
         Ok(result)
     }
 
