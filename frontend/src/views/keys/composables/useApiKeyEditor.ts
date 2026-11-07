@@ -5,11 +5,14 @@ import { ref, shallowRef } from 'vue'
 import { createApiKey, updateApiKey } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { notification as ZNotification } from '@/utils/notification'
+import { generateRequestId } from '@/utils/operation'
 
 export interface ApiKeyFormValue {
   identityPolicy: import('@/api/modules/affinity').CallerIdentityPolicy
   portableHistory: boolean
   providerRequestProfileOverrides: ProviderRequestProfiles
+  installationSeedEnabled: boolean
+  installationSeed: string
   installationId: string
   customKey: string
   name: string
@@ -43,16 +46,24 @@ export function useApiKeyEditor(options: {
     const profiles = cloneDeep(key.providerRequestProfileOverrides)
     const openai = profiles.openai
     const identity = (openai?.inherit as Record<string, unknown> | undefined) ?? openai
+    const installationSeed = typeof identity?.installationSeed === 'string'
+      ? identity.installationSeed
+      : ''
     const installationId = typeof identity?.installationId === 'string'
       ? identity.installationId
       : ''
-    if (openai?.inherit)
+    if (openai?.inherit) {
       delete profiles.openai
-    else if (openai)
+    }
+    else if (openai) {
       delete openai.installationId
+      delete openai.installationSeed
+    }
     form.value = {
       identityPolicy: cloneDeep(key.identityPolicy ?? { mode: 'direct' }),
       providerRequestProfileOverrides: profiles,
+      installationSeedEnabled: !!installationSeed,
+      installationSeed,
       installationId,
       portableHistory: key.portableHistory,
       customKey: '',
@@ -102,14 +113,42 @@ export function useApiKeyEditor(options: {
           weeklyLimitUsd: form.value.weeklyLimitUsd.trim() || '0',
         }
         const profiles = cloneDeep(form.value.providerRequestProfileOverrides)
+        if (form.value.installationSeedEnabled) {
+          const installationSeed = form.value.installationSeed || generateRequestId()
+          if (profiles.openai?.inherit) {
+            profiles.openai = {
+              inherit: { installationSeed },
+            }
+          }
+          else if (profiles.openai) {
+            delete profiles.openai.installationId
+            delete profiles.openai.installationSeed
+            profiles.openai.installationSeed = installationSeed
+          }
+          else {
+            profiles.openai = {
+              inherit: { installationSeed },
+            }
+          }
+        }
         const installationId = form.value.installationId
-        if (installationId) {
+        if (!form.value.installationSeedEnabled && installationId) {
           // 仅固定安装 ID 时保留对全局 UA 的继承，不在 Key 中复制当前全局值
-          profiles.openai = profiles.openai
-            ? { ...profiles.openai, installationId }
-            : {
-                inherit: { installationId },
-              }
+          if (profiles.openai?.inherit) {
+            profiles.openai = {
+              inherit: { installationId },
+            }
+          }
+          else if (profiles.openai) {
+            delete profiles.openai.installationId
+            delete profiles.openai.installationSeed
+            profiles.openai.installationId = installationId
+          }
+          else {
+            profiles.openai = {
+              inherit: { installationId },
+            }
+          }
         }
         const current = editingKey.value
         let created: { key: string, name: string } | undefined
@@ -171,6 +210,8 @@ function emptyForm(): ApiKeyFormValue {
     identityPolicy: { mode: 'direct' },
     portableHistory: false,
     providerRequestProfileOverrides: {},
+    installationSeedEnabled: true,
+    installationSeed: generateRequestId(),
     installationId: '',
     customKey: '',
     name: '',

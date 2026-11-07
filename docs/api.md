@@ -1728,10 +1728,12 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 
 `providerRequestProfileOverrides` 按 Provider ID 保存身份选择，列表返回同名对象。创建时各项为完整配置对象，
 未提供的 Provider 跟随通用设置；更新时省略某项保留原值，设为 `null` 清除该项覆盖。最多 256 项，每项最多 64 KiB。
-独立配置整体覆盖通用设置，不逐字段继承；OpenAI 也支持 `{ "inherit": { "installationId": "<UUID>" } }`，
-只固定安装 ID 并继续继承通用 UA。完整 OpenAI 画像也可附加 `installationId`；省略、`null` 或空字符串使用账号默认身份。
-固定值须为带连字符的 UUID，生成与清除均由管理员显式操作；修改安装身份后不复用旧 WS 握手。
-本地调用方、续接与亲和隔离仍使用原始身份，固定安装 ID 不放宽授权。目录与选择规则见 [Provider 客户端身份](#provider-客户端身份)
+独立配置整体覆盖通用设置，不逐字段继承；OpenAI 支持 `{ "inherit": { "installationId": "<UUID>" } }` 固定安装 ID，
+也支持 `{ "inherit": { "installationSeed": "<UUID>" } }` 按 Key 与账号稳定派生安装身份，两者均继续继承通用 UA。
+完整 OpenAI 画像也可附加 `installationId` 或 `installationSeed`；Seed 生效时优先使用 Seed 派生值。
+省略、`null` 或空字符串使用账号默认身份。固定值须为带连字符的 UUID，生成与清除均由管理员显式操作；修改安装身份后不复用旧 WS 握手。
+管理端新建 API Key 默认生成并启用 Seed；编辑已有 Key 时保留当前安装身份模式，关闭 Seed 后才回到安装 ID 或账号默认身份。
+本地调用方、续接与亲和隔离仍使用原始身份，固定安装 ID 或 Seed 均不放宽授权。目录与选择规则见 [Provider 客户端身份](#provider-客户端身份)
 
 兼容字段 `openaiClientProfileOverride` 和 `xaiClientProfileOverride` 分别对应上述映射中的 `openai`、`xai`。
 创建时省略或 `null` 表示无覆盖；更新时省略保留、`null` 清除。与通用字段同时提交时必须一致，否则拒绝整个请求；

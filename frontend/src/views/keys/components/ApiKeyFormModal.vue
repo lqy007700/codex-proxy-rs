@@ -30,6 +30,16 @@ const rules = useApiKeyFormRules()
 
 watch(open, () => formRef.value?.clearValidate())
 
+function toggleInstallationSeed(enabled: boolean) {
+  form.value = {
+    ...form.value,
+    installationSeedEnabled: enabled,
+    installationSeed: enabled && !form.value.installationSeed
+      ? generateRequestId()
+      : form.value.installationSeed,
+  }
+}
+
 async function requestSave() {
   if (props.saving || !await formRef.value?.validate().catch(() => false))
     return
@@ -121,12 +131,30 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
         </div>
       </ZFormItem>
 
-      <ZFormItem label="安装 ID（可选）">
-        <div class="flex gap-2">
-          <ZInput v-model="form.installationId" aria-label="安装 ID（可选）" placeholder="留空继承全局设置" :disabled="saving" />
-          <ZButton :disabled="saving" @click="updateForm('installationId', generateRequestId())">
-            生成
-          </ZButton>
+      <ZFormItem label="安装身份">
+        <div class="grid gap-3">
+          <div class="flex items-center justify-between gap-3">
+            <div class="grid gap-1">
+              <span class="text-cp-sm text-cp-text">按 Key 派生安装身份（Seed）</span>
+              <span class="text-cp-xs text-cp-text-secondary">开启后按 Key 与账号分别生成稳定身份，适合一个 Key 使用多个账号</span>
+            </div>
+            <ZSwitch
+              :model-value="form.installationSeedEnabled"
+              aria-label="按 Key 派生安装身份（Seed）"
+              :disabled="saving"
+              @update:model-value="toggleInstallationSeed"
+            />
+          </div>
+          <div v-if="form.installationSeedEnabled" class="grid gap-1 text-cp-xs text-cp-text-secondary">
+            <span>当前 Seed：{{ form.installationSeed }}</span>
+            <span>修改已有 Key 的 Seed 会切换上游安装身份，可能影响旧会话续接</span>
+          </div>
+          <div v-else class="flex gap-2">
+            <ZInput v-model="form.installationId" aria-label="安装 ID（可选）" placeholder="留空继承账号设置" :disabled="saving" />
+            <ZButton :disabled="saving" @click="updateForm('installationId', generateRequestId())">
+              生成
+            </ZButton>
+          </div>
         </div>
       </ZFormItem>
 
