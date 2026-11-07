@@ -25,7 +25,10 @@ const managementViews = [
   { label: '操作记录', value: 'operations' },
   { label: '身份来源', value: 'sources' },
 ]
-const viewLabel = computed(() => [...tabs, ...managementViews].find(item => item.value === view.value)?.label ?? '按 K 查看')
+const viewLabel = computed(() => [
+  ...tabs,
+  ...managementViews,
+].find(item => item.value === view.value)?.label ?? '按 K 查看')
 const filters = reactive<AffinityFilters>({})
 const sessions = shallowRef<AffinitySession[]>([])
 const sources = shallowRef<IdentitySource[]>([])
@@ -176,9 +179,24 @@ const accountColumns = defineTableColumns<AccountAffinityRow>([
     kind: 'identity',
     size: '3xl',
   },
-  { key: 'provider', label: '平台/类型', kind: 'meta', size: 'md' },
-  { key: 'bindings', label: '当前绑定 K', kind: 'custom', size: '3xl' },
-  { key: 'status', label: '状态', kind: 'custom', size: 'lg' },
+  {
+    key: 'provider',
+    label: '平台/类型',
+    kind: 'meta',
+    size: 'md',
+  },
+  {
+    key: 'bindings',
+    label: '当前绑定 K',
+    kind: 'custom',
+    size: '3xl',
+  },
+  {
+    key: 'status',
+    label: '状态',
+    kind: 'custom',
+    size: 'lg',
+  },
 ])
 function canManage(session: AffinitySession) {
   return session.observation.bindingScope === 'token' || session.observation.caller.mode === 'direct'
@@ -341,8 +359,12 @@ async function load() {
           ? loadAllTokenAffinity()
           : getAffinitySessions({
               ...Object.fromEntries(Object.entries(filters).map(([name, value]) => [name, value?.trim() || undefined])),
-              bindingScope: view.value === 'sessions' ? 'session' : 'token',
-              mode: view.value === 'sessions' ? filters.mode ?? 'direct' : 'newApi',
+              bindingScope: view.value === 'sessions'
+                ? 'session'
+                : 'token',
+              mode: view.value === 'sessions'
+                ? filters.mode ?? 'direct'
+                : 'newApi',
               cursor: cursor.value,
             }, { signal: query.signal }),
       view.value === 'operations'
@@ -417,10 +439,10 @@ function selectView(value: string) {
     query: value === 'accounts'
       ? { view: 'accounts' }
       : value === 'sessions'
-      ? { mode: 'direct' }
-      : value === 'tokens'
-        ? {}
-        : { management: value },
+        ? { mode: 'direct' }
+        : value === 'tokens'
+          ? {}
+          : { management: value },
   })
 }
 function clearFilters() {
@@ -429,8 +451,8 @@ function clearFilters() {
     query: view.value === 'accounts'
       ? { view: 'accounts' }
       : view.value === 'sessions'
-      ? { mode: 'direct' }
-      : {},
+        ? { mode: 'direct' }
+        : {},
   })
 }
 const filterContext = computed(() => Object.entries(filters)
@@ -639,8 +661,12 @@ function openTokenView(session: AffinitySession) {
               </button>
             </template>
             <template #identity="{ row }">
-              <div class="truncate" :title="accountIdentityLabel(row.account)">{{ accountIdentityLabel(row.account) }}</div>
-              <div class="mt-1 truncate text-cp-xs text-cp-text-tertiary">{{ row.account.email || row.account.id }}</div>
+              <div class="truncate" :title="accountIdentityLabel(row.account)">
+                {{ accountIdentityLabel(row.account) }}
+              </div>
+              <div class="mt-1 truncate text-cp-xs text-cp-text-tertiary">
+                {{ row.account.email || row.account.id }}
+              </div>
             </template>
             <template #provider="{ row }">
               <span>{{ row.account.provider }}</span>
@@ -651,7 +677,9 @@ function openTokenView(session: AffinitySession) {
                 <ZTag v-for="binding in row.bindings.slice(0, 3)" :key="key(binding)" type="info">
                   {{ tokenLabel(binding) }}
                 </ZTag>
-                <ZTag v-if="row.bindings.length > 3" type="default">+{{ row.bindings.length - 3 }}</ZTag>
+                <ZTag v-if="row.bindings.length > 3" type="default">
+                  +{{ row.bindings.length - 3 }}
+                </ZTag>
               </div>
               <span v-else class="text-cp-xs text-cp-text-tertiary">暂无已观测绑定</span>
             </template>
@@ -662,18 +690,32 @@ function openTokenView(session: AffinitySession) {
             </template>
             <template #expanded="{ row }">
               <div class="grid gap-2 p-4">
-                <div v-if="!row.bindings.length" class="text-cp-sm text-cp-text-tertiary">当前账号没有已观测且未过期的 K 绑定</div>
+                <div v-if="!row.bindings.length" class="text-cp-sm text-cp-text-tertiary">
+                  当前账号没有已观测且未过期的 K 绑定
+                </div>
                 <div v-for="binding in row.bindings" :key="key(binding)" class="grid gap-2 rounded-cp bg-cp-fill-quaternary p-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
                   <div class="min-w-0">
-                    <div class="truncate text-cp-sm" :title="tokenLabel(binding)">{{ tokenLabel(binding) }}</div>
-                    <div class="mt-1 truncate text-cp-xs text-cp-text-tertiary">Token #{{ binding.observation.caller.mode === 'newApi' ? binding.observation.caller.tokenId : '-' }} · 用户 #{{ binding.observation.caller.mode === 'newApi' ? binding.observation.caller.userId : '-' }}</div>
+                    <div class="truncate text-cp-sm" :title="tokenLabel(binding)">
+                      {{ tokenLabel(binding) }}
+                    </div>
+                    <div class="mt-1 truncate text-cp-xs text-cp-text-tertiary">
+                      Token #{{ binding.observation.caller.mode === 'newApi' ? binding.observation.caller.tokenId : '-' }} · 用户 #{{ binding.observation.caller.mode === 'newApi' ? binding.observation.caller.userId : '-' }}
+                    </div>
                   </div>
-                  <div class="text-cp-xs text-cp-text-secondary">{{ binding.provider }}</div>
+                  <div class="text-cp-xs text-cp-text-secondary">
+                    {{ binding.provider }}
+                  </div>
                   <div>
-                    <ZTag :type="binding.directive || binding.accountId !== binding.observation.actualAccountId ? 'warning' : 'success'">{{ bindingStatusLabel(binding) }}</ZTag>
-                    <div class="mt-1 text-cp-xs text-cp-text-tertiary">到期 {{ binding.expiresAtDisplay }}</div>
+                    <ZTag :type="binding.directive || binding.accountId !== binding.observation.actualAccountId ? 'warning' : 'success'">
+                      {{ bindingStatusLabel(binding) }}
+                    </ZTag>
+                    <div class="mt-1 text-cp-xs text-cp-text-tertiary">
+                      到期 {{ binding.expiresAtDisplay }}
+                    </div>
                   </div>
-                  <ZButton size="small" @click="openTokenView(binding)">查看 K</ZButton>
+                  <ZButton size="small" @click="openTokenView(binding)">
+                    查看 K
+                  </ZButton>
                 </div>
               </div>
             </template>
