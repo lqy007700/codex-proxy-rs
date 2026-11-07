@@ -8348,7 +8348,10 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 expected_tier
             );
             assert_eq!(operation, original);
-            assert_eq!(outbound["metadata"], body["metadata"]);
+            assert!(
+                outbound.get("metadata").is_none(),
+                "Codex OAuth must omit unsupported metadata options"
+            );
             assert!(!observations.is_empty());
             for observation in &observations {
                 assert_eq!(
