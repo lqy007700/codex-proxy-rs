@@ -155,20 +155,20 @@ function diagnosticNameDisplay(name: string) {
         <template #nameDisplay="{ row }">
           <div class="inline-grid max-w-full min-w-0 gap-1" :title="row.nameDisplay.full">
             <code
-              class="block max-w-full truncate font-mono text-cp-sm leading-none font-heavy text-cp-text"
+              class="block max-w-full truncate font-mono text-z-sm leading-none font-heavy text-z-text"
             >
               {{ row.nameDisplay.primary }}
             </code>
             <span
               v-if="row.nameDisplay.secondary"
-              class="flex min-w-0 items-center gap-1.25 text-cp-text-secondary"
+              class="flex min-w-0 items-center gap-1.25 text-z-text-secondary"
             >
               <CornerDownRight
                 v-if="resultDimension !== 'account'"
-                class="size-3.25 shrink-0 text-cp-blue-text"
+                class="size-3.25 shrink-0 text-z-blue-text"
                 stroke-width="2.4"
               />
-              <code class="block truncate font-mono text-cp-xs font-bold">
+              <code class="block truncate font-mono text-z-xs font-bold">
                 {{ row.nameDisplay.secondary }}
               </code>
             </span>
@@ -182,7 +182,7 @@ function diagnosticNameDisplay(name: string) {
             :plan-type-display="row.accountPlanTypeDisplay || row.accountPlanType"
             size="sm"
           />
-          <span v-else class="text-cp-text-quaternary">—</span>
+          <span v-else class="text-z-text-quaternary">—</span>
         </template>
 
         <template #requestCount="{ row }">
@@ -190,10 +190,10 @@ function diagnosticNameDisplay(name: string) {
             class="grid justify-items-end gap-1 font-mono leading-none tabular-nums"
             :title="`成功 ${formatCompactNumber(row.successCount)}`"
           >
-            <strong class="font-bold text-cp-text">
+            <strong class="font-bold text-z-text">
               {{ formatCompactNumber(row.requestCount) }}
             </strong>
-            <small class="text-[10px] font-emphasis text-cp-text-quaternary">
+            <small class="text-[10px] font-emphasis text-z-text-quaternary">
               {{ formatPercent(row.requestShare) }}
             </small>
           </span>
@@ -202,7 +202,7 @@ function diagnosticNameDisplay(name: string) {
         <template #errorCount="{ row }">
           <strong
             class="font-mono font-bold tabular-nums"
-            :class="row.errorCount > 0 ? 'text-cp-error-text' : 'text-cp-text-quaternary'"
+            :class="row.errorCount > 0 ? 'text-z-error-text' : 'text-z-text-quaternary'"
             :aria-label="`错误 ${formatCompactNumber(row.errorCount)} 次`"
             :title="`错误率 ${row.errorRate == null ? '无样本' : formatPercent(row.errorRate)}`"
           >
@@ -216,14 +216,14 @@ function diagnosticNameDisplay(name: string) {
             :title="`重试率 ${formatPercent(row.retryRate)}`"
           >
             <span class="inline-flex items-baseline gap-1.5">
-              <small class="text-[10px] font-emphasis text-cp-text-quaternary">TTFT</small>
-              <strong class="font-bold text-cp-blue-text">
+              <small class="text-[10px] font-emphasis text-z-text-quaternary">TTFT</small>
+              <strong class="font-bold text-z-blue-text">
                 {{ formatDuration(row.firstTokenP95Ms) }}
               </strong>
             </span>
-            <small class="flex items-center gap-2 text-[10px] font-emphasis text-cp-text-quaternary">
+            <small class="flex items-center gap-2 text-[10px] font-emphasis text-z-text-quaternary">
               <span>P95 {{ formatDuration(row.latencyP95Ms) }}</span>
-              <span :class="row.retryCount > 0 ? 'text-cp-orange-text' : undefined">
+              <span :class="row.retryCount > 0 ? 'text-z-orange-text' : undefined">
                 重试 {{ formatCompactNumber(row.retryCount) }}
               </span>
             </small>
@@ -231,7 +231,7 @@ function diagnosticNameDisplay(name: string) {
         </template>
 
         <template #estimatedCost="{ row }">
-          <span class="font-mono font-bold tabular-nums text-cp-green-text">
+          <span class="font-mono font-bold tabular-nums text-z-green-text">
             {{ formatUsd(row.estimatedCost) }}
           </span>
         </template>

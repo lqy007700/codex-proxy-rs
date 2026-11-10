@@ -6,10 +6,10 @@ defineProps<{ record: { route: string | null, compact?: boolean } }>()
 
 <template>
   <div class="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap">
-    <code class="font-mono text-cp-sm font-emphasis">{{ record.route || '—' }}</code>
+    <code class="font-mono text-z-sm font-emphasis">{{ record.route || '—' }}</code>
     <span
       v-if="record.compact"
-      class="inline-flex shrink-0 text-cp-orange-text"
+      class="inline-flex shrink-0 text-z-orange-text"
       title="压缩请求"
       aria-label="压缩请求"
     >

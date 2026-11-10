@@ -43,23 +43,23 @@ async function test() {
           <ZTextarea v-model="sample" aria-label="请求样本" placeholder="粘贴包含 body、headers、turnMetadata 的请求 JSON" resize="none" maxlength="262144" size="small" class="font-mono [&_textarea]:block [&_textarea]:h-64" spellcheck="false" />
         </ZFormItem>
         <div class="grid min-w-0 content-start gap-2">
-          <span class="flex min-h-4 items-center text-cp leading-none font-medium text-cp-text-secondary">最终结果</span><pre class="cp-scrollbar m-0 h-64 overflow-auto rounded-cp bg-cp-fill-quaternary p-3 font-mono text-cp-xs break-all whitespace-pre-wrap">{{ output || '点击测试查看结果' }}</pre>
+          <span class="flex min-h-4 items-center text-z leading-none font-medium text-z-text-secondary">最终结果</span><pre class="z-scrollbar m-0 h-64 overflow-auto rounded-z bg-z-fill-quaternary p-3 font-mono text-z-xs break-all whitespace-pre-wrap">{{ output || '点击测试查看结果' }}</pre>
         </div>
       </div>
       <ol v-if="result" class="m-0 grid list-none gap-1.5 p-0" aria-label="规则执行结果">
-        <li v-for="outcome in result.outcomes" :key="outcome.ruleId" class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 rounded-cp bg-cp-fill-quaternary px-3 py-2.5 text-cp-sm">
+        <li v-for="outcome in result.outcomes" :key="outcome.ruleId" class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 rounded-z bg-z-fill-quaternary px-3 py-2.5 text-z-sm">
           <span class="truncate font-medium" :title="policy.rules.find(rule => rule.id === outcome.ruleId)?.name">{{ policy.rules.find(rule => rule.id === outcome.ruleId)?.name }}</span>
-          <span v-if="outcome.status === 'disabled'" class="text-cp-xs text-cp-text-tertiary">未启用</span>
-          <span v-else-if="outcome.status === 'skipped'" class="text-cp-xs text-cp-warning-text">已跳过</span>
-          <span v-else class="inline-flex items-baseline gap-1 whitespace-nowrap text-cp-xs text-cp-text-secondary">
-            命中 <strong class="text-cp-sm font-emphasis text-cp-text tabular-nums">{{ outcome.matches }}</strong> 处
+          <span v-if="outcome.status === 'disabled'" class="text-z-xs text-z-text-tertiary">未启用</span>
+          <span v-else-if="outcome.status === 'skipped'" class="text-z-xs text-z-warning-text">已跳过</span>
+          <span v-else class="inline-flex items-baseline gap-1 whitespace-nowrap text-z-xs text-z-text-secondary">
+            命中 <strong class="text-z-sm font-emphasis text-z-text tabular-nums">{{ outcome.matches }}</strong> 处
           </span>
-          <p v-if="outcome.reason" class="col-span-2 m-0 text-cp-xs break-words text-cp-warning-text">
+          <p v-if="outcome.reason" class="col-span-2 m-0 text-z-xs break-words text-z-warning-text">
             {{ outcome.reason }}
           </p>
         </li>
       </ol>
-      <p v-if="localError" role="alert" class="m-0 text-cp-sm text-cp-error-text">
+      <p v-if="localError" role="alert" class="m-0 text-z-sm text-z-error-text">
         {{ localError }}
       </p>
     </div>

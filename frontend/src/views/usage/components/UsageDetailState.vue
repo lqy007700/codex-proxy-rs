@@ -12,13 +12,13 @@ defineEmits<{ retry: [] }>()
 <template>
   <div v-if="loading" class="grid min-w-0 gap-3" role="status" aria-live="polite" aria-busy="true">
     <span class="sr-only">正在加载请求详情</span>
-    <div v-if="variant === 'error'" class="grid gap-3 rounded-cp-card bg-cp-fill-quaternary p-4">
+    <div v-if="variant === 'error'" class="grid gap-3 rounded-z-card bg-z-fill-quaternary p-4">
       <ZSkeleton shape="text" class="h-4 w-40" />
       <ZSkeleton shape="text" class="w-3/4" />
       <ZSkeleton shape="text" class="w-1/2" />
     </div>
     <div class="grid gap-3 lg:grid-cols-2">
-      <div v-for="panel in variant === 'request' ? 4 : 2" :key="panel" class="grid gap-5 rounded-cp-card bg-cp-fill-quaternary p-4">
+      <div v-for="panel in variant === 'request' ? 4 : 2" :key="panel" class="grid gap-5 rounded-z-card bg-z-fill-quaternary p-4">
         <ZSkeleton shape="text" class="h-4 w-24" />
         <div v-for="row in variant === 'request' ? 3 : 4" :key="row" class="grid grid-cols-2 gap-4">
           <div v-for="column in 2" :key="column" class="grid gap-2">
@@ -28,7 +28,7 @@ defineEmits<{ retry: [] }>()
         </div>
       </div>
     </div>
-    <div class="grid gap-5 rounded-cp-card bg-cp-fill-quaternary p-4">
+    <div class="grid gap-5 rounded-z-card bg-z-fill-quaternary p-4">
       <ZSkeleton shape="text" class="h-4 w-24" />
       <ZSkeleton shape="text" class="h-4 w-2/3" />
       <div class="grid grid-cols-2 gap-4">
@@ -37,14 +37,14 @@ defineEmits<{ retry: [] }>()
       </div>
     </div>
     <div v-if="variant === 'request'" class="grid gap-3 lg:grid-cols-2">
-      <div v-for="panel in 2" :key="panel" class="grid gap-5 rounded-cp-card bg-cp-fill-quaternary p-4">
+      <div v-for="panel in 2" :key="panel" class="grid gap-5 rounded-z-card bg-z-fill-quaternary p-4">
         <ZSkeleton shape="text" class="h-4 w-20" />
         <ZSkeleton class="h-24 w-full" />
       </div>
     </div>
   </div>
   <div v-else-if="error" class="grid min-h-64 place-content-center justify-items-center gap-4" role="alert">
-    <p class="m-0 text-cp-sm text-cp-text-secondary">
+    <p class="m-0 text-z-sm text-z-text-secondary">
       {{ error }}
     </p>
     <ZButton @click="$emit('retry')">

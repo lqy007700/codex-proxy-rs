@@ -53,6 +53,8 @@ type CredentialLoadHook = dyn for<'a> Fn(
 pub(crate) struct MemoryAccountStore {
     accounts: Mutex<BTreeMap<ProviderAccountId, StoredAccount>>,
     quota_reads: AtomicUsize,
+    account_reads: AtomicUsize,
+    provider_list_reads: AtomicUsize,
     fail_provider_listing: AtomicBool,
     pending_account_reads: bool,
     credential_load_hook: Mutex<Option<Arc<CredentialLoadHook>>>,
@@ -60,6 +62,14 @@ pub(crate) struct MemoryAccountStore {
 }
 
 impl MemoryAccountStore {
+    pub(crate) fn account_reads(&self) -> usize {
+        self.account_reads.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn provider_list_reads(&self) -> usize {
+        self.provider_list_reads.load(Ordering::SeqCst)
+    }
+
     pub(crate) fn with_pending_account_reads() -> Self {
         Self {
             pending_account_reads: true,
@@ -284,6 +294,7 @@ impl ProviderAccountStore for MemoryAccountStore {
         &self,
         account: &ProviderAccountId,
     ) -> Result<Option<ProviderAccount>, StoreError> {
+        self.account_reads.fetch_add(1, Ordering::SeqCst);
         if self.pending_account_reads {
             futures::future::pending::<()>().await;
         }
@@ -309,6 +320,7 @@ impl ProviderAccountStore for MemoryAccountStore {
         &self,
         provider: &ProviderKind,
     ) -> Result<Vec<ProviderAccount>, StoreError> {
+        self.provider_list_reads.fetch_add(1, Ordering::SeqCst);
         if self.fail_provider_listing.load(Ordering::SeqCst) {
             return Err(StoreError::caused_by(
                 StoreErrorKind::Unavailable,
@@ -326,6 +338,22 @@ impl ProviderAccountStore for MemoryAccountStore {
             .values()
             .filter(|stored| stored.account.provider() == provider && stored.account.enabled())
             .map(|stored| stored.account.clone())
+            .collect())
+    }
+
+    async fn list_for_provider_accounts(
+        &self,
+        provider: &ProviderKind,
+        account_ids: &[ProviderAccountId],
+    ) -> Result<Vec<ProviderAccount>, gateway_core::error::StoreError> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .list_for_provider(provider)
+            .await?
+            .into_iter()
+            .filter(|account| account_ids.contains(account.id()))
             .collect())
     }
 
@@ -1312,6 +1340,37 @@ impl ProviderCooldownPort for MemoryCooldownPort {
                 .expect("cooldown lock")
                 .get(account_id)
                 .cloned())
+        })
+    }
+
+    fn read_many<'a>(
+        &'a self,
+        account_ids: &'a [ProviderAccountId],
+    ) -> BoxFuture<'a, Vec<Result<Option<ProviderCooldown>, ProviderStoreError>>> {
+        Box::pin(async move {
+            let mut results = Vec::with_capacity(account_ids.len());
+            for batch in account_ids.chunks(128) {
+                results
+                    .extend(futures::future::join_all(batch.iter().map(|id| self.read(id))).await);
+            }
+            results
+        })
+    }
+
+    fn read_scoped_many<'a>(
+        &'a self,
+        account_ids: &'a [ProviderAccountId],
+        scope: &'a ProviderCooldownScope,
+    ) -> BoxFuture<'a, Vec<Result<Option<ProviderScopedCooldown>, ProviderStoreError>>> {
+        Box::pin(async move {
+            let mut results = Vec::with_capacity(account_ids.len());
+            for batch in account_ids.chunks(128) {
+                results.extend(
+                    futures::future::join_all(batch.iter().map(|id| self.read_scoped(id, scope)))
+                        .await,
+                );
+            }
+            results
         })
     }
 

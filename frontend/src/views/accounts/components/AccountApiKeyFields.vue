@@ -17,7 +17,7 @@ const transportOptions = [
     </ZFormItem>
     <ZFormItem label="Base URL" required>
       <template #extra>
-        <span class="text-cp-xs text-cp-text-quaternary" title="填写 API 前缀，接口路径会自动追加">API 前缀</span>
+        <span class="text-z-xs text-z-text-quaternary" title="填写 API 前缀，接口路径会自动追加">API 前缀</span>
       </template>
       <ZInput v-model="form.base_url" type="url" placeholder="https://api.example.com/v1" :disabled="disabled" autocomplete="off" />
     </ZFormItem>

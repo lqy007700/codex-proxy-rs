@@ -43,6 +43,7 @@ fn plaintext_provider_schema_round_trips_dynamic_cookie_data() {
     let data = CodexCredentialData::OAuth(CodexOAuthCredentialData {
         transport: provider_openai::credential::ResponsesTransport::PreferWebsocket,
         schema_version: 1,
+        oauth_identity_changed: false,
         principal: Some(CodexCredentialPrincipal {
             oauth_subject: "subject-private".to_owned(),
             poid: Some("poid-private".to_owned()),

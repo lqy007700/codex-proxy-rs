@@ -118,8 +118,8 @@ function handleRequestConsume(creditId: string) {
 <template>
   <button
     type="button"
-    class="inline-flex shrink-0 touch-manipulation items-center justify-center rounded-cp border-0 bg-transparent text-cp-text-secondary outline-none transition-[background-color,color,opacity,transform] duration-150 hover:bg-cp-fill-quaternary hover:text-cp-text active:bg-cp-fill-tertiary focus-visible:ring-2 focus-visible:ring-cp-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-cp-bg-container motion-safe:active:scale-[0.96] motion-reduce:transition-none"
-    :class="showTriggerCount ? 'h-cp-control-sm gap-1 px-2' : 'size-cp-control-sm'"
+    class="inline-flex shrink-0 touch-manipulation items-center justify-center rounded-z border-0 bg-transparent text-z-text-secondary outline-none transition-[background-color,color,opacity,transform] duration-150 hover:bg-z-fill-quaternary hover:text-z-text active:bg-z-fill-tertiary focus-visible:ring-2 focus-visible:ring-z-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-z-bg-container motion-safe:active:scale-[0.96] motion-reduce:transition-none"
+    :class="showTriggerCount ? 'h-z-control-sm gap-1 px-2' : 'size-z-control-sm'"
     :aria-label="triggerLabel"
     :aria-pressed="panelOpen || undefined"
     :title="triggerLabel"
@@ -139,16 +139,16 @@ function handleRequestConsume(creditId: string) {
     :show-close="!consuming" :close-on-click-modal="!consuming" :close-on-press-escape="!consuming"
   >
     <div v-if="confirmation" class="grid gap-3">
-      <section class="rounded-cp bg-cp-fill-quaternary px-4 py-3.5">
-        <p class="m-0 text-cp-xs font-heavy text-cp-text-quaternary">
+      <section class="rounded-z bg-z-fill-quaternary px-4 py-3.5">
+        <p class="m-0 text-z-xs font-heavy text-z-text-quaternary">
           本次使用
         </p>
-        <p class="mt-1.5 mb-0 text-cp-lg leading-snug font-heavy text-cp-text">
+        <p class="mt-1.5 mb-0 text-z-lg leading-snug font-heavy text-z-text">
           {{ confirmCreditTitle }}
         </p>
         <p
           v-if="confirmation.credit"
-          class="mt-1 mb-0 font-mono text-[10px] leading-normal font-emphasis text-cp-text-quaternary"
+          class="mt-1 mb-0 font-mono text-[10px] leading-normal font-emphasis text-z-text-quaternary"
         >
           {{ confirmation.credit.expiresAtDisplay ? `将于 ${confirmation.credit.expiresAtDisplay} 到期` : '有效期由上游决定' }}
         </p>
@@ -156,7 +156,7 @@ function handleRequestConsume(creditId: string) {
     </div>
 
     <div v-else class="grid gap-4">
-      <section class="overflow-hidden rounded-cp bg-cp-fill-quaternary" aria-label="当前额度">
+      <section class="overflow-hidden rounded-z bg-z-fill-quaternary" aria-label="当前额度">
         <UsageLimits :windows="account.quota.windows" />
         <AccountQuotaCredits :credits="account.quota.credits" />
       </section>
@@ -170,13 +170,13 @@ function handleRequestConsume(creditId: string) {
 
       <ResetCreditAutomation v-if="account.capabilities.consumeResetCredit" :key="account.id" :account-id="account.id" />
 
-      <section v-if="ambiguous" class="flex items-start gap-3 rounded-cp bg-cp-warning-container px-4 py-3.5" role="status">
-        <AlertTriangle class="mt-0.5 size-4 shrink-0 text-cp-warning-on-container" />
+      <section v-if="ambiguous" class="flex items-start gap-3 rounded-z bg-z-warning-container px-4 py-3.5" role="status">
+        <AlertTriangle class="mt-0.5 size-4 shrink-0 text-z-warning-on-container" />
         <div class="min-w-0 flex-1">
-          <p class="m-0 text-cp-sm font-heavy text-cp-warning-on-container">
+          <p class="m-0 text-z-sm font-heavy text-z-warning-on-container">
             上次操作结果待确认
           </p>
-          <p class="mt-1 mb-0 text-cp-xs leading-normal font-emphasis text-cp-text-secondary">
+          <p class="mt-1 mb-0 text-z-xs leading-normal font-emphasis text-z-text-secondary">
             请继续确认上次重置结果
           </p>
         </div>
@@ -187,7 +187,7 @@ function handleRequestConsume(creditId: string) {
 
       <section class="grid gap-3" aria-label="可用重置卡">
         <div class="flex items-center gap-2">
-          <h3 class="m-0 min-w-0 flex-1 text-cp-sm font-heavy text-cp-text">
+          <h3 class="m-0 min-w-0 flex-1 text-z-sm font-heavy text-z-text">
             可用重置卡
           </h3>
           <ZTag size="small" :type="hasSnapshot && availableCount > 0 ? 'success' : 'default'" role="status">
@@ -211,7 +211,7 @@ function handleRequestConsume(creditId: string) {
           <ZEmpty v-if="loadError" title="重置卡加载失败" description="请刷新重试" size="small" surface="none" role="alert" />
           <p
             v-else-if="loading && !hasSnapshot"
-            class="m-0 px-4 py-4 text-cp-xs font-emphasis text-cp-text-secondary"
+            class="m-0 px-4 py-4 text-z-xs font-emphasis text-z-text-secondary"
             role="status"
           >
             正在查询可用重置次数…
@@ -220,13 +220,13 @@ function handleRequestConsume(creditId: string) {
             <li
               v-for="credit in creditItems"
               :key="credit.id"
-              class="flex items-center gap-4 rounded-cp bg-cp-fill-quaternary px-4 py-3.5"
+              class="flex items-center gap-4 rounded-z bg-z-fill-quaternary px-4 py-3.5"
             >
               <div class="min-w-0 flex-1">
-                <p class="m-0 text-cp-sm leading-normal font-heavy wrap-anywhere text-cp-text">
+                <p class="m-0 text-z-sm leading-normal font-heavy wrap-anywhere text-z-text">
                   {{ credit.title }}
                 </p>
-                <p class="mt-1 mb-0 text-cp-xs leading-normal font-emphasis text-cp-text-secondary">
+                <p class="mt-1 mb-0 text-z-xs leading-normal font-emphasis text-z-text-secondary">
                   {{ credit.expiry }}
                 </p>
               </div>

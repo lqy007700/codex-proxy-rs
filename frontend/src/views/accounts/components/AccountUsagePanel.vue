@@ -75,42 +75,42 @@ const modelUsageColumns = defineTableColumns<AccountModelUsage>([
 </script>
 
 <template>
-  <section class="grid gap-4 rounded-lg bg-cp-bg-container p-4 shadow-cp-tertiary xl:min-h-0 xl:grid-cols-[0.52fr_1.48fr]">
+  <section class="grid gap-4 rounded-lg bg-z-bg-container p-4 shadow-z-tertiary xl:min-h-0 xl:grid-cols-[0.52fr_1.48fr]">
     <div class="xl:flex xl:min-h-0 xl:flex-col">
       <div class="mb-3 flex shrink-0 items-center justify-between gap-3">
-        <h3 class="m-0 text-cp-lg font-heavy text-cp-text">
+        <h3 class="m-0 text-z-lg font-heavy text-z-text">
           Tokens 结构
         </h3>
-        <span class="text-cp-xs font-emphasis text-cp-text-quaternary">{{ account.usage.windowLabelDisplay }}</span>
+        <span class="text-z-xs font-emphasis text-z-text-quaternary">{{ account.usage.windowLabelDisplay }}</span>
       </div>
       <div class="grid gap-2 xl:min-h-0 xl:flex-1 xl:grid-rows-5">
-        <div class="flex items-center justify-between rounded-lg bg-cp-green-container px-3 py-2">
-          <span class="text-cp-sm font-bold text-cp-green-on-container">输入</span>
-          <strong class="font-mono text-cp text-cp-text">
+        <div class="flex items-center justify-between rounded-lg bg-z-green-container px-3 py-2">
+          <span class="text-z-sm font-bold text-z-green-on-container">输入</span>
+          <strong class="font-mono text-z text-z-text">
             {{ account.usage.inputTokensDisplay }}
           </strong>
         </div>
-        <div class="flex items-center justify-between rounded-lg bg-cp-orange-container px-3 py-2">
-          <span class="text-cp-sm font-bold text-cp-orange-on-container">输出</span>
-          <strong class="font-mono text-cp text-cp-text">
+        <div class="flex items-center justify-between rounded-lg bg-z-orange-container px-3 py-2">
+          <span class="text-z-sm font-bold text-z-orange-on-container">输出</span>
+          <strong class="font-mono text-z text-z-text">
             {{ account.usage.outputTokensDisplay }}
           </strong>
         </div>
-        <div class="flex items-center justify-between rounded-lg bg-cp-cyan-container px-3 py-2">
-          <span class="text-cp-sm font-bold text-cp-cyan-on-container">缓存读取</span>
-          <strong class="font-mono text-cp text-cp-text">
+        <div class="flex items-center justify-between rounded-lg bg-z-cyan-container px-3 py-2">
+          <span class="text-z-sm font-bold text-z-cyan-on-container">缓存读取</span>
+          <strong class="font-mono text-z text-z-text">
             {{ account.usage.cachedInputTokensDisplay }}
           </strong>
         </div>
-        <div class="flex items-center justify-between rounded-lg bg-cp-blue-container px-3 py-2">
-          <span class="text-cp-sm font-bold text-cp-blue-on-container">推理</span>
-          <strong class="font-mono text-cp text-cp-text">
+        <div class="flex items-center justify-between rounded-lg bg-z-blue-container px-3 py-2">
+          <span class="text-z-sm font-bold text-z-blue-on-container">推理</span>
+          <strong class="font-mono text-z text-z-text">
             {{ account.usage.reasoningOutputTokensDisplay }}
           </strong>
         </div>
-        <div class="flex items-center justify-between rounded-lg bg-cp-blue-container px-3 py-2">
-          <span class="text-cp-sm font-bold text-cp-blue-on-container">缓存写入</span>
-          <strong class="font-mono text-cp text-cp-text">
+        <div class="flex items-center justify-between rounded-lg bg-z-blue-container px-3 py-2">
+          <span class="text-z-sm font-bold text-z-blue-on-container">缓存写入</span>
+          <strong class="font-mono text-z text-z-text">
             {{ account.usage.cacheWriteInputTokensDisplay }}
           </strong>
         </div>
@@ -119,28 +119,28 @@ const modelUsageColumns = defineTableColumns<AccountModelUsage>([
 
     <div class="min-w-0 pt-4 xl:flex xl:min-h-0 xl:flex-col xl:pt-0 xl:pl-4">
       <div class="mb-3 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2">
-        <h3 class="m-0 shrink-0 text-cp-lg font-heavy text-cp-text">
+        <h3 class="m-0 shrink-0 text-z-lg font-heavy text-z-text">
           模型使用排行
         </h3>
 
         <div class="ml-auto flex items-baseline gap-4">
           <div v-if="hasUsageSummary" class="flex items-baseline gap-1.5 whitespace-nowrap">
-            <Sigma class="size-3.5 self-center text-cp-text-tertiary" :stroke-width="1.75" />
+            <Sigma class="size-3.5 self-center text-z-text-tertiary" :stroke-width="1.75" />
             <span title="总 Token">
               <span class="sr-only">总 Token：</span>
-              <span class="font-mono text-cp-sm font-emphasis tabular-nums text-cp-text">
+              <span class="font-mono text-z-sm font-emphasis tabular-nums text-z-text">
                 {{ account.usage.totalTokensDisplay }}
               </span>
             </span>
-            <span class="mx-0.5 text-[10px] leading-none font-emphasis text-cp-text-quaternary"> / </span>
+            <span class="mx-0.5 text-[10px] leading-none font-emphasis text-z-text-quaternary"> / </span>
             <span title="总计费">
               <span class="sr-only">总计费：</span>
-              <span class="font-mono text-cp-sm font-heavy tabular-nums text-cp-green-text">
+              <span class="font-mono text-z-sm font-heavy tabular-nums text-z-green-text">
                 {{ totalBillingDisplay }}
               </span>
             </span>
           </div>
-          <span class="whitespace-nowrap text-cp-xs font-emphasis text-cp-text-quaternary">{{ account.usage.windowLabelDisplay }}</span>
+          <span class="whitespace-nowrap text-z-xs font-emphasis text-z-text-quaternary">{{ account.usage.windowLabelDisplay }}</span>
         </div>
       </div>
 

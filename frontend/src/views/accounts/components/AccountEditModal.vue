@@ -24,6 +24,7 @@ defineProps<{
 
 const emit = defineEmits<{
   save: []
+  afterLeave: []
 }>()
 
 const open = defineModel<boolean>({ required: true })
@@ -50,11 +51,12 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
     v-model="open"
     title="编辑账号"
     width="42rem"
-    :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving"
+    :show-close="!saving"
+    :close-on-click-modal="!saving" :close-on-press-escape="!saving" @closed="emit('afterLeave')"
   >
     <div v-if="account" class="grid gap-5">
       <div
-        class="flex flex-wrap items-center justify-between gap-4 rounded-cp bg-cp-fill-quaternary px-4 py-3.5"
+        class="flex flex-wrap items-center justify-between gap-4 rounded-z bg-z-fill-quaternary px-4 py-3.5"
       >
         <AccountIdentityCell
           class="min-w-0 flex-1"
@@ -71,7 +73,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
       </div>
 
       <ZFormItem v-if="isOpenAiOAuthAccount(account)" label="上游传输方式">
-        <p v-if="configurationLoading" role="status" class="m-0 text-cp-sm text-cp-text-secondary">
+        <p v-if="configurationLoading" role="status" class="m-0 text-z-sm text-z-text-secondary">
           正在读取上游设置…
         </p>
         <ZEmpty v-else-if="!configurationReady" title="传输方式读取失败" description="其他设置仍可保存" size="small" surface="none" role="alert" />
@@ -79,10 +81,10 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
       </ZFormItem>
 
       <section v-if="isOpenAiApiKeyAccount(account)" class="grid gap-4">
-        <h3 class="m-0 text-cp font-heavy text-cp-text">
+        <h3 class="m-0 text-z font-heavy text-z-text">
           上游连接
         </h3>
-        <p v-if="configurationLoading" role="status" class="m-0 text-cp-sm text-cp-text-secondary">
+        <p v-if="configurationLoading" role="status" class="m-0 text-z-sm text-z-text-secondary">
           正在读取上游设置…
         </p>
         <ZEmpty v-else-if="!configurationReady" title="上游设置读取失败" description="请关闭后重试" size="small" surface="none" role="alert" />

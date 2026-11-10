@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ZButton, ZInput, ZPageHeader, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
+import { ZButton, ZCard, ZInput, ZPageHeader, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
 import { Check, RotateCcw, Save, Search, Undo2 } from '@lucide/vue'
 
 import { defineAsyncComponent } from 'vue'
@@ -29,7 +29,9 @@ const {
   previewStyle,
   modificationCount,
   dirty,
-  selectPreset,
+  selectMaterial,
+  applyProfile,
+  resetPrimaryColor,
   setPrimaryColor,
   setMode,
   setSeedColor,
@@ -71,8 +73,8 @@ function saveTheme(event: MouseEvent) {
         <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>自定义当前浏览器中的管理端配色与界面风格</span>
           <span
-            class="inline-flex items-center gap-1.5 text-cp-sm font-heavy"
-            :class="dirty ? 'text-cp-primary-text' : 'text-cp-text-tertiary'"
+            class="inline-flex items-center gap-1.5 text-z-sm font-heavy"
+            :class="dirty ? 'text-z-primary-text' : 'text-z-text-tertiary'"
           >
             <span class="size-1.5 rounded-full bg-current" />
             {{ dirty ? `${modificationCount} 处修改待应用` : '已同步' }}
@@ -113,14 +115,16 @@ function saveTheme(event: MouseEvent) {
     </ZPageHeader>
 
     <section
-      class="theme-workbench isolate mt-5 overflow-hidden rounded-cp-card bg-cp-bg-layout shadow-cp-card xl:flex xl:min-h-0 xl:flex-1 xl:flex-col"
+      class="theme-workbench isolate mt-5 overflow-hidden xl:flex xl:min-h-0 xl:flex-1 xl:flex-col"
       aria-label="主题编辑器"
     >
       <div
         class="theme-workbench-body grid min-h-180 gap-3 xl:min-h-0 xl:flex-1 xl:overflow-hidden xl:grid-cols-[370px_minmax(0,1fr)]"
       >
-        <aside
-          class="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-cp-lg bg-cp-bg-container pt-3 pr-0 pb-3 pl-3 shadow-cp-secondary"
+        <ZCard
+          as="aside"
+          padding="none"
+          class="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 py-3 pl-3"
           aria-label="主题 Token 编辑面板"
         >
           <ZInput
@@ -143,7 +147,9 @@ function saveTheme(event: MouseEvent) {
                 :resolved="resolvedPreview"
                 :query="query"
                 @mode="setMode"
-                @preset="selectPreset"
+                @material="selectMaterial"
+                @profile="applyProfile"
+                @reset-primary="resetPrimaryColor"
                 @primary="setPrimaryColor"
                 @seed-color="setSeedColor"
                 @seed-number="setSeedNumber"
@@ -162,7 +168,7 @@ function saveTheme(event: MouseEvent) {
               />
             </div>
           </ZScrollbar>
-        </aside>
+        </ZCard>
 
         <div class="hidden min-h-0 min-[768px]:block">
           <ThemeEditorPreview v-model="preview" class="h-full" :theme="previewTheme" :style="previewStyle" />

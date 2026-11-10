@@ -31,7 +31,7 @@ function dismissTooltip(event: KeyboardEvent, close: () => void) {
     <template #reference="{ close }">
       <button
         type="button"
-        class="rounded-cp border-0 bg-transparent p-0 text-left outline-none transition-opacity duration-150 hover:opacity-85 focus-visible:ring-2 focus-visible:ring-cp-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-cp-bg-container disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
+        class="rounded-z border-0 bg-transparent p-0 text-left outline-none transition-opacity duration-150 hover:opacity-85 focus-visible:ring-2 focus-visible:ring-z-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-z-bg-container disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
         :disabled="disabled"
         :aria-pressed="selected"
         :title="title"
@@ -43,7 +43,7 @@ function dismissTooltip(event: KeyboardEvent, close: () => void) {
         </ZTag>
       </button>
     </template>
-    <div class="max-w-96 px-3 py-2 text-cp-sm wrap-anywhere">
+    <div class="max-w-96 px-3 py-2 text-z-sm wrap-anywhere">
       {{ title }}
     </div>
   </ZPopover>

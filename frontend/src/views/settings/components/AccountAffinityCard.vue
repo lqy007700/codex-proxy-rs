@@ -27,7 +27,7 @@ const affinityOptions = [
                 <CircleAlert class="size-3.5" aria-hidden="true" />
               </ZIconButton>
             </template>
-            <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+            <div class="max-w-72 space-y-2 px-3 py-2 text-z-sm leading-relaxed text-z-text-secondary">
               <p>宽松：会话内请求直接按调度策略选号，不优先主账号</p>
               <p>优先：会话内请求优先沿用主账号，繁忙或不可用时临时分流，不改变会话绑定</p>
               <p>严格：同一会话共用账号，子线程等待当前账号，并跟随主线程换号</p>
@@ -55,7 +55,7 @@ const affinityOptions = [
                 <CircleAlert class="size-3.5" aria-hidden="true" />
               </ZIconButton>
             </template>
-            <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+            <div class="max-w-72 space-y-2 px-3 py-2 text-z-sm leading-relaxed text-z-text-secondary">
               <p>次数仅用于初始账号，不包含换号重试和最后一次保底</p>
               <p>初始账号 3 次、换号 0 次：A → A → A → 保底</p>
               <p>上游明确建议等待时优先使用其等待时间，账号不可用可提前结束本阶段</p>
@@ -73,7 +73,7 @@ const affinityOptions = [
                 <CircleAlert class="size-3.5" aria-hidden="true" />
               </ZIconButton>
             </template>
-            <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+            <div class="max-w-72 space-y-2 px-3 py-2 text-z-sm leading-relaxed text-z-text-secondary">
               <p>默认 1 次，换号后不重新获得初始账号的尝试次数</p>
               <p>初始账号 2 次、换号 1 次：A → A → B → 保底</p>
               <p>初始账号 3 次、换号 2 次：A → A → A → B → C → 保底</p>

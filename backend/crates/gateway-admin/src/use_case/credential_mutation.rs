@@ -265,6 +265,27 @@ pub(super) async fn commit_authorization(
         prepared.abort().await?;
         return Err(AdminError::invalid("重新授权不能修改账号设置"));
     }
+    if let PreparedAuthorizationCredential::Reauthorize(credential) = &prepared.credential
+        && credential.facts().provider_kind.as_str() == "openai"
+        && credential.facts().replacement_identity.is_some()
+    {
+        let automation = accounts
+            .reset_credit_automation(credential.facts().account_id.as_str())
+            .await;
+        match automation {
+            Ok(Some(record)) if record.state.pending.is_some() => {
+                prepared.abort().await?;
+                return Err(AdminError::conflict(
+                    "重置卡消费结果待确认，暂不能更换授权账号",
+                ));
+            }
+            Err(error) => {
+                prepared.abort().await?;
+                return Err(map_store_error(error, "reset-credit automation"));
+            }
+            _ => {}
+        }
+    }
     let crate::model::provider_credentials::AuthorizationCommitSettlement {
         command,
         credential_guard,

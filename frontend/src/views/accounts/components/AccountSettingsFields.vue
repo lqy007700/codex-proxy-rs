@@ -48,7 +48,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
     <AccountModelAccessField v-model="modelAccess" :account-id="modelAccountId ?? accountId" :disabled="disabled" :allow-preserve="preserveModelAccess" @catalog-change="modelCatalog = $event" />
     <slot name="model-mappings" :models="modelCatalog" />
     <div v-if="showScheduling" class="flex min-h-6 items-center justify-between gap-3">
-      <span class="text-cp leading-none font-medium text-cp-text-secondary">调度</span>
+      <span class="text-z leading-none font-medium text-z-text-secondary">调度</span>
       <ZSwitch
         v-model="enabled"
         aria-label="切换账号调度"
@@ -58,7 +58,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
 
     <ZFormItem v-if="showSchedulingRole" label="调度用途">
       <ZSegmented v-model="schedulingRole" aria-label="调度用途" :options="schedulingRoleOptions" :disabled="disabled" />
-      <p v-if="schedulingRole === 'fallback'" class="m-0 mt-2 text-cp-xs text-cp-text-secondary">
+      <p v-if="schedulingRole === 'fallback'" class="m-0 mt-2 text-z-xs text-z-text-secondary">
         仅在普通账号恢复失败或无可用普通账号时使用
       </p>
     </ZFormItem>

@@ -34,7 +34,7 @@ const emit = defineEmits<{
 
       <div
         v-if="loading"
-        class="rounded-cp bg-cp-fill-quaternary px-4 py-4 text-cp font-emphasis text-cp-text-quaternary"
+        class="rounded-z bg-z-fill-quaternary px-4 py-4 text-z font-emphasis text-z-text-quaternary"
       >
         正在加载模型映射...
       </div>
@@ -42,7 +42,7 @@ const emit = defineEmits<{
         <div
           v-for="(row, index) in mappings"
           :key="index"
-          class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-cp-card bg-cp-fill-quaternary p-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]"
+          class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-z-card bg-z-fill-quaternary p-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]"
         >
           <ZInput
             :model-value="row.requestedModel"
@@ -50,7 +50,7 @@ const emit = defineEmits<{
             aria-label="请求模型"
             @update:model-value="emit('updateMapping', index, 'requestedModel', $event)"
           />
-          <span class="hidden text-cp-text-quaternary sm:block" aria-hidden="true">→</span>
+          <span class="hidden text-z-text-quaternary sm:block" aria-hidden="true">→</span>
           <ZInput
             class="col-start-1 row-start-2 sm:col-start-auto sm:row-start-auto"
             :model-value="row.upstreamModel"
@@ -63,7 +63,7 @@ const emit = defineEmits<{
             aria-label="删除映射"
             @click="emit('removeMapping', index)"
           >
-            <Trash2 class="size-4 text-cp-error" />
+            <Trash2 class="size-4 text-z-error" />
           </ZIconButton>
         </div>
       </div>

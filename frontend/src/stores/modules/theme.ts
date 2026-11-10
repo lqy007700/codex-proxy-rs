@@ -1,23 +1,26 @@
 // @env browser
 
 import type {
-  ResolvedTheme,
+  Theme,
   ThemeColorId,
   ThemeCustomization,
   ThemeMode,
+  ThemePresetId,
 } from '@codex-proxy/ui/theme'
 
 import { normalizeHexColor } from '@codex-proxy/ui'
 import {
-  applyResolvedTheme,
-  DEFAULT_CUSTOM_THEME_COLOR,
-  DEFAULT_THEME_COLOR,
-  DEFAULT_THEME_MODE,
+  applyTheme,
+  createTheme,
+  defaultThemeColorId,
+  defaultThemeMode,
+  defaultThemePresetId,
+  defaultThemePrimaryColor,
   isThemeColorId,
   isThemeMode,
+  isThemePresetId,
   normalizeThemeCustomization,
-  resolveTheme,
-  resolveThemeName,
+  resolveThemeScheme,
 } from '@codex-proxy/ui/theme'
 import { usePreferredDark, usePreferredReducedMotion, useTimeoutFn } from '@vueuse/core'
 
@@ -30,6 +33,7 @@ interface ThemeTransitionOrigin {
 }
 
 interface ThemeConfigurationInput {
+  preset: ThemePresetId
   mode: ThemeMode
   color: ThemeColorId
   customColor: string
@@ -48,9 +52,10 @@ type ViewTransitionDocument = Document & {
 export const useThemeStore = defineStore(
   'theme',
   () => {
-    const themeMode = shallowRef<ThemeMode>(DEFAULT_THEME_MODE)
-    const themeColor = shallowRef<ThemeColorId>(DEFAULT_THEME_COLOR)
-    const customThemeColor = shallowRef(DEFAULT_CUSTOM_THEME_COLOR)
+    const themeMode = shallowRef<ThemeMode>(defaultThemeMode)
+    const themePreset = shallowRef<ThemePresetId>(defaultThemePresetId)
+    const themeColor = shallowRef<ThemeColorId>(defaultThemeColorId)
+    const customThemeColor = shallowRef(defaultThemePrimaryColor)
     const themeCustomization = ref<ThemeCustomization>({})
     const themeRevision = shallowRef(0)
     const themeTransitioning = shallowRef(false)
@@ -60,14 +65,15 @@ export const useThemeStore = defineStore(
     let themeTransitionOrigin: ThemeTransitionOrigin | undefined
     let themeTransitionRequested = false
 
-    const effectiveTheme = computed(() => resolveThemeName(themeMode.value, preferredDark.value))
+    const effectiveTheme = computed(() => resolveThemeScheme(themeMode.value, preferredDark.value))
     const resolvedTheme = computed(() =>
-      resolveTheme(
-        effectiveTheme.value,
-        themeColor.value,
-        customThemeColor.value,
-        themeCustomization.value,
-      ),
+      createTheme({
+        scheme: effectiveTheme.value,
+        preset: themePreset.value,
+        colorId: themeColor.value,
+        primaryColor: customThemeColor.value,
+        customization: themeCustomization.value,
+      }),
     )
 
     const { start: startFallbackTransitionTimer, stop: stopFallbackTransitionTimer } = useTimeoutFn(
@@ -79,23 +85,33 @@ export const useThemeStore = defineStore(
       { immediate: false },
     )
 
-    watch(resolvedTheme, theme => applyTheme(theme))
+    watch(resolvedTheme, theme => syncTheme(theme))
 
     function initializeTheme(): void {
       normalizePersistedTheme()
-      applyTheme(resolvedTheme.value)
+      syncTheme(resolvedTheme.value)
     }
 
     function normalizePersistedTheme(): void {
+      if (!isThemePresetId(themePreset.value))
+        themePreset.value = defaultThemePresetId
       if (!isThemeMode(themeMode.value))
-        themeMode.value = DEFAULT_THEME_MODE
+        themeMode.value = defaultThemeMode
       if (!isThemeColorId(themeColor.value))
-        themeColor.value = DEFAULT_THEME_COLOR
-      customThemeColor.value = normalizeHexColor(customThemeColor.value) ?? DEFAULT_CUSTOM_THEME_COLOR
-      themeCustomization.value = normalizeThemeCustomization(themeCustomization.value)
+        themeColor.value = defaultThemeColorId
+      customThemeColor.value = normalizeHexColor(customThemeColor.value) ?? defaultThemePrimaryColor
+      // v0.7 将 CSS 前缀存入 Token 键，升级时保留现有自定义值
+      const customization = themeCustomization.value
+      const tokenOverrides = Object.fromEntries(Object.entries(customization?.tokenOverrides ?? {}).map(
+        ([name, value]) => [
+          name.replace(/^--cp-/, ''),
+          value,
+        ],
+      ))
+      themeCustomization.value = normalizeThemeCustomization({ ...customization, tokenOverrides })
     }
 
-    function applyTheme(theme: ResolvedTheme): void {
+    function syncTheme(theme: Theme): void {
       if (typeof document === 'undefined')
         return
 
@@ -120,16 +136,16 @@ export const useThemeStore = defineStore(
       clearThemeTransitionRequest()
     }
 
-    function commitTheme(theme: ResolvedTheme): void {
-      applyResolvedTheme(document.documentElement, theme)
+    function commitTheme(theme: Theme): void {
+      applyTheme(document.documentElement, theme)
       appliedThemeSignature = themeSignature(theme)
       themeRevision.value += 1
     }
 
-    function runThemeTransition(theme: ResolvedTheme): void {
+    function runThemeTransition(theme: Theme): void {
       const transitionDocument = document as ViewTransitionDocument
       const shrinkingDarkLayer
-        = document.documentElement.dataset.theme === 'dark' && theme.name === 'light'
+        = document.documentElement.dataset.theme === 'dark' && theme.scheme === 'light'
 
       if (!transitionDocument.startViewTransition) {
         runFallbackThemeTransition(theme)
@@ -192,7 +208,7 @@ export const useThemeStore = defineStore(
         .catch(() => undefined)
     }
 
-    function runFallbackThemeTransition(theme: ResolvedTheme): void {
+    function runFallbackThemeTransition(theme: Theme): void {
       themeTransitioning.value = true
       stopFallbackTransitionTimer()
       document.documentElement.classList.add('theme-fallback-transition')
@@ -237,10 +253,11 @@ export const useThemeStore = defineStore(
       event?: MouseEvent,
     ): boolean {
       const customColor = normalizeHexColor(configuration.customColor)
-      if (!isThemeMode(configuration.mode) || !isThemeColorId(configuration.color) || !customColor)
+      if (!isThemePresetId(configuration.preset) || !isThemeMode(configuration.mode) || !isThemeColorId(configuration.color) || !customColor)
         return false
 
       requestThemeTransition(event)
+      themePreset.value = configuration.preset
       themeMode.value = configuration.mode
       themeColor.value = configuration.color
       customThemeColor.value = customColor
@@ -250,18 +267,20 @@ export const useThemeStore = defineStore(
 
     function resetTheme(event?: MouseEvent): void {
       const unchanged
-        = themeMode.value === DEFAULT_THEME_MODE
-          && themeColor.value === DEFAULT_THEME_COLOR
-          && customThemeColor.value === DEFAULT_CUSTOM_THEME_COLOR
+        = themeMode.value === defaultThemeMode
+          && themePreset.value === defaultThemePresetId
+          && themeColor.value === defaultThemeColorId
+          && customThemeColor.value === defaultThemePrimaryColor
           && Object.keys(themeCustomization.value).length === 0
       if (unchanged) {
         clearThemeTransitionRequest()
         return
       }
       requestThemeTransition(event)
-      themeMode.value = DEFAULT_THEME_MODE
-      themeColor.value = DEFAULT_THEME_COLOR
-      customThemeColor.value = DEFAULT_CUSTOM_THEME_COLOR
+      themeMode.value = defaultThemeMode
+      themePreset.value = defaultThemePresetId
+      themeColor.value = defaultThemeColorId
+      customThemeColor.value = defaultThemePrimaryColor
       themeCustomization.value = {}
     }
 
@@ -288,6 +307,7 @@ export const useThemeStore = defineStore(
 
     return {
       themeMode,
+      themePreset,
       themeColor,
       customThemeColor,
       themeCustomization,
@@ -308,6 +328,7 @@ export const useThemeStore = defineStore(
       key: 'codex-proxy-rs-theme',
       pick: [
         'themeMode',
+        'themePreset',
         'themeColor',
         'customThemeColor',
         'themeCustomization',
@@ -316,6 +337,6 @@ export const useThemeStore = defineStore(
   },
 )
 
-function themeSignature(theme: ResolvedTheme): string {
-  return `${theme.name}:${theme.colorId}:${theme.seed}:${JSON.stringify(theme.tokens)}`
+function themeSignature(theme: Theme): string {
+  return `${theme.preset}:${theme.scheme}:${theme.colorId}:${theme.seed}:${JSON.stringify(theme.tokens)}`
 }

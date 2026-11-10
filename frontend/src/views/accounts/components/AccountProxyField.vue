@@ -108,7 +108,7 @@ const testHint = computed(() => selectedProxy.value?.enabled === false
       </ZIconButton>
     </div>
     <AccountProxyTestBadge v-if="selectedTest" :result="selectedTest" />
-    <p v-if="testHint" class="m-0 mt-1 text-cp-xs text-cp-text-tertiary">
+    <p v-if="testHint" class="m-0 mt-1 text-z-xs text-z-text-tertiary">
       {{ testHint }}
     </p>
   </ZFormItem>

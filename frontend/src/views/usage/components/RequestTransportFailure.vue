@@ -115,29 +115,29 @@ const diagnosis = computed(() => {
 </script>
 
 <template>
-  <aside v-if="diagnosis" class="mb-3 rounded-cp bg-cp-warning-container p-3" aria-label="上游失败诊断">
+  <aside v-if="diagnosis" class="mb-3 rounded-z bg-z-warning-container p-3" aria-label="上游失败诊断">
     <div class="flex items-start gap-2">
-      <CircleAlert :size="16" class="mt-0.5 shrink-0 text-cp-warning-text" aria-hidden="true" />
+      <CircleAlert :size="16" class="mt-0.5 shrink-0 text-z-warning-text" aria-hidden="true" />
       <div class="min-w-0 flex-1">
-        <p class="m-0 text-cp-sm font-bold text-cp-text">
+        <p class="m-0 text-z-sm font-bold text-z-text">
           {{ diagnosis.message }}
         </p>
-        <p class="mt-1 mb-0 break-all font-mono text-cp-xs tabular-nums text-cp-text-secondary">
+        <p class="mt-1 mb-0 break-all font-mono text-z-xs tabular-nums text-z-text-secondary">
           <span v-if="diagnosis.sequence !== undefined">#{{ diagnosis.sequence }} · +{{ diagnosis.elapsed }} · </span>{{ diagnosis.reason }}
         </p>
       </div>
     </div>
-    <dl v-if="diagnosis.fields.length" class="mt-3 mb-0 grid gap-x-5 gap-y-2 text-cp-xs sm:grid-cols-2">
+    <dl v-if="diagnosis.fields.length" class="mt-3 mb-0 grid gap-x-5 gap-y-2 text-z-xs sm:grid-cols-2">
       <div v-for="field in diagnosis.fields" :key="field.label" class="min-w-0">
-        <dt class="text-cp-text-secondary">
+        <dt class="text-z-text-secondary">
           {{ field.label }}
         </dt>
-        <dd class="mt-0.5 ml-0 break-all font-mono leading-relaxed text-cp-text">
+        <dd class="mt-0.5 ml-0 break-all font-mono leading-relaxed text-z-text">
           {{ field.value }}
         </dd>
       </div>
     </dl>
-    <p v-if="!diagnosis.reason" class="mt-3 mb-0 text-cp-xs leading-relaxed text-cp-text-secondary">
+    <p v-if="!diagnosis.reason" class="mt-3 mb-0 text-z-xs leading-relaxed text-z-text-secondary">
       这条记录未保存底层错误分类，需用请求 ID 检索留存的服务器日志
     </p>
   </aside>

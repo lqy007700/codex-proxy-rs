@@ -8,10 +8,10 @@ defineProps<{
 
 <template>
   <span
-    class="inline-flex h-6 min-w-14 items-center justify-center rounded-full px-2 text-cp-sm leading-none font-bold"
+    class="inline-flex h-6 min-w-14 items-center justify-center rounded-full px-2 text-z-sm leading-none font-bold"
     :class="{
-      'bg-cp-success-container text-cp-success-on-container': apiKey.enabled,
-      'bg-cp-fill-quaternary text-cp-text-secondary': !apiKey.enabled,
+      'bg-z-success-container text-z-success-on-container': apiKey.enabled,
+      'bg-z-fill-quaternary text-z-text-secondary': !apiKey.enabled,
     }"
   >
     {{ apiKey.enabled ? '已启用' : '已禁用' }}

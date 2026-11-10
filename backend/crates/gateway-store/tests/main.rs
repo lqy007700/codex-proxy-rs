@@ -6,6 +6,7 @@ mod config;
 mod lease_renewal;
 mod postgres;
 mod redis;
+mod shutdown;
 mod support;
 
 use gateway_store::StoreResult;

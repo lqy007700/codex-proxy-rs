@@ -228,15 +228,10 @@ impl DefaultAccountsService {
 
     pub(super) async fn remember_reset_credits(
         &self,
-        account_id: &ProviderAccountId,
+        record: Option<ResetCreditAutomation>,
         credits: &ProviderResetCredits,
     ) -> Result<(), AdminError> {
-        let Some(mut record) = self
-            .accounts
-            .reset_credit_automation(account_id.as_str())
-            .await
-            .map_err(|e| map_store_error(e, "reset-credit automation"))?
-        else {
+        let Some(mut record) = record else {
             return Ok(());
         };
         if !record.enabled {

@@ -90,7 +90,7 @@ function focusSelection() {
       </ZIconButton>
     </template>
     <div ref="content" class="flex max-h-[calc(100dvh-1.5rem)] w-72 max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-y-auto p-3" role="dialog" aria-label="清理未列出模型" tabindex="-1">
-      <p class="m-0 shrink-0 text-cp-sm font-emphasis text-cp-text">
+      <p class="m-0 shrink-0 text-z-sm font-emphasis text-z-text">
         清理未列出模型
       </p>
       <ZScrollbar max-height="12rem" class="flex min-h-0 flex-col">
@@ -110,7 +110,7 @@ function focusSelection() {
           </ZCheckbox>
         </div>
       </ZScrollbar>
-      <p v-if="wouldEmpty" class="m-0 shrink-0 text-cp-xs text-cp-warning-text" role="status">
+      <p v-if="wouldEmpty" class="m-0 shrink-0 text-z-xs text-z-warning-text" role="status">
         请至少保留一个白名单模型
       </p>
       <div class="flex shrink-0 justify-end gap-2">

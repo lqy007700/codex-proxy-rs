@@ -657,25 +657,25 @@ function openTokenView(session: AffinitySession) {
     <ZCard class="mt-5">
       <template #header>
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <span class="text-cp-sm font-medium">{{ viewLabel }}</span>
+          <span class="text-z-sm font-medium">{{ viewLabel }}</span>
           <ZSegmented v-model="view" aria-label="账号亲和视图" :options="views" :disabled="saving || loading" @update:model-value="selectView" />
         </div>
       </template>
       <template #body>
-        <div v-if="filterContext && view !== 'sources' && view !== 'operations' && view !== 'accounts'" class="mb-4 flex flex-wrap items-center gap-2 text-cp-xs text-cp-text-secondary">
+        <div v-if="filterContext && view !== 'sources' && view !== 'operations' && view !== 'accounts'" class="mb-4 flex flex-wrap items-center gap-2 text-z-xs text-z-text-secondary">
           <span class="break-all">当前范围：{{ filterContext }}</span>
           <ZButton size="small" :disabled="saving || loading" @click="clearFilters">
             {{ view === 'sessions' ? '查看全部直连绑定' : '查看全部 Key' }}
           </ZButton>
         </div>
-        <div v-if="error" class="my-4 flex items-center gap-3 text-cp-error" role="alert">
+        <div v-if="error" class="my-4 flex items-center gap-3 text-z-error" role="alert">
           {{ error }}<ZButton @click="load">
             重试
           </ZButton>
         </div>
         <template v-else-if="view === 'sources'">
           <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <p class="m-0 text-cp-sm text-cp-text-secondary">
+            <p class="m-0 text-z-sm text-z-text-secondary">
               同一 New API 实例复用稳定来源，轮换 CPR Key 不改变调用方归属
             </p><ZButton type="primary" @click="editSource()">
               新增来源
@@ -710,12 +710,12 @@ function openTokenView(session: AffinitySession) {
           </template>
         </ZTable>
         <template v-else-if="view === 'accounts'">
-          <p class="mb-4 text-cp-sm text-cp-text-secondary">
+          <p class="mb-4 text-z-sm text-z-text-secondary">
             按账号查看当前绑定的 New API Key，仅展示已观测且未过期的主绑定
           </p>
           <ZTable :columns="accountColumns" :data="accountRows" :row-key="row => row.account.id" :expanded-row-keys="[...expandedAccountIds]" :loading="loading" empty-text="暂无账号数据">
             <template #expander="{ row }">
-              <button type="button" class="inline-flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-cp-text-secondary transition hover:bg-cp-bg-text-hover hover:text-cp-text" :title="expandedAccountIds.has(row.account.id) ? '收起绑定 K' : '展开绑定 K'" @click.stop="toggleAccount(row.account.id)">
+              <button type="button" class="inline-flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-z-text-secondary transition hover:bg-z-bg-text-hover hover:text-z-text" :title="expandedAccountIds.has(row.account.id) ? '收起绑定 K' : '展开绑定 K'" @click.stop="toggleAccount(row.account.id)">
                 <ChevronDown class="size-3.5 transition-transform" :class="expandedAccountIds.has(row.account.id) ? '' : '-rotate-90'" />
               </button>
             </template>
@@ -723,13 +723,13 @@ function openTokenView(session: AffinitySession) {
               <div class="truncate" :title="accountIdentityLabel(row.account)">
                 {{ accountIdentityLabel(row.account) }}
               </div>
-              <div class="mt-1 truncate text-cp-xs text-cp-text-tertiary">
+              <div class="mt-1 truncate text-z-xs text-z-text-tertiary">
                 {{ row.account.email || row.account.id }}
               </div>
             </template>
             <template #provider="{ row }">
               <span>{{ row.account.provider }}</span>
-              <span class="mt-1 block text-cp-xs text-cp-text-tertiary">{{ row.account.authenticationKind }}</span>
+              <span class="mt-1 block text-z-xs text-z-text-tertiary">{{ row.account.authenticationKind }}</span>
             </template>
             <template #bindings="{ row }">
               <div v-if="row.bindings.length" class="flex flex-wrap gap-1">
@@ -740,14 +740,14 @@ function openTokenView(session: AffinitySession) {
                   +{{ row.bindings.length - 3 }}
                 </ZTag>
               </div>
-              <span v-else class="text-cp-xs text-cp-text-tertiary">暂无已观测绑定</span>
+              <span v-else class="text-z-xs text-z-text-tertiary">暂无已观测绑定</span>
             </template>
             <template #sessionStats="{ row }">
               <template v-if="statsForBindings(row.bindings).total">
                 <span>{{ statsForBindings(row.bindings).total }} 个窗口</span>
-                <span class="mt-1 block text-cp-xs text-cp-text-tertiary">进行中 {{ statsForBindings(row.bindings).active }}</span>
+                <span class="mt-1 block text-z-xs text-z-text-tertiary">进行中 {{ statsForBindings(row.bindings).active }}</span>
               </template>
-              <span v-else class="text-cp-xs text-cp-text-tertiary">暂无会话</span>
+              <span v-else class="text-z-xs text-z-text-tertiary">暂无会话</span>
             </template>
             <template #status="{ row }">
               <ZTag :type="row.bindings.length ? 'success' : 'default'">
@@ -756,32 +756,32 @@ function openTokenView(session: AffinitySession) {
             </template>
             <template #expanded="{ row }">
               <div class="grid gap-2 p-4">
-                <div v-if="!row.bindings.length" class="text-cp-sm text-cp-text-tertiary">
+                <div v-if="!row.bindings.length" class="text-z-sm text-z-text-tertiary">
                   当前账号没有已观测且未过期的 K 绑定
                 </div>
-                <div v-for="binding in row.bindings" :key="key(binding)" class="grid gap-2 rounded-cp bg-cp-fill-quaternary p-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_auto] md:items-center">
+                <div v-for="binding in row.bindings" :key="key(binding)" class="grid gap-2 rounded-z bg-z-fill-quaternary p-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_auto] md:items-center">
                   <div class="min-w-0">
-                    <div class="truncate text-cp-sm" :title="tokenLabel(binding)">
+                    <div class="truncate text-z-sm" :title="tokenLabel(binding)">
                       {{ tokenLabel(binding) }}
                     </div>
-                    <div class="mt-1 truncate text-cp-xs text-cp-text-tertiary">
+                    <div class="mt-1 truncate text-z-xs text-z-text-tertiary">
                       Token #{{ binding.observation.caller.mode === 'newApi' ? binding.observation.caller.tokenId : '-' }} · 用户 #{{ binding.observation.caller.mode === 'newApi' ? binding.observation.caller.userId : '-' }}
                     </div>
                   </div>
-                  <div class="text-cp-xs text-cp-text-secondary">
+                  <div class="text-z-xs text-z-text-secondary">
                     {{ binding.provider }}
                   </div>
                   <div>
                     <ZTag :type="binding.directive || binding.accountId !== binding.observation.actualAccountId ? 'warning' : 'success'">
                       {{ bindingStatusLabel(binding) }}
                     </ZTag>
-                    <div class="mt-1 text-cp-xs text-cp-text-tertiary">
+                    <div class="mt-1 text-z-xs text-z-text-tertiary">
                       到期 {{ binding.expiresAtDisplay }}
                     </div>
                   </div>
-                  <div class="text-cp-xs text-cp-text-secondary">
+                  <div class="text-z-xs text-z-text-secondary">
                     <span>{{ statsFor(binding).total }} 个窗口</span>
-                    <span class="mt-1 block text-cp-xs text-cp-text-tertiary">进行中 {{ statsFor(binding).active }}</span>
+                    <span class="mt-1 block text-z-xs text-z-text-tertiary">进行中 {{ statsFor(binding).active }}</span>
                   </div>
                   <ZButton size="small" @click="openTokenView(binding)">
                     查看 K
@@ -793,7 +793,7 @@ function openTokenView(session: AffinitySession) {
         </template>
         <template v-else>
           <div v-if="view === 'sessions' && selectedSessions.length" class="my-4 flex flex-wrap items-center gap-2">
-            <span class="mr-2 text-cp-sm text-cp-text-secondary">已选 {{ selectedSessions.length }} 个{{ view === 'sessions' ? '会话绑定' : ' New API Key' }}</span>
+            <span class="mr-2 text-z-sm text-z-text-secondary">已选 {{ selectedSessions.length }} 个{{ view === 'sessions' ? '会话绑定' : ' New API Key' }}</span>
             <AffinityBindingActions batch :token="view !== 'sessions'" :disabled="saving || loading" @action="openOperation(selectedSessions, $event)" />
             <ZButton :disabled="saving" @click="selected = new Set()">
               取消选择
@@ -805,18 +805,18 @@ function openTokenView(session: AffinitySession) {
             </template>
             <template #selection="{ row }">
               <ZCheckbox v-if="canManage(row)" :model-value="selected.has(key(row))" :disabled="saving" :aria-label="`选择绑定 ${row.reference}`" @update:model-value="toggle([row], $event)" />
-              <span v-else class="text-cp-xs text-cp-text-tertiary">只读</span>
+              <span v-else class="text-z-xs text-z-text-tertiary">只读</span>
             </template>
             <template #caller="{ row }">
               <div class="truncate" :title="callerLabel(row)">
                 {{ row.observation.caller.mode === 'newApi' ? tokenLabel(row) : callerLabel(row) }}
-              </div><div class="mt-1 truncate text-cp-xs text-cp-text-tertiary">
+              </div><div class="mt-1 truncate text-z-xs text-z-text-tertiary">
                 {{ row.observation.caller.mode === 'newApi' ? `Token #${row.observation.caller.tokenId} · 用户 #${row.observation.caller.userId}` : '直连 CPR' }}
               </div>
-              <div v-if="row.observation.caller.mode === 'newApi'" class="mt-1 truncate text-cp-xs text-cp-text-tertiary" :title="sourceNames.get(row.observation.caller.sourceId) ?? row.observation.caller.sourceId">
+              <div v-if="row.observation.caller.mode === 'newApi'" class="mt-1 truncate text-z-xs text-z-text-tertiary" :title="sourceNames.get(row.observation.caller.sourceId) ?? row.observation.caller.sourceId">
                 {{ sourceNames.get(row.observation.caller.sourceId) ?? row.observation.caller.sourceId }}
               </div>
-              <div class="mt-2 grid gap-1 whitespace-normal text-cp-xs sm:hidden">
+              <div class="mt-2 grid gap-1 whitespace-normal text-z-xs sm:hidden">
                 <span>{{ view === 'sessions' ? '会话' : '主账号' }}：{{ accountLabel(row.accountId) }}</span>
                 <span>最近请求：{{ accountLabel(row.observation.actualAccountId) }}</span>
                 <span>{{ statusLabel(row) }}</span>
@@ -826,12 +826,12 @@ function openTokenView(session: AffinitySession) {
               </div>
             </template>
             <template #session="{ row }">
-              <span class="block truncate font-mono text-cp-xs" :title="row.reference">{{ row.reference }}</span><span class="text-cp-xs text-cp-text-tertiary">{{ row.provider }}</span>
+              <span class="block truncate font-mono text-z-xs" :title="row.reference">{{ row.reference }}</span><span class="text-z-xs text-z-text-tertiary">{{ row.provider }}</span>
             </template>
             <template #account="{ row }">
               <span class="block truncate" :title="row.accountId">{{ view === 'sessions' ? '会话' : '主账号' }}：{{ accountLabel(row.accountId) }}</span>
-              <span class="mt-1 block truncate text-cp-xs text-cp-text-tertiary" :title="row.observation.actualAccountId">最近请求：{{ accountLabel(row.observation.actualAccountId) }}</span>
-              <div v-if="view === 'tokens' && (row.directive || row.accountId !== row.observation.actualAccountId)" class="mt-2 text-cp-xs">
+              <span class="mt-1 block truncate text-z-xs text-z-text-tertiary" :title="row.observation.actualAccountId">最近请求：{{ accountLabel(row.observation.actualAccountId) }}</span>
+              <div v-if="view === 'tokens' && (row.directive || row.accountId !== row.observation.actualAccountId)" class="mt-2 text-z-xs">
                 <ZTag type="warning">
                   {{ row.directive ? pendingLabel(row.directive, true) : '最近使用其他账号' }}
                 </ZTag>
@@ -839,19 +839,19 @@ function openTokenView(session: AffinitySession) {
             </template>
             <template #sessions="{ row }">
               <span>{{ statsFor(row).total }} 个窗口</span>
-              <span class="mt-1 block text-cp-xs text-cp-text-tertiary">进行中 {{ statsFor(row).active }}</span>
+              <span class="mt-1 block text-z-xs text-z-text-tertiary">进行中 {{ statsFor(row).active }}</span>
             </template>
             <template #status="{ row }">
               <ZTag :type="row.directive || (row.observation.bindingScope === 'token' && row.observation.actualAccountId !== row.accountId) ? 'warning' : 'success'">
                 {{ statusLabel(row) }}
               </ZTag>
-              <span v-if="row.directive" class="mt-1 block whitespace-normal text-cp-xs text-cp-text-secondary">
+              <span v-if="row.directive" class="mt-1 block whitespace-normal text-z-xs text-z-text-secondary">
                 {{ pendingLabel(row.directive, row.observation.bindingScope === 'token') }}
               </span>
             </template>
             <template #time="{ row }">
-              <span class="block whitespace-nowrap font-mono text-cp-xs" :title="`最近准入 ${row.lastAdmissionAtDisplay}`">{{ row.lastAdmissionAtDisplay }}</span>
-              <span class="mt-1 block whitespace-nowrap text-cp-xs text-cp-text-tertiary">到期 {{ row.expiresAtDisplay }}</span>
+              <span class="block whitespace-nowrap font-mono text-z-xs" :title="`最近准入 ${row.lastAdmissionAtDisplay}`">{{ row.lastAdmissionAtDisplay }}</span>
+              <span class="mt-1 block whitespace-nowrap text-z-xs text-z-text-tertiary">到期 {{ row.expiresAtDisplay }}</span>
             </template>
             <template #actions="{ row }">
               <div class="flex flex-wrap gap-1">
@@ -866,7 +866,7 @@ function openTokenView(session: AffinitySession) {
             </template>
           </ZTable>
           <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
-            <span class="text-cp-xs text-cp-text-tertiary">仅展示已观测且未过期的绑定</span>
+            <span class="text-z-xs text-z-text-tertiary">仅展示已观测且未过期的绑定</span>
             <div class="flex gap-2">
               <ZButton :disabled="!previousCursors.length || loading || saving" @click="previousPage">
                 上一页
@@ -880,7 +880,7 @@ function openTokenView(session: AffinitySession) {
     </ZCard>
     <ZDialog ref="operationDialog" v-model="showOperation" :title="operationTitle" width="48rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
       <template v-if="!operation">
-        <p class="mt-0 text-cp-sm text-cp-text-secondary">
+        <p class="mt-0 text-z-sm text-z-text-secondary">
           本次调整 {{ operationSelection.length }} 个{{ tokenOperation ? ' New API Key' : '会话绑定' }}
         </p>
         <ZFormItem v-if="action === 'target'" :label="tokenOperation ? '目标主账号' : '目标账号'" required>
@@ -889,24 +889,24 @@ function openTokenView(session: AffinitySession) {
               <span :title="String(option.value)">{{ option.label }}</span>
             </template>
           </ZSelect>
-          <div v-if="accountsError" role="alert" class="mt-2 flex items-center gap-2 text-cp-xs text-cp-error">
+          <div v-if="accountsError" role="alert" class="mt-2 flex items-center gap-2 text-z-xs text-z-error">
             {{ accountsError }}<ZButton size="small" :disabled="saving" @click="loadTargetAccounts()">
               重试
             </ZButton>
           </div>
         </ZFormItem>
-        <p v-else class="text-cp-sm text-cp-text-secondary">
+        <p v-else class="text-z-sm text-z-text-secondary">
           {{ action === 'reassign' ? '排除当前账号，由系统重新选择可用账号' : '清除当前偏好，重新选号时仍可能选中原账号' }}
         </p>
         <ul class="m-0 grid max-h-72 list-none gap-3 overflow-auto p-0">
-          <li v-for="session in operationSelection" :key="key(session)" class="rounded-cp-lg bg-cp-bg-layout p-3">
-            <p class="m-0 text-cp-sm">
+          <li v-for="session in operationSelection" :key="key(session)" class="rounded-z-lg bg-z-bg-layout p-3">
+            <p class="m-0 text-z-sm">
               {{ callerLabel(session) }}
             </p>
-            <p class="my-1 break-all text-cp-xs text-cp-text-tertiary">
+            <p class="my-1 break-all text-z-xs text-z-text-tertiary">
               {{ bindingContext(session) }}
             </p>
-            <p class="mb-0 mt-1 break-all text-cp-sm text-cp-text-secondary">
+            <p class="mb-0 mt-1 break-all text-z-sm text-z-text-secondary">
               {{ accountLabel(session.accountId) }} → {{ action === 'target' ? targetAccount ? accountLabel(targetAccount) : '请选择目标账号' : action === 'reassign' ? '系统重选其他账号' : '重新选号' }}
             </p>
           </li>
@@ -916,31 +916,31 @@ function openTokenView(session: AffinitySession) {
         <p class="mt-0" :title="operation.plan.directive.action === 'target' ? operation.plan.directive.accountId : undefined">
           {{ directiveLabel(operation.plan.directive, operation.plan.items.every(item => item.session.observation.bindingScope === 'token')) }} · {{ operation.plan.items.length }} 个{{ operation.plan.items.every(item => item.session.observation.bindingScope === 'token') ? ' New API Key' : '会话绑定' }}
         </p>
-        <p class="text-cp-sm text-cp-text-secondary">
+        <p class="text-z-sm text-z-text-secondary">
           预览有效至 {{ operation.plan.expiresAtDisplay }}，执行时复核账号范围和绑定版本，冲突项不会覆盖
         </p>
         <ul class="m-0 grid max-h-96 list-none gap-3 overflow-auto p-0">
-          <li v-for="item in operation.plan.items" :key="key(item.session)" class="rounded-cp-lg border border-cp-border p-3">
-            <p class="m-0 text-cp-sm">
+          <li v-for="item in operation.plan.items" :key="key(item.session)" class="rounded-z-lg border border-z-border p-3">
+            <p class="m-0 text-z-sm">
               {{ callerLabel(item.session) }}
-            </p><p class="my-1 break-all text-cp-xs text-cp-text-tertiary">
+            </p><p class="my-1 break-all text-z-xs text-z-text-tertiary">
               {{ bindingContext(item.session) }}
-            </p><p class="my-1 break-all text-cp-sm text-cp-text-secondary">
+            </p><p class="my-1 break-all text-z-sm text-z-text-secondary">
               {{ accountLabel(item.session.accountId) }} → {{ operation.plan.directive.action === 'target' ? accountLabel(operation.plan.directive.accountId) : operation.plan.directive.action === 'reassign' ? '系统重选其他账号' : '重新选号' }}
             </p>
-            <p v-if="operation.results[key(item.session)]" class="m-0 text-cp-sm" :class="operation.results[key(item.session)]!.status === 'applied' ? 'text-cp-success' : 'text-cp-error'" role="status">
+            <p v-if="operation.results[key(item.session)]" class="m-0 text-z-sm" :class="operation.results[key(item.session)]!.status === 'applied' ? 'text-z-success' : 'text-z-error'" role="status">
               {{ operation.results[key(item.session)]!.status === 'applied' ? '操作已保存，等待生效' : operation.results[key(item.session)]!.message }}{{ operation.results[key(item.session)]!.auditRecorded ? '' : '（审计待补写，请重试）' }}
             </p>
-            <p v-else class="m-0 text-cp-sm" :class="item.rejection ? 'text-cp-error' : 'text-cp-text-secondary'">
+            <p v-else class="m-0 text-z-sm" :class="item.rejection ? 'text-z-error' : 'text-z-text-secondary'">
               {{ item.rejection ?? '待执行' }}
             </p>
           </li>
         </ul>
       </template>
-      <p v-if="tokenOperation" class="mb-0 text-cp-sm text-cp-text-secondary">
+      <p v-if="tokenOperation" class="mb-0 text-z-sm text-z-text-secondary">
         后续符合条件的新请求生效，旧会话不迁移，目标不可用时仍可能分流
       </p>
-      <p v-else class="mb-0 text-cp-sm text-cp-text-secondary">
+      <p v-else class="mb-0 text-z-sm text-z-text-secondary">
         已准入请求继续完成，原生续接保留其账号归属
       </p>
       <template #footer>
@@ -961,9 +961,9 @@ function openTokenView(session: AffinitySession) {
         <ZInput v-model="source.name" aria-label="来源名称" :disabled="saving" maxlength="128" />
       </ZFormItem><ZFormItem label="启用">
         <ZSwitch v-model="source.enabled" aria-label="启用来源" :disabled="saving" />
-      </ZFormItem><p class="break-all font-mono text-cp-xs text-cp-text-tertiary">
+      </ZFormItem><p class="break-all font-mono text-z-xs text-z-text-tertiary">
         {{ source.id }}
-      </p><p class="text-cp-sm text-cp-text-secondary">
+      </p><p class="text-z-sm text-z-text-secondary">
         停用后，关联 CPR Key 的新请求将无法通过认证；重新启用后恢复
       </p>
       <template #footer>

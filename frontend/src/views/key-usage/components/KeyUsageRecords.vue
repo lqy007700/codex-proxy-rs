@@ -30,7 +30,7 @@ const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetCo
         <ZTableColumnSettings :options="columnOptions" @change="setColumnVisible" @reorder="setColumnOrder" @reset="resetColumns" />
       </div>
     </template>
-    <p v-if="error || stale" role="status" class="mt-0 mb-3 text-cp-sm text-cp-error-text">
+    <p v-if="error || stale" role="status" class="mt-0 mb-3 text-z-sm text-z-error-text">
       {{ error || '请求日志刷新失败，暂时保留上次结果' }}
     </p>
     <div class="flex h-120 min-h-0 overflow-hidden">
@@ -49,7 +49,7 @@ const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetCo
         </template>
         <template #tokenDetails="{ row }">
           <UsageTokenCell v-if="row.tokenDetails" :record="{ tokenDetails: row.tokenDetails }" />
-          <span v-else class="text-cp-text-tertiary">—</span>
+          <span v-else class="text-z-text-tertiary">—</span>
         </template>
         <template #billing="{ row }">
           <UsageBillingCell :record="row" />
@@ -67,7 +67,7 @@ const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetCo
           <UsageClientIpCell :record="row" />
         </template>
         <template #userAgent="{ row }">
-          <span class="block max-w-full wrap-break-word whitespace-normal font-mono text-cp-sm leading-[1.4] font-emphasis text-cp-text-secondary">{{ row.userAgent || '—' }}</span>
+          <span class="block max-w-full wrap-break-word whitespace-normal font-mono text-z-sm leading-[1.4] font-emphasis text-z-text-secondary">{{ row.userAgent || '—' }}</span>
         </template>
       </ZTable>
     </div>

@@ -33,7 +33,7 @@ const router = useRouter()
       aria-label="编辑密钥"
       @click.stop="emit('edit', apiKey)"
     >
-      <Pencil class="size-3.5 text-cp-link" />
+      <Pencil class="size-3.5 text-z-link" />
     </ZIconButton>
     <ZIconButton
       size="small"
@@ -42,7 +42,7 @@ const router = useRouter()
       :disabled="revealing"
       @click.stop="emit('use', apiKey)"
     >
-      <Terminal class="size-3.5 text-cp-primary-text" />
+      <Terminal class="size-3.5 text-z-primary-text" />
     </ZIconButton>
 
     <ZPopover placement="bottom-end">
@@ -55,25 +55,25 @@ const router = useRouter()
         <div class="w-44 p-1.5">
           <ZMenuItem @click.stop="(close(), router.push({ path: '/affinity', query: { clientKeyId: apiKey.id, mode: apiKey.identityPolicy.mode } }))">
             <template #icon>
-              <Network class="size-3.5 text-cp-text-quaternary" />
+              <Network class="size-3.5 text-z-text-quaternary" />
             </template>
             查看账号亲和
           </ZMenuItem>
           <ZMenuItem @click.stop="(close(), emit('resetBudget', apiKey))">
             <template #icon>
-              <RotateCcw class="size-3.5 text-cp-text-quaternary" />
+              <RotateCcw class="size-3.5 text-z-text-quaternary" />
             </template>
             重置已用额度
           </ZMenuItem>
           <ZMenuItem :disabled="revealing" @click.stop="(close(), emit('importCcs', apiKey))">
             <template #icon>
-              <Upload class="size-3.5 text-cp-text-quaternary" />
+              <Upload class="size-3.5 text-z-text-quaternary" />
             </template>
             导入 CCSwitch
           </ZMenuItem>
           <ZMenuItem :loading="updatingStatus" @click.stop="(close(), emit('toggle', apiKey))">
             <template #icon>
-              <Power class="size-3.5" :class="apiKey.enabled ? 'text-cp-warning' : 'text-cp-success'" />
+              <Power class="size-3.5" :class="apiKey.enabled ? 'text-z-warning' : 'text-z-success'" />
             </template>
             {{ apiKey.enabled ? '禁用密钥' : '启用密钥' }}
           </ZMenuItem>

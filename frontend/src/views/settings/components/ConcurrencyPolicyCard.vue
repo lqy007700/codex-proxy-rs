@@ -49,7 +49,7 @@ const openaiGuardianReservedConcurrency = defineModel<string>('openaiGuardianRes
                 <CircleAlert class="size-3.5" aria-hidden="true" />
               </ZIconButton>
             </template>
-            <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+            <div class="max-w-72 space-y-2 px-3 py-2 text-z-sm leading-relaxed text-z-text-secondary">
               <p>仅对 OpenAI 账号生效，普通并发为 10、审批名额为 3 时，两类请求分别最多运行 10 个和 3 个，互不占用名额</p>
               <p>开启独立额度后，审批请求单独排队，可超过账号队列容量，仍受总等待容量、排队超时与密钥限额约束</p>
             </div>
@@ -65,7 +65,7 @@ const openaiGuardianReservedConcurrency = defineModel<string>('openaiGuardianRes
                 <CircleAlert class="size-3.5" aria-hidden="true" />
               </ZIconButton>
             </template>
-            <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+            <div class="max-w-72 space-y-2 px-3 py-2 text-z-sm leading-relaxed text-z-text-secondary">
               <p>上游建议等待超出此值时，按现有重试规则尝试换号，无可用账号时返回上游错误</p>
               <p>此值不是请求总时长，未提供有效等待建议时仍使用本地退避</p>
             </div>

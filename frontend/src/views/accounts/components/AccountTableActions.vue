@@ -38,7 +38,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
       aria-label="编辑账号"
       @click.stop="emit('edit', account)"
     >
-      <Pencil class="size-3.5 text-cp-link" />
+      <Pencil class="size-3.5 text-z-link" />
     </ZIconButton>
 
     <ZIconButton
@@ -47,7 +47,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
       :disabled="deleting"
       @click.stop="emit('delete', account)"
     >
-      <Trash2 class="size-3.5 text-cp-error" />
+      <Trash2 class="size-3.5 text-z-error" />
     </ZIconButton>
 
     <ZPopover placement="bottom-end">
@@ -61,7 +61,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
         <div class="w-40 p-1.5">
           <ZMenuItem @click.stop="(close(), router.push({ path: '/affinity', query: { accountId: account.id } }))">
             <template #icon>
-              <Network class="size-3.5 text-cp-text-quaternary" />
+              <Network class="size-3.5 text-z-text-quaternary" />
             </template>
             查看账号亲和
           </ZMenuItem>
@@ -71,7 +71,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             @click.stop="(close(), emit('test', account))"
           >
             <template #icon>
-              <Wifi class="size-3.5 text-cp-text-quaternary" />
+              <Wifi class="size-3.5 text-z-text-quaternary" />
             </template>
             测试连接
           </ZMenuItem>
@@ -82,16 +82,16 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             @click.stop="(close(), emit('refresh', account.id))"
           >
             <template #loading>
-              <RefreshCw class="size-3.5 animate-spin text-cp-text-quaternary motion-reduce:animate-none" />
+              <RefreshCw class="size-3.5 animate-spin text-z-text-quaternary motion-reduce:animate-none" />
             </template>
             <template #icon>
-              <RefreshCw class="size-3.5 text-cp-text-quaternary" />
+              <RefreshCw class="size-3.5 text-z-text-quaternary" />
             </template>
             刷新令牌
           </ZMenuItem>
           <ZMenuItem v-if="credentialEligible" @click.stop="(close(), emit('reauthorize', account))">
             <template #icon>
-              <KeyRound class="size-3.5 text-cp-text-quaternary" />
+              <KeyRound class="size-3.5 text-z-text-quaternary" />
             </template>
             重新授权
           </ZMenuItem>
@@ -102,10 +102,10 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             @click.stop="(close(), emit('downloadModelCatalog', account))"
           >
             <template #loading>
-              <RefreshCw class="size-3.5 animate-spin text-cp-text-quaternary motion-reduce:animate-none" />
+              <RefreshCw class="size-3.5 animate-spin text-z-text-quaternary motion-reduce:animate-none" />
             </template>
             <template #icon>
-              <Download class="size-3.5 text-cp-text-quaternary" />
+              <Download class="size-3.5 text-z-text-quaternary" />
             </template>
             下载模型目录
           </ZMenuItem>
@@ -115,7 +115,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             @click.stop="(close(), emit('recover', account.id))"
           >
             <template #icon>
-              <RotateCcw class="size-3.5 text-cp-text-quaternary" />
+              <RotateCcw class="size-3.5 text-z-text-quaternary" />
             </template>
             恢复状态
           </ZMenuItem>

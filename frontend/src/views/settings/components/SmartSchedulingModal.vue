@@ -69,7 +69,7 @@ function confirm() {
 <template>
   <ZDialog v-model="open" title="智能调度设置" description="调整账号选择偏好" width="36rem">
     <form :id="formId" class="grid gap-5" novalidate @submit.prevent="confirm">
-      <p v-if="!active" class="m-0 text-cp text-cp-text-secondary">
+      <p v-if="!active" class="m-0 text-z text-z-text-secondary">
         仅在启用智能调度后生效
       </p>
       <div>
@@ -84,14 +84,14 @@ function confirm() {
                       <CircleHelp class="size-3.5" />
                     </ZIconButton>
                   </template>
-                  <p class="m-0 max-w-64 px-3 py-2 text-cp-sm leading-relaxed">{{ field.help }}</p>
+                  <p class="m-0 max-w-64 px-3 py-2 text-z-sm leading-relaxed">{{ field.help }}</p>
                 </ZPopover>
               </span>
             </template>
             <ZInput v-model="draft[field.key]" type="number" min="0" max="10" step="0.1" placeholder="0 表示不参与评分" :aria-label="field.label" />
           </ZFormItem>
         </div>
-        <p v-if="submitted && emptyWeights" role="alert" class="mt-2 mb-0 text-cp-sm text-cp-danger">
+        <p v-if="submitted && emptyWeights" role="alert" class="mt-2 mb-0 text-z-sm text-z-danger">
           至少一项系数需要大于 0
         </p>
       </div>

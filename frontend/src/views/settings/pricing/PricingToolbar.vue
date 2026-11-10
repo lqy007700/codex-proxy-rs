@@ -47,7 +47,7 @@ const providerOptions = computed(() => props.providers.map(value => ({
       </div>
       <ZSelect v-model="source" class="w-32" aria-label="价格来源" :options="[{ label: '全部来源', value: 'all' }, { label: sourceLabels.custom, value: 'custom' }, { label: sourceLabels.synced, value: 'synced' }, { label: sourceLabels.builtin, value: 'builtin' }]" />
       <div v-if="selectedCount" class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto" role="group" aria-label="批量操作">
-        <span class="inline-flex h-cp-control w-full items-center gap-1 whitespace-nowrap text-cp text-cp-text-secondary sm:mr-1 sm:w-auto" aria-live="polite">
+        <span class="inline-flex h-z-control w-full items-center gap-1 whitespace-nowrap text-z text-z-text-secondary sm:mr-1 sm:w-auto" aria-live="polite">
           已选 <span class="font-mono tabular-nums">{{ selectedCount }}</span> 项
         </span>
         <ZButton :disabled="disabled || selectedCount > 500" @click="$emit('setMultiplier')">
@@ -74,11 +74,11 @@ const providerOptions = computed(() => props.providers.map(value => ({
                 <CircleAlert class="size-3.5" />
               </ZIconButton>
             </template>
-            <div :id="syncInfoId" class="grid w-64 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
+            <div :id="syncInfoId" class="grid w-64 gap-2 p-3 text-z-xs leading-relaxed text-z-text-secondary">
               <p class="m-0">
                 从 models.dev 获取社区价目，保留人工单价与倍率
               </p>
-              <p class="m-0 text-cp-text-tertiary">
+              <p class="m-0 text-z-text-tertiary">
                 最近同步：{{ syncTime }}
               </p>
             </div>

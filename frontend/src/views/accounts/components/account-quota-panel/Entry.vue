@@ -50,7 +50,7 @@ const items = computed(() => props.windows.map((window) => {
   <section class="grid min-w-0 gap-2">
     <h4
       v-if="grouped && label && windows[0]?.limitId !== 'codex'"
-      class="m-0 truncate text-cp-xs leading-4 font-heavy text-cp-text-secondary"
+      class="m-0 truncate text-z-xs leading-4 font-heavy text-z-text-secondary"
       :title="label"
     >
       {{ label }}
@@ -62,12 +62,12 @@ const items = computed(() => props.windows.map((window) => {
     >
       <div v-for="item in items" :key="item.key" class="grid min-w-0 gap-1.5">
         <template v-if="item.local">
-          <div class="flex min-w-0 items-baseline justify-between gap-2 text-cp-xs leading-3.5">
-            <span class="min-w-0 truncate font-bold text-cp-text-quaternary">
+          <div class="flex min-w-0 items-baseline justify-between gap-2 text-z-xs leading-3.5">
+            <span class="min-w-0 truncate font-bold text-z-text-quaternary">
               {{ item.localLabel }}
             </span>
             <strong
-              class="shrink-0 font-mono font-heavy tabular-nums text-cp-text"
+              class="shrink-0 font-mono font-heavy tabular-nums text-z-text"
               :title="`窗口请求：${item.requestDisplay} 次`"
             >
               {{ item.requestDisplay }} 次
@@ -80,7 +80,7 @@ const items = computed(() => props.windows.map((window) => {
             :label="item.timelineTitle"
           />
 
-          <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-cp-text-tertiary">
+          <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-z-text-tertiary">
             <span class="shrink-0 font-emphasis">统计范围</span>
             <span
               class="min-w-0 truncate font-mono font-emphasis tabular-nums"
@@ -91,14 +91,14 @@ const items = computed(() => props.windows.map((window) => {
           </p>
         </template>
         <template v-else>
-          <div class="flex min-w-0 items-baseline justify-between gap-2 text-cp-xs leading-3.5">
-            <span class="min-w-0 truncate font-bold text-cp-text-quaternary">
+          <div class="flex min-w-0 items-baseline justify-between gap-2 text-z-xs leading-3.5">
+            <span class="min-w-0 truncate font-bold text-z-text-quaternary">
               {{ item.label }}
             </span>
             <span class="flex shrink-0 items-baseline gap-1.5 font-mono font-heavy tabular-nums">
               <strong
                 v-if="item.localUsageDisplay"
-                class="text-cp-text-quaternary"
+                class="text-z-text-quaternary"
                 :title="`窗口消耗：${item.localUsageDisplay}`"
               >
                 {{ item.localUsageDisplay }}
@@ -113,7 +113,7 @@ const items = computed(() => props.windows.map((window) => {
           </div>
 
           <div
-            class="h-1.5 w-full overflow-hidden rounded-full bg-cp-border-secondary"
+            class="h-1.5 w-full overflow-hidden rounded-full bg-z-border-secondary"
             role="progressbar"
             :aria-label="item.ariaLabel"
             aria-valuemin="0"
@@ -128,7 +128,7 @@ const items = computed(() => props.windows.map((window) => {
             />
           </div>
 
-          <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-cp-text-tertiary">
+          <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-z-text-tertiary">
             <span class="shrink-0 font-emphasis">重置</span>
             <span class="min-w-0 truncate font-mono font-emphasis tabular-nums" :title="item.resetAtDisplay">
               {{ item.resetAtDisplay }}

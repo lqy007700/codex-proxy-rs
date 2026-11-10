@@ -190,7 +190,7 @@ const userAgent = computed({
         />
       </ZFormItem>
     </div>
-    <p v-if="!custom && currentPreset?.reason" class="m-0 text-cp-sm text-cp-text-secondary">
+    <p v-if="!custom && currentPreset?.reason" class="m-0 text-z-sm text-z-text-secondary">
       {{ currentPreset.reason }}
     </p>
     <div v-if="!custom" class="grid gap-4 sm:grid-cols-2">
@@ -245,7 +245,7 @@ const userAgent = computed({
         autocomplete="off"
         class="font-mono"
       />
-      <p v-if="error" role="alert" class="m-0 text-cp-sm text-cp-error">
+      <p v-if="error" role="alert" class="m-0 text-z-sm text-z-error">
         {{ error }}
       </p>
     </template>

@@ -91,7 +91,7 @@ async function confirmAssignment() {
       <div class="flex min-w-0 items-center gap-2">
         <ZInput v-model="search" class="min-w-0 flex-1 sm:w-80 sm:flex-none" :disabled="assigning" aria-label="搜索待分配账号" placeholder="搜索账号名称或邮箱">
           <template #prefix>
-            <Search class="size-4.5 text-cp-text-tertiary" />
+            <Search class="size-4.5 text-z-text-tertiary" />
           </template>
         </ZInput>
         <div v-if="selectedIds.size" class="ml-auto flex shrink-0 gap-2">
@@ -103,7 +103,7 @@ async function confirmAssignment() {
           </ZButton>
         </div>
       </div>
-      <ZTable class="min-h-0 shrink-0 [--cp-table-row-height:56px]" :style="{ height: 'min(50dvh, 28rem)' }" :columns="columns" :data="accounts" :loading="loading" :empty-text="emptyText" :selected-row-keys="selectedRowKeys">
+      <ZTable class="min-h-0 shrink-0 [--z-table-row-height:56px]" :style="{ height: 'min(50dvh, 28rem)' }" :columns="columns" :data="accounts" :loading="loading" :empty-text="emptyText" :selected-row-keys="selectedRowKeys">
         <template #header-selection>
           <ZCheckbox :model-value="allSelected" :indeterminate="indeterminate" :disabled="loading || assigning" aria-label="选择当前页可分配账号" @update:model-value="toggleAll" />
         </template>
@@ -112,10 +112,10 @@ async function confirmAssignment() {
         </template>
         <template #identity="{ row }">
           <div class="min-w-0">
-            <div class="truncate text-cp font-heavy text-cp-text" :title="row.name">
+            <div class="truncate text-z font-heavy text-z-text" :title="row.name">
               {{ row.name }}
             </div>
-            <div v-if="row.email && row.email !== row.name" class="mt-0.5 truncate font-mono text-cp-xs text-cp-text-secondary" :title="row.email">
+            <div v-if="row.email && row.email !== row.name" class="mt-0.5 truncate font-mono text-z-xs text-z-text-secondary" :title="row.email">
               {{ row.email }}
             </div>
           </div>
@@ -132,16 +132,16 @@ async function confirmAssignment() {
           </div>
         </template>
         <template #outboundProxy="{ row }">
-          <span v-if="row.outboundProxyId === proxy?.id" class="text-cp-success-text">已使用此代理</span>
-          <span v-else class="block truncate text-cp-xs text-cp-text-secondary" :title="row.outboundProxyEndpoint ?? undefined">
+          <span v-if="row.outboundProxyId === proxy?.id" class="text-z-success-text">已使用此代理</span>
+          <span v-else class="block truncate text-z-xs text-z-text-secondary" :title="row.outboundProxyEndpoint ?? undefined">
             {{ row.outboundProxyEndpoint || '直连' }}
           </span>
         </template>
       </ZTable>
-      <p v-if="tooManySelected" class="m-0 text-cp-sm text-cp-error-text" role="alert">
+      <p v-if="tooManySelected" class="m-0 text-z-sm text-z-error-text" role="alert">
         {{ `一次最多分配 ${maximumAccounts} 个账号` }}
       </p>
-      <p v-if="proxy && !proxy.enabled" class="m-0 text-cp-sm text-cp-warning-text" role="alert">
+      <p v-if="proxy && !proxy.enabled" class="m-0 text-z-sm text-z-warning-text" role="alert">
         启用此代理后可分配账号
       </p>
     </div>

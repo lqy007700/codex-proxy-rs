@@ -18,6 +18,7 @@ const MAX_COOKIES: usize = 128;
 /// 已解析且只在 Provider 内可见的认证材料
 pub struct CodexRuntimeCredential {
     pub transport: super::ResponsesTransport,
+    pub(crate) oauth_identity_changed: bool,
     pub authentication: CodexRuntimeAuthentication,
     pub principal: Option<CodexCredentialPrincipal>,
     pub installation_id: String,
@@ -131,6 +132,7 @@ impl CodexCredentialCodec {
     ) -> Result<PlaintextCredential, CodexCredentialDataError> {
         Self::encode_complete(CodexCredentialData::OAuth(CodexOAuthCredentialData {
             schema_version: CODEX_CREDENTIAL_SCHEMA_VERSION,
+            oauth_identity_changed: false,
             transport: super::ResponsesTransport::oauth_default(),
             principal,
             installation_id,
@@ -182,6 +184,9 @@ impl CodexCredentialCodec {
         let data = serde_json::from_value::<CodexCredentialData>(value)
             .map_err(|_| CodexCredentialDataError::Invalid)?;
         validate(&data)?;
+        let oauth_identity_changed = data
+            .oauth()
+            .is_some_and(|oauth| oauth.oauth_identity_changed);
         let transport = match &data {
             CodexCredentialData::OAuth(data) => data.transport,
             CodexCredentialData::ApiKey(data) => data.transport,
@@ -214,6 +219,7 @@ impl CodexCredentialCodec {
             };
         Ok(CodexRuntimeCredential {
             transport,
+            oauth_identity_changed,
             authentication,
             principal,
             installation_id,
@@ -254,6 +260,7 @@ impl CodexCredentialCodec {
             (CodexCredentialData::OAuth(incoming), CodexCredentialData::OAuth(existing)) => {
                 incoming.installation_id = existing.installation_id;
                 incoming.transport = existing.transport;
+                incoming.oauth_identity_changed |= existing.oauth_identity_changed;
             }
             (CodexCredentialData::ApiKey(incoming), CodexCredentialData::ApiKey(existing)) => {
                 incoming.installation_id = existing.installation_id;

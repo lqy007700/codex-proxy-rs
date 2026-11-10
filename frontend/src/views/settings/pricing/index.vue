@@ -49,7 +49,7 @@ function requestDelete(row: PricingRow) {
 </script>
 
 <template>
-  <section class="flex min-h-0 min-w-0 flex-col rounded-cp-card bg-cp-bg-container p-3 shadow-cp-card sm:p-4" aria-label="模型定价">
+  <section class="flex min-h-0 min-w-0 flex-col rounded-z-card bg-z-bg-container p-3 shadow-z-card sm:p-4" aria-label="模型定价">
     <PricingToolbar
       v-model:search="search"
       v-model:provider="provider"
@@ -80,7 +80,7 @@ function requestDelete(row: PricingRow) {
     <ZPagination v-bind="pagination" :disabled="loading" @current-change="page = $event" @size-change="pageSize = $event" />
     <PricingEditor v-model="editorOpen" :row="editing" :provider="provider" :saving="saving" @save="saveModel" />
     <ZConfirmDialog v-model="deleteOpen" title="删除模型价目" description="删除该模型的同步与自定义价格，历史账单不变" destructive confirm-text="删除" :loading="saving" @confirm="deleteModel">
-      <span class="break-all font-mono text-cp-sm font-normal">{{ deleting?.model }}</span>
+      <span class="break-all font-mono text-z-sm font-normal">{{ deleting?.model }}</span>
     </ZConfirmDialog>
     <PricingBatchModal v-model="batchOpen" :rows="targets" :reset="batchReset" :saving="saving" @confirm="saveBatch" />
     <PricingSyncModal v-model="syncOpen" :preview="preview" :catalog="syncCatalog" :saving="saving" @confirm="confirmSync" />

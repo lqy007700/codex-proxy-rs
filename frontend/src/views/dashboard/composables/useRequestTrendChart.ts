@@ -1,6 +1,7 @@
 import type { BarSeriesOption, EChartsOption, LineSeriesOption } from 'echarts'
 import type { Ref } from 'vue'
 import type { dashboardTrendView, normalizeDashboardTrendKind } from '../presenter'
+import { getThemeVarName } from '@codex-proxy/ui/theme'
 import { usePreferredReducedMotion } from '@vueuse/core'
 import { computed, shallowRef, watch } from 'vue'
 
@@ -165,8 +166,8 @@ export function useRequestTrendChart(options: {
           axisLabel: {
             show: true,
             color: activeKind.value === 'usage'
-              ? trendColor('输出', '--cp-color-green-solid', '#12B981')
-              : trendColor('成功', '--cp-color-green-solid', '#12B981'),
+              ? trendColor('输出', 'color-green-solid', '#12B981')
+              : trendColor('成功', 'color-green-solid', '#12B981'),
             fontSize: 9,
             fontFamily: 'JetBrains Mono Variable, JetBrains Mono',
             formatter: formatSecondaryAxisValue,
@@ -204,17 +205,17 @@ export function useRequestTrendChart(options: {
     if (activeKind.value === 'usage') {
       return [
         title,
-        tooltipItem('输入', point?.inputTokens, trendColor('输入', '--cp-color-blue-solid', '#5983F4')),
-        tooltipItem('输出', point?.outputTokens, trendColor('输出', '--cp-color-green-solid', '#12B981')),
+        tooltipItem('输入', point?.inputTokens, trendColor('输入', 'color-blue-solid', '#5983F4')),
+        tooltipItem('输出', point?.outputTokens, trendColor('输出', 'color-green-solid', '#12B981')),
         tooltipItem(
           '缓存',
           point?.cachedInputTokens,
-          trendColor('缓存', '--cp-color-text-tertiary', '#94A3B8'),
+          trendColor('缓存', 'color-text-tertiary', '#94A3B8'),
         ),
         tooltipItem(
           '缓存命中',
           zeroAwareRateText(point, 'cacheHitRate', 'inputTokensValue'),
-          trendColor('缓存', '--cp-color-text-tertiary', '#94A3B8'),
+          trendColor('缓存', 'color-text-tertiary', '#94A3B8'),
         ),
         tooltipItem('请求', point?.requests, palette.value.textSecondary),
       ]
@@ -265,9 +266,9 @@ export function useRequestTrendChart(options: {
 
   function getSeries(): Array<BarSeriesOption | LineSeriesOption> {
     if (activeKind.value === 'usage') {
-      const cacheColor = trendColor('缓存', '--cp-color-text-tertiary', '#94A3B8')
-      const inputColor = trendColor('输入', '--cp-color-blue-solid', '#5983F4')
-      const outputColor = trendColor('输出', '--cp-color-green-solid', '#12B981')
+      const cacheColor = trendColor('缓存', 'color-text-tertiary', '#94A3B8')
+      const inputColor = trendColor('输入', 'color-blue-solid', '#5983F4')
+      const outputColor = trendColor('输出', 'color-green-solid', '#12B981')
       return [
         lineSeries('缓存', seriesValues('cachedInputTokensValue'), cacheColor, {
           area: true,
@@ -302,7 +303,7 @@ export function useRequestTrendChart(options: {
         ...gapLineSeries(
           '总耗时 P95',
           activeSeriesValues('latencyP95Ms'),
-          trendColor('总耗时', '--cp-color-orange-solid', '#F59E0B'),
+          trendColor('总耗时', 'color-orange-solid', '#F59E0B'),
           {
             lineType: 'dashed',
             smooth: 0.2,
@@ -313,7 +314,7 @@ export function useRequestTrendChart(options: {
         ...gapLineSeries(
           '首字 P95',
           activeSeriesValues('firstTokenP95Ms'),
-          trendColor('首字', '--cp-color-cyan-solid', '#13C2C2'),
+          trendColor('首字', 'color-cyan-solid', '#13C2C2'),
           {
             area: true,
             smooth: 0.24,
@@ -324,7 +325,7 @@ export function useRequestTrendChart(options: {
         ...gapLineSeries(
           '速率 P50',
           activeSeriesValues('outputThroughputP50'),
-          trendColor('速率', '--cp-color-green-solid', '#12B981'),
+          trendColor('速率', 'color-green-solid', '#12B981'),
           {
             smooth: 0.2,
             width: 2,
@@ -339,18 +340,18 @@ export function useRequestTrendChart(options: {
       barSeries(
         '错误数',
         seriesValues('errorsValue'),
-        trendColor('错误', '--cp-color-red-solid', '#EF4444'),
+        trendColor('错误', 'color-red-solid', '#EF4444'),
       ),
       ...gapLineSeries(
         '成功率',
         seriesValues('successRateValue'),
-        trendColor('成功', '--cp-color-green-solid', '#12B981'),
+        trendColor('成功', 'color-green-solid', '#12B981'),
         { width: 2.4, yAxisIndex: 1 },
       ),
       lineSeries(
         '总请求',
         seriesValues('requestsValue'),
-        trendColor('请求', '--cp-color-blue-solid', '#5983F4'),
+        trendColor('请求', 'color-blue-solid', '#5983F4'),
         { lineType: 'dashed', width: 1.8 },
       ),
     ]
@@ -468,7 +469,7 @@ export function useRequestTrendChart(options: {
 
   function summaryMarkerStyle(item: TrendSummaryItem) {
     return item.colorVar
-      ? { backgroundColor: `var(${item.colorVar})` }
+      ? { backgroundColor: `var(${getThemeVarName(item.colorVar)})` }
       : undefined
   }
 

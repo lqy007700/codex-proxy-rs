@@ -109,7 +109,7 @@ useEventListener(panel, 'mouseleave', scheduleClose)
       <button
         ref="accountButton"
         type="button"
-        class="block max-w-full cursor-pointer truncate rounded-cp-sm border-0 bg-transparent p-0 text-left font-mono text-cp-sm leading-none font-bold text-cp-text outline-none hover:text-cp-primary-text focus-visible:ring-2 focus-visible:ring-cp-control-outline"
+        class="block max-w-full cursor-pointer truncate rounded-z-sm border-0 bg-transparent p-0 text-left font-mono text-z-sm leading-none font-bold text-z-text outline-none hover:text-z-primary-text focus-visible:ring-2 focus-visible:ring-z-control-outline"
         :title="accountText"
         :aria-label="`${accountText}，查看请求尝试账号`"
         aria-haspopup="dialog"
@@ -122,16 +122,16 @@ useEventListener(panel, 'mouseleave', scheduleClose)
 
     <section
       ref="panel"
-      class="w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded-cp-lg p-2"
+      class="w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded-z-lg p-2"
       role="dialog"
       aria-label="请求尝试账号"
       :aria-busy="loading"
     >
-      <p v-if="loading" class="m-0 px-2 py-3 text-cp-sm text-cp-text-secondary" role="status">
+      <p v-if="loading" class="m-0 px-2 py-3 text-z-sm text-z-text-secondary" role="status">
         正在加载尝试记录
       </p>
       <div v-else-if="error" class="grid gap-2 p-2">
-        <p class="m-0 text-cp-sm wrap-break-word text-cp-error-text" role="alert">
+        <p class="m-0 text-z-sm wrap-break-word text-z-error-text" role="alert">
           加载失败：{{ error }}
         </p>
         <ZButton size="small" class="justify-self-start" @click="loadAttempts">
@@ -147,20 +147,20 @@ useEventListener(panel, 'mouseleave', scheduleClose)
           size="small"
         >
           <template #accountEmail="{ row }">
-            <span class="block font-mono text-cp-sm leading-5 wrap-anywhere whitespace-normal text-cp-text">
+            <span class="block font-mono text-z-sm leading-5 wrap-anywhere whitespace-normal text-z-text">
               {{ usageAccountText(row) }}
             </span>
           </template>
           <template #providerErrorCode="{ row }">
-            <span class="block font-mono text-cp-sm leading-5 wrap-anywhere whitespace-normal" :class="attemptOutcomeClass(row.outcome)">
+            <span class="block font-mono text-z-sm leading-5 wrap-anywhere whitespace-normal" :class="attemptOutcomeClass(row.outcome)">
               {{ attemptCode(row) }}
             </span>
           </template>
         </ZTable>
-        <p v-else class="m-0 px-2 py-3 text-cp-sm text-cp-text-secondary" role="status">
+        <p v-else class="m-0 px-2 py-3 text-z-sm text-z-text-secondary" role="status">
           暂无尝试记录
         </p>
-        <p v-if="incomplete" class="mx-2 mt-2 mb-1 text-cp-xs text-cp-text-tertiary">
+        <p v-if="incomplete" class="mx-2 mt-2 mb-1 text-z-xs text-z-text-tertiary">
           尝试记录可能不完整
         </p>
       </template>
@@ -168,7 +168,7 @@ useEventListener(panel, 'mouseleave', scheduleClose)
   </ZPopover>
   <span
     v-else
-    class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
+    class="block max-w-full truncate font-mono text-z-sm leading-none font-bold text-z-text"
     :title="accountText"
   >
     {{ accountText }}

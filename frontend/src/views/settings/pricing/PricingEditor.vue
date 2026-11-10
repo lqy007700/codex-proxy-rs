@@ -109,7 +109,7 @@ function submit() {
 <template>
   <ZDialog v-model="open" :title="row ? '编辑模型价格' : '添加模型价格'" width="42rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
     <template #description>
-      <span class="inline-flex items-center gap-2 align-middle text-cp-sm font-normal">
+      <span class="inline-flex items-center gap-2 align-middle text-z-sm font-normal">
         <ProviderIconGroup :provider="provider" size="sm" />
         <span>USD / 1M Tokens</span>
       </span>
@@ -132,8 +132,8 @@ function submit() {
           <ZSelect :model-value="selectedBand" :options="bandOptions" aria-label="价格档位" class="min-w-0 flex-1 sm:max-w-56" :disabled="saving" @update:model-value="selectedBand = $event as PriceBand" />
           <ZSegmented v-model="priceMode" aria-label="单价来源" :options="sourceOptions" :disabled="saving" />
         </div>
-        <PricingRateFields v-if="current || base" class="rounded-cp-lg bg-cp-fill-quaternary p-4" :base="base" :custom="current" :multiplier-bps="bps" :disabled="saving" @change="updatePrice" />
-        <div v-else class="grid justify-items-center gap-3 py-6 text-cp-sm text-cp-text-tertiary">
+        <PricingRateFields v-if="current || base" class="rounded-z-lg bg-z-fill-quaternary p-4" :base="base" :custom="current" :multiplier-bps="bps" :disabled="saving" @change="updatePrice" />
+        <div v-else class="grid justify-items-center gap-3 py-6 text-z-sm text-z-text-tertiary">
           <p class="m-0">
             此档位暂无来源价格
           </p>
@@ -142,7 +142,7 @@ function submit() {
           </ZButton>
         </div>
       </section>
-      <p v-if="validation" role="alert" class="m-0 rounded-cp bg-cp-error-container p-3 text-cp-sm text-cp-error-on-container">
+      <p v-if="validation" role="alert" class="m-0 rounded-z bg-z-error-container p-3 text-z-sm text-z-error-on-container">
         {{ validation }}
       </p>
     </div>
@@ -156,7 +156,7 @@ function submit() {
             计价说明
           </ZButton>
         </template>
-        <div :id="helpId" class="grid w-72 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
+        <div :id="helpId" class="grid w-72 gap-2 p-3 text-z-xs leading-relaxed text-z-text-secondary">
           <p class="m-0">
             模型 ID 使用实际发送给上游的名称，不是客户端别名
           </p>

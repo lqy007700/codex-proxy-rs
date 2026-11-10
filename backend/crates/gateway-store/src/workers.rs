@@ -12,6 +12,7 @@ pub(crate) struct CommandStoreWriters {
     pub(crate) client_key_usage: postgres::PgClientApiKeyUsageWriter,
     pub(crate) admission_release: redis::ClientAdmissionReleaseWriter,
     pub(crate) budget: postgres::ClientBudgetWriter,
+    pub(crate) shutdown: (redis::SchedulingLeaseCleanup, crate::shutdown::RequestDrain),
 }
 
 /// 短生命周期 CLI 只运行数据面必需的四个写泵，不注册恢复、保留或维护 Worker
@@ -19,6 +20,7 @@ pub struct CommandStoreDrain {
     cancellation: gateway_core::lifecycle::CancellationToken,
     tasks: Vec<tokio::task::JoinHandle<Result<(), WorkerTaskError>>>,
     execution_idle: postgres::ExecutionBufferIdle,
+    shutdown: (redis::SchedulingLeaseCleanup, crate::shutdown::RequestDrain),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -33,6 +35,7 @@ impl CommandStoreWriters {
             client_key_usage,
             admission_release,
             budget,
+            shutdown,
         } = self;
         let execution_idle = execution.idle();
         let tasks = vec![
@@ -45,6 +48,7 @@ impl CommandStoreWriters {
             cancellation,
             tasks,
             execution_idle,
+            shutdown,
         }
     }
 }
@@ -62,6 +66,9 @@ where
 impl CommandStoreDrain {
     pub(crate) async fn shutdown(mut self) -> Result<(), CommandStoreDrainError> {
         let deadline = std::time::Instant::now() + COMMAND_DRAIN_TIMEOUT;
+        // 在写泵仍运行时取消请求并回收账号租约，沿用命令自身的总关闭预算
+        let (leases, requests) = &self.shutdown;
+        let ((), ()) = futures::join!(leases.shutdown(), requests.wait());
         // CLI 调用方已结束数据面会话；先让已接收的 execution 写入在正常 writer
         // 路径完成，避免立即取消后落入更短的常驻进程关闭丢弃窗口
         let mut failed = !self.execution_idle.wait_until(deadline).await;
@@ -92,6 +99,7 @@ impl CommandStoreDrain {
 
 impl Drop for CommandStoreDrain {
     fn drop(&mut self) {
+        self.shutdown.1.begin_shutdown();
         self.cancellation.cancel();
         for task in &self.tasks {
             task.abort();
@@ -105,7 +113,9 @@ pub(crate) fn store_worker_contributions(
     client_key_usage_writer: postgres::PgClientApiKeyUsageWriter,
     admission_release_writer: redis::ClientAdmissionReleaseWriter,
     budget_writer: postgres::ClientBudgetWriter,
+    shutdown: (redis::SchedulingLeaseCleanup, crate::shutdown::RequestDrain),
 ) -> StoreResult<Vec<WorkerContribution>> {
+    let (lease_cleanup, request_drain) = shutdown;
     let stale_id = WorkerId::try_new(WorkerKind::StaleModelRequestRecovery, "postgres")
         .map_err(worker_definition_error)?;
     let ops_flush_id =
@@ -117,16 +127,28 @@ pub(crate) fn store_worker_contributions(
         .map_err(worker_definition_error)?;
     let budget_flush_id = WorkerId::try_new(WorkerKind::OpsFlush, "postgres_client_budget")
         .map_err(worker_definition_error)?;
+    let lease_cleanup_id = WorkerId::try_new(WorkerKind::OpsFlush, "redis_account_leases")
+        .map_err(worker_definition_error)?;
     let ops_flush_restart =
         DaemonRestartPolicy::try_new(Duration::from_secs(1), Duration::from_secs(60))
             .map_err(worker_definition_error)?;
     Ok(vec![
         WorkerContribution::Registration(
             WorkerRegistration::try_new(
+                lease_cleanup_id,
+                WorkerRunnable::Daemon {
+                    restart: ops_flush_restart,
+                    task: Box::new(lease_cleanup),
+                },
+            )
+            .map_err(worker_definition_error)?,
+        ),
+        WorkerContribution::Registration(
+            WorkerRegistration::try_new(
                 budget_flush_id,
                 WorkerRunnable::Daemon {
                     restart: ops_flush_restart,
-                    task: Box::new(budget_writer),
+                    task: Box::new(request_drain.writer(budget_writer)),
                 },
             )
             .map_err(worker_definition_error)?,
@@ -141,7 +163,7 @@ pub(crate) fn store_worker_contributions(
                 ops_flush_id,
                 WorkerRunnable::Daemon {
                     restart: ops_flush_restart,
-                    task: Box::new(execution_writer),
+                    task: Box::new(request_drain.writer(execution_writer)),
                 },
             )
             .map_err(worker_definition_error)?,
@@ -151,7 +173,7 @@ pub(crate) fn store_worker_contributions(
                 client_key_usage_flush_id,
                 WorkerRunnable::Daemon {
                     restart: ops_flush_restart,
-                    task: Box::new(client_key_usage_writer),
+                    task: Box::new(request_drain.writer(client_key_usage_writer)),
                 },
             )
             .map_err(worker_definition_error)?,
@@ -161,7 +183,7 @@ pub(crate) fn store_worker_contributions(
                 admission_flush_id,
                 WorkerRunnable::Daemon {
                     restart: ops_flush_restart,
-                    task: Box::new(admission_release_writer),
+                    task: Box::new(request_drain.writer(admission_release_writer)),
                 },
             )
             .map_err(worker_definition_error)?,

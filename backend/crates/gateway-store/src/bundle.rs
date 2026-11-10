@@ -153,6 +153,8 @@ async fn connect(
     let provider_leases = Arc::new(redis::RedisProviderLeaseCoordinator::new(
         credential_leases.clone(),
     ));
+    let lease_cleanup = provider_leases.cleanup_worker();
+    let request_drain = crate::shutdown::RequestDrain::new(lease_cleanup.stopping());
     let provider_session_affinity: Arc<
         dyn gateway_core::provider_ports::ProviderSessionAffinityPort,
     > = Arc::new(redis::RedisProviderSessionAffinityRepository::new(
@@ -256,7 +258,7 @@ async fn connect(
     let core_ports = CoreStorePorts::new(
         execution,
         (
-            Arc::new(admissions),
+            Arc::new(admissions.with_request_drain(request_drain.clone())),
             Arc::new(postgres::PgClientAdmissionRecoveryRepository::new(
                 pool.clone(),
             )),
@@ -321,6 +323,7 @@ async fn connect(
                 client_key_usage_writer,
                 admission_release_writer,
                 budget_writer,
+                (lease_cleanup, request_drain),
             )?,
             None,
         ),
@@ -331,6 +334,7 @@ async fn connect(
                 client_key_usage: client_key_usage_writer,
                 admission_release: admission_release_writer,
                 budget: budget_writer,
+                shutdown: (lease_cleanup, request_drain),
             }),
         ),
     };

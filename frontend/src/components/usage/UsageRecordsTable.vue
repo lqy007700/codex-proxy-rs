@@ -49,7 +49,7 @@ withDefaults(
 
     <template #clientApiKeyName="{ displayValue }">
       <span
-        class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
+        class="block max-w-full truncate font-mono text-z-sm leading-none font-bold text-z-text"
         :title="String(displayValue)"
       >
         {{ displayValue }}
@@ -58,7 +58,7 @@ withDefaults(
 
     <template #callerTokenName="{ displayValue }">
       <span
-        class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
+        class="block max-w-full truncate font-mono text-z-sm leading-none font-bold text-z-text"
         :title="String(displayValue || '')"
       >
         {{ displayValue || '—' }}
@@ -75,7 +75,7 @@ withDefaults(
     <template #accountEmail="{ row }">
       <slot name="accountEmail" :row="row">
         <span
-          class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
+          class="block max-w-full truncate font-mono text-z-sm leading-none font-bold text-z-text"
           :title="usageAccountText(row)"
         >
           {{ usageAccountText(row) }}
@@ -83,7 +83,7 @@ withDefaults(
       </slot>
       <span
         v-if="row.accountNotes?.trim()"
-        class="mt-1 block max-w-full truncate text-cp-xs font-emphasis text-cp-text-quaternary"
+        class="mt-1 block max-w-full truncate text-z-xs font-emphasis text-z-text-quaternary"
         :title="row.accountNotes"
       >
         {{ row.accountNotes }}
@@ -97,7 +97,7 @@ withDefaults(
         :plan-type-display="row.accountPlanTypeDisplay || row.accountPlanType"
         size="sm"
       />
-      <span v-else class="text-cp-text-quaternary">—</span>
+      <span v-else class="text-z-text-quaternary">—</span>
     </template>
 
     <template #createdAtDisplay="{ row }">
@@ -110,7 +110,7 @@ withDefaults(
 
     <template #userAgent="{ row }">
       <span
-        class="line-clamp-2 max-w-full wrap-break-word whitespace-normal font-mono text-cp-sm leading-[1.4] font-emphasis text-cp-text-secondary"
+        class="line-clamp-2 max-w-full wrap-break-word whitespace-normal font-mono text-z-sm leading-[1.4] font-emphasis text-z-text-secondary"
         :title="usageUserAgent(row)"
       >
         {{ usageUserAgent(row) }}

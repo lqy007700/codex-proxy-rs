@@ -22,11 +22,11 @@ const invalid = computed(() => props.rows.filter(row => row.error))
               <CircleHelp class="size-3.5" aria-hidden="true" />
             </ZIconButton>
           </template>
-          <div class="max-w-80 space-y-3 p-3 text-cp-sm text-cp-text-secondary">
+          <div class="max-w-80 space-y-3 p-3 text-z-sm text-z-text-secondary">
             <p class="m-0">
               支持以下格式
             </p>
-            <div class="space-y-1 font-mono text-cp-xs break-all text-cp-text">
+            <div class="space-y-1 font-mono text-z-xs break-all text-z-text">
               <p class="m-0">
                 host:port
               </p>
@@ -47,14 +47,14 @@ const invalid = computed(() => props.rows.filter(row => row.error))
         </ZPopover>
       </template>
       <template #extra>
-        <span class="text-cp-xs text-cp-text-tertiary">每行一条 · 最多 {{ MAX_BATCH_CREATE }} 条</span>
+        <span class="text-z-xs text-z-text-tertiary">每行一条 · 最多 {{ MAX_BATCH_CREATE }} 条</span>
       </template>
       <ZTextarea v-model="text" :rows="8" :disabled="disabled" class="font-mono" aria-label="批量代理列表" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="proxy.example.com:8080&#10;proxy.example.net:1080:user:password&#10;socks5://user:password@proxy.example.org:1080" />
-      <div v-if="rows.length && !error" class="mt-2 space-y-1.5 text-cp-xs">
-        <p class="m-0 text-cp-text-secondary" role="status">
-          共 {{ rows.length }} 条，{{ rows.length - invalid.length }} 条可添加<span v-if="invalid.length" class="text-cp-error-text">，{{ invalid.length }} 条需修改</span>
+      <div v-if="rows.length && !error" class="mt-2 space-y-1.5 text-z-xs">
+        <p class="m-0 text-z-text-secondary" role="status">
+          共 {{ rows.length }} 条，{{ rows.length - invalid.length }} 条可添加<span v-if="invalid.length" class="text-z-error-text">，{{ invalid.length }} 条需修改</span>
         </p>
-        <ul v-if="invalid.length" class="m-0 list-none space-y-1 p-0 text-cp-error-text" role="alert">
+        <ul v-if="invalid.length" class="m-0 list-none space-y-1 p-0 text-z-error-text" role="alert">
           <li v-for="row in invalid.slice(0, 5)" :key="row.line">
             第 {{ row.line }} 行：{{ row.error }}
           </li>

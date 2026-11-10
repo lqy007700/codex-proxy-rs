@@ -16,6 +16,59 @@ struct StoredResetCreditAutomation {
     state: ResetCreditAutomationState,
 }
 
+// 调用方先锁配置版本，再锁账号；与计划 CAS 共用行锁，避免旧任务跨身份写回
+pub(super) async fn reset_for_identity_replacement(
+    transaction: &mut Transaction<'_, Postgres>,
+    account_id: &str,
+) -> StoreResult<()> {
+    let stored: Option<sqlx::types::Json<StoredResetCreditAutomation>> = sqlx::query_scalar(
+        "select reset_credit_automation_json from provider_accounts where id = $1 for update",
+    )
+    .bind(account_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|source| postgres_unavailable("lock reset-credit identity replacement", source))?
+    .flatten();
+    let Some(stored) = stored else {
+        return Ok(());
+    };
+    if stored.state.pending.is_some() {
+        return Err(StoreError::Conflict {
+            entity: "reset-credit automation",
+            id: account_id.to_owned(),
+            kind: ConflictKind::InvalidTransition,
+            source: None,
+        });
+    }
+    let now = Utc::now();
+    let revision = stored
+        .revision
+        .checked_add(1)
+        .filter(|revision| *revision <= i64::MAX as u64)
+        .ok_or_else(|| StoreError::InvalidData {
+            entity: "reset-credit automation",
+            message: "invalid automation revision".to_owned(),
+            source: None,
+        })?;
+    let replacement = StoredResetCreditAutomation {
+        enabled: stored.enabled,
+        revision,
+        state: ResetCreditAutomationState {
+            next_discovery_at: now,
+            credits: vec![],
+            pending: None,
+            retry_at: None,
+            failures: 0,
+            last_result: None,
+        },
+    };
+    sqlx::query("update provider_accounts set reset_credit_automation_json = $2, reset_credit_next_run_at = $3 where id = $1")
+        .bind(account_id).bind(sqlx::types::Json(replacement)).bind(now)
+        .execute(&mut **transaction).await
+        .map_err(|source| postgres_unavailable("reset replacement identity automation", source))?;
+    Ok(())
+}
+
 #[async_trait]
 impl ResetCreditAutomationStore for PgAdminAccountStore {
     async fn reset_credit_automation(

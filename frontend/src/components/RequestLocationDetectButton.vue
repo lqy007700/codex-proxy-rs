@@ -15,7 +15,7 @@ const emit = defineEmits<{ detect: [] }>()
     :disabled="disabled || loading"
     @click="emit('detect')"
   >
-    <span class="relative grid size-7 place-items-center text-cp-link">
+    <span class="relative grid size-7 place-items-center text-z-link">
       <span v-if="loading" class="location-ripple" aria-hidden="true" />
       <span v-if="loading" class="location-ripple location-ripple-delayed" aria-hidden="true" />
       <LocateFixed class="relative z-10 size-4" aria-hidden="true" />

@@ -35,7 +35,7 @@ const props = withDefaults(defineProps<{
   account: null,
 })
 
-const emit = defineEmits<{ create: [], generateOauth: [] }>()
+const emit = defineEmits<{ create: [], generateOauth: [], afterLeave: [] }>()
 const open = defineModel<boolean>({ default: false })
 const form = defineModel<AccountCreateForm>('form', { required: true })
 const callback = defineModel<string>('callback', { required: true })
@@ -89,19 +89,20 @@ function continueToImport() {
     :description="view.modal.description"
     :type="view.modal.type"
     :width="view.modal.width"
-    :show-close="!busy" :close-on-click-modal="!busy" :close-on-press-escape="!busy"
+    :show-close="!busy"
+    :close-on-click-modal="!busy" :close-on-press-escape="!busy" @closed="emit('afterLeave')"
   >
     <template #icon>
-      <Settings2 v-if="view.configuring" class="text-cp-text" :size="20" aria-hidden="true" />
-      <LayoutGrid v-else-if="view.isBatch" class="text-cp-text" :size="20" aria-hidden="true" />
-      <Xai v-else-if="view.provider === 'xai'" class="text-cp-text" :width="20" :height="20" aria-hidden="true" />
-      <Openai v-else-if="view.provider === 'openai'" class="text-cp-text" :width="20" :height="20" aria-hidden="true" />
+      <Settings2 v-if="view.configuring" class="text-z-text" :size="20" aria-hidden="true" />
+      <LayoutGrid v-else-if="view.isBatch" class="text-z-text" :size="20" aria-hidden="true" />
+      <Xai v-else-if="view.provider === 'xai'" class="text-z-text" :width="20" :height="20" aria-hidden="true" />
+      <Openai v-else-if="view.provider === 'openai'" class="text-z-text" :width="20" :height="20" aria-hidden="true" />
     </template>
 
     <div class="grid gap-4">
       <div
         v-if="reauthorizing && account"
-        class="flex flex-wrap items-center justify-between gap-4 rounded-cp bg-cp-fill-quaternary px-4 py-3.5"
+        class="flex flex-wrap items-center justify-between gap-4 rounded-z bg-z-fill-quaternary px-4 py-3.5"
       >
         <AccountIdentityCell
           class="min-w-0 flex-1"
@@ -138,7 +139,7 @@ function continueToImport() {
         :groups-loading="groupsLoading"
         :proxy-error="form.proxyId.trim() ? proxyError : undefined"
       />
-      <p v-if="view.configuring && !scheduling.valid" class="m-0 text-xs text-cp-error" role="alert">
+      <p v-if="view.configuring && !scheduling.valid" class="m-0 text-xs text-z-error" role="alert">
         {{ scheduling.message }}
       </p>
       <template v-if="!view.configuring">

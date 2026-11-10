@@ -94,7 +94,7 @@ function removeRule(id: string) {
       <section class="grid min-w-0 gap-3" aria-label="匹配规则">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex min-w-0 items-center gap-1">
-            <span class="text-cp-sm font-emphasis text-cp-text-secondary">命中任意规则后累计</span>
+            <span class="text-z-sm font-emphasis text-z-text-secondary">命中任意规则后累计</span>
             <ZPopover trigger="hover-click" placement="top-start" :hover-delay="240">
               <template #reference="{ open }">
                 <ZIconButton
@@ -106,7 +106,7 @@ function removeRule(id: string) {
                   <CircleAlert class="size-3.5" />
                 </ZIconButton>
               </template>
-              <div :id="helpId" class="grid max-w-80 gap-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+              <div :id="helpId" class="grid max-w-80 gap-2 px-3 py-2 text-z-sm leading-relaxed text-z-text-secondary">
                 <p class="m-0">
                   规则内需满足全部条件，每个条件命中任意候选值即可，同一次失败只累计一次
                 </p>
@@ -126,12 +126,12 @@ function removeRule(id: string) {
             添加规则
           </ZButton>
         </div>
-        <p v-if="!policy.rules.length" class="m-0 rounded-cp bg-cp-fill-quaternary px-4 py-4 text-cp-sm text-cp-text-tertiary">
+        <p v-if="!policy.rules.length" class="m-0 rounded-z bg-z-fill-quaternary px-4 py-4 text-z-sm text-z-text-tertiary">
           暂无规则，添加规则以选择要累计的失败
         </p>
         <div v-else class="grid min-w-0 gap-2">
           <template v-for="(rule, index) in policy.rules" :key="rule.id">
-            <span v-if="index > 0" class="pl-4 text-cp-xs font-emphasis text-cp-text-tertiary">或</span>
+            <span v-if="index > 0" class="pl-4 text-z-xs font-emphasis text-z-text-tertiary">或</span>
             <ProtectionRuleRow
               :rule="rule"
               :expanded="expandedId === rule.id"
@@ -143,7 +143,7 @@ function removeRule(id: string) {
             />
           </template>
         </div>
-        <p v-if="showErrors && rulesError" class="m-0 text-cp-sm text-cp-error-text" role="alert">
+        <p v-if="showErrors && rulesError" class="m-0 text-z-sm text-z-error-text" role="alert">
           {{ rulesError }}
         </p>
       </section>
@@ -165,7 +165,7 @@ function removeRule(id: string) {
             <Activity class="size-4" />
           </template>
           <template #suffix>
-            <span class="text-cp-sm">次</span>
+            <span class="text-z-sm">次</span>
           </template>
         </ZInput>
       </ZFormItem>
@@ -187,7 +187,7 @@ function removeRule(id: string) {
             <Timer class="size-4" />
           </template>
           <template #suffix>
-            <span class="text-cp-sm">秒</span>
+            <span class="text-z-sm">秒</span>
           </template>
         </ZInput>
       </ZFormItem>
@@ -209,7 +209,7 @@ function removeRule(id: string) {
             <Snowflake class="size-4" />
           </template>
           <template #suffix>
-            <span class="text-cp-sm">秒</span>
+            <span class="text-z-sm">秒</span>
           </template>
         </ZInput>
       </ZFormItem>

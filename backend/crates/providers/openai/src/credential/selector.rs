@@ -35,6 +35,7 @@ use super::eligibility::CodexSelectionModel;
 use super::quota::CodexCredentialQuotaService;
 use super::refresh::refresh_recovery_deadline;
 use super::repository::{CodexCredentialRepository, CredentialRepositoryError};
+use super::scheduling_projection::{SchedulingProjectionCache, SchedulingProjectionKey};
 use super::types::{
     CODEX_AUTHENTICATION_KIND_OAUTH, CodexCookie, CodexCookieCaptureOutcome, RuntimeCodexCookie,
 };
@@ -52,7 +53,6 @@ const SESSION_AFFINITY_TIMEOUT: Duration = Duration::from_millis(500);
 const CYBER_POLICY_TIMEOUT: Duration = Duration::from_millis(100);
 const CYBER_POLICY_SESSION_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_ACCOUNT_SNAPSHOT_RETRIES: u32 = 3;
-const COOLDOWN_READ_CONCURRENCY: usize = 128;
 // 套餐权限可能变化，明确拒绝只作有界的账号模型排除，不冻结整个账号
 const MODEL_UNSUPPORTED_COOLDOWN: Duration = Duration::from_secs(30 * 60);
 
@@ -143,6 +143,7 @@ pub struct CodexCredentialSelector {
     cookie_policy: CodexCookiePolicy,
     risk_recovery: Mutex<HashMap<String, RiskRecoveryState>>,
     account_feedback: Arc<AccountFeedbackStats>,
+    scheduling_projection: SchedulingProjectionCache,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -293,6 +294,7 @@ impl CodexCredentialSelector {
             cooldowns,
             cookie_policy,
             risk_recovery: Mutex::new(HashMap::new()),
+            scheduling_projection: SchedulingProjectionCache::default(),
             waiting: ConcurrencyWaitQueue::default(),
             reserved_waiting: ConcurrencyWaitQueue::default(),
             account_feedback,
@@ -569,7 +571,7 @@ impl CodexCredentialSelector {
             request.attempt.deadline().at(),
             request.attempt.concurrency_wait_budget(),
         )
-        .with_periodic_recheck(binding_key.is_some() || token_key.is_some())
+        .with_periodic_recheck(true)
         .with_priority(if prioritized {
             WaitPriority::High
         } else {
@@ -597,6 +599,42 @@ impl CodexCredentialSelector {
             return Err(CredentialSelectionError::NoEligibleCredential);
         }
         let pinned_account = required_account.or_else(|| continuation_account.clone());
+        // 只复用普通新链的原生候选观测，恢复阶段与账号级模型路由沿用完整实时读取
+        let projection_key = match (model, request.attempt.account_scope()) {
+            (CodexSelectionModel::Requested(model), Some(scope))
+                if !diagnostic
+                    && !follow_only
+                    && pinned_account.is_none()
+                    && request.attempt.attempt_index().get() == 1
+                    && request.attempt.continuation_attempt() == ContinuationAttempt::None
+                    && matches!(
+                        request.attempt.recovery_stage(),
+                        gateway_core::engine::recovery::AccountRecoveryStage::Initial
+                    )
+                    && affinity_mode != AccountAffinity::Relaxed
+                    && (binding_key.is_some() || token_key.is_some())
+                    && !request.attempt.has_account_model_routes()
+                    && request.attempt.request_policy_context().is_none()
+                    && adapter_model.as_ref().is_none_or(|model| {
+                        matches!(
+                        request.attempt.upstream_adapter(&self.provider_kind, model),
+                        Ok(gateway_core::engine::upstream_adapter::UpstreamAdapterSelection::Native)
+                    )
+                    }) =>
+            {
+                Some(SchedulingProjectionKey {
+                    client_key: request.attempt.client_api_key_ref().clone(),
+                    scope: Arc::clone(scope),
+                    model: model.to_owned(),
+                    policy: request.attempt.account_selection_policy(),
+                    requires_websocket: request.requires_websocket,
+                    concurrency_pool,
+                })
+            }
+            _ => None,
+        };
+        let mut refresh_candidates = false;
+        let mut queued_binding = None;
         let mut snapshot_retries = 0;
         let mut defer_token_directive = false;
         'capacity: loop {
@@ -635,7 +673,6 @@ impl CodexCredentialSelector {
                 // 旧账号的增量状态不能把已迁移的会话拉回去，交回客户端完整历史重放
                 return Err(CredentialSelectionError::ContinuationOwnerChanged);
             }
-            let mut accounts = self.repository.list_for_provider().await?;
             // 只有安全新链可以迁移主绑定；恢复轮询、保底和旧 owner 不改写用户偏好
             let token_selection = token_key.is_some()
                 && !defer_token_directive
@@ -647,23 +684,85 @@ impl CodexCredentialSelector {
                     request.attempt.recovery_stage(),
                     gateway_core::engine::recovery::AccountRecoveryStage::Initial
                 );
-            let token_unavailable = token_snapshot.as_ref().is_some_and(|binding| {
-                !request
+            let force_full = std::mem::take(&mut refresh_candidates);
+            // 可分流请求仍复核整个池；只有固定归属的等待者可以缩小读取范围
+            let queued_account = waiting
+                .queued_key()
+                .filter(|&queued| {
+                    !force_full
+                        && queued_binding == binding
+                        && request.attempt.request_policy_context().is_none()
+                        && (pinned_account.as_ref() == Some(queued)
+                            || (follow_only
+                                || affinity_mode == AccountAffinity::Strict && token_key.is_none())
+                                && binding
+                                    .as_ref()
+                                    .is_some_and(|binding| binding.account_id() == queued))
+                })
+                .cloned();
+            queued_binding = binding.clone();
+            let healthy_binding = token_snapshot
+                .as_ref()
+                .filter(|_| token_selection)
+                .or(binding.as_ref())
+                .filter(|_| {
+                    !defer_token_directive
+                        && token_snapshot
+                            .iter()
+                            .chain(binding_snapshot.iter())
+                            .all(|binding| binding.directive().is_none())
+                        && (token_key.is_none() || token_snapshot.is_some())
+                });
+            let (projection, projection_fill) = match (projection_key.as_ref(), healthy_binding) {
+                (Some(key), Some(_)) if !force_full && queued_account.is_none() => {
+                    self.scheduling_projection.read(key).await
+                }
+                _ => (None, None),
+            };
+            let projection = projection.filter(|candidates| {
+                healthy_binding.is_some_and(|binding| {
+                    candidates
+                        .iter()
+                        .any(|candidate| candidate.account.id() == binding.account_id())
+                })
+            });
+            let projected_account = projection
+                .as_ref()
+                .and_then(|_| healthy_binding.map(ProviderSessionBinding::account_id));
+            let projection_started = std::time::Instant::now();
+            let accounts = if let Some(target) = pinned_account
+                .as_ref()
+                .or(queued_account.as_ref())
+                .or(projected_account)
+            {
+                self.repository
+                    .store()
+                    .get_account(target)
+                    .await
+                    .map_err(|source| CredentialSelectionError::Store(ErrorSource::new(source)))?
+                    .filter(|account| diagnostic || account.enabled())
+                    .into_iter()
+                    .collect()
+            } else if diagnostic {
+                self.repository.list_for_provider().await?
+            } else {
+                let ids = request
                     .attempt
                     .account_scope()
-                    .is_some_and(|scope| scope.allows(binding.account_id()))
-                    || !accounts.iter().any(|account| {
-                        account.id() == binding.account_id()
-                            && account.enabled()
-                            && !matches!(
-                                account.credential_state(),
-                                CredentialState::Banned | CredentialState::Invalid
-                            )
-                            && request.attempt.account_scope().is_some_and(|scope| {
-                                scope.scheduling_role(account.id())
-                                    == Some(gateway_core::account::AccountSchedulingRole::Regular)
-                            })
-                    })
+                    .into_iter()
+                    .flat_map(|scope| scope.allowed_account_ids().cloned())
+                    .collect::<Vec<_>>();
+                self.repository.list_for_accounts(&ids).await?
+            };
+            let token_unavailable = token_snapshot.as_ref().is_some_and(|binding| {
+                self.primary_migration_reason(
+                    request.attempt,
+                    binding.account_id(),
+                    accounts
+                        .iter()
+                        .find(|account| account.id() == binding.account_id()),
+                )
+                .is_some()
             });
             let token_directive = token_snapshot
                 .as_ref()
@@ -674,20 +773,6 @@ impl CodexCredentialSelector {
                     && !token_unavailable
                     && (binding.directive().is_none() || defer_token_directive)
             });
-            // store 侧常规调度列表不包含停用账号；管理端诊断要对固定账号执行真实上游
-            // 验证，先补回 required 账号，再统一检查认证类型和传输能力
-            if diagnostic
-                && let Some(required) = request.attempt.required_account()
-                && !accounts.iter().any(|account| account.id() == required)
-                && let Some(account) = self
-                    .repository
-                    .store()
-                    .get_account(required)
-                    .await
-                    .map_err(|source| CredentialSelectionError::Store(ErrorSource::new(source)))?
-            {
-                accounts.push(account);
-            }
             let mut model_access_rejected = 0_usize;
             let accounts = accounts
                 .into_iter()
@@ -806,6 +891,10 @@ impl CodexCredentialSelector {
                     let runtime = match self.repository.reload_selected_credential(&account).await {
                         Ok((_, runtime)) => runtime,
                         Err(CredentialRepositoryError::RevisionConflict(_)) => {
+                            if let Some(key) = projection_key.as_ref() {
+                                self.scheduling_projection.invalidate(key);
+                            }
+                            refresh_candidates = true;
                             retry_account_snapshot(
                                 request.attempt,
                                 &account,
@@ -843,58 +932,73 @@ impl CodexCredentialSelector {
             if !diagnostic {
                 self.quota.prepare_scheduling(&accounts).await;
             }
-            let mut rate_limits = HashMap::with_capacity(accounts.len());
-            if !diagnostic {
-                // 同一批候选并发读取实时冷却，避免逐账号累加 Redis 往返
-                // 分批限制在途读取，取消选号时直接释放本批 future，不启动后续批次
-                for batch in accounts.chunks(COOLDOWN_READ_CONCURRENCY) {
-                    rate_limits.extend(
-                        futures::future::join_all(batch.iter().map(|account| async {
-                            let account_cooldown = self.quota.cooldown(account.id());
-                            let model_cooldown = async {
-                                let CodexSelectionModel::Requested(target) =
-                                    model.for_account(request.attempt, account.id())
-                                else {
-                                    return None;
-                                };
-                                let scope = gateway_core::routing::UpstreamModelId::new(target)
-                                    .ok()
-                                    .map(ProviderCooldownScope::upstream_model)?;
-                                if !native_accounts.contains(account.id()) {
-                                    return None;
-                                }
-                                self.cooldowns
-                                    .read_scoped(account.id(), &scope)
-                                    .await
-                                    .ok()
-                                    .flatten()
-                                    .filter(|cooldown| {
-                                        cooldown.credential_revision() == account.revision()
-                                            && cooldown.until() > SystemTime::now()
-                                    })
-                            };
-                            let (account_cooldown, model_cooldown) =
-                                futures::join!(account_cooldown, model_cooldown);
-                            // 保留账号保护的探测语义，同时覆盖两种冷却中较晚的到期时间
-                            let mut until = account_cooldown.unwrap_or(None);
-                            if let Some(model_cooldown) = model_cooldown {
-                                let cooldown =
-                                    until.get_or_insert(gateway_core::account::AccountCooldown {
-                                        until: model_cooldown.until(),
-                                        kind: gateway_core::account::AccountCooldownKind::RateLimit,
-                                    });
-                                cooldown.until = cooldown.until.max(model_cooldown.until());
-                            }
-                            (account.id().clone(), until)
-                        }))
-                        .await,
-                    );
-                }
-            }
             let account_ids = accounts
                 .iter()
                 .map(|account| account.id().clone())
                 .collect::<Vec<_>>();
+            let account_revisions = accounts
+                .iter()
+                .map(|account| (account.id().clone(), account.revision()))
+                .collect::<HashMap<_, _>>();
+            let mut rate_limits = HashMap::with_capacity(accounts.len());
+            if !diagnostic {
+                // 模型映射按每个账号的冻结目标分组，不能用入口模型查询所有账号的冷却
+                let mut model_groups =
+                    std::collections::BTreeMap::<String, Vec<ProviderAccountId>>::new();
+                for account in &accounts {
+                    if native_accounts.contains(account.id())
+                        && let CodexSelectionModel::Requested(target) =
+                            model.for_account(request.attempt, account.id())
+                    {
+                        model_groups
+                            .entry(target.to_owned())
+                            .or_default()
+                            .push(account.id().clone());
+                    }
+                }
+                let model_cooldowns = async {
+                    let mut results = Vec::new();
+                    for (target, ids) in &model_groups {
+                        let Ok(target) =
+                            gateway_core::routing::UpstreamModelId::new(target.as_str())
+                        else {
+                            continue;
+                        };
+                        let scope = ProviderCooldownScope::upstream_model(target);
+                        let cooldowns = self.cooldowns.read_scoped_many(ids, &scope).await;
+                        results.extend(ids.iter().cloned().zip(cooldowns));
+                    }
+                    results
+                };
+                let (account_cooldowns, model_cooldowns) =
+                    futures::join!(self.cooldowns.read_many(&account_ids), model_cooldowns);
+                for (id, cooldown) in account_ids.iter().zip(account_cooldowns) {
+                    let state = cooldown
+                        .ok()
+                        .flatten()
+                        .map(|value| value.scheduling_state());
+                    rate_limits.insert(
+                        id.clone(),
+                        state.filter(|state| state.is_active(SystemTime::now())),
+                    );
+                }
+                for (id, cooldown) in model_cooldowns {
+                    if let Some(cooldown) = cooldown.ok().flatten().filter(|cooldown| {
+                        account_revisions
+                            .get(&id)
+                            .is_some_and(|revision| cooldown.credential_revision() == *revision)
+                            && cooldown.until() > SystemTime::now()
+                    }) {
+                        let until = rate_limits.entry(id).or_default().get_or_insert(
+                            gateway_core::account::AccountCooldown {
+                                until: cooldown.until(),
+                                kind: gateway_core::account::AccountCooldownKind::RateLimit,
+                            },
+                        );
+                        until.until = until.until.max(cooldown.until());
+                    }
+                }
+            }
             let scheduling = self
                 .leases
                 .load_state(
@@ -905,7 +1009,7 @@ impl CodexCredentialSelector {
                 )
                 .await?;
             let round_robin_cursor = scheduling.round_robin_cursor();
-            let candidates = accounts
+            let mut candidates = accounts
                 .into_iter()
                 .map(|account| {
                     let health = self
@@ -930,6 +1034,31 @@ impl CodexCredentialSelector {
                     AccountCandidate { account, signals }
                 })
                 .collect::<Vec<_>>();
+            if let Some(projection) = projection.as_ref() {
+                let Some(current) = candidates.pop() else {
+                    if let Some(key) = projection_key.as_ref() {
+                        self.scheduling_projection.invalidate(key);
+                    }
+                    refresh_candidates = true;
+                    continue 'capacity;
+                };
+                candidates = projection
+                    .iter()
+                    .map(|candidate| {
+                        if candidate.account.id() == current.account.id() {
+                            current.clone()
+                        } else {
+                            candidate.clone()
+                        }
+                    })
+                    .collect();
+            } else if queued_account.is_none()
+                && let Some(key) = projection_key.as_ref()
+            {
+                self.scheduling_projection
+                    .publish(key.clone(), projection_started, &candidates);
+            }
+            drop(projection_fill);
             let mut affinity = token_primary
                 .or(binding.as_ref())
                 .filter(|_| affinity_mode != AccountAffinity::Relaxed)
@@ -1051,6 +1180,16 @@ impl CodexCredentialSelector {
                     }
                 };
                 let mut wait_candidates = AccountSelector.wait_candidates(&candidates, &context);
+                if let Some(queued) = queued_account.as_ref() {
+                    if waiting.can_try(queued) && selection.is_some() {
+                        refresh_candidates = true;
+                    } else if follow_only || wait_candidates.contains(queued) {
+                        waiting.wait(std::slice::from_ref(queued)).await?;
+                    } else {
+                        refresh_candidates = true;
+                    }
+                    continue 'capacity;
+                }
                 let preferred_wait = preferred.as_ref().filter(|account| {
                     !diagnostic
                         && ((affinity_mode == AccountAffinity::Strict && token_primary.is_none())
@@ -1116,6 +1255,18 @@ impl CodexCredentialSelector {
                     &context,
                     selection.as_ref(),
                 );
+                // 分流、排队和改绑必须基于本轮完整池，短时观测不能裁决其他账号的准入
+                if projection.is_some()
+                    && selection.is_none_or(|selection| {
+                        Some(selection.candidate().account.id()) != projected_account
+                    })
+                {
+                    if let Some(key) = projection_key.as_ref() {
+                        self.scheduling_projection.invalidate(key);
+                    }
+                    refresh_candidates = true;
+                    continue 'capacity;
+                }
                 let Some(selection) = selection else {
                     if token_directive.is_some() {
                         // 管理偏好不能中断聊天，目标暂不可用时保留指令并按原偏好重选
@@ -1229,6 +1380,10 @@ impl CodexCredentialSelector {
                 {
                     Ok(reloaded) => reloaded,
                     Err(CredentialRepositoryError::RevisionConflict(_)) => {
+                        if let Some(key) = projection_key.as_ref() {
+                            self.scheduling_projection.invalidate(key);
+                        }
+                        refresh_candidates = true;
                         retry_account_snapshot(request.attempt, &account, &mut snapshot_retries)?;
                         continue 'capacity;
                     }
@@ -1258,6 +1413,13 @@ impl CodexCredentialSelector {
                     .await?
                 {
                     ProviderLeaseAcquisition::Busy { retry_after } => {
+                        if projection.is_some() {
+                            if let Some(key) = projection_key.as_ref() {
+                                self.scheduling_projection.invalidate(key);
+                            }
+                            refresh_candidates = true;
+                            continue 'capacity;
+                        }
                         if preferred_wait != Some(account.id()) {
                             affinity.observe_lease_busy(account.id());
                         }
@@ -1280,11 +1442,24 @@ impl CodexCredentialSelector {
                                         .as_ref()
                                         .is_some_and(|binding| binding.directive().is_none()))
                         }) {
+                            let migration_reason = if token_selection && !defer_token_directive {
+                                if let Some(primary) = token_snapshot.as_ref().filter(|binding| {
+                                    binding.directive().is_none()
+                                        && binding.account_id() != account.id()
+                                }) {
+                                    self.current_primary_migration_reason(request.attempt, primary)
+                                        .await?
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            };
                             let primary = token_snapshot
                                 .as_ref()
                                 .filter(|_| {
                                     !token_selection
-                                        || (!token_unavailable && token_directive.is_none())
+                                        || (migration_reason.is_none() && token_directive.is_none())
                                 })
                                 .map_or(account.id(), ProviderSessionBinding::account_id);
                             if !self
@@ -1304,6 +1479,12 @@ impl CodexCredentialSelector {
                                 )?;
                                 continue 'capacity;
                             }
+                            if let Some(reason) = migration_reason {
+                                request.attempt.trace().record("account.affinity.migrated", serde_json::json!({
+                                    "bindingScope": "token", "fromAccountId": token_snapshot.as_ref().map(|binding| binding.account_id().as_str()),
+                                    "toAccountId": account.id().as_str(), "reason": reason,
+                                }));
+                            }
                         }
                         // 实际请求账号独立于主绑定，保底及待执行指令也应保留实际选号观测
                         if let Some(key) = token_key.as_ref().filter(|_| {
@@ -1318,6 +1499,29 @@ impl CodexCredentialSelector {
                             )
                             .await?;
                         }
+                        let session_migration_reason = if regular_account
+                            && request.attempt.attempt_index().get() == 1
+                            && request.attempt.continuation_attempt() == ContinuationAttempt::None
+                            && matches!(
+                                request.attempt.recovery_stage(),
+                                gateway_core::engine::recovery::AccountRecoveryStage::Initial
+                            )
+                            && !follow_only
+                            && pinned_account.is_none()
+                            && affinity_mode == AccountAffinity::Preferred
+                        {
+                            if let Some(primary) = binding
+                                .as_ref()
+                                .filter(|binding| binding.account_id() != account.id())
+                            {
+                                self.current_primary_migration_reason(request.attempt, primary)
+                                    .await?
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
                         if let Some(key) = binding_key.filter(|_| {
                             regular_account
                                 && (normal_admission
@@ -1328,10 +1532,13 @@ impl CodexCredentialSelector {
                             .admit_session(
                                 key,
                                 binding_snapshot.as_ref(),
-                                // 分流只改变本次租约，CAS 续期仍保留会话主账号
+                                // 临时分流保留主账号，已确认不可用或持续耗尽时才迁移主绑定
                                 binding
                                     .as_ref()
-                                    .filter(|_| affinity_mode == AccountAffinity::Preferred)
+                                    .filter(|_| {
+                                        affinity_mode == AccountAffinity::Preferred
+                                            && session_migration_reason.is_none()
+                                    })
                                     .map_or(account.id(), ProviderSessionBinding::account_id),
                                 request
                                     .attempt
@@ -1342,6 +1549,12 @@ impl CodexCredentialSelector {
                         {
                             drop(guard);
                             continue 'capacity;
+                        }
+                        if let Some(reason) = session_migration_reason {
+                            request.attempt.trace().record("account.affinity.migrated", serde_json::json!({
+                                "bindingScope": "session", "fromAccountId": binding.as_ref().map(|binding| binding.account_id().as_str()),
+                                "toAccountId": account.id().as_str(), "reason": reason,
+                            }));
                         }
                         if let Some(key) = request.session_affinity_key.filter(|_| {
                             !diagnostic && !request.attempt.caller_identity().is_unidentified()
@@ -1407,6 +1620,7 @@ impl CodexCredentialSelector {
                             transport: runtime.transport,
                             account,
                             authentication: runtime.authentication,
+                            oauth_identity_changed: runtime.oauth_identity_changed,
                             cookies,
                             cyber_policy_scope,
                             allows_account_state_mutation,
@@ -1424,6 +1638,59 @@ impl CodexCredentialSelector {
                 }
             }
         }
+    }
+
+    /// 主绑定迁移只认账号级不可用或有效额度耗尽，不将繁忙、冷却和单模型拒绝升级为迁移
+    fn primary_migration_reason(
+        &self,
+        attempt: &AttemptContext,
+        account_id: &ProviderAccountId,
+        account: Option<&ProviderAccount>,
+    ) -> Option<&'static str> {
+        if !attempt.account_scope().is_some_and(|scope| {
+            scope.allows(account_id)
+                && scope.scheduling_role(account_id)
+                    == Some(gateway_core::account::AccountSchedulingRole::Regular)
+        }) {
+            return Some("account_out_of_scope");
+        }
+        let Some(account) = account else {
+            return Some("account_unavailable");
+        };
+        if !account.enabled()
+            || account.provider() != &self.provider_kind
+            || matches!(
+                account.credential_state(),
+                CredentialState::Expired | CredentialState::Banned | CredentialState::Invalid
+            )
+        {
+            return Some("account_unavailable");
+        }
+        let recovery_window = attempt.account_selection_policy().queue_policy().timeout;
+        let now = SystemTime::now();
+        // reset 前后沿用请求冻结的恢复宽限；时间到期不能自行证明额度恢复
+        (account.quota().is_exhausted()
+            && account.quota().reset_at().is_none_or(|reset| {
+                reset
+                    .duration_since(now)
+                    .unwrap_or_else(|error| error.duration())
+                    > recovery_window
+            }))
+        .then_some("quota_exhausted")
+    }
+
+    async fn current_primary_migration_reason(
+        &self,
+        attempt: &AttemptContext,
+        binding: &ProviderSessionBinding,
+    ) -> Result<Option<&'static str>, CredentialSelectionError> {
+        let account = self
+            .repository
+            .store()
+            .get_account(binding.account_id())
+            .await
+            .map_err(|source| CredentialSelectionError::Store(ErrorSource::new(source)))?;
+        Ok(self.primary_migration_reason(attempt, binding.account_id(), account.as_ref()))
     }
 
     pub(crate) async fn record_model_unsupported(
@@ -2029,6 +2296,7 @@ pub struct CodexCredentialLease {
     transport: super::ResponsesTransport,
     account: ProviderAccount,
     authentication: CodexRuntimeAuthentication,
+    oauth_identity_changed: bool,
     cookies: Vec<RuntimeCodexCookie>,
     installation_id: String,
     cyber_policy_scope: Option<CodexCyberPolicyScope>,
@@ -2041,6 +2309,10 @@ pub struct CodexCredentialLease {
 }
 
 impl CodexCredentialLease {
+    pub(crate) const fn oauth_identity_changed(&self) -> bool {
+        self.oauth_identity_changed
+    }
+
     pub(crate) const fn transport(&self) -> super::ResponsesTransport {
         self.transport
     }

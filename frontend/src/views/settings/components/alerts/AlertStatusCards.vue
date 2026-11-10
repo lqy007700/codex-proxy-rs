@@ -47,55 +47,55 @@ const deliveryColumns = defineTableColumns<AlertStatus['deliveries'][number]>([
         </ZButton>
       </div>
     </template>
-    <p v-if="error" role="alert" class="mb-4 text-cp-sm text-cp-error-text">
+    <p v-if="error" role="alert" class="mb-4 text-z-sm text-z-error-text">
       状态读取失败，当前显示上次读取结果，可稍后刷新重试
     </p>
-    <dl class="grid gap-x-8 gap-y-3 text-cp-sm sm:grid-cols-2 lg:grid-cols-3">
+    <dl class="grid gap-x-8 gap-y-3 text-z-sm sm:grid-cols-2 lg:grid-cols-3">
       <div class="flex items-baseline justify-between gap-3">
-        <dt class="text-cp-text-secondary">
+        <dt class="text-z-text-secondary">
           告警状态
         </dt>
-        <dd :class="status?.runtime.phase === 'firing' ? 'text-cp-error-text' : undefined">
+        <dd :class="status?.runtime.phase === 'firing' ? 'text-z-error-text' : undefined">
           {{ phaseLabel(status?.runtime) }}
         </dd>
       </div>
       <div class="flex items-baseline justify-between gap-3">
-        <dt class="text-cp-text-secondary">
+        <dt class="text-z-text-secondary">
           最近评估
         </dt>
         <dd>{{ evaluationLabel(status?.runtime) }}</dd>
       </div>
       <div class="flex items-baseline justify-between gap-3">
-        <dt class="text-cp-text-secondary">
+        <dt class="text-z-text-secondary">
           最近检查
         </dt>
         <dd>{{ status?.runtime.checkedAtDisplay ?? '—' }}</dd>
       </div>
       <div class="flex items-baseline justify-between gap-3">
-        <dt class="text-cp-text-secondary">
+        <dt class="text-z-text-secondary">
           有效请求
         </dt>
         <dd>{{ status?.runtime.sample?.requests ?? '—' }}</dd>
       </div>
       <div class="flex items-baseline justify-between gap-3">
-        <dt class="text-cp-text-secondary">
+        <dt class="text-z-text-secondary">
           失败请求
         </dt>
         <dd>{{ status?.runtime.sample?.failures ?? '—' }}</dd>
       </div>
       <div class="flex items-baseline justify-between gap-3">
-        <dt class="text-cp-text-secondary">
+        <dt class="text-z-text-secondary">
           失败率
         </dt>
         <dd>{{ rateLabel(status?.runtime.sample?.failureRatePercent) }}</dd>
       </div>
     </dl>
-    <p v-if="status?.runtime.sample" class="mt-3 text-cp-sm text-cp-text-secondary">
+    <p v-if="status?.runtime.sample" class="mt-3 text-z-sm text-z-text-secondary">
       统计窗口 {{ status.runtime.sample.windowStartDisplay }} 至 {{ status.runtime.sample.windowEndDisplay }}
     </p>
-    <div v-if="preview" role="status" class="mt-4 space-y-1 rounded-cp bg-cp-fill-quaternary p-3 text-cp-sm">
+    <div v-if="preview" role="status" class="mt-4 space-y-1 rounded-z bg-z-fill-quaternary p-3 text-z-sm">
       <p>窗口预览：有效请求 {{ preview.requests }} 次，失败 {{ preview.failures }} 次，失败率 {{ rateLabel(preview.failureRatePercent) }}</p>
-      <p class="text-cp-text-secondary">
+      <p class="text-z-text-secondary">
         {{ preview.windowStartDisplay }} 至 {{ preview.windowEndDisplay }}，预览不触发通知或改变告警状态
       </p>
     </div>
@@ -104,7 +104,7 @@ const deliveryColumns = defineTableColumns<AlertStatus['deliveries'][number]>([
   <ZCard title="最近告警" description="最近 10 条事件，配置变更结束不代表业务恢复">
     <ZTable :columns="eventColumns" :data="status?.events ?? []" row-key="id" :loading="loading && !status" empty-text="暂无告警事件">
       <template #status="{ row }">
-        <span :class="row.status === 'firing' ? 'text-cp-error-text' : undefined">{{ eventLabels[row.status] }}</span>
+        <span :class="row.status === 'firing' ? 'text-z-error-text' : undefined">{{ eventLabels[row.status] }}</span>
       </template>
       <template #closedAtDisplay="{ row }">
         {{ row.closedAtDisplay ?? '—' }}
@@ -124,7 +124,7 @@ const deliveryColumns = defineTableColumns<AlertStatus['deliveries'][number]>([
         {{ notificationLabels[row.kind] }}
       </template>
       <template #status="{ row }">
-        <span :class="row.status === 'failed' ? 'text-cp-error-text' : undefined">{{ deliveryLabels[row.status] }}</span>
+        <span :class="row.status === 'failed' ? 'text-z-error-text' : undefined">{{ deliveryLabels[row.status] }}</span>
       </template>
       <template #result="{ row }">
         <span v-if="row.sentAtDisplay">{{ row.sentAtDisplay }}</span>

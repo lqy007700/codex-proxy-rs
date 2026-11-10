@@ -319,19 +319,19 @@ function usageTrendSummary(points: ReturnType<typeof aggregateUsageTrend>) {
       label: '输入',
       value: formatCompactNumber(inputTokens),
       tone: 'info',
-      colorVar: '--cp-color-blue-solid',
+      colorVar: 'color-blue-solid',
     },
     {
       label: '输出',
       value: formatCompactNumber(outputTokens),
       tone: 'success',
-      colorVar: '--cp-color-green-solid',
+      colorVar: 'color-green-solid',
     },
     {
       label: '缓存',
       value: formatCompactNumber(cachedInputTokens),
       tone: 'normal',
-      colorVar: '--cp-color-text-tertiary',
+      colorVar: 'color-text-tertiary',
     },
   ]
 }
@@ -379,21 +379,21 @@ function trendSummaryTone(label: string) {
 function trendSummaryColorVar(kind: DashboardTrendKind, label: string) {
   if (kind === 'latency') {
     if (label.includes('总耗时'))
-      return '--cp-color-orange-solid'
+      return 'color-orange-solid'
     if (label.includes('速率'))
-      return '--cp-color-green-solid'
-    return '--cp-color-cyan-solid'
+      return 'color-green-solid'
+    return 'color-cyan-solid'
   }
   if (kind === 'errors') {
     if (label.includes('错误'))
-      return '--cp-color-red-solid'
+      return 'color-red-solid'
     if (label.includes('成功'))
-      return '--cp-color-green-solid'
-    return '--cp-color-blue-solid'
+      return 'color-green-solid'
+    return 'color-blue-solid'
   }
   if (label.includes('输出'))
-    return '--cp-color-green-solid'
+    return 'color-green-solid'
   if (label.includes('缓存'))
-    return '--cp-color-text-tertiary'
-  return '--cp-color-blue-solid'
+    return 'color-text-tertiary'
+  return 'color-blue-solid'
 }

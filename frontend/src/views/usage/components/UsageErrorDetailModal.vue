@@ -17,8 +17,8 @@ const props = defineProps<{ record: UsageRecordDetail | null, loading?: boolean,
 const emit = defineEmits<{ retry: [] }>()
 const open = defineModel<boolean>({ default: false })
 
-const panelClass = 'min-w-0 rounded-cp-card bg-cp-fill-quaternary px-4 py-3.5'
-const panelTitleClass = 'm-0 text-cp-sm leading-none font-heavy text-cp-text-secondary'
+const panelClass = 'min-w-0 rounded-z-card bg-z-fill-quaternary px-4 py-3.5'
+const panelTitleClass = 'm-0 text-z-sm leading-none font-heavy text-z-text-secondary'
 
 const errorMessage = computed(() => {
   const message = props.record?.message?.trim()
@@ -186,40 +186,40 @@ const attempts = computed(() => (props.record?.attempts ?? []).map(attempt => ({
   <ZDialog v-model="open" title="错误详情" description="失败原因与请求上下文" type="danger" width="64rem">
     <UsageDetailState v-if="loading || error" :loading="!!loading" :error="error" variant="error" @retry="emit('retry')" />
     <div v-else-if="record" class="grid min-w-0 gap-3">
-      <section class="min-w-0 rounded-cp-card bg-cp-error-container px-4 py-3.5 text-cp-error-on-container">
+      <section class="min-w-0 rounded-z-card bg-z-error-container px-4 py-3.5 text-z-error-on-container">
         <div class="flex items-center gap-3">
-          <h3 class="m-0 text-cp-sm leading-none font-heavy">
+          <h3 class="m-0 text-z-sm leading-none font-heavy">
             {{ record.logicalOutcome === 'incomplete' ? '响应未完成' : '请求失败' }}
           </h3>
-          <span v-if="record.recovered" class="rounded-cp-sm bg-cp-success-container px-2 py-1 text-cp-xs font-emphasis text-cp-success-on-container">
+          <span v-if="record.recovered" class="rounded-z-sm bg-z-success-container px-2 py-1 text-z-xs font-emphasis text-z-success-on-container">
             后续已恢复
           </span>
         </div>
-        <p class="mt-3 mb-0 wrap-anywhere whitespace-pre-wrap font-mono text-cp-sm leading-relaxed">
+        <p class="mt-3 mb-0 wrap-anywhere whitespace-pre-wrap font-mono text-z-sm leading-relaxed">
           {{ errorSummary || errorMessage }}
         </p>
         <UsageDetailFieldGrid v-if="errorItems.length" :items="errorItems" />
         <template v-if="upstreamMessage">
-          <p class="mt-3 mb-1 text-cp-xs text-cp-text-secondary">
+          <p class="mt-3 mb-1 text-z-xs text-z-text-secondary">
             Message
           </p>
-          <p class="m-0 wrap-anywhere whitespace-pre-wrap font-mono text-cp-sm leading-relaxed" translate="no">
+          <p class="m-0 wrap-anywhere whitespace-pre-wrap font-mono text-z-sm leading-relaxed" translate="no">
             {{ upstreamMessage }}
           </p>
         </template>
         <template v-if="record.upstreamError?.closeReason">
-          <p class="mt-3 mb-1 text-cp-xs text-cp-text-secondary">
+          <p class="mt-3 mb-1 text-z-xs text-z-text-secondary">
             关闭原因
           </p>
-          <p class="m-0 wrap-anywhere whitespace-pre-wrap font-mono text-cp-sm leading-relaxed" translate="no">
+          <p class="m-0 wrap-anywhere whitespace-pre-wrap font-mono text-z-sm leading-relaxed" translate="no">
             {{ record.upstreamError.closeReason }}
           </p>
         </template>
         <template v-if="!upstreamMessage || upstreamMessage !== errorMessage">
-          <p class="mt-3 mb-1 text-cp-xs text-cp-text-secondary">
+          <p class="mt-3 mb-1 text-z-xs text-z-text-secondary">
             网关摘要
           </p>
-          <p class="m-0 wrap-anywhere whitespace-pre-wrap font-mono text-cp-sm leading-relaxed" translate="no">
+          <p class="m-0 wrap-anywhere whitespace-pre-wrap font-mono text-z-sm leading-relaxed" translate="no">
             {{ errorMessage }}
           </p>
         </template>
@@ -244,12 +244,12 @@ const attempts = computed(() => (props.record?.attempts ?? []).map(attempt => ({
         <h3 :class="panelTitleClass">
           尝试链路
         </h3>
-        <p v-if="!record.attemptsComplete" class="mt-3 mb-0 text-cp-sm text-cp-text-tertiary">
+        <p v-if="!record.attemptsComplete" class="mt-3 mb-0 text-z-sm text-z-text-tertiary">
           尝试记录可能不完整
         </p>
         <ol v-if="attempts.length" class="mt-3 mb-0 grid list-none gap-4 p-0 lg:grid-cols-2">
           <li v-for="attempt in attempts" :key="attempt.id" class="min-w-0">
-            <div class="flex items-center gap-3 text-cp-sm font-bold">
+            <div class="flex items-center gap-3 text-z-sm font-bold">
               <span>尝试 {{ attempt.index }}</span>
               <span :class="attemptOutcomeClass(attempt.outcome)">{{ attemptOutcomeText(attempt.outcome) }}</span>
               <UsageStatusCodeBadge :status-code="attempt.statusCode" />
@@ -260,7 +260,7 @@ const attempts = computed(() => (props.record?.attempts ?? []).map(attempt => ({
       </section>
 
       <details v-if="responseText || metadataText" :class="panelClass">
-        <summary class="cursor-pointer text-cp-sm font-heavy text-cp-text-secondary">
+        <summary class="cursor-pointer text-z-sm font-heavy text-z-text-secondary">
           诊断数据
         </summary>
         <div class="mt-3 grid min-w-0 gap-3">
@@ -272,7 +272,7 @@ const attempts = computed(() => (props.record?.attempts ?? []).map(attempt => ({
     </div>
 
     <template #footer>
-      <RouterLink v-if="record?.callerIdentity?.mode === 'newApi'" :to="{ path: '/affinity', query: { sourceId: record.callerIdentity.sourceId, userId: record.callerIdentity.userId, tokenId: record.callerIdentity.tokenId } }" class="mr-auto text-cp-sm text-cp-link">
+      <RouterLink v-if="record?.callerIdentity?.mode === 'newApi'" :to="{ path: '/affinity', query: { sourceId: record.callerIdentity.sourceId, userId: record.callerIdentity.userId, tokenId: record.callerIdentity.tokenId } }" class="mr-auto text-z-sm text-z-link">
         查看调用方亲和
       </RouterLink>
       <ZButton type="primary" @click="open = false">

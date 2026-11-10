@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import type { ThemeName } from '@codex-proxy/ui/theme'
+import type { ThemeScheme } from '@codex-proxy/ui/theme'
 import type { CSSProperties } from 'vue'
 import type { ThemeEditorPreview } from '../composables/useThemeEditor'
 
-import { ZSegmented } from '@codex-proxy/ui'
+import { ZCard, ZSegmented } from '@codex-proxy/ui'
 import { defineAsyncComponent, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 
 import ThemePreviewCanvas from './ThemePreviewCanvas.vue'
 import ThemePreviewError from './ThemePreviewError.vue'
 
 defineProps<{
-  theme: ThemeName
+  theme: ThemeScheme
   style: CSSProperties
 }>()
 const previewReady = shallowRef(false)
@@ -56,13 +56,13 @@ const previewOptions = [
 
 <template>
   <section class="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden" aria-label="主题实时预览">
-    <header class="shrink-0 flex flex-wrap items-center justify-between gap-3 rounded-cp-lg bg-cp-bg-container px-3 py-2.5 shadow-cp-tertiary">
+    <ZCard as="header" padding="none" class="shrink-0 flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
       <div>
-        <strong class="block text-cp-sm font-heavy text-cp-text">实时预览</strong>
-        <span class="mt-0.5 block text-[9px] font-emphasis text-cp-text-quaternary">真实组件在影子环境隔离渲染，拖动画板并缩放检查细节</span>
+        <strong class="block text-z-sm font-heavy text-z-text">实时预览</strong>
+        <span class="mt-0.5 block text-[9px] font-emphasis text-z-text-quaternary">真实组件在影子环境隔离渲染，拖动画板并缩放检查细节</span>
       </div>
       <ZSegmented v-model="preview" aria-label="预览类型" size="small" :options="previewOptions" />
-    </header>
+    </ZCard>
 
     <ThemePreviewCanvas
       class="h-full min-h-0"

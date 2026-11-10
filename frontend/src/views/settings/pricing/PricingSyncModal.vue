@@ -80,7 +80,7 @@ function confirm() {
 <template>
   <ZDialog v-model="open" title="确认同步来源价目" description="USD / 1M Tokens" width="48rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
     <div class="grid gap-4">
-      <p class="m-0 text-cp text-cp-text-secondary">
+      <p class="m-0 text-z text-z-text-secondary">
         仅同步所选模型的来源价格，保留自定义单价和倍率
       </p>
       <div v-if="changes.length" class="flex items-center justify-between gap-3">
@@ -91,11 +91,11 @@ function confirm() {
           :disabled="saving"
           @update:model-value="selected = new Set($event ? changes.map(item => item.id) : [])"
         />
-        <span class="text-cp-sm text-cp-text-tertiary" aria-live="polite">已选 {{ selectedChanges.length }} / {{ changes.length }}</span>
+        <span class="text-z-sm text-z-text-tertiary" aria-live="polite">已选 {{ selectedChanges.length }} / {{ changes.length }}</span>
       </div>
-      <ZScrollbar max-height="20rem" class="rounded-cp bg-cp-fill-quaternary">
+      <ZScrollbar max-height="20rem" class="rounded-z bg-z-fill-quaternary">
         <div class="p-4">
-          <div v-for="item in changes" :key="item.id" class="grid gap-2 py-3 text-cp-sm">
+          <div v-for="item in changes" :key="item.id" class="grid gap-2 py-3 text-z-sm">
             <ZCheckbox
               :model-value="selected.has(item.id)"
               :label="item.id"
@@ -103,25 +103,25 @@ function confirm() {
               @update:model-value="toggle(item.id, $event)"
             >
               <template #label>
-                <span class="break-all font-mono text-cp-sm font-normal">{{ item.id }}</span>
+                <span class="break-all font-mono text-z-sm font-normal">{{ item.id }}</span>
               </template>
             </ZCheckbox>
-            <span v-if="item.custom" class="pl-6.5 text-cp-xs text-cp-primary-text">保留人工覆盖</span>
+            <span v-if="item.custom" class="pl-6.5 text-z-xs text-z-primary-text">保留人工覆盖</span>
             <div v-if="item.details.length" class="ml-6.5 grid gap-1">
-              <div v-for="detail in item.details" :key="detail.label" class="grid grid-cols-2 items-center gap-x-4 rounded-cp-sm bg-cp-bg-container px-2 py-1.5 text-cp-xs">
-                <span class="text-cp-text-secondary">{{ detail.label }}</span>
+              <div v-for="detail in item.details" :key="detail.label" class="grid grid-cols-2 items-center gap-x-4 rounded-z-sm bg-z-bg-container px-2 py-1.5 text-z-xs">
+                <span class="text-z-text-secondary">{{ detail.label }}</span>
                 <span class="flex items-center gap-2 font-mono tabular-nums">
-                  <span class="text-cp-text-tertiary">{{ detail.before }}</span><span aria-hidden="true">→</span><span class="text-cp-primary-text">{{ detail.after }}</span>
+                  <span class="text-z-text-tertiary">{{ detail.before }}</span><span aria-hidden="true">→</span><span class="text-z-primary-text">{{ detail.after }}</span>
                 </span>
               </div>
             </div>
           </div>
-          <p v-if="!changes.length" class="m-0 text-cp-sm text-cp-text-secondary">
+          <p v-if="!changes.length" class="m-0 text-z-sm text-z-text-secondary">
             来源价格没有变化
           </p>
         </div>
       </ZScrollbar>
-      <details v-if="preview?.skipped.length" class="text-cp-sm text-cp-text-secondary">
+      <details v-if="preview?.skipped.length" class="text-z-sm text-z-text-secondary">
         <summary class="cursor-pointer">
           跳过 {{ preview.skipped.length }} 个缺少完整价格或计价方式不匹配的模型
         </summary>

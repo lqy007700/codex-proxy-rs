@@ -13,8 +13,8 @@ const props = defineProps<{
 }>()
 
 const healthPopoverArrowSurfaceClasses = {
-  top: 'bg-cp-popover-header-bg',
-  bottom: 'bg-cp-bg-elevated',
+  top: 'bg-z-popover-header-bg',
+  bottom: 'bg-z-bg-elevated',
 }
 
 const timelineGrid = useTemplateRef<HTMLElement>('timelineGrid')
@@ -231,7 +231,7 @@ onBeforeUnmount(() => {
     <template #actions>
       <div class="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div
-          class="flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-cp-xs leading-none font-emphasis text-cp-text-quaternary"
+          class="flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-z-xs leading-none font-emphasis text-z-text-quaternary"
         >
           <span
             v-for="item in healthLegend"
@@ -297,7 +297,7 @@ onBeforeUnmount(() => {
                   :class="[
                     healthStatusMeta[point.status].cellClass,
                     isActivePoint(point)
-                      ? 'brightness-105 shadow-[0_5px_10px_-5px_var(--cp-color-shadow)]'
+                      ? 'brightness-105 shadow-[0_5px_10px_-5px_var(--z-color-shadow)]'
                       : isInteractivePoint(point)
                         ? 'group-hover:brightness-95'
                         : undefined,
@@ -307,7 +307,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </template>
-        <div data-health-timeline-popover class="w-72 overflow-hidden rounded-cp-lg">
+        <div data-health-timeline-popover class="w-72 overflow-hidden rounded-z-lg">
           <HealthTimelinePointPopover v-if="activePoint" :point="activePoint" />
         </div>
       </ZPopover>

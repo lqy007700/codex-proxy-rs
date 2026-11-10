@@ -21,8 +21,8 @@ const infoId = useId()
         <Info class="size-3.5" aria-hidden="true" />
       </ZIconButton>
     </template>
-    <div :id="infoId" class="grid w-72 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
-      <p class="m-0 font-emphasis text-cp-text">
+    <div :id="infoId" class="grid w-72 gap-2 p-3 text-z-xs leading-relaxed text-z-text-secondary">
+      <p class="m-0 font-emphasis text-z-text">
         单价单位：USD / 1M Tokens
       </p>
       <p class="m-0">

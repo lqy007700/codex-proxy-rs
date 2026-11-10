@@ -26,13 +26,13 @@ const { profile, subscription, loading, error, load } = useAccountPersonalInfo({
 <template>
   <ZDialog v-model="open" title="个人信息" width="64rem">
     <div class="flex min-h-0 min-w-0 flex-col gap-6 pb-2">
-      <div class="grid min-w-0 grid-cols-1 gap-4 rounded-cp-lg bg-cp-fill-alter p-4 sm:p-5 lg:items-center" :class="account.capabilities.profile ? 'lg:grid-cols-[minmax(310px,1.05fr)_minmax(0,1.95fr)]' : undefined">
+      <div class="grid min-w-0 grid-cols-1 gap-4 rounded-z-lg bg-z-fill-alter p-4 sm:p-5 lg:items-center" :class="account.capabilities.profile ? 'lg:grid-cols-[minmax(310px,1.05fr)_minmax(0,1.95fr)]' : undefined">
         <AccountProfileHero :account="account" :profile="profile" />
         <AccountProfileMetrics v-if="account.capabilities.profile" :profile="profile" :loading="loading" />
       </div>
 
       <section v-if="subscription" class="grid min-w-0 grid-cols-1 gap-4" aria-labelledby="profile-subscription-title">
-        <h3 id="profile-subscription-title" class="m-0 text-cp font-heavy text-cp-text">
+        <h3 id="profile-subscription-title" class="m-0 text-z font-heavy text-z-text">
           订阅信息
         </h3>
         <AccountSubscription :subscription="subscription" />
@@ -42,7 +42,7 @@ const { profile, subscription, loading, error, load } = useAccountPersonalInfo({
         <AccountProfileSkeleton v-if="account.capabilities.profile" />
         <div v-else role="status" aria-busy="true">
           <span class="sr-only">正在加载订阅信息</span>
-          <ZSkeleton class="h-24 w-full rounded-cp-lg" />
+          <ZSkeleton class="h-24 w-full rounded-z-lg" />
         </div>
       </template>
       <ZEmpty
@@ -64,7 +64,7 @@ const { profile, subscription, loading, error, load } = useAccountPersonalInfo({
           <AccountProfileTokenActivity :calendar="profile.activityCalendar" />
           <AccountProfileActivityInsights :insights="profile.activityInsights" />
         </template>
-        <p v-if="error" role="status" class="m-0 text-cp-sm text-cp-warning">
+        <p v-if="error" role="status" class="m-0 text-z-sm text-z-warning">
           本次信息刷新未完成，保留已获取的结果
         </p>
       </template>

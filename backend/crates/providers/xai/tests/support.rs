@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use chrono::Utc;
+use futures::future::BoxFuture;
 use gateway_core::account::{
     AccountConcurrencyLimit, AccountErrorReason, AccountStateChange, AccountWeight,
     CredentialCasOutcome, CredentialCasUpdate, CredentialCasUpdateParts, CredentialRevision,
@@ -350,6 +351,22 @@ impl ProviderAccountStore for MemoryProviderAccountStore {
             .values()
             .filter(|stored| stored.account.provider() == provider && stored.account.enabled())
             .map(|stored| stored.account.clone())
+            .collect())
+    }
+
+    async fn list_for_provider_accounts(
+        &self,
+        provider: &ProviderKind,
+        account_ids: &[ProviderAccountId],
+    ) -> Result<Vec<ProviderAccount>, gateway_core::error::StoreError> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .list_for_provider(provider)
+            .await?
+            .into_iter()
+            .filter(|account| account_ids.contains(account.id()))
             .collect())
     }
 
@@ -900,6 +917,37 @@ impl ProviderCooldownPort for MemoryCooldownPort {
         account_id: &'a ProviderAccountId,
     ) -> futures::future::BoxFuture<'a, Result<Option<ProviderCooldown>, ProviderStoreError>> {
         Box::pin(async move { Ok(self.cooldown(account_id)) })
+    }
+
+    fn read_many<'a>(
+        &'a self,
+        account_ids: &'a [ProviderAccountId],
+    ) -> BoxFuture<'a, Vec<Result<Option<ProviderCooldown>, ProviderStoreError>>> {
+        Box::pin(async move {
+            let mut results = Vec::with_capacity(account_ids.len());
+            for batch in account_ids.chunks(128) {
+                results
+                    .extend(futures::future::join_all(batch.iter().map(|id| self.read(id))).await);
+            }
+            results
+        })
+    }
+
+    fn read_scoped_many<'a>(
+        &'a self,
+        account_ids: &'a [ProviderAccountId],
+        scope: &'a ProviderCooldownScope,
+    ) -> BoxFuture<'a, Vec<Result<Option<ProviderScopedCooldown>, ProviderStoreError>>> {
+        Box::pin(async move {
+            let mut results = Vec::with_capacity(account_ids.len());
+            for batch in account_ids.chunks(128) {
+                results.extend(
+                    futures::future::join_all(batch.iter().map(|id| self.read_scoped(id, scope)))
+                        .await,
+                );
+            }
+            results
+        })
     }
 
     fn clear<'a>(

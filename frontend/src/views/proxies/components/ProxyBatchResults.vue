@@ -44,8 +44,8 @@ const locationPending = computed(() => testItems.value.filter(item => item.statu
 
 <template>
   <section class="min-w-0 space-y-3" aria-label="批量添加结果">
-    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-cp-xs text-cp-text-secondary" role="status" aria-live="polite">
-      <span>已处理 <strong class="font-mono font-medium text-cp-text">{{ completed }} / {{ items.length }}</strong></span>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-z-xs text-z-text-secondary" role="status" aria-live="polite">
+      <span>已处理 <strong class="font-mono font-medium text-z-text">{{ completed }} / {{ items.length }}</strong></span>
       <span>已添加 {{ created }}</span>
       <span v-if="invalid">格式错误 {{ invalid }}</span>
       <template v-if="testItems.length">
@@ -58,20 +58,20 @@ const locationPending = computed(() => testItems.value.filter(item => item.statu
     </div>
     <ZScrollbar max-height="min(26rem, 50dvh)" always-visible role="region" aria-label="代理结果滚动列表">
       <ol class="m-0 list-none space-y-1 p-0">
-        <li v-for="row in rows" :key="row.item.key" class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 rounded-cp-sm px-3 py-2.5 odd:bg-cp-fill-quaternary">
-          <span class="min-w-0 truncate font-mono text-cp-xs text-cp-text" :title="row.item.endpoint">{{ row.item.endpoint || `第 ${row.item.key} 行` }}</span>
-          <span class="flex flex-wrap justify-end gap-x-2 text-cp-xs" :class="proxyBatchStates[row.result.status].tone">
-            <span v-if="row.test" class="text-cp-text-secondary">已添加</span>
+        <li v-for="row in rows" :key="row.item.key" class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 rounded-z-sm px-3 py-2.5 odd:bg-z-fill-quaternary">
+          <span class="min-w-0 truncate font-mono text-z-xs text-z-text" :title="row.item.endpoint">{{ row.item.endpoint || `第 ${row.item.key} 行` }}</span>
+          <span class="flex flex-wrap justify-end gap-x-2 text-z-xs" :class="proxyBatchStates[row.result.status].tone">
+            <span v-if="row.test" class="text-z-text-secondary">已添加</span>
             <span>{{ row.result.status === 'succeeded' ? row.test ? '连接正常' : '已添加' : proxyBatchStates[row.result.status].label }}</span>
           </span>
-          <div class="col-span-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-cp-xs text-cp-text-secondary">
+          <div class="col-span-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-z-xs text-z-text-secondary">
             <span class="max-w-full truncate" :title="row.item.name">{{ row.item.name }}</span>
             <ProxyRegion v-if="row.test?.record" :proxy="row.test.record" class="max-w-full" />
             <span v-if="row.test?.record?.lastTest" class="min-w-0 break-all font-mono">
               {{ row.test.record.lastTest.latencyMs }} ms<span v-if="row.test.record.lastTest.exitIpv4"> · IPv4 {{ row.test.record.lastTest.exitIpv4 }}</span><span v-if="row.test.record.lastTest.exitIpv6"> · IPv6 {{ row.test.record.lastTest.exitIpv6 }}</span>
             </span>
           </div>
-          <span v-if="row.message" class="col-span-2 text-cp-xs leading-relaxed wrap-anywhere" :class="row.result.status === 'succeeded' ? 'text-cp-warning-text' : proxyBatchStates[row.result.status].tone">{{ row.message }}</span>
+          <span v-if="row.message" class="col-span-2 text-z-xs leading-relaxed wrap-anywhere" :class="row.result.status === 'succeeded' ? 'text-z-warning-text' : proxyBatchStates[row.result.status].tone">{{ row.message }}</span>
         </li>
       </ol>
     </ZScrollbar>

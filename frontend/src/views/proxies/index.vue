@@ -73,7 +73,7 @@ watch(search, () => {
         <div class="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
           <ZInput v-model="search" :disabled="batchTesting" class="sm:w-80" aria-label="搜索代理" placeholder="搜索代理名称">
             <template #prefix>
-              <Search class="size-4.5 text-cp-text-tertiary" />
+              <Search class="size-4.5 text-z-text-tertiary" />
             </template>
           </ZInput>
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:ml-auto">
@@ -100,10 +100,10 @@ watch(search, () => {
               <ZCheckbox :model-value="selectedIds.has(row.id)" :disabled="batchTesting" :aria-label="`选择代理 ${row.name}`" @update:model-value="toggleSelection(row.id)" />
             </template>
             <template #name="{ row }">
-              <span class="block truncate text-cp text-cp-text" :title="row.name">{{ row.name }}</span>
+              <span class="block truncate text-z text-z-text" :title="row.name">{{ row.name }}</span>
             </template>
             <template #address="{ row }">
-              <span class="flex min-w-0 items-center gap-1 text-cp-xs font-emphasis text-cp-text-quaternary">
+              <span class="flex min-w-0 items-center gap-1 text-z-xs font-emphasis text-z-text-quaternary">
                 <LockKeyhole v-if="row.hasAuthentication" class="size-3 shrink-0" aria-label="已保存代理认证" />
                 <span class="truncate font-mono" :title="row.endpoint">{{ row.endpoint }}</span>
               </span>
@@ -114,7 +114,7 @@ watch(search, () => {
               </ZTag>
             </template>
             <template #exitIp="{ row }">
-              <div v-if="row.lastTest?.exitIpv4 && row.lastTest?.exitIpv6" class="flex flex-col gap-0.5 font-mono text-cp-xs">
+              <div v-if="row.lastTest?.exitIpv4 && row.lastTest?.exitIpv6" class="flex flex-col gap-0.5 font-mono text-z-xs">
                 <span class="truncate" :title="`IPv4: ${row.lastTest.exitIpv4}`">
                   {{ row.lastTest.exitIpv4 }}
                 </span>
@@ -122,28 +122,28 @@ watch(search, () => {
                   {{ row.lastTest.exitIpv6 }}
                 </span>
               </div>
-              <div v-else-if="row.lastTest?.exitIpv4" class="truncate font-mono text-cp-xs" :title="`IPv4: ${row.lastTest.exitIpv4}`">
+              <div v-else-if="row.lastTest?.exitIpv4" class="truncate font-mono text-z-xs" :title="`IPv4: ${row.lastTest.exitIpv4}`">
                 {{ row.lastTest.exitIpv4 }}
               </div>
-              <div v-else-if="row.lastTest?.exitIpv6" class="truncate font-mono text-cp-xs" :title="`IPv6: ${row.lastTest.exitIpv6}`">
+              <div v-else-if="row.lastTest?.exitIpv6" class="truncate font-mono text-z-xs" :title="`IPv6: ${row.lastTest.exitIpv6}`">
                 {{ row.lastTest.exitIpv6 }}
               </div>
-              <span v-else-if="row.lastTest?.exitIp" class="block truncate font-mono text-cp-xs" :title="row.lastTest.exitIp">{{ row.lastTest.exitIp }}</span>
-              <span v-else class="text-cp-text-quaternary">-</span>
+              <span v-else-if="row.lastTest?.exitIp" class="block truncate font-mono text-z-xs" :title="row.lastTest.exitIp">{{ row.lastTest.exitIp }}</span>
+              <span v-else class="text-z-text-quaternary">-</span>
             </template>
             <template #region="{ row }">
-              <ProxyRegion :proxy="row" class="text-cp-sm" />
+              <ProxyRegion :proxy="row" class="text-z-sm" />
             </template>
             <template #latency="{ row }">
-              <span v-if="testingIds.has(row.id)" class="text-cp-text-secondary">测试中</span>
-              <span v-else-if="row.lastTest?.success" class="tabular-nums text-cp-success">
+              <span v-if="testingIds.has(row.id)" class="text-z-text-secondary">测试中</span>
+              <span v-else-if="row.lastTest?.success" class="tabular-nums text-z-success">
                 {{ row.lastTest.latencyMs }} ms
               </span>
-              <span v-else-if="row.lastTest" class="text-cp-error" :title="`${row.lastTest.message}（耗时 ${row.lastTest.latencyMs} ms）`">失败</span>
-              <span v-else class="text-cp-text-quaternary">未测试</span>
+              <span v-else-if="row.lastTest" class="text-z-error" :title="`${row.lastTest.message}（耗时 ${row.lastTest.latencyMs} ms）`">失败</span>
+              <span v-else class="text-z-text-quaternary">未测试</span>
             </template>
             <template #accounts="{ row }">
-              <button type="button" class="flex w-fit cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent p-0 text-cp-sm text-cp-text-secondary outline-none transition-colors hover:text-cp-primary-text focus-visible:ring-2 focus-visible:ring-cp-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-cp-bg-container" :aria-label="`查看 ${row.name} 的 ${row.accountCount} 个关联账号`" @click="inspected = row; showAccounts = true">
+              <button type="button" class="flex w-fit cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent p-0 text-z-sm text-z-text-secondary outline-none transition-colors hover:text-z-primary-text focus-visible:ring-2 focus-visible:ring-z-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-z-bg-container" :aria-label="`查看 ${row.name} 的 ${row.accountCount} 个关联账号`" @click="inspected = row; showAccounts = true">
                 <Users class="size-3.5" aria-hidden="true" />
                 <span class="font-mono tabular-nums">{{ row.accountCount }}</span>
               </button>
@@ -183,7 +183,7 @@ watch(search, () => {
       <p class="m-0">
         确定禁用“{{ pendingDisable?.name }}”吗？
       </p>
-      <p class="mt-3 mb-0 text-cp-text-secondary">
+      <p class="mt-3 mb-0 text-z-text-secondary">
         关联账号的新请求将改为直连，代理配置和绑定会保留，重新启用后恢复使用
       </p>
     </ZConfirmDialog>
@@ -191,7 +191,7 @@ watch(search, () => {
       <p class="m-0">
         确定删除“{{ pendingDelete?.name }}”吗？
       </p>
-      <p class="mt-3 mb-0 text-cp-text-secondary">
+      <p class="mt-3 mb-0 text-z-text-secondary">
         将自动解除关联账号，关联账号的新请求将改为直连
       </p>
     </ZConfirmDialog>

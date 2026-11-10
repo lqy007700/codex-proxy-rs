@@ -63,7 +63,7 @@ const trendKind = defineModel<DashboardTrendKind>('trendKind', { required: true 
       </template>
       <template #actions>
         <ZIconButton
-          class="text-cp-primary-text"
+          class="text-z-primary-text"
           size="default"
           aria-label="刷新概览"
           :loading="loading || refreshing"
@@ -78,7 +78,7 @@ const trendKind = defineModel<DashboardTrendKind>('trendKind', { required: true 
       </template>
     </ZPageHeader>
 
-    <p v-if="analyticsError" class="mt-4 text-cp-sm text-cp-warning-text" role="alert">
+    <p v-if="analyticsError" class="mt-4 text-z-sm text-z-warning-text" role="alert">
       {{ analytics ? '刷新失败，显示上次统计' : '统计暂不可用，请稍后重试' }}
     </p>
 

@@ -183,23 +183,23 @@ watch(search, () => {
       <template #label>
         <span class="inline-flex flex-wrap items-end gap-x-2 gap-y-1">
           <span>模型配置</span>
-          <span v-if="canEdit" class="text-cp-xs leading-none font-normal text-cp-text-tertiary tabular-nums">
+          <span v-if="canEdit" class="text-z-xs leading-none font-normal text-z-text-tertiary tabular-nums">
             已选择 {{ selectedCount }} 个
           </span>
-          <span v-if="canEdit && catalogObservedAtDisplay" class="text-cp-xs leading-none font-normal text-cp-text-tertiary tabular-nums">
+          <span v-if="canEdit && catalogObservedAtDisplay" class="text-z-xs leading-none font-normal text-z-text-tertiary tabular-nums">
             目录更新于 {{ catalogObservedAtDisplay }}
           </span>
         </span>
       </template>
 
-      <p v-if="props.allowPreserve" class="m-0 text-cp-sm text-cp-text-secondary">
+      <p v-if="props.allowPreserve" class="m-0 text-z-sm text-z-text-secondary">
         {{ props.accountId ? '批量编辑不会修改模型配置' : '账号保存后可在编辑页面配置模型' }}
       </p>
 
       <template v-else>
         <div class="grid gap-2">
           <div class="flex min-w-0 items-center justify-between gap-2">
-            <span class="text-cp-xs font-medium text-cp-text-secondary">已选择模型</span>
+            <span class="text-z-xs font-medium text-z-text-secondary">已选择模型</span>
             <AccountModelCleanupPopover v-if="missingModels.length" :models="missingModels" :model-count="selectedCount" :disabled="disabled || loading" @remove="removeMissingModels" />
             <ZIconButton
               v-if="accountId"
@@ -219,11 +219,11 @@ watch(search, () => {
 
           <div
             v-if="selectedModels.length"
-            class="grid max-h-36 min-h-10 gap-2 overflow-y-auto rounded-cp bg-cp-fill-quaternary p-2"
+            class="grid max-h-36 min-h-10 gap-2 overflow-y-auto rounded-z bg-z-fill-quaternary p-2"
             aria-label="已选择模型"
           >
             <div v-for="group in selectedGroups" :key="group.key" class="grid min-w-0 gap-1.5" role="group" :aria-label="group.label">
-              <span class="text-cp-xs text-cp-text-secondary">{{ group.label }}</span>
+              <span class="text-z-xs text-z-text-secondary">{{ group.label }}</span>
               <div class="flex flex-wrap gap-1.5">
                 <ZTag
                   v-for="item in group.models"
@@ -240,14 +240,14 @@ watch(search, () => {
               </div>
             </div>
           </div>
-          <div v-else class="rounded-cp bg-cp-fill-quaternary px-3 py-2 text-cp-xs text-cp-text-tertiary">
+          <div v-else class="rounded-z bg-z-fill-quaternary px-3 py-2 text-z-xs text-z-text-tertiary">
             暂未选择模型，请在下方选择或添加
           </div>
 
           <div class="flex items-center justify-between gap-2 pt-1">
-            <span class="text-cp-xs font-medium text-cp-text-secondary">上游目录</span>
+            <span class="text-z-xs font-medium text-z-text-secondary">上游目录</span>
             <div class="flex items-center gap-2">
-              <span v-if="catalog" class="text-cp-xs text-cp-text-tertiary tabular-nums">
+              <span v-if="catalog" class="text-z-xs text-z-text-tertiary tabular-nums">
                 {{ filteredModels.length }} 个
               </span>
               <ZIconButton
@@ -274,7 +274,7 @@ watch(search, () => {
               添加模型
             </ZButton>
           </div>
-          <p v-if="inputError" class="m-0 text-cp-xs text-cp-error-text" role="alert">
+          <p v-if="inputError" class="m-0 text-z-xs text-z-error-text" role="alert">
             {{ inputError }}
           </p>
 
@@ -291,7 +291,7 @@ watch(search, () => {
               />
             </div>
           </ZScrollbar>
-          <p v-else-if="loading" class="m-0 py-4 text-center text-cp-sm text-cp-text-tertiary" role="status">
+          <p v-else-if="loading" class="m-0 py-4 text-center text-z-sm text-z-text-tertiary" role="status">
             加载模型目录中
           </p>
           <ZEmpty v-else-if="!error && !canAdd" :title="search ? '无匹配模型' : '暂无可用模型'" :icon="search ? Search : undefined" size="small" surface="none" />

@@ -170,16 +170,16 @@ watch(
             </template>
             <template #limits="{ row }">
               <dl class="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs tabular-nums">
-                <dt class="text-right text-cp-text-tertiary">
+                <dt class="text-right text-z-text-tertiary">
                   并发
                 </dt>
-                <dd class="m-0 truncate text-cp-text" :title="String(row.maxConcurrency || '∞')">
+                <dd class="m-0 truncate text-z-text" :title="String(row.maxConcurrency || '∞')">
                   {{ row.maxConcurrency || '∞' }}
                 </dd>
-                <dt class="text-right text-cp-text-tertiary">
+                <dt class="text-right text-z-text-tertiary">
                   RPM
                 </dt>
-                <dd class="m-0 truncate text-cp-text" :title="String(row.requestsPerMinute || '∞')">
+                <dd class="m-0 truncate text-z-text" :title="String(row.requestsPerMinute || '∞')">
                   {{ row.requestsPerMinute || '∞' }}
                 </dd>
               </dl>

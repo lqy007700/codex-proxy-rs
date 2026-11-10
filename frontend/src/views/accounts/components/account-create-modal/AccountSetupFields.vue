@@ -17,7 +17,7 @@ const form = defineModel<AccountCreateForm>({ required: true })
 <template>
   <div class="grid gap-6">
     <fieldset class="m-0 min-w-0 border-0 p-0">
-      <legend class="mb-3 p-0 text-cp font-medium text-cp-text-secondary">
+      <legend class="mb-3 p-0 text-z font-medium text-z-text-secondary">
         账号平台
       </legend>
       <AccountProviderChooser v-model="form.source" :disabled="disabled" />

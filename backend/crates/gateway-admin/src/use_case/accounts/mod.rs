@@ -1028,10 +1028,16 @@ impl AccountsService for DefaultAccountsService {
     ) -> Result<ProviderResetCredits, AdminError> {
         let lock = self.reset_credit_lock(&account_id).await;
         let _guard = lock.lock().await;
+        // 查询前捕获计划版本，换号或修改配置后由 CAS 拒绝旧身份的查询结果
+        let automation = self
+            .accounts
+            .reset_credit_automation(account_id.as_str())
+            .await
+            .map_err(|error| map_store_error(error, "reset-credit automation"))?;
         let credits = self
             .reset_credits_upstream(context, account_id.clone())
             .await?;
-        if let Err(error) = self.remember_reset_credits(&account_id, &credits).await {
+        if let Err(error) = self.remember_reset_credits(automation, &credits).await {
             tracing::warn!(
                 account_id = account_id.as_str(),
                 error_kind = error.kind().as_str(),
@@ -1150,6 +1156,7 @@ impl AccountsService for DefaultAccountsService {
                     vec![AccountConnectionTestEvent::Failed {
                         source: error.source(),
                         gateway_error_code: error.kind(),
+                        proxy_hint: error.proxy_hint(),
                         send_state: error.send_state(),
                         message,
                         provider_error_code: error.client_error_code().map(ToOwned::to_owned),

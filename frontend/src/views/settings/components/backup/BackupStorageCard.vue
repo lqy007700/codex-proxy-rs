@@ -36,11 +36,11 @@ function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageFo
 <template>
   <ZCard title="S3 存储配置">
     <template #description>
-      <span class="text-cp-text-secondary">
+      <span class="text-z-text-secondary">
         配置 S3 兼容存储（支持
         <button
           type="button"
-          class="cursor-pointer border-0 bg-transparent p-0 text-cp-link underline underline-offset-2 hover:text-cp-link-hover"
+          class="cursor-pointer border-0 bg-transparent p-0 text-z-link underline underline-offset-2 hover:text-z-link-hover"
           @click="emit('openR2Guide')"
         >
           Cloudflare R2
@@ -58,8 +58,8 @@ function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageFo
           @click="emit('test')"
         >
           <template #icon>
-            <CircleCheck v-if="verified" class="size-4 text-cp-success-text" />
-            <CircleAlert v-else class="size-4 text-cp-warning-text" />
+            <CircleCheck v-if="verified" class="size-4 text-z-success-text" />
+            <CircleAlert v-else class="size-4 text-z-warning-text" />
           </template>
           {{ testing ? '测试中...' : '测试连接' }}
         </ZButton>

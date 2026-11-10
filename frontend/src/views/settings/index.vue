@@ -127,11 +127,11 @@ watch(section, (value) => {
   <div class="w-full" :class="section === 'pricing' ? 'flex h-[calc(100dvh-2rem)] flex-none! flex-col min-[961px]:h-[calc(100dvh-3rem)]' : undefined">
     <ZPageHeader title="系统设置" description="配置网关调度、上游与定价，管理访问安全、历史保留与备份" />
 
-    <div class="mt-4 flex min-h-cp-control shrink-0 flex-wrap items-center justify-between gap-3">
+    <div class="mt-4 flex min-h-z-control shrink-0 flex-wrap items-center justify-between gap-3">
       <ZSegmented
         :model-value="section"
         aria-label="设置分区"
-        class="hidden! bg-(--cp-input-bg)! sm:inline-grid!"
+        class="hidden! bg-(--z-input-bg)! sm:inline-grid!"
         :options="sectionOptions"
         @update:model-value="switchSection"
       />
@@ -143,7 +143,7 @@ watch(section, (value) => {
         @update:model-value="switchSection"
       />
       <div v-if="section !== 'alerts' && (isBasicSection || hasChanges)" class="ml-auto flex items-center justify-end gap-2">
-        <span v-if="hasChanges" class="mr-1 size-1.5 shrink-0 rounded-full bg-cp-warning" aria-hidden="true" />
+        <span v-if="hasChanges" class="mr-1 size-1.5 shrink-0 rounded-full bg-z-warning" aria-hidden="true" />
         <ZIconButton v-if="hasChanges" aria-label="撤销全部基础设置更改" variant="solid" :disabled="saving || loading || detectingLocation" @click="resetSettings">
           <Undo2 class="size-4" />
         </ZIconButton>

@@ -14,7 +14,7 @@ const props = defineProps<{
   stopping: boolean
   error: string
 }>()
-const emit = defineEmits<{ select: [id: string], refresh: [], stop: [], viewAccounts: [] }>()
+const emit = defineEmits<{ select: [id: string], refresh: [], stop: [], viewAccounts: [], afterLeave: [] }>()
 const open = defineModel<boolean>({ required: true })
 const retentionOpen = shallowRef(false)
 const retentionId = useId()
@@ -39,8 +39,8 @@ function handleRetentionKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <ZDialog v-model="open" title="导入任务" description="关闭页面后继续导入，再次打开即可查看进度" width="48rem">
-    <div v-if="error" role="alert" class="mb-4 flex items-center justify-between gap-3 rounded-cp bg-cp-warning-container p-3 text-xs text-cp-warning-on-container">
+  <ZDialog v-model="open" title="导入任务" description="关闭页面后继续导入，再次打开即可查看进度" width="48rem" @closed="emit('afterLeave')">
+    <div v-if="error" role="alert" class="mb-4 flex items-center justify-between gap-3 rounded-z bg-z-warning-container p-3 text-xs text-z-warning-on-container">
       <span>进度暂未更新：{{ error.replace(/[。.]\s*$/u, '') }}，恢复连接后将自动刷新</span>
       <ZButton size="small" :loading="loading" @click="emit('refresh')">
         重试
@@ -75,7 +75,7 @@ function handleRetentionKeydown(event: KeyboardEvent) {
               <CircleAlert class="size-4" />
             </ZIconButton>
           </template>
-          <div :id="retentionId" role="tooltip" class="grid w-72 max-w-[calc(100vw-2rem)] gap-2 p-4 text-cp-xs leading-relaxed text-cp-text-secondary">
+          <div :id="retentionId" role="tooltip" class="grid w-72 max-w-[calc(100vw-2rem)] gap-2 p-4 text-z-xs leading-relaxed text-z-text-secondary">
             <p class="m-0">
               结果保留 1 小时
             </p>

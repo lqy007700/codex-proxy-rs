@@ -61,15 +61,15 @@ const linkItems = [
     <div class="grid gap-5">
       <section class="flex min-w-0 items-center gap-3">
         <span
-          class="inline-flex size-9 shrink-0 items-center justify-center rounded-cp bg-cp-fill-quaternary font-mono text-cp-xl leading-none font-extrabold text-cp-text"
+          class="inline-flex size-9 shrink-0 items-center justify-center rounded-z bg-z-fill-quaternary font-mono text-z-xl leading-none font-extrabold text-z-text"
         >
           Z
         </span>
         <div class="min-w-0">
-          <p class="m-0 truncate text-cp-xl leading-none font-heavy text-cp-text">
+          <p class="m-0 truncate text-z-xl leading-none font-heavy text-z-text">
             {{ author }}
           </p>
-          <p class="mt-1.5 mb-0 text-cp-sm leading-none font-emphasis text-cp-text-secondary">
+          <p class="mt-1.5 mb-0 text-z-sm leading-none font-emphasis text-z-text-secondary">
             Built by Zyy · Codex Proxy RS
           </p>
         </div>
@@ -79,20 +79,20 @@ const linkItems = [
         <div
           v-for="item in linkItems"
           :key="item.label"
-          class="group flex min-w-0 items-center justify-between gap-3 rounded-cp px-1 py-2.5 transition-colors hover:bg-cp-fill-quaternary"
+          class="group flex min-w-0 items-center justify-between gap-3 rounded-z px-1 py-2.5 transition-colors hover:bg-z-fill-quaternary"
         >
           <div class="flex min-w-0 items-center gap-3">
             <span
-              class="inline-flex size-8 shrink-0 items-center justify-center rounded-cp bg-cp-fill-tertiary text-cp-text"
+              class="inline-flex size-8 shrink-0 items-center justify-center rounded-z bg-z-fill-tertiary text-z-text"
             >
               <component :is="item.icon" class="size-5" />
             </span>
             <div class="min-w-0">
-              <p class="m-0 text-cp-xs leading-none font-heavy text-cp-text-quaternary">
+              <p class="m-0 text-z-xs leading-none font-heavy text-z-text-quaternary">
                 {{ item.label }}
               </p>
               <p
-                class="mt-2 mb-0 truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
+                class="mt-2 mb-0 truncate font-mono text-z-sm leading-none font-bold text-z-text"
                 :title="item.value"
               >
                 {{ item.value }}
@@ -104,7 +104,7 @@ const linkItems = [
             :href="item.href"
             target="_blank"
             rel="noreferrer"
-            class="inline-flex size-7 shrink-0 items-center justify-center rounded-cp text-cp-text-quaternary transition-colors hover:bg-cp-fill-tertiary hover:text-cp-link"
+            class="inline-flex size-7 shrink-0 items-center justify-center rounded-z text-z-text-quaternary transition-colors hover:bg-z-fill-tertiary hover:text-z-link"
             :aria-label="`打开 ${item.label}`"
           >
             <ExternalLink class="size-3.5" />
@@ -112,7 +112,7 @@ const linkItems = [
         </div>
       </section>
 
-      <p class="m-0 font-mono text-cp-xs leading-none font-emphasis text-cp-text-quaternary">
+      <p class="m-0 font-mono text-z-xs leading-none font-emphasis text-z-text-quaternary">
         {{ versionLine }}
       </p>
     </div>

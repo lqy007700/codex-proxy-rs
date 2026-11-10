@@ -16,26 +16,26 @@ const outcomeMeta = computed(() => [
   {
     label: '成功',
     value: props.point.successRequests,
-    dotClass: 'bg-cp-success',
-    valueClass: 'text-cp-success-text',
+    dotClass: 'bg-z-success',
+    valueClass: 'text-z-success-text',
   },
   {
     label: '服务失败',
     value: healthServiceFailureCount(props.point),
-    dotClass: 'bg-cp-error',
-    valueClass: 'text-cp-error-text',
+    dotClass: 'bg-z-error',
+    valueClass: 'text-z-error-text',
   },
   {
     label: '客户端取消',
     value: props.point.cancelledRequests,
-    dotClass: 'bg-cp-orange-solid',
-    valueClass: 'text-cp-orange-text',
+    dotClass: 'bg-z-orange-solid',
+    valueClass: 'text-z-orange-text',
   },
   {
     label: '调用方错误',
     value: props.point.callerErrorRequests,
-    dotClass: 'bg-cp-info',
-    valueClass: 'text-cp-info-text',
+    dotClass: 'bg-z-info',
+    valueClass: 'text-z-info-text',
   },
 ])
 const outcomeSegments = computed(() => {
@@ -58,12 +58,12 @@ const metricItems = outcomeMeta
   <section
     role="dialog"
     :aria-label="`${point.time} 请求健康详情`"
-    class="overflow-hidden rounded-cp-lg bg-cp-bg-elevated"
+    class="overflow-hidden rounded-z-lg bg-z-bg-elevated"
   >
-    <header class="flex items-center justify-between gap-3 bg-cp-popover-header-bg px-3.5 py-3">
+    <header class="flex items-center justify-between gap-3 bg-z-popover-header-bg px-3.5 py-3">
       <div class="flex min-w-0 items-center gap-2">
         <span class="size-2 shrink-0 rounded-full" :class="status.cellClass" />
-        <strong class="font-mono text-cp leading-none font-heavy text-cp-text">
+        <strong class="font-mono text-z leading-none font-heavy text-z-text">
           {{ point.time }}
         </strong>
         <span
@@ -73,13 +73,13 @@ const metricItems = outcomeMeta
           {{ status.label }}
         </span>
       </div>
-      <span class="shrink-0 text-[10px] leading-none font-emphasis text-cp-text-quaternary"> 15 分钟 </span>
+      <span class="shrink-0 text-[10px] leading-none font-emphasis text-z-text-quaternary"> 15 分钟 </span>
     </header>
 
     <div class="grid gap-3.5 px-3.5 py-3.5">
       <div class="flex items-end justify-between gap-4">
         <div>
-          <p class="m-0 text-cp-xs leading-none font-emphasis text-cp-text-quaternary">
+          <p class="m-0 text-z-xs leading-none font-emphasis text-z-text-quaternary">
             有效请求可用性
           </p>
           <strong
@@ -90,14 +90,14 @@ const metricItems = outcomeMeta
           </strong>
         </div>
         <div class="text-right">
-          <span class="block text-[10px] leading-none font-emphasis text-cp-text-quaternary"> 有效请求 </span>
-          <strong class="mt-2 block font-mono text-cp-xl leading-none font-heavy tabular-nums text-cp-text">
+          <span class="block text-[10px] leading-none font-emphasis text-z-text-quaternary"> 有效请求 </span>
+          <strong class="mt-2 block font-mono text-z-xl leading-none font-heavy tabular-nums text-z-text">
             {{ formatHealthCount(eligibleRequests) }}
           </strong>
         </div>
       </div>
 
-      <div class="flex h-1.5 w-full overflow-hidden rounded-full bg-cp-fill-tertiary">
+      <div class="flex h-1.5 w-full overflow-hidden rounded-full bg-z-fill-tertiary">
         <span
           v-for="segment in outcomeSegments"
           :key="segment.label"
@@ -111,13 +111,13 @@ const metricItems = outcomeMeta
         <div
           v-for="item in metricItems"
           :key="item.label"
-          class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-cp bg-cp-fill-tertiary px-2.5 py-2.5"
+          class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-z bg-z-fill-tertiary px-2.5 py-2.5"
         >
           <span class="size-1.5 rounded-full" :class="item.dotClass" />
-          <span class="truncate text-[10px] leading-none font-emphasis text-cp-text-secondary">
+          <span class="truncate text-[10px] leading-none font-emphasis text-z-text-secondary">
             {{ item.label }}
           </span>
-          <strong class="font-mono text-cp-sm leading-none font-heavy tabular-nums" :class="item.valueClass">
+          <strong class="font-mono text-z-sm leading-none font-heavy tabular-nums" :class="item.valueClass">
             {{ formatHealthCount(item.value) }}
           </strong>
         </div>

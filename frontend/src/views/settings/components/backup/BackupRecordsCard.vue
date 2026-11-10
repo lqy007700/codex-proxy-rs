@@ -107,7 +107,7 @@ function canDelete(record: BackupRecord): boolean {
               <CircleHelp class="size-3.5" aria-hidden="true" />
             </ZIconButton>
           </template>
-          <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+          <div class="max-w-72 space-y-2 px-3 py-2 text-z-sm leading-relaxed text-z-text-secondary">
             <p>保留账号、Key、设置、插件及已用额度</p>
             <p>用量保留小时汇总</p>
           </div>
@@ -153,7 +153,7 @@ function canDelete(record: BackupRecord): boolean {
         empty-text="暂无备份记录"
       >
         <template #id="{ row }">
-          <span class="text-cp-text-secondary" :title="row.id">{{ shortId(row.id) }}</span>
+          <span class="text-z-text-secondary" :title="row.id">{{ shortId(row.id) }}</span>
         </template>
 
         <template #status="{ row }">
@@ -161,27 +161,27 @@ function canDelete(record: BackupRecord): boolean {
         </template>
 
         <template #fileName="{ row }">
-          <span class="text-cp-text-secondary" :title="row.objectKey">{{ formatFileName(row) }}</span>
+          <span class="text-z-text-secondary" :title="row.objectKey">{{ formatFileName(row) }}</span>
         </template>
 
         <template #sizeBytes="{ row }">
-          <span class="text-cp-text-secondary">{{ formatSize(row.sizeBytes) }}</span>
+          <span class="text-z-text-secondary">{{ formatSize(row.sizeBytes) }}</span>
         </template>
 
         <template #expiresAt="{ row }">
-          <span class="text-cp-text-secondary">
+          <span class="text-z-text-secondary">
             {{ row.expiresAtDisplay ?? '—' }}
           </span>
         </template>
 
         <template #reference="{ row }">
-          <span class="text-cp-text-secondary">
+          <span class="text-z-text-secondary">
             {{ triggerLabel(row.triggerKind) }}
           </span>
         </template>
 
         <template #startedAt="{ row }">
-          <span class="text-cp-text-secondary">
+          <span class="text-z-text-secondary">
             {{ row.startedAtDisplay ?? '—' }}
           </span>
         </template>

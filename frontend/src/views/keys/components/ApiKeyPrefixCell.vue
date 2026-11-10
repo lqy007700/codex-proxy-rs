@@ -16,7 +16,7 @@ const emit = defineEmits<{
 
 <template>
   <div class="flex items-center gap-2">
-    <code class="block min-w-0 overflow-hidden whitespace-nowrap font-mono text-cp-sm font-emphasis text-cp-text">
+    <code class="block min-w-0 overflow-hidden whitespace-nowrap font-mono text-z-sm font-emphasis text-z-text">
       {{ prefix }}••••••••••••••••
     </code>
     <ZIconButton

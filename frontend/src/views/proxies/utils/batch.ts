@@ -31,15 +31,15 @@ export interface ProxyBatchInput {
 }
 
 export const proxyBatchStates: Record<ProxyBatchStatus, { label: string, tone: string }> = {
-  pending: { label: '待执行', tone: 'text-cp-text-secondary' },
-  running: { label: '执行中', tone: 'text-cp-info-text' },
-  succeeded: { label: '成功', tone: 'text-cp-success-text' },
-  failed: { label: '失败', tone: 'text-cp-error-text' },
-  error: { label: '请求失败', tone: 'text-cp-error-text' },
-  conflict: { label: '配置冲突', tone: 'text-cp-warning-text' },
-  busy: { label: '测试繁忙', tone: 'text-cp-warning-text' },
-  unknown: { label: '结果待确认', tone: 'text-cp-warning-text' },
-  skipped: { label: '未执行', tone: 'text-cp-text-secondary' },
+  pending: { label: '待执行', tone: 'text-z-text-secondary' },
+  running: { label: '执行中', tone: 'text-z-info-text' },
+  succeeded: { label: '成功', tone: 'text-z-success-text' },
+  failed: { label: '失败', tone: 'text-z-error-text' },
+  error: { label: '请求失败', tone: 'text-z-error-text' },
+  conflict: { label: '配置冲突', tone: 'text-z-warning-text' },
+  busy: { label: '测试繁忙', tone: 'text-z-warning-text' },
+  unknown: { label: '结果待确认', tone: 'text-z-warning-text' },
+  skipped: { label: '未执行', tone: 'text-z-text-secondary' },
 }
 
 // 简写只转换录入格式，完整 URL 原样交给后端的 OutboundProxy 校验

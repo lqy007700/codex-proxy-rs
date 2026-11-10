@@ -352,7 +352,7 @@ impl CodexProvider {
             installation_id,
             client: client
                 .for_account(lease.account())
-                .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
+                .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, None).error)?
                 .with_responses_api_base_url(lease.authentication().responses_api_base_url())
                 .with_middleware_headers(middleware_headers)
                 .with_outbound_middleware(outbound_middleware)
@@ -434,6 +434,8 @@ pub(super) struct OpenAiSessionState {
     pub(super) account_model_mapping: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) credential_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) oauth_identity: Option<String>,
     pub(super) conversation_id: Option<String>,
     #[serde(default)]
     pub(super) turn_state: Option<String>,
@@ -457,6 +459,7 @@ pub(super) struct OpenAiSessionCapture {
     pub(super) upstream_model: String,
     pub(super) account_model_mapping: bool,
     pub(super) credential_revision: Option<u64>,
+    pub(super) oauth_identity: Option<String>,
     pub(super) conversation_id: Option<String>,
     pub(super) turn_state: Option<String>,
     pub(super) client_turn_id: Option<String>,
@@ -507,6 +510,7 @@ fn encode_openai_session_capture(
         upstream_model: Some(capture.upstream_model.clone()),
         account_model_mapping: capture.account_model_mapping,
         credential_revision: capture.credential_revision,
+        oauth_identity: capture.oauth_identity.clone(),
         conversation_id: capture.conversation_id.clone(),
         turn_state: capture.turn_state.clone(),
         client_turn_id: capture.client_turn_id.clone(),
@@ -594,9 +598,12 @@ pub(super) async fn create_response_attempt(
 
 pub(super) fn map_handshake_attempt_error(
     error: CodexHandshakeAttemptError,
+    account: &ProviderAccount,
 ) -> MappedProviderFailure {
     match error {
-        CodexHandshakeAttemptError::Client(error) => map_handshake_error(error),
+        CodexHandshakeAttemptError::Client(error) => {
+            map_client_error(error, UpstreamSendState::Ambiguous, Some(account))
+        }
         CodexHandshakeAttemptError::Cancelled => MappedProviderFailure::plain(provider_error(
             ProviderErrorKind::Cancelled,
             UpstreamSendState::Ambiguous,
@@ -688,7 +695,7 @@ pub(super) fn cold_json_response_stream(request: ColdJsonResponse) -> EventStrea
                 error,
             );
         }
-        let response = match response.map_err(map_handshake_attempt_error) {
+        let response = match response.map_err(|error| map_handshake_attempt_error(error, &active_account)) {
             Ok(response) => response,
             Err(mut failure) => {
                 if let Some(observation) = failure.observation.take() {
@@ -877,7 +884,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 error,
             );
         }
-        let response = response.map_err(map_handshake_attempt_error);
+        let response = response.map_err(|error| map_handshake_attempt_error(error, &active_account));
         let response = match response {
             Ok(response) => response,
             Err(mut failure) => {
@@ -1180,7 +1187,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             if let Some(affinity) = &routing_affinity {
                 for fact in events.iter().flat_map(ProviderEvent::canonical_facts) {
                     if let GatewayEvent::Started(meta) = fact {
-                        guardian_routing.remember(&context.session_namespace(), active_account.id(), meta.response_id(), affinity);
+                        guardian_routing.remember(&context.session_namespace(), &active_account, meta.response_id(), affinity);
                     }
                 }
             }

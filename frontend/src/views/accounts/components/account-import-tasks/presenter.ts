@@ -1,12 +1,12 @@
 import type { AccountImportTask, AccountImportTaskItem, ImportItemStatus } from '@/api'
 
 export const itemStates: Record<ImportItemStatus, { label: string, color: string, fill: string }> = {
-  pending: { label: '等待中', color: 'bg-cp-fill-alter text-cp-text-secondary', fill: 'bg-cp-fill-secondary' },
-  running: { label: '处理中', color: 'bg-cp-primary-container text-cp-primary-on-container', fill: 'bg-cp-primary' },
-  succeeded: { label: '已入库', color: 'bg-cp-success-container text-cp-success-on-container', fill: 'bg-cp-success' },
-  failed: { label: '失败', color: 'bg-cp-error-container text-cp-error-on-container', fill: 'bg-cp-error' },
-  unknown: { label: '待核对', color: 'bg-cp-warning-container text-cp-warning-on-container', fill: 'bg-cp-warning' },
-  skipped: { label: '未执行', color: 'bg-cp-fill-tertiary text-cp-text-secondary', fill: 'bg-cp-text-quaternary' },
+  pending: { label: '等待中', color: 'bg-z-fill-alter text-z-text-secondary', fill: 'bg-z-fill-secondary' },
+  running: { label: '处理中', color: 'bg-z-primary-container text-z-primary-on-container', fill: 'bg-z-primary' },
+  succeeded: { label: '已入库', color: 'bg-z-success-container text-z-success-on-container', fill: 'bg-z-success' },
+  failed: { label: '失败', color: 'bg-z-error-container text-z-error-on-container', fill: 'bg-z-error' },
+  unknown: { label: '待核对', color: 'bg-z-warning-container text-z-warning-on-container', fill: 'bg-z-warning' },
+  skipped: { label: '未执行', color: 'bg-z-fill-tertiary text-z-text-secondary', fill: 'bg-z-text-quaternary' },
 }
 
 export const outcomeOrder: ImportItemStatus[] = [

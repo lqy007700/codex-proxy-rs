@@ -67,10 +67,10 @@ watch(() => props.accountId, () => {
 </script>
 
 <template>
-  <section class="grid gap-2 rounded-cp bg-cp-fill-quaternary px-4 py-3" aria-label="自动使用重置卡">
+  <section class="grid gap-2 rounded-z bg-z-fill-quaternary px-4 py-3" aria-label="自动使用重置卡">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center gap-1">
-        <h3 class="m-0 text-cp-sm font-heavy text-cp-text">
+        <h3 class="m-0 text-z-sm font-heavy text-z-text">
           自动使用
         </h3>
         <ZPopover trigger="click" placement="bottom-start" role="dialog">
@@ -79,7 +79,7 @@ watch(() => props.accountId, () => {
               <CircleHelp class="size-3.5" />
             </ZIconButton>
           </template>
-          <div class="grid max-w-64 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
+          <div class="grid max-w-64 gap-2 p-3 text-z-xs leading-relaxed text-z-text-secondary">
             <p>每天随机查询一次，各账号错开时间</p>
             <p>临期使用前核对卡片，已在其他地方使用的会自动跳过</p>
           </div>
@@ -101,10 +101,10 @@ watch(() => props.accountId, () => {
         />
       </div>
     </div>
-    <p v-if="status?.enabled && status.nextConsumeAtDisplay" class="text-cp-xs text-cp-text-secondary">
+    <p v-if="status?.enabled && status.nextConsumeAtDisplay" class="text-z-xs text-z-text-secondary">
       下次使用 {{ status.nextConsumeAtDisplay }}
     </p>
-    <p v-if="resultText" class="text-cp-xs text-cp-warning" role="status">
+    <p v-if="resultText" class="text-z-xs text-z-warning" role="status">
       {{ resultText }}
     </p>
     <ZEmpty v-if="loadError" title="自动使用设置加载失败" :description="loadError" size="small" surface="none" role="alert">
@@ -119,6 +119,6 @@ watch(() => props.accountId, () => {
 
 <style scoped>
 .reset-credit-switch :deep(input:not(:checked) + span) {
-  background-color: var(--cp-switch-unchecked-bg);
+  background-color: var(--z-switch-unchecked-bg);
 }
 </style>

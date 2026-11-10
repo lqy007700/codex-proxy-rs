@@ -125,7 +125,7 @@ watch(timeRange, () => {
       </template>
     </ZPageHeader>
 
-    <div v-if="scopedLabels.length" class="mt-4 flex flex-wrap items-center gap-3 text-cp-sm text-cp-text-secondary">
+    <div v-if="scopedLabels.length" class="mt-4 flex flex-wrap items-center gap-3 text-z-sm text-z-text-secondary">
       <span class="break-all">当前限定：{{ scopedLabels.join(' · ') }}</span>
       <ZButton size="small" @click="router.replace({ path: '/usage' })">
         清除限定
@@ -137,11 +137,11 @@ watch(timeRange, () => {
       <template #header>
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 class="m-0 text-xl leading-[1.15] font-heavy text-cp-text">
+            <h2 class="m-0 text-xl leading-[1.15] font-heavy text-z-text">
               请求明细
             </h2>
             <p
-              class="mt-1.75 mb-0 text-cp leading-[1.15] font-emphasis text-cp-text-secondary"
+              class="mt-1.75 mb-0 text-z leading-[1.15] font-emphasis text-z-text-secondary"
             >
               查看请求结果、用量与错误详情
             </p>
@@ -210,10 +210,10 @@ watch(timeRange, () => {
     <details :open="statsExpanded" class="group mt-5" @toggle="statsExpanded = ($event.target as HTMLDetailsElement).open">
       <ZCard
         as="summary"
-        class="flex cursor-pointer list-none items-center justify-between gap-3 select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cp-primary [&::-webkit-details-marker]:hidden"
+        class="flex cursor-pointer list-none items-center justify-between gap-3 select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-z-primary [&::-webkit-details-marker]:hidden"
       >
-        <span class="text-xl leading-[1.15] font-heavy text-cp-text">统计概览</span>
-        <span class="flex shrink-0 items-center gap-2 text-cp-sm font-emphasis text-cp-text-secondary">
+        <span class="text-xl leading-[1.15] font-heavy text-z-text">统计概览</span>
+        <span class="flex shrink-0 items-center gap-2 text-z-sm font-emphasis text-z-text-secondary">
           <span class="group-open:hidden">展开</span>
           <span class="hidden group-open:inline">收起</span>
           <ChevronDown class="size-4.5 transition-transform group-open:rotate-180 motion-reduce:transition-none" />

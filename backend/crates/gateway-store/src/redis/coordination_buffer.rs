@@ -28,6 +28,7 @@ const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct BufferedClientAdmissionPort {
     inner: Arc<dyn ClientAdmissionPort>,
     sender: mpsc::Sender<AdmissionRelease>,
+    request_drain: Option<crate::shutdown::RequestDrain>,
 }
 
 impl BufferedClientAdmissionPort {
@@ -54,6 +55,7 @@ impl BufferedClientAdmissionPort {
             Self {
                 inner: Arc::clone(&inner),
                 sender,
+                request_drain: None,
             },
             ClientAdmissionReleaseWriter {
                 inner,
@@ -61,6 +63,11 @@ impl BufferedClientAdmissionPort {
                 receiver: Mutex::new(receiver),
             },
         )
+    }
+
+    pub(crate) fn with_request_drain(mut self, drain: crate::shutdown::RequestDrain) -> Self {
+        self.request_drain = Some(drain);
+        self
     }
 
     fn enqueue(&self, release: AdmissionRelease) -> bool {
@@ -90,6 +97,9 @@ impl ClientAdmissionPort for BufferedClientAdmissionPort {
         deadline: gateway_core::lifecycle::Deadline,
         cancellation: CancellationToken,
     ) -> Box<dyn gateway_core::lifecycle::LeaseGuard> {
+        if let Some(drain) = &self.request_drain {
+            drain.track(key, request, cancellation.clone());
+        }
         self.inner.maintain(key, request, deadline, cancellation)
     }
 
@@ -98,12 +108,22 @@ impl ClientAdmissionPort for BufferedClientAdmissionPort {
             client_api_key_id: key.clone(),
             model_request_id: request.clone(),
         });
+        if let Some(drain) = &self.request_drain {
+            drain.complete(key, request);
+        }
     }
 
     fn admit(
         &self,
         request: ClientAdmissionRequest,
     ) -> BoxFuture<'_, Result<ClientAdmissionDecision, ClientAdmissionError>> {
+        if self
+            .request_drain
+            .as_ref()
+            .is_some_and(crate::shutdown::RequestDrain::is_stopping)
+        {
+            return Box::pin(ready(Err(ClientAdmissionError(None))));
+        }
         self.inner.admit(request)
     }
 
@@ -116,6 +136,10 @@ impl ClientAdmissionPort for BufferedClientAdmissionPort {
             client_api_key_id: client_api_key_id.clone(),
             model_request_id: model_request_id.clone(),
         });
+        // Core 在显式释放准入前已登记费用，写泵可在此后开始排空
+        if let Some(drain) = &self.request_drain {
+            drain.complete(client_api_key_id, model_request_id);
+        }
         Box::pin(ready(Ok(enqueued)))
     }
 

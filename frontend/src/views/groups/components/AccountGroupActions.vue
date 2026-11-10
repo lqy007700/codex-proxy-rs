@@ -23,7 +23,7 @@ const emit = defineEmits<{
       aria-label="编辑分组"
       @click.stop="emit('edit', group)"
     >
-      <Pencil class="size-3.5 text-cp-link" />
+      <Pencil class="size-3.5 text-z-link" />
     </ZIconButton>
     <ZIconButton
       size="small"
@@ -33,7 +33,7 @@ const emit = defineEmits<{
     >
       <Power
         class="size-3.5"
-        :class="group.enabled ? 'text-cp-warning' : 'text-cp-success'"
+        :class="group.enabled ? 'text-z-warning' : 'text-z-success'"
       />
     </ZIconButton>
     <ZIconButton
@@ -42,7 +42,7 @@ const emit = defineEmits<{
       :disabled="deleting"
       @click.stop="emit('delete', group)"
     >
-      <Trash2 class="size-3.5 text-cp-error" />
+      <Trash2 class="size-3.5 text-z-error" />
     </ZIconButton>
   </div>
 </template>

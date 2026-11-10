@@ -25,7 +25,7 @@ const search = defineModel<string>('search', { required: true })
     <div class="min-w-0 flex-1 md:w-96 md:flex-none">
       <ZInput v-model="search" placeholder="搜索名称或标签" aria-label="搜索 API Key 名称或标签" class="w-full">
         <template #prefix>
-          <Search class="size-4.5 text-cp-text-tertiary" />
+          <Search class="size-4.5 text-z-text-tertiary" />
         </template>
       </ZInput>
     </div>

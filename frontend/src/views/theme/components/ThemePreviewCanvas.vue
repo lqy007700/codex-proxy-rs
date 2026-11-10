@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ThemeName } from '@codex-proxy/ui/theme'
+import type { ThemeScheme } from '@codex-proxy/ui/theme'
 import type { CSSProperties } from 'vue'
 import { ZButton, ZIconButton } from '@codex-proxy/ui'
 
@@ -10,7 +10,7 @@ import { useThemePreviewCanvas } from '../composables/useThemePreviewCanvas'
 import ThemePreviewScope from './ThemePreviewScope.vue'
 
 defineProps<{
-  theme: ThemeName
+  theme: ThemeScheme
   style: CSSProperties
   stylesRevision: number
 }>()
@@ -41,7 +41,7 @@ const boardStyle = computed<CSSProperties>(() => ({
 <template>
   <div
     ref="viewport"
-    class="relative min-h-0 overflow-hidden rounded-cp-lg bg-cp-bg-layout bg-[radial-gradient(circle,color-mix(in_srgb,var(--cp-color-text-quaternary)_24%,transparent)_1px,transparent_1px)] bg-size-[18px_18px] shadow-cp-secondary select-none"
+    class="relative min-h-0 overflow-hidden rounded-z-lg bg-z-bg-layout bg-[radial-gradient(circle,color-mix(in_srgb,var(--z-color-text-quaternary)_24%,transparent)_1px,transparent_1px)] bg-size-[18px_18px] select-none"
     :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
     role="application"
     tabindex="0"
@@ -55,21 +55,21 @@ const boardStyle = computed<CSSProperties>(() => ({
       :style="stageStyle"
     >
       <ThemePreviewScope :theme="theme" :style="style" :styles-revision="stylesRevision">
-        <div class="overflow-hidden bg-cp-bg-layout p-6" data-theme-preview-board :style="boardStyle">
+        <div class="overflow-hidden bg-z-bg-layout p-6" data-theme-preview-board :style="boardStyle">
           <slot />
         </div>
       </ThemePreviewScope>
     </div>
 
     <div
-      class="pointer-events-none absolute top-3 left-3 z-10 inline-flex items-center gap-2 rounded-cp bg-cp-bg-container/92 px-2.5 py-2 text-[10px] font-emphasis text-cp-text-secondary shadow-cp-tertiary backdrop-blur-sm"
+      class="pointer-events-none absolute top-3 left-3 z-10 inline-flex items-center gap-2 rounded-z bg-z-bg-container/92 px-2.5 py-2 text-[10px] font-emphasis text-z-text-secondary shadow-z-tertiary backdrop-blur-sm"
     >
-      <Move class="size-3.5 text-cp-primary-text" />
+      <Move class="size-3.5 text-z-primary-text" />
       拖动空白处平移 · 滚轮缩放
     </div>
 
     <div
-      class="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-cp-lg bg-cp-bg-container/94 p-1.5 shadow-cp-popup backdrop-blur-md"
+      class="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-z-lg bg-z-bg-container/94 p-1.5 shadow-z-popup backdrop-blur-md"
       data-canvas-control
       @pointerdown.stop
       @dblclick.stop
@@ -89,7 +89,7 @@ const boardStyle = computed<CSSProperties>(() => ({
       <ZIconButton aria-label="放大画板" size="small" :disabled="!canZoomIn" @click="zoomIn">
         <Plus class="size-3.5" />
       </ZIconButton>
-      <span class="mx-0.5 h-4 w-px bg-cp-fill-secondary" />
+      <span class="mx-0.5 h-4 w-px bg-z-fill-secondary" />
       <ZIconButton aria-label="适应画板" size="small" @click="fitToViewport()">
         <Maximize2 class="size-3.5" />
       </ZIconButton>

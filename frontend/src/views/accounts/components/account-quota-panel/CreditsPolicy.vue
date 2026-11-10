@@ -39,10 +39,10 @@ async function toggle(allowCredits: boolean) {
 </script>
 
 <template>
-  <section class="grid gap-2 rounded-cp bg-cp-fill-quaternary px-4 py-3" aria-label="额度点数使用设置">
+  <section class="grid gap-2 rounded-z bg-z-fill-quaternary px-4 py-3" aria-label="额度点数使用设置">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center gap-1">
-        <h3 class="m-0 text-cp-sm font-heavy text-cp-text">
+        <h3 class="m-0 text-z-sm font-heavy text-z-text">
           允许使用额度点数
         </h3>
         <ZPopover trigger="click" placement="bottom-start" role="dialog">
@@ -51,7 +51,7 @@ async function toggle(allowCredits: boolean) {
               <CircleHelp class="size-3.5" />
             </ZIconButton>
           </template>
-          <div class="grid max-w-64 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
+          <div class="grid max-w-64 gap-2 p-3 text-z-xs leading-relaxed text-z-text-secondary">
             <p>默认关闭，套餐额度耗尽后暂停使用此账号</p>
             <p>开启后可继续使用上游可用点数，与自动使用重置卡独立</p>
             <p>额度信息可能延迟，已发出的请求仍可能消耗点数</p>
@@ -71,6 +71,6 @@ async function toggle(allowCredits: boolean) {
 
 <style scoped>
 .credits-policy-switch :deep(input:not(:checked) + span) {
-  background-color: var(--cp-switch-unchecked-bg);
+  background-color: var(--z-switch-unchecked-bg);
 }
 </style>

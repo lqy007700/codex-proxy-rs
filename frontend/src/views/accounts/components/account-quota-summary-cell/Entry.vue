@@ -78,7 +78,7 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
     <template #reference="{ open }">
       <button
         type="button"
-        class="col-span-full grid w-full min-w-0 grid-cols-subgrid cursor-pointer rounded-sm border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline"
+        class="col-span-full grid w-full min-w-0 grid-cols-subgrid cursor-pointer rounded-sm border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-z-control-outline"
         :aria-label="`查看${detailTitle}详情`"
         :aria-expanded="open"
         aria-haspopup="dialog"
@@ -101,9 +101,9 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
       </button>
     </template>
 
-    <section class="w-84 overflow-hidden rounded-cp-lg" role="dialog" :aria-label="`${detailTitle}详情`">
-      <header v-if="detailHeading" class="bg-cp-popover-header-bg px-3 py-2.5">
-        <h3 class="m-0 truncate text-cp leading-5 font-heavy text-cp-text" :title="detailHeading">
+    <section class="w-84 overflow-hidden rounded-z-lg" role="dialog" :aria-label="`${detailTitle}详情`">
+      <header v-if="detailHeading" class="bg-z-popover-header-bg px-3 py-2.5">
+        <h3 class="m-0 truncate text-z leading-5 font-heavy text-z-text" :title="detailHeading">
           {{ detailHeading }}
         </h3>
       </header>
@@ -112,16 +112,16 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
         <article v-for="item in detailItems" :key="item.key">
           <div class="grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2.5">
             <span
-              class="grid h-5 w-8 place-items-center rounded-sm bg-cp-blue-container-strong font-mono text-[9px] leading-none font-heavy tracking-[0.04em] text-cp-blue-on-container"
+              class="grid h-5 w-8 place-items-center rounded-sm bg-z-blue-container-strong font-mono text-[9px] leading-none font-heavy tracking-[0.04em] text-z-blue-on-container"
             >
               {{ item.code }}
             </span>
-            <h4 class="m-0 min-w-0 truncate text-cp-sm leading-4 font-heavy text-cp-text-secondary">
+            <h4 class="m-0 min-w-0 truncate text-z-sm leading-4 font-heavy text-z-text-secondary">
               {{ item.local ? item.localLabel : item.label }}
             </h4>
             <strong
-              class="font-mono text-cp-xs leading-none font-heavy tabular-nums"
-              :class="item.local ? 'text-cp-text' : item.percentTextClass"
+              class="font-mono text-z-xs leading-none font-heavy tabular-nums"
+              :class="item.local ? 'text-z-text' : item.percentTextClass"
             >
               {{ item.local ? `${item.requestDisplay} 次` : item.usedPercentDisplay }}
             </strong>
@@ -135,7 +135,7 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
           />
           <template v-else>
             <div
-              class="mt-2 h-1 w-full overflow-hidden rounded-full bg-cp-border-secondary"
+              class="mt-2 h-1 w-full overflow-hidden rounded-full bg-z-border-secondary"
               role="progressbar"
               :aria-label="item.label"
               aria-valuemin="0"
@@ -153,30 +153,30 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
 
           <dl class="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[10px] leading-4">
             <template v-if="item.local">
-              <dt class="font-emphasis text-cp-text-tertiary">
+              <dt class="font-emphasis text-z-text-tertiary">
                 统计方式
               </dt>
-              <dd class="m-0 text-right font-mono font-heavy tabular-nums text-cp-text">
+              <dd class="m-0 text-right font-mono font-heavy tabular-nums text-z-text">
                 滚动窗口
               </dd>
-              <dt class="font-emphasis text-cp-text-tertiary">
+              <dt class="font-emphasis text-z-text-tertiary">
                 统计范围
               </dt>
-              <dd class="m-0 truncate text-right font-mono font-emphasis tabular-nums text-cp-text-secondary">
+              <dd class="m-0 truncate text-right font-mono font-emphasis tabular-nums text-z-text-secondary">
                 {{ item.durationDisplay }}
               </dd>
             </template>
             <template v-else>
-              <dt class="font-emphasis text-cp-text-tertiary">
+              <dt class="font-emphasis text-z-text-tertiary">
                 窗口消耗
               </dt>
-              <dd class="m-0 text-right font-mono font-heavy tabular-nums text-cp-text">
+              <dd class="m-0 text-right font-mono font-heavy tabular-nums text-z-text">
                 {{ item.localUsageDisplay }}
               </dd>
-              <dt class="font-emphasis text-cp-text-tertiary">
+              <dt class="font-emphasis text-z-text-tertiary">
                 重置时间
               </dt>
-              <dd class="m-0 truncate text-right font-mono font-emphasis tabular-nums text-cp-text-secondary">
+              <dd class="m-0 truncate text-right font-mono font-emphasis tabular-nums text-z-text-secondary">
                 {{ item.resetAtDisplay }}
               </dd>
             </template>

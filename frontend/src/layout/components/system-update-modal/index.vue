@@ -268,22 +268,22 @@ watch(
     :show-close="!restarting" :close-on-click-modal="!restarting" :close-on-press-escape="!restarting"
   >
     <template #icon>
-      <ArrowUpCircle class="size-4.5 text-cp-success" />
+      <ArrowUpCircle class="size-4.5 text-z-success" />
     </template>
 
     <div class="grid gap-3.5">
-      <section class="grid gap-4 rounded-cp-card bg-cp-fill-quaternary px-4 py-4">
+      <section class="grid gap-4 rounded-z-card bg-z-fill-quaternary px-4 py-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="min-w-0">
-            <p class="m-0 text-cp-xs leading-none font-heavy text-cp-text-quaternary">
+            <p class="m-0 text-z-xs leading-none font-heavy text-z-text-quaternary">
               Codex Proxy RS
             </p>
-            <p class="mt-2 mb-0 text-lg leading-none font-heavy text-cp-text">
+            <p class="mt-2 mb-0 text-lg leading-none font-heavy text-z-text">
               应用包更新
             </p>
           </div>
           <span
-            class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-cp-sm font-heavy"
+            class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-z-sm font-heavy"
             :class="presentation.status.badge"
           >
             <component
@@ -299,10 +299,10 @@ watch(
           <div
             v-for="item in presentation.summaryItems"
             :key="item.key"
-            class="min-w-0 rounded-cp bg-cp-bg-container px-3 py-2.5"
+            class="min-w-0 rounded-z bg-z-bg-container px-3 py-2.5"
           >
             <div class="flex min-w-0 items-center justify-between gap-2">
-              <p class="m-0 truncate text-cp-xs leading-none font-heavy text-cp-text-quaternary">
+              <p class="m-0 truncate text-z-xs leading-none font-heavy text-z-text-quaternary">
                 {{ item.label }}
               </p>
               <a
@@ -311,14 +311,14 @@ watch(
                 target="_blank"
                 rel="noreferrer"
                 :class="{ invisible: checking || changingChannel }"
-                class="inline-flex shrink-0 items-center gap-1 text-cp-xs leading-none font-bold text-cp-link transition-colors hover:text-cp-link-hover"
+                class="inline-flex shrink-0 items-center gap-1 text-z-xs leading-none font-bold text-z-link transition-colors hover:text-z-link-hover"
               >
                 发布页
                 <ExternalLink class="size-3" />
               </a>
             </div>
             <p
-              class="mt-2 mb-0 h-[1em] truncate font-mono text-cp leading-none font-bold text-cp-text"
+              class="mt-2 mb-0 h-[1em] truncate font-mono text-z leading-none font-bold text-z-text"
               :title="item.title || item.value"
             >
               <ZSkeleton
@@ -333,16 +333,16 @@ watch(
           </div>
         </div>
 
-        <p v-if="needRestart && restartTargetVersion" class="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-cp-sm">
-          <span class="text-cp-text-secondary">待生效版本</span>
-          <strong class="wrap-anywhere font-mono font-heavy text-cp-text">v{{ restartTargetVersion }}</strong>
+        <p v-if="needRestart && restartTargetVersion" class="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-z-sm">
+          <span class="text-z-text-secondary">待生效版本</span>
+          <strong class="wrap-anywhere font-mono font-heavy text-z-text">v{{ restartTargetVersion }}</strong>
         </p>
-        <p v-if="updateInfo?.unsupportedReason" class="m-0 text-cp-sm text-cp-text-secondary">
+        <p v-if="updateInfo?.unsupportedReason" class="m-0 text-z-sm text-z-text-secondary">
           {{ updateInfo.unsupportedReason }}
         </p>
         <p
           v-if="updateError || updateInfo?.warning"
-          class="m-0 rounded-cp bg-cp-error-container px-3 py-2 text-cp-sm leading-normal font-bold text-cp-error-on-container"
+          class="m-0 rounded-z bg-z-error-container px-3 py-2 text-z-sm leading-normal font-bold text-z-error-on-container"
         >
           {{ updateError || updateInfo?.warning }}
         </p>
@@ -355,12 +355,12 @@ watch(
               上次操作失败
             </ZButton>
           </template>
-          <div class="grid w-80 max-w-[calc(100vw-2rem)] gap-2 p-3 text-cp-sm">
-            <div v-if="lastFailedOperation.targetVersion || lastFailedOperation.finishedAt" class="flex flex-wrap gap-x-3 gap-y-1 text-cp-xs text-cp-text-quaternary">
+          <div class="grid w-80 max-w-[calc(100vw-2rem)] gap-2 p-3 text-z-sm">
+            <div v-if="lastFailedOperation.targetVersion || lastFailedOperation.finishedAt" class="flex flex-wrap gap-x-3 gap-y-1 text-z-xs text-z-text-quaternary">
               <span v-if="lastFailedOperation.targetVersion">目标版本 v{{ lastFailedOperation.targetVersion }}</span>
               <span v-if="lastFailedOperation.finishedAt">{{ lastFailedOperation.finishedAtDisplay }}</span>
             </div>
-            <p class="m-0 wrap-anywhere text-cp-text-secondary">
+            <p class="m-0 wrap-anywhere text-z-text-secondary">
               {{ lastFailedOperation.error || lastFailedOperation.message || '操作失败' }}
             </p>
           </div>
@@ -369,13 +369,13 @@ watch(
 
       <section
         v-if="hasReleaseNotes || releaseNotesLoading"
-        class="grid gap-2 rounded-cp-card bg-cp-fill-quaternary px-4 py-3.5"
+        class="grid gap-2 rounded-z-card bg-z-fill-quaternary px-4 py-3.5"
       >
         <div class="flex items-center justify-between gap-3">
-          <p class="m-0 text-cp font-heavy text-cp-text">
+          <p class="m-0 text-z font-heavy text-z-text">
             发布说明
           </p>
-          <span class="font-mono text-cp-xs font-emphasis text-cp-text-quaternary">
+          <span class="font-mono text-z-xs font-emphasis text-z-text-quaternary">
             <ZSkeleton v-if="releaseNotesLoading" shape="text" class="w-14" aria-hidden="true" />
             <template v-else>{{ presentation.releaseVersion }}</template>
           </span>
@@ -400,22 +400,22 @@ watch(
 
       <section
         v-if="showUpdateProgress"
-        class="overflow-hidden rounded-cp-card bg-cp-fill-quaternary"
+        class="overflow-hidden rounded-z-card bg-z-fill-quaternary"
       >
         <header class="flex items-center justify-between gap-3 px-4 pt-3.5 pb-2.5">
           <div class="flex min-w-0 items-center gap-2">
-            <Terminal class="size-4 shrink-0 text-cp-success" />
-            <p class="m-0 text-cp leading-none font-heavy text-cp-text">
+            <Terminal class="size-4 shrink-0 text-z-success" />
+            <p class="m-0 text-z leading-none font-heavy text-z-text">
               更新进度
             </p>
           </div>
           <span
-            class="inline-flex h-6 items-center gap-1.5 rounded-full bg-cp-fill-quaternary px-2 text-cp-xs leading-none font-bold text-cp-text-secondary"
+            class="inline-flex h-6 items-center gap-1.5 rounded-full bg-z-fill-quaternary px-2 text-z-xs leading-none font-bold text-z-text-secondary"
             :title="updateStreamError || presentation.streamStatusLabel"
           >
             <i
               class="size-1.5 rounded-full"
-              :class="updateStreaming ? 'bg-cp-success' : 'bg-cp-text-quaternary'"
+              :class="updateStreaming ? 'bg-z-success' : 'bg-z-text-quaternary'"
             />
             {{ presentation.streamStatusLabel }}
           </span>
@@ -429,16 +429,16 @@ watch(
             <div
               v-for="log in updateLogRows"
               :key="log.id"
-              class="grid grid-cols-[68px_14px_minmax(0,1fr)] items-start gap-2 rounded-cp bg-cp-bg-container px-3 py-2 font-mono text-cp-xs leading-[1.55]"
+              class="grid grid-cols-[68px_14px_minmax(0,1fr)] items-start gap-2 rounded-z bg-z-bg-container px-3 py-2 font-mono text-z-xs leading-[1.55]"
             >
-              <span class="tabular-nums text-cp-text-quaternary">{{ log.time }}</span>
+              <span class="tabular-nums text-z-text-quaternary">{{ log.time }}</span>
               <Circle
                 class="mt-1 size-2.5"
                 :class="log.classes.marker"
                 fill="currentColor"
               />
               <p class="m-0 min-w-0 wrap-break-word" :class="log.classes.text">
-                <span v-if="log.step" class="mr-1 text-cp-text-quaternary">[{{ log.step }}]</span>
+                <span v-if="log.step" class="mr-1 text-z-text-quaternary">[{{ log.step }}]</span>
                 {{ log.message }}
               </p>
             </div>
@@ -465,12 +465,12 @@ watch(
               <CircleHelp class="size-4" />
             </ZButton>
           </template>
-          <div class="grid w-72 gap-2 p-3 text-cp-sm text-cp-text-secondary">
+          <div class="grid w-72 gap-2 p-3 text-z-sm text-z-text-secondary">
             <p v-for="channel in availableChannels" :key="channel" class="m-0">
-              <strong class="font-heavy text-cp-text">{{ channelLabels[channel].label }}</strong>
+              <strong class="font-heavy text-z-text">{{ channelLabels[channel].label }}</strong>
               · {{ channelLabels[channel].description }}
             </p>
-            <p class="m-0 text-cp-text-quaternary">
+            <p class="m-0 text-z-text-quaternary">
               选择仅用于本次检查，重新打开时按运行版本选择通道，不会自动安装或降级
             </p>
           </div>
@@ -546,23 +546,23 @@ watch(
     @confirm="handleConfirmUpdate"
   >
     <div class="grid gap-3">
-      <div class="grid gap-2 rounded-cp bg-cp-fill-quaternary p-3">
+      <div class="grid gap-2 rounded-z bg-z-fill-quaternary p-3">
         <div
           v-for="item in presentation.confirmRows"
           :key="item.key"
           class="flex min-w-0 items-center justify-between gap-3"
         >
-          <span class="text-cp-sm leading-none font-bold text-cp-text-quaternary">
+          <span class="text-z-sm leading-none font-bold text-z-text-quaternary">
             {{ item.label }}
           </span>
           <span
-            class="truncate font-mono text-cp leading-none font-heavy text-cp-text"
+            class="truncate font-mono text-z leading-none font-heavy text-z-text"
           >
             {{ item.value }}
           </span>
         </div>
       </div>
-      <p class="m-0 text-cp-sm leading-relaxed font-emphasis text-cp-text-quaternary">
+      <p class="m-0 text-z-sm leading-relaxed font-emphasis text-z-text-quaternary">
         点击确认后弹窗会关闭，并按远端最新目标版本开始更新
       </p>
     </div>

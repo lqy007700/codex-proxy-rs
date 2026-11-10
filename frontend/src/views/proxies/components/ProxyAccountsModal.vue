@@ -118,21 +118,21 @@ watch([
         </ZButton>
         <ZInput v-model="search" class="mb-4 shrink-0 sm:w-80" :disabled="removing" aria-label="搜索关联账号" placeholder="搜索账号名称或邮箱">
           <template #prefix>
-            <Search class="size-4.5 text-cp-text-tertiary" />
+            <Search class="size-4.5 text-z-text-tertiary" />
           </template>
         </ZInput>
       </div>
-      <ZTable :key="proxy?.id" class="min-h-0 shrink-0 [--cp-table-row-height:64px]" :style="{ height: tableHeight }" :columns="columns" :data="rows" :loading="loading" :empty-text="emptyText">
+      <ZTable :key="proxy?.id" class="min-h-0 shrink-0 [--z-table-row-height:64px]" :style="{ height: tableHeight }" :columns="columns" :data="rows" :loading="loading" :empty-text="emptyText">
         <template #identity="{ row }">
           <div class="flex min-w-0 items-center gap-3">
-            <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-cp font-extrabold" :class="row.avatarTone" aria-hidden="true">
+            <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-z font-extrabold" :class="row.avatarTone" aria-hidden="true">
               {{ row.initial }}
             </span>
             <div class="min-w-0 flex-1">
-              <div class="truncate text-cp font-heavy text-cp-text" :title="row.name">
+              <div class="truncate text-z font-heavy text-z-text" :title="row.name">
                 {{ row.displayName }}
               </div>
-              <div v-if="row.email" class="mt-0.5 truncate font-mono text-cp-xs font-emphasis text-cp-text-quaternary" :title="row.email">
+              <div v-if="row.email" class="mt-0.5 truncate font-mono text-z-xs font-emphasis text-z-text-quaternary" :title="row.email">
                 {{ row.email }}
               </div>
             </div>
@@ -143,7 +143,7 @@ watch([
         </template>
         <template #plan="{ row }">
           <AccountPlanBadge v-if="row.planType && row.planTypeDisplay" :plan-type="row.planType" :plan-type-display="row.planTypeDisplay" />
-          <span v-else class="text-cp-xs text-cp-text-quaternary">—</span>
+          <span v-else class="text-z-xs text-z-text-quaternary">—</span>
         </template>
         <template #groups="{ row }">
           <div class="flex justify-center">
@@ -158,7 +158,7 @@ watch([
             :loading="removing && pendingRemove?.id === row.id"
             @click="requestRemove(row)"
           >
-            <Unlink class="size-3.5 text-cp-error" />
+            <Unlink class="size-3.5 text-z-error" />
           </ZIconButton>
         </template>
       </ZTable>

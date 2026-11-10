@@ -256,7 +256,7 @@ const {
       <template #body>
         <div class="flex min-h-0 flex-col xl:h-full">
           <ZTable
-            class="h-100! min-h-100 flex-none [--cp-table-row-height:72px] xl:h-auto! xl:min-h-0 xl:flex-1"
+            class="h-100! min-h-100 flex-none [--z-table-row-height:72px] xl:h-auto! xl:min-h-0 xl:flex-1"
             :columns="visibleColumns"
             :data="accounts"
             :loading="loading"
@@ -269,7 +269,7 @@ const {
             <template #expander="{ row }">
               <button
                 type="button"
-                class="inline-flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-cp-text-secondary transition hover:bg-cp-bg-text-hover hover:text-cp-text"
+                class="inline-flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-z-text-secondary transition hover:bg-z-bg-text-hover hover:text-z-text"
                 :title="expandedAccountIds.has(row.id) ? '收起统计' : '展开统计'"
                 @click.stop="toggleExpanded(row.id)"
               >
@@ -301,7 +301,7 @@ const {
               <AccountIdentityCell :account="row" show-notes name-only>
                 <template #meta>
                   <span
-                    class="shrink-0 whitespace-nowrap font-mono text-[10px] font-emphasis tabular-nums text-cp-text-quaternary"
+                    class="shrink-0 whitespace-nowrap font-mono text-[10px] font-emphasis tabular-nums text-z-text-quaternary"
                     :title="`并发 ${row.concurrencyLimit ?? '默认'} · 权重 ${row.weight}`"
                   >
                     {{ row.concurrencyLimit ?? '默认' }}/{{ row.weight }}

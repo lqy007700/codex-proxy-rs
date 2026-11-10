@@ -62,7 +62,7 @@ watch(() => step.value.action, (action) => {
               <CircleHelp class="size-3.5" />
             </ZIconButton>
           </template>
-          <div class="max-w-72 p-3 text-cp-sm text-cp-text-secondary">
+          <div class="max-w-72 p-3 text-z-sm text-z-text-secondary">
             支持对象成员、双引号键名、数组索引和 * 通配，例如 $["workspaces"]["/home/alex/demo"]<br>环境文本使用 $，请求头直接填写名称
           </div>
         </ZPopover>
@@ -84,7 +84,7 @@ watch(() => step.value.action, (action) => {
               <CircleHelp class="size-3.5" />
             </ZIconButton>
           </template>
-          <div class="max-w-72 p-3 text-cp-sm text-cp-text-secondary">
+          <div class="max-w-72 p-3 text-z-sm text-z-text-secondary">
             ${1} 或 ${name} 引用捕获组，$$ 表示字面 $<br>使用 Rust regex 语法，不支持前后顾和模式中的反向引用
           </div>
         </ZPopover>

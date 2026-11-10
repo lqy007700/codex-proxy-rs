@@ -34,6 +34,7 @@ mod bundle;
 mod config;
 mod error;
 mod lease_renewal;
+mod shutdown;
 mod value;
 mod workers;
 

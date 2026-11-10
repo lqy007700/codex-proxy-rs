@@ -15,6 +15,7 @@ mod passthrough;
 mod portable_history;
 mod precommit;
 mod privacy;
+mod reauthorization;
 mod recovery;
 mod response_interrupt;
 mod search_history;
@@ -4241,12 +4242,44 @@ async fn websocket_fast_path_miss_uses_http_and_keeps_background_preconnect() {
 
 #[tokio::test]
 async fn connection_failure_preserves_io_cause_without_claiming_payload_was_sent() {
-    for websocket in [false, true] {
+    use gateway_core::error::ProxyConnectionHint;
+    for (websocket, proxy_hint) in [
+        (false, None),
+        (true, None),
+        (false, Some(ProxyConnectionHint::CheckProxy)),
+        (true, Some(ProxyConnectionHint::Unreachable)),
+        (true, Some(ProxyConnectionHint::TunnelFailed)),
+    ] {
         let store = Arc::new(MemoryAccountStore::default());
         create_account(&store, "acct_abrupt_disconnect").await;
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}", listener.local_addr().unwrap());
-        drop(listener);
+        let rejection = if proxy_hint == Some(ProxyConnectionHint::TunnelFailed) {
+            Some(tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                assert!(
+                    capture_http_request(&mut socket)
+                        .await
+                        .starts_with(b"CONNECT ")
+                );
+                socket
+                    .write_all(
+                        b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+            }))
+        } else {
+            drop(listener);
+            None
+        };
+        if proxy_hint.is_some() {
+            store.set_egress(
+                "acct_abrupt_disconnect",
+                Some(gateway_core::account::OutboundProxy::parse(&base_url).unwrap()),
+                None,
+            );
+        }
         let operation = if websocket {
             Operation::Generate(generate_with_persisted_session_context(
                 "acct_abrupt_disconnect",
@@ -4272,7 +4305,13 @@ async fn connection_failure_preserves_io_cause_without_claiming_payload_was_sent
             }
         };
         let diagnostic = error.diagnostic().expect("connection diagnosis");
-        assert_eq!(diagnostic.code(), Some("connection_refused"));
+        assert_eq!(diagnostic.proxy_hint(), proxy_hint);
+        if let Some(rejection) = rejection {
+            rejection.await.unwrap();
+        }
+        if proxy_hint.is_none() {
+            assert_eq!(diagnostic.code(), Some("connection_refused"));
+        }
         assert_eq!(diagnostic.stage(), Some("connect"));
         assert_eq!(error.send_state(), UpstreamSendState::NotSent);
         assert!(!diagnostic.as_str().contains("after payload send"));

@@ -72,7 +72,7 @@ function handleExplanationKeydown(event: KeyboardEvent) {
     type="info"
   >
     <template #icon>
-      <ChartNoAxesCombined class="size-5 text-cp-primary-text" :stroke-width="1.75" />
+      <ChartNoAxesCombined class="size-5 text-z-primary-text" :stroke-width="1.75" />
     </template>
 
     <div class="grid grid-cols-1 gap-4">
@@ -87,7 +87,7 @@ function handleExplanationKeydown(event: KeyboardEvent) {
 
       <div aria-live="polite" :aria-busy="loading || refreshing">
         <ForecastSkeleton v-if="loading || refreshing" />
-        <div v-else-if="error && !report" class="grid rounded-cp-card bg-cp-fill-tertiary/70 [html[data-theme=light]_&]:bg-cp-fill-quaternary/70">
+        <div v-else-if="error && !report" class="grid rounded-z-card bg-z-fill-tertiary/70 [html[data-theme=light]_&]:bg-z-fill-quaternary/70">
           <ZEmpty title="预测加载失败" description="暂时无法取得预测数据，请重新加载" surface="none" class="min-h-80 content-center">
             <template #action>
               <ZButton @click="load">
@@ -97,7 +97,7 @@ function handleExplanationKeydown(event: KeyboardEvent) {
           </ZEmpty>
         </div>
         <template v-else-if="forecast">
-          <div v-if="unavailableReason" class="grid rounded-cp-card bg-cp-fill-tertiary/70 [html[data-theme=light]_&]:bg-cp-fill-quaternary/70">
+          <div v-if="unavailableReason" class="grid rounded-z-card bg-z-fill-tertiary/70 [html[data-theme=light]_&]:bg-z-fill-quaternary/70">
             <ZEmpty title="暂时无法预测" :description="unavailableReason" :icon="ChartNoAxesCombined" surface="none" class="min-h-72 content-center" />
           </div>
           <ForecastCapacity v-else :forecast="forecast" />
@@ -107,7 +107,7 @@ function handleExplanationKeydown(event: KeyboardEvent) {
 
     <template #footer>
       <div class="mr-auto flex min-w-0 items-center gap-1">
-        <span v-if="forecast?.source?.observedAt" class="hidden text-cp-xs text-cp-text-tertiary sm:block">
+        <span v-if="forecast?.source?.observedAt" class="hidden text-z-xs text-z-text-tertiary sm:block">
           更新于 {{ forecast.source.observedAtDisplay }}
         </span>
         <ZPopover v-model="explanationOpen" trigger="hover-click" placement="top-start" :hover-delay="240">
@@ -122,8 +122,8 @@ function handleExplanationKeydown(event: KeyboardEvent) {
               <CircleAlert class="size-3.5" aria-hidden="true" />
             </ZIconButton>
           </template>
-          <section :id="explanationId" role="tooltip" class="grid w-96 max-w-[calc(100vw-2rem)] gap-3 p-4 text-cp-xs leading-relaxed text-cp-text-secondary">
-            <h4 class="m-0 font-heavy text-cp-text">
+          <section :id="explanationId" role="tooltip" class="grid w-96 max-w-[calc(100vw-2rem)] gap-3 p-4 text-z-xs leading-relaxed text-z-text-secondary">
+            <h4 class="m-0 font-heavy text-z-text">
               仅供参考
             </h4>
             <p class="m-0">

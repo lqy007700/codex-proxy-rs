@@ -8,7 +8,7 @@ const mistGradientId = `${id}-brand-mist`
 </script>
 
 <template>
-  <svg class="text-cp-text-light-solid" xmlns="http://www.w3.org/2000/svg" viewBox="48 48 416 416" focusable="false">
+  <svg class="text-z-text-light-solid" xmlns="http://www.w3.org/2000/svg" viewBox="48 48 416 416" focusable="false">
     <defs>
       <filter :id="noiseFilterId" x="0" y="0" width="100%" height="100%">
         <feTurbulence type="fractalNoise" baseFrequency="1.7" numOctaves="2" seed="31" result="noise" />
@@ -31,7 +31,7 @@ const mistGradientId = `${id}-brand-mist`
       </radialGradient>
     </defs>
 
-    <rect class="fill-(--cp-brand-mark-bg)" x="48" y="48" width="416" height="416" rx="88" />
+    <rect class="fill-(--z-brand-mark-bg)" x="48" y="48" width="416" height="416" rx="88" />
     <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="36">
       <path d="M156 307A112 112 0 0 1 307 156" />
       <path d="M356 205A112 112 0 0 1 205 356" />

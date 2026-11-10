@@ -95,15 +95,15 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
             <template #identity="{ row }">
               <div class="grid min-w-0 gap-1">
                 <div class="flex min-w-0 flex-wrap items-center gap-2">
-                  <strong class="truncate text-cp text-cp-text">
+                  <strong class="truncate text-z text-z-text">
                     {{ row.name }}
                   </strong>
                   <span
                     v-if="row.fastMode !== 'default'"
                     class="inline-flex size-4 shrink-0 items-center justify-center rounded-full"
                     :class="row.fastMode === 'enabled'
-                      ? 'bg-cp-warning-container text-cp-warning-on-container'
-                      : 'bg-cp-fill-tertiary text-cp-text-tertiary'"
+                      ? 'bg-z-warning-container text-z-warning-on-container'
+                      : 'bg-z-fill-tertiary text-z-text-tertiary'"
                     :title="row.fastMode === 'enabled' ? 'Fast 已开启' : 'Fast 已关闭'"
                     role="img"
                     :aria-label="row.fastMode === 'enabled' ? 'Fast 已开启' : 'Fast 已关闭'"
@@ -113,7 +113,7 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
                   </span>
                   <span
                     v-if="!row.allowImageGeneration"
-                    class="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-cp-fill-tertiary text-cp-text-tertiary"
+                    class="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-z-fill-tertiary text-z-text-tertiary"
                     title="生图已关闭"
                     role="img"
                     aria-label="生图已关闭"
@@ -121,7 +121,7 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
                     <ImageOff class="size-3" stroke-width="2.2" aria-hidden="true" />
                   </span>
                 </div>
-                <span v-if="row.description" class="truncate text-cp-xs font-emphasis text-cp-text-quaternary">
+                <span v-if="row.description" class="truncate text-z-xs font-emphasis text-z-text-quaternary">
                   {{ row.description }}
                 </span>
               </div>
@@ -138,10 +138,10 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
 
             <template #enabled="{ row }">
               <span
-                class="inline-flex h-6 items-center rounded-lg px-2 text-cp-xs font-bold"
+                class="inline-flex h-6 items-center rounded-lg px-2 text-z-xs font-bold"
                 :class="row.enabled
-                  ? 'bg-cp-success-container text-cp-success-on-container'
-                  : 'bg-cp-fill-tertiary text-cp-text-quaternary'"
+                  ? 'bg-z-success-container text-z-success-on-container'
+                  : 'bg-z-fill-tertiary text-z-text-quaternary'"
               >
                 {{ row.enabled ? '已启用' : '已禁用' }}
               </span>
@@ -213,10 +213,10 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
       <p class="m-0">
         确定禁用“{{ pendingDisableGroup?.name }}”吗？
       </p>
-      <p v-if="referencedKeyNames.length > 0" class="mt-2 mb-0 text-cp-warning-text">
+      <p v-if="referencedKeyNames.length > 0" class="mt-2 mb-0 text-z-warning-text">
         将影响 {{ referencedKeyNames.length }} 个 API 密钥：{{ referencedKeyNames.join('、') }}
       </p>
-      <p v-else-if="pendingDisableGroup?.clientKeyCount" class="mt-2 mb-0 text-cp-warning-text">
+      <p v-else-if="pendingDisableGroup?.clientKeyCount" class="mt-2 mb-0 text-z-warning-text">
         将影响 {{ pendingDisableGroup.clientKeyCount }} 个 API 密钥
       </p>
     </ZConfirmDialog>

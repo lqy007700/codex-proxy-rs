@@ -107,18 +107,18 @@ function clearForm() {
         <ZSwitch v-model="customLocation" label="自定义时区位置" :disabled="busy" />
         <RequestLocationDetectButton :loading="detectingLocation" :disabled="busy" @detect="emit('detectLocation')" />
       </div>
-      <p v-if="manualLocationWarning" class="m-0 text-cp-sm text-cp-warning-text" role="status">
+      <p v-if="manualLocationWarning" class="m-0 text-z-sm text-z-warning-text" role="status">
         {{ manualLocationWarning }}
       </p>
       <RequestLocationFields v-if="customLocation" v-model="location" :disabled="busy" />
-      <p v-if="proxy?.accountCount && proxyUrl.trim()" class="m-0 text-cp-sm text-cp-warning-text">
+      <p v-if="proxy?.accountCount && proxyUrl.trim()" class="m-0 text-z-sm text-z-warning-text">
         将更新 {{ proxy.accountCount }} 个关联账号的出口
       </p>
     </ZForm>
     <ProxyBatchCreateFields v-else-if="!batchItems.length" v-model="batchText" v-model:prefix="batchPrefix" v-model:protocol="batchProtocol" :rows="parsed" :error="inputError" :disabled="busy" />
     <div v-else class="grid min-w-0 gap-5">
       <ProxyBatchResults :items="batchItems" :tests="batchTestItems" />
-      <p v-if="batchItems.some(item => item.status === 'unknown')" class="m-0 text-cp-xs text-cp-warning-text" role="alert">
+      <p v-if="batchItems.some(item => item.status === 'unknown')" class="m-0 text-z-xs text-z-warning-text" role="alert">
         结果待确认的条目可能已保存，请刷新列表核对后再添加
       </p>
     </div>

@@ -66,7 +66,7 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
     @closed="emit('afterLeave')"
   >
     <template #icon>
-      <KeyRound class="text-cp-text" :size="20" aria-hidden="true" />
+      <KeyRound class="text-z-text" :size="20" aria-hidden="true" />
     </template>
 
     <ZForm ref="formElement" :model="form" :rules="rules" scroll-to-error focus-on-error novalidate class="grid gap-6" @submit="requestSave">
@@ -125,7 +125,7 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
             :disabled="saving"
             @update:model-value="updateForm('portableHistory', $event)"
           />
-          <p class="text-sm text-cp-text-secondary">
+          <p class="text-sm text-z-text-secondary">
             正常保留推理状态，遇到明确推理密文拒绝时尝试一次同账号恢复
           </p>
         </div>
@@ -135,8 +135,8 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
         <div class="grid gap-3">
           <div class="flex items-center justify-between gap-3">
             <div class="grid gap-1">
-              <span class="text-cp-sm text-cp-text">按 Key 派生安装身份（Seed）</span>
-              <span class="text-cp-xs text-cp-text-secondary">开启后按 Key 与账号分别生成稳定身份，适合一个 Key 使用多个账号</span>
+              <span class="text-z-sm text-z-text">按 Key 派生安装身份（Seed）</span>
+              <span class="text-z-xs text-z-text-secondary">开启后按 Key 与账号分别生成稳定身份，适合一个 Key 使用多个账号</span>
             </div>
             <ZSwitch
               :model-value="form.installationSeedEnabled"
@@ -145,7 +145,7 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
               @update:model-value="toggleInstallationSeed"
             />
           </div>
-          <div v-if="form.installationSeedEnabled" class="grid gap-1 text-cp-xs text-cp-text-secondary">
+          <div v-if="form.installationSeedEnabled" class="grid gap-1 text-z-xs text-z-text-secondary">
             <span>当前 Seed：{{ form.installationSeed }}</span>
             <span>修改已有 Key 的 Seed 会切换上游安装身份，可能影响旧会话续接</span>
           </div>

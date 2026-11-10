@@ -22,7 +22,7 @@ const catalogId = useId()
             <CircleHelp class="size-3.5" />
           </ZIconButton>
         </template>
-        <div class="grid max-w-64 gap-2 p-3 text-cp-sm text-cp-text-secondary">
+        <div class="grid max-w-64 gap-2 p-3 text-z-sm text-z-text-secondary">
           <p class="m-0">
             优先使用本账号的映射，未命中时沿用全局映射
           </p>
@@ -45,7 +45,7 @@ const catalogId = useId()
         class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]"
       >
         <ZInput v-model="row.requestedModel" placeholder="请求模型" :aria-label="`请求模型 ${index + 1}`" :disabled="disabled" />
-        <span class="hidden text-cp-text-quaternary sm:block" aria-hidden="true">→</span>
+        <span class="hidden text-z-text-quaternary sm:block" aria-hidden="true">→</span>
         <ZInput
           v-model="row.upstreamModel"
           class="col-start-1 row-start-2 sm:col-start-auto sm:row-start-auto"
@@ -60,7 +60,7 @@ const catalogId = useId()
           :disabled="disabled"
           @click="rows.splice(index, 1)"
         >
-          <Trash2 class="size-4 text-cp-error" />
+          <Trash2 class="size-4 text-z-error" />
         </ZIconButton>
       </div>
       <datalist :id="catalogId">

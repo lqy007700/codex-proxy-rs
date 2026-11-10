@@ -143,28 +143,28 @@ function formatTooltip(params: unknown) {
   >
     <template #body>
       <div class="grid min-h-66" :class="hasData ? 'gap-3' : 'h-full'">
-        <div v-if="hasData" class="grid grid-cols-2 gap-2 rounded-xl bg-cp-fill-quaternary/45 p-2 sm:grid-cols-4">
+        <div v-if="hasData" class="grid grid-cols-2 gap-2 rounded-xl bg-z-fill-quaternary/45 p-2 sm:grid-cols-4">
           <div class="grid gap-1 px-2">
-            <span class="text-[10px] font-bold text-cp-text-quaternary">服务成功率</span>
-            <strong class="font-mono text-cp-base font-heavy tabular-nums text-cp-green-text">
+            <span class="text-[10px] font-bold text-z-text-quaternary">服务成功率</span>
+            <strong class="font-mono text-z-base font-heavy tabular-nums text-z-green-text">
               {{ serviceSuccessRateText(health.successRate) }}
             </strong>
           </div>
           <div class="grid gap-1 px-2">
-            <span class="text-[10px] font-bold text-cp-text-quaternary">完成率</span>
-            <strong class="font-mono text-cp-base font-heavy tabular-nums text-cp-text">
+            <span class="text-[10px] font-bold text-z-text-quaternary">完成率</span>
+            <strong class="font-mono text-z-base font-heavy tabular-nums text-z-text">
               {{ formatPercent(health.completionRate) }}
             </strong>
           </div>
           <div class="grid gap-1 px-2">
-            <span class="text-[10px] font-bold text-cp-text-quaternary">已取消</span>
-            <strong class="font-mono text-cp-base font-heavy tabular-nums text-cp-blue-text">
+            <span class="text-[10px] font-bold text-z-text-quaternary">已取消</span>
+            <strong class="font-mono text-z-base font-heavy tabular-nums text-z-blue-text">
               {{ formatCompactNumber(health.cancelledRequests) }}
             </strong>
           </div>
           <div class="grid gap-1 px-2">
-            <span class="text-[10px] font-bold text-cp-text-quaternary">未完成</span>
-            <strong class="font-mono text-cp-base font-heavy tabular-nums text-cp-orange-text">
+            <span class="text-[10px] font-bold text-z-text-quaternary">未完成</span>
+            <strong class="font-mono text-z-base font-heavy tabular-nums text-z-orange-text">
               {{ formatCompactNumber(health.incompleteRequests) }}
             </strong>
           </div>

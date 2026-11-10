@@ -2297,6 +2297,33 @@ impl ProviderCooldownPort for TestCooldown {
         Box::pin(async { Ok(None) })
     }
 
+    fn read_many<'a>(
+        &'a self,
+        account_ids: &'a [ProviderAccountId],
+    ) -> BoxFuture<'a, Vec<Result<Option<ProviderCooldown>, ProviderStoreError>>> {
+        Box::pin(async move {
+            let mut results = Vec::with_capacity(account_ids.len());
+            for id in account_ids {
+                results.push(self.read(id).await);
+            }
+            results
+        })
+    }
+
+    fn read_scoped_many<'a>(
+        &'a self,
+        account_ids: &'a [ProviderAccountId],
+        scope: &'a ProviderCooldownScope,
+    ) -> BoxFuture<'a, Vec<Result<Option<ProviderScopedCooldown>, ProviderStoreError>>> {
+        Box::pin(async move {
+            let mut results = Vec::with_capacity(account_ids.len());
+            for id in account_ids {
+                results.push(self.read_scoped(id, scope).await);
+            }
+            results
+        })
+    }
+
     fn clear<'a>(
         &'a self,
         _account_id: &'a ProviderAccountId,

@@ -45,7 +45,7 @@ const view = computed(() => resolveAccountUsageWindowPresentation({
         >
           <span
             v-if="view.quota.localUsageVisible"
-            class="text-right text-cp-text-quaternary"
+            class="text-right text-z-text-quaternary"
             :class="view.classes.value"
             :title="showNativeTooltip ? `窗口消耗：${view.quota.localUsageDisplay}` : undefined"
           >
@@ -66,7 +66,7 @@ const view = computed(() => resolveAccountUsageWindowPresentation({
         >
           <span
             v-if="view.quota.localUsageVisible"
-            class="text-cp-text-quaternary"
+            class="text-z-text-quaternary"
             :class="view.classes.value"
           >
             {{ view.quota.localUsageDisplay }}
@@ -96,7 +96,7 @@ const view = computed(() => resolveAccountUsageWindowPresentation({
       </div>
       <div
         v-if="view.quota.resetVisible"
-        class="mt-3 text-cp-sm font-emphasis text-cp-text-secondary"
+        class="mt-3 text-z-sm font-emphasis text-z-text-secondary"
       >
         重置时间: {{ window.resetAtDisplay }}
       </div>
@@ -109,7 +109,7 @@ const view = computed(() => resolveAccountUsageWindowPresentation({
         </span>
         <strong
           v-if="view.local.requestValueVisible"
-          class="shrink-0 font-mono tabular-nums text-cp-text"
+          class="shrink-0 font-mono tabular-nums text-z-text"
           :class="view.classes.value"
         >
           {{ view.local.requestDisplay }}
@@ -125,7 +125,7 @@ const view = computed(() => resolveAccountUsageWindowPresentation({
     </template>
 
     <div v-else :class="view.classes.header">
-      <span class="min-w-0 text-cp-text-secondary">额度待观测</span>
+      <span class="min-w-0 text-z-text-secondary">额度待观测</span>
     </div>
   </div>
 </template>

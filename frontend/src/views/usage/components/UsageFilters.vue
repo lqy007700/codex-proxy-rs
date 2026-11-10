@@ -20,7 +20,7 @@ const search = defineModel<string>('search', { required: true })
     <div class="min-w-0 flex-1 sm:w-96 sm:flex-none">
       <ZInput v-model="search" placeholder="请求 ID、密钥名称、上游key、账号或模型" aria-label="搜索请求：请求 ID、密钥名称、上游key、账号或模型" class="w-full">
         <template #prefix>
-          <Search class="size-4.5 text-cp-text-tertiary" />
+          <Search class="size-4.5 text-z-text-tertiary" />
         </template>
       </ZInput>
     </div>

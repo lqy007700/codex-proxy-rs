@@ -41,8 +41,8 @@ watch(() => props.notes, recheckOpen, { flush: 'post' })
     <template #reference>
       <button
         type="button"
-        class="inline-flex min-w-0 max-w-full touch-manipulation items-center rounded-cp-sm border-0 bg-transparent p-0 text-left text-cp-xs leading-4 text-cp-text-tertiary outline-none transition-colors hover:text-cp-primary-text focus-visible:ring-2 focus-visible:ring-cp-control-outline motion-reduce:transition-none"
-        :class="open ? 'text-cp-primary-text' : ''"
+        class="inline-flex min-w-0 max-w-full touch-manipulation items-center rounded-z-sm border-0 bg-transparent p-0 text-left text-z-xs leading-4 text-z-text-tertiary outline-none transition-colors hover:text-z-primary-text focus-visible:ring-2 focus-visible:ring-z-control-outline motion-reduce:transition-none"
+        :class="open ? 'text-z-primary-text' : ''"
         aria-label="查看账号备注"
         aria-haspopup="dialog"
         :aria-expanded="open"
@@ -52,9 +52,9 @@ watch(() => props.notes, recheckOpen, { flush: 'post' })
       </button>
     </template>
 
-    <section :id="detailId" class="w-max max-w-[min(20rem,calc(100vw-1rem))] overflow-hidden rounded-cp-lg" role="dialog" aria-label="账号备注">
+    <section :id="detailId" class="w-max max-w-[min(20rem,calc(100vw-1rem))] overflow-hidden rounded-z-lg" role="dialog" aria-label="账号备注">
       <ZScrollbar max-height="min(240px, calc(100dvh - 2rem))">
-        <div class="px-3 py-2.5 text-cp-sm leading-5 whitespace-pre-wrap text-cp-text select-text wrap-anywhere">
+        <div class="px-3 py-2.5 text-z-sm leading-5 whitespace-pre-wrap text-z-text select-text wrap-anywhere">
           {{ notes }}
         </div>
       </ZScrollbar>

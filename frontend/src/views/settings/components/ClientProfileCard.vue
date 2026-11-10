@@ -21,10 +21,10 @@ const model = defineModel<ProviderRequestProfiles>({ required: true })
     >
       <template #heading>
         <div class="min-w-0 pt-0.5">
-          <h2 class="m-0 text-xl leading-[1.15] font-heavy text-cp-text text-balance">
+          <h2 class="m-0 text-xl leading-[1.15] font-heavy text-z-text text-balance">
             客户端身份
           </h2>
-          <p class="mt-1.75 mb-0 text-cp leading-[1.3] font-emphasis text-cp-text-secondary text-pretty">
+          <p class="mt-1.75 mb-0 text-z leading-[1.3] font-emphasis text-z-text-secondary text-pretty">
             配置网关向上游声明的客户端类型、版本与请求头
           </p>
         </div>

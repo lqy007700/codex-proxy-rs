@@ -21,7 +21,7 @@ const label = computed(() => `账号并发占用 ${props.capacity.usedSlots ?? '
     variant="text" size="small" :type="full ? 'warning' : 'default'"
     :aria-label="`${label}，查看并发明细`"
     :title="`${label}，查看明细`"
-    class="relative top-0.75 -m-0.5 h-auto! px-0.5! py-0.5! whitespace-nowrap font-mono text-[9px]! font-normal! tabular-nums hover:bg-cp-bg-text-hover!"
+    class="relative top-0.75 -m-0.5 h-auto! px-0.5! py-0.5! whitespace-nowrap font-mono text-[9px]! font-normal! tabular-nums hover:bg-z-bg-text-hover!"
     @click.stop="$emit('showDetails')"
   >
     <span aria-hidden="true" class="inline-flex items-center gap-1">

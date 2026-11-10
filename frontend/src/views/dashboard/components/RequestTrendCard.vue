@@ -55,14 +55,14 @@ const {
 
     <template #body>
       <div class="grid gap-3.5">
-        <div class="grid h-14.25 min-w-0 grid-cols-3 gap-1.5 rounded-xl bg-cp-fill-quaternary/45 p-1.5">
+        <div class="grid h-14.25 min-w-0 grid-cols-3 gap-1.5 rounded-xl bg-z-fill-quaternary/45 p-1.5">
           <button
             v-for="item in props.summary"
             :key="item.label"
             type="button"
             :aria-label="`突出显示${item.label}曲线`"
             :aria-pressed="pinnedSummaryLabel === item.label"
-            class="group grid min-w-0 grid-cols-[8px_minmax(0,1fr)] items-center gap-x-2 rounded-lg border-0 bg-transparent px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline"
+            class="group grid min-w-0 grid-cols-[8px_minmax(0,1fr)] items-center gap-x-2 rounded-lg border-0 bg-transparent px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-z-control-outline"
             @click="toggleSummarySeries(item.label)"
           >
             <i
@@ -71,20 +71,20 @@ const {
               :class="[
                 isSummarySeriesActive(item.label) ? 'scale-125' : undefined,
                 {
-                  'bg-cp-info': item.tone === 'info',
-                  'bg-cp-success': item.tone === 'success',
-                  'bg-cp-warning': item.tone === 'warning',
-                  'bg-cp-error': item.tone === 'danger',
-                  'bg-cp-text-tertiary': item.tone === 'normal',
+                  'bg-z-info': item.tone === 'info',
+                  'bg-z-success': item.tone === 'success',
+                  'bg-z-warning': item.tone === 'warning',
+                  'bg-z-error': item.tone === 'danger',
+                  'bg-z-text-tertiary': item.tone === 'normal',
                 },
               ]"
             />
             <span class="grid min-w-0 gap-1.5">
-              <span class="truncate text-[10px] leading-none font-bold text-cp-text-secondary">
+              <span class="truncate text-[10px] leading-none font-bold text-z-text-secondary">
                 {{ item.label }}
               </span>
               <strong
-                class="truncate font-mono text-cp-xl leading-none font-heavy tabular-nums text-cp-text"
+                class="truncate font-mono text-z-xl leading-none font-heavy tabular-nums text-z-text"
                 :title="item.value"
               >
                 {{ item.value }}

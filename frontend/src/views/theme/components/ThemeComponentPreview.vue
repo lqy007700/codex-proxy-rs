@@ -54,13 +54,13 @@ const viewOptions = [
   { label: '受限', value: 'limited' },
 ]
 const themeSwatches = [
-  { label: 'Container', className: 'bg-cp-bg-container' },
-  { label: 'Fill Alter', className: 'bg-cp-fill-alter' },
-  { label: 'Elevated', className: 'bg-cp-bg-elevated' },
-  { label: 'Accent', className: 'bg-cp-primary' },
-  { label: 'Success', className: 'bg-cp-success' },
-  { label: 'Warning', className: 'bg-cp-warning' },
-  { label: 'Error', className: 'bg-cp-error' },
+  { label: 'Container', className: 'bg-z-bg-container' },
+  { label: 'Fill Alter', className: 'bg-z-fill-alter' },
+  { label: 'Elevated', className: 'bg-z-bg-elevated' },
+  { label: 'Accent', className: 'bg-z-primary' },
+  { label: 'Success', className: 'bg-z-success' },
+  { label: 'Warning', className: 'bg-z-warning' },
+  { label: 'Error', className: 'bg-z-error' },
 ]
 const progressItems = [
   { label: '账号可用率', value: '94%', width: '94%' },
@@ -169,32 +169,32 @@ const pagination: PaginationState = {
 
 function statusClass(status: PreviewTableRow['status']) {
   if (status === '正常')
-    return 'bg-cp-success-container text-cp-success-on-container'
+    return 'bg-z-success-container text-z-success-on-container'
   if (status === '限流')
-    return 'bg-cp-warning-container text-cp-warning-on-container'
+    return 'bg-z-warning-container text-z-warning-on-container'
   if (status === '异常')
-    return 'bg-cp-error-container text-cp-error-on-container'
-  return 'bg-cp-fill-tertiary text-cp-text-secondary'
+    return 'bg-z-error-container text-z-error-on-container'
+  return 'bg-z-fill-tertiary text-z-text-secondary'
 }
 </script>
 
 <template>
-  <div class="grid h-full min-w-0 grid-rows-[80px_352px_290px_520px_374px] gap-5 overflow-hidden rounded-cp-card bg-(--cp-card-bg) p-6 shadow-cp-card">
+  <div class="grid h-full min-w-0 grid-rows-[80px_352px_290px_520px_374px] gap-5 overflow-hidden rounded-z-card bg-(--z-card-bg) p-6 shadow-z-card">
     <header class="flex items-center justify-between gap-8 px-1">
       <div class="min-w-0">
-        <p class="m-0 font-mono text-cp-xs font-heavy tracking-[0.16em] text-cp-primary-text uppercase">
+        <p class="m-0 font-mono text-z-xs font-heavy tracking-[0.16em] text-z-primary-text uppercase">
           Component specimen
         </p>
-        <h1 class="mt-2 mb-0 text-[30px] leading-none font-extrabold text-cp-text">
+        <h1 class="mt-2 mb-0 text-[30px] leading-none font-extrabold text-z-text">
           组件概览
         </h1>
-        <p class="mt-2 mb-0 text-cp font-emphasis text-cp-text-secondary">
+        <p class="mt-2 mb-0 text-z font-emphasis text-z-text-secondary">
           在同一张校样板中检查控制态、数据密度与浮层关系
         </p>
       </div>
 
       <div class="flex shrink-0 items-center gap-6">
-        <span class="rounded-full bg-cp-primary-container px-3 py-1.5 font-mono text-[10px] font-heavy tracking-wide text-cp-primary-on-container uppercase">
+        <span class="rounded-full bg-z-primary-container px-3 py-1.5 font-mono text-[10px] font-heavy tracking-wide text-z-primary-on-container uppercase">
           21 Base Components
         </span>
         <div class="flex items-center gap-5" aria-label="当前主题语义色">
@@ -203,19 +203,19 @@ function statusClass(status: PreviewTableRow['status']) {
             :key="item.label"
             class="grid justify-items-center gap-1.5"
           >
-            <span class="size-6 rounded-cp shadow-cp-tertiary" :class="item.className" />
-            <span class="font-mono text-[10px] font-heavy text-cp-text-quaternary">{{ item.label }}</span>
+            <span class="size-6 rounded-z shadow-z-tertiary" :class="item.className" />
+            <span class="font-mono text-[10px] font-heavy text-z-text-quaternary">{{ item.label }}</span>
           </div>
         </div>
       </div>
     </header>
 
     <section class="grid min-w-0 grid-cols-12 gap-6" aria-label="基础控制组件">
-      <ZCard padding="compact" class="col-span-7 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="按钮与动作" description="ZButton · ZIconButton · ZMotionIcon">
+      <ZCard padding="compact" class="col-span-7 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" title="按钮与动作" description="ZButton · ZIconButton · ZMotionIcon">
         <template #body>
           <div class="grid flex-1 content-start gap-6">
             <div>
-              <p class="mt-0 mb-3 font-mono text-cp-xs font-heavy text-cp-text-quaternary">
+              <p class="mt-0 mb-3 font-mono text-z-xs font-heavy text-z-text-quaternary">
                 Button / action
               </p>
               <div class="flex flex-wrap items-center gap-3">
@@ -243,9 +243,9 @@ function statusClass(status: PreviewTableRow['status']) {
               </div>
             </div>
 
-            <div class="grid grid-cols-[1fr_auto] items-end gap-5 rounded-cp-lg bg-cp-fill-quaternary p-4">
+            <div class="grid grid-cols-[1fr_auto] items-end gap-5 rounded-z-lg bg-z-fill-quaternary p-4">
               <div>
-                <p class="mt-0 mb-3 text-cp-sm font-heavy text-cp-text-secondary">
+                <p class="mt-0 mb-3 text-z-sm font-heavy text-z-text-secondary">
                   尺寸与禁用状态
                 </p>
                 <div class="flex flex-wrap items-center gap-3">
@@ -284,7 +284,7 @@ function statusClass(status: PreviewTableRow['status']) {
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-5 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="表单与输入" description="ZInput · ZSelect · ZInputNumber · ZSlider · ZTextarea · ZColorPicker">
+      <ZCard padding="compact" class="col-span-5 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" title="表单与输入" description="ZInput · ZSelect · ZInputNumber · ZSlider · ZTextarea · ZColorPicker">
         <template #body>
           <ZForm class="grid-cols-2 gap-3!">
             <ZInput v-model="search" aria-label="搜索账号" placeholder="搜索账号">
@@ -336,7 +336,7 @@ function statusClass(status: PreviewTableRow['status']) {
     </section>
 
     <section class="grid min-w-0 grid-cols-12 gap-6" aria-label="选择与反馈组件">
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="选择与切换" description="ZSegmented · ZSwitch · ZCheckbox · ZRadio">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" title="选择与切换" description="ZSegmented · ZSwitch · ZCheckbox · ZRadio">
         <template #body>
           <div class="grid gap-5">
             <ZSegmented v-model="view" aria-label="账号视图" :options="viewOptions" class="w-full" />
@@ -355,26 +355,26 @@ function statusClass(status: PreviewTableRow['status']) {
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="反馈语义" description="Success · Warning · Error · Info">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" title="反馈语义" description="Success · Warning · Error · Info">
         <template #body>
           <div class="grid gap-2.5">
-            <div class="flex items-center gap-3 rounded-cp bg-cp-success-container px-3.5 py-3 text-cp-success-on-container">
-              <Check class="size-4 shrink-0" /><strong class="text-cp-sm">主题设置已保存</strong>
+            <div class="flex items-center gap-3 rounded-z bg-z-success-container px-3.5 py-3 text-z-success-on-container">
+              <Check class="size-4 shrink-0" /><strong class="text-z-sm">主题设置已保存</strong>
             </div>
-            <div class="flex items-center gap-3 rounded-cp bg-cp-warning-container px-3.5 py-3 text-cp-warning-on-container">
-              <TriangleAlert class="size-4 shrink-0" /><strong class="text-cp-sm">3 个账号额度接近上限</strong>
+            <div class="flex items-center gap-3 rounded-z bg-z-warning-container px-3.5 py-3 text-z-warning-on-container">
+              <TriangleAlert class="size-4 shrink-0" /><strong class="text-z-sm">3 个账号额度接近上限</strong>
             </div>
-            <div class="flex items-center gap-3 rounded-cp bg-cp-error-container px-3.5 py-3 text-cp-error-on-container">
-              <CircleAlert class="size-4 shrink-0" /><strong class="text-cp-sm">连接测试未通过</strong>
+            <div class="flex items-center gap-3 rounded-z bg-z-error-container px-3.5 py-3 text-z-error-on-container">
+              <CircleAlert class="size-4 shrink-0" /><strong class="text-z-sm">连接测试未通过</strong>
             </div>
-            <div class="flex items-center gap-3 rounded-cp bg-cp-info-container px-3.5 py-3 text-cp-info-on-container">
-              <Info class="size-4 shrink-0" /><strong class="text-cp-sm">调度规则将在下次请求生效</strong>
+            <div class="flex items-center gap-3 rounded-z bg-z-info-container px-3.5 py-3 text-z-info-on-container">
+              <Info class="size-4 shrink-0" /><strong class="text-z-sm">调度规则将在下次请求生效</strong>
             </div>
           </div>
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="状态与进度" description="ZTag · Progress Token">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" title="状态与进度" description="ZTag · Progress Token">
         <template #body>
           <div class="grid gap-4">
             <div class="flex flex-wrap gap-2">
@@ -395,11 +395,11 @@ function statusClass(status: PreviewTableRow['status']) {
               </ZButton>
             </div>
             <div v-for="item in progressItems" :key="item.label" class="grid gap-2">
-              <div class="flex justify-between text-cp-sm font-heavy text-cp-text-secondary">
-                <span>{{ item.label }}</span><span class="font-mono text-cp-text">{{ item.value }}</span>
+              <div class="flex justify-between text-z-sm font-heavy text-z-text-secondary">
+                <span>{{ item.label }}</span><span class="font-mono text-z-text">{{ item.value }}</span>
               </div>
-              <div class="h-2 overflow-hidden rounded-full bg-cp-progress-remaining">
-                <div class="h-full rounded-full bg-cp-primary" :style="{ width: item.width }" />
+              <div class="h-2 overflow-hidden rounded-full bg-z-progress-remaining">
+                <div class="h-full rounded-full bg-z-primary" :style="{ width: item.width }" />
               </div>
             </div>
           </div>
@@ -407,7 +407,7 @@ function statusClass(status: PreviewTableRow['status']) {
       </ZCard>
     </section>
 
-    <ZCard padding="compact" class="h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="数据表格" description="ZTable · ZScrollbar · ZPagination（标准行高）">
+    <ZCard padding="compact" class="h-full min-w-0 bg-z-fill-quaternary! shadow-none!" title="数据表格" description="ZTable · ZScrollbar · ZPagination（标准行高）">
       <template #actions>
         <ZInput aria-label="筛选表格" size="small" placeholder="筛选账号" class="w-64">
           <template #prefix>
@@ -420,12 +420,12 @@ function statusClass(status: PreviewTableRow['status']) {
           <ZTable :columns="tableColumns" :data="tableRows">
             <template #account="{ row }">
               <div class="grid gap-1">
-                <strong class="font-mono text-cp-sm text-cp-text">{{ row.account }}</strong>
-                <span class="text-[10px] font-emphasis text-cp-text-quaternary">credential_{{ row.id }}</span>
+                <strong class="font-mono text-z-sm text-z-text">{{ row.account }}</strong>
+                <span class="text-[10px] font-emphasis text-z-text-quaternary">credential_{{ row.id }}</span>
               </div>
             </template>
             <template #status="{ row }">
-              <span class="inline-flex rounded-full px-2.5 py-1 text-cp-xs font-heavy" :class="statusClass(row.status)">
+              <span class="inline-flex rounded-full px-2.5 py-1 text-z-xs font-heavy" :class="statusClass(row.status)">
                 {{ row.status }}
               </span>
             </template>
@@ -436,7 +436,7 @@ function statusClass(status: PreviewTableRow['status']) {
     </ZCard>
 
     <section class="grid min-w-0 grid-cols-12 gap-6 overflow-hidden" aria-label="边界状态组件">
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="空状态" description="ZEmpty · ZButton">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" title="空状态" description="ZEmpty · ZButton">
         <template #body>
           <ZEmpty title="暂无匹配账号" description="调整筛选条件，或添加一个新的上游账号" class="flex-1">
             <template #action>
@@ -448,9 +448,9 @@ function statusClass(status: PreviewTableRow['status']) {
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="加载与骨架" description="ZSkeleton · ZButton loading">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" title="加载与骨架" description="ZSkeleton · ZButton loading">
         <template #body>
-          <div class="grid flex-1 content-between gap-5 rounded-cp-lg bg-cp-fill-quaternary p-4">
+          <div class="grid flex-1 content-between gap-5 rounded-z-lg bg-z-fill-quaternary p-4">
             <div class="grid gap-4">
               <div class="flex items-center gap-3">
                 <ZSkeleton class="size-10 shrink-0" />
@@ -465,7 +465,7 @@ function statusClass(status: PreviewTableRow['status']) {
               </div>
             </div>
             <div class="flex items-center justify-between">
-              <span class="text-cp-sm font-emphasis text-cp-text-secondary">正在同步账号状态</span>
+              <span class="text-z-sm font-emphasis text-z-text-secondary">正在同步账号状态</span>
               <ZButton size="small" loading>
                 同步中
               </ZButton>
@@ -474,13 +474,13 @@ function statusClass(status: PreviewTableRow['status']) {
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="浮层与菜单" description="ZPopover · ZMenuItem · Elevated Surface">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" title="浮层与菜单" description="ZPopover · ZMenuItem · Elevated Surface">
         <template #body>
-          <div class="grid min-w-0 flex-1 grid-rows-[auto_1fr_auto] overflow-hidden rounded-cp-lg bg-cp-bg-container p-4">
-            <div class="flex items-center justify-between rounded-cp bg-cp-bg-container px-4 py-3 shadow-cp-tertiary">
+          <div class="grid min-w-0 flex-1 grid-rows-[auto_1fr_auto] overflow-hidden rounded-z-lg bg-z-bg-container p-4">
+            <div class="flex items-center justify-between rounded-z bg-z-bg-container px-4 py-3 shadow-z-tertiary">
               <div>
-                <strong class="block text-cp-sm text-cp-text">relay@example.com</strong>
-                <span class="mt-1 block text-[10px] text-cp-text-quaternary">OpenAI · OAuth</span>
+                <strong class="block text-z-sm text-z-text">relay@example.com</strong>
+                <span class="mt-1 block text-[10px] text-z-text-quaternary">OpenAI · OAuth</span>
               </div>
               <ZPopover>
                 <template #reference>
@@ -498,7 +498,7 @@ function statusClass(status: PreviewTableRow['status']) {
               </ZPopover>
             </div>
 
-            <div class="mt-3 ml-auto w-64 max-w-full self-start rounded-cp-lg bg-cp-bg-elevated p-2 shadow-cp">
+            <div class="mt-3 ml-auto w-64 max-w-full self-start rounded-z-lg bg-z-bg-elevated p-2 shadow-cp">
               <ZMenuItem>
                 <template #icon>
                   <KeyRound class="size-3.5" />
@@ -519,9 +519,9 @@ function statusClass(status: PreviewTableRow['status']) {
               </ZMenuItem>
             </div>
 
-            <div class="flex min-w-0 items-center gap-3 rounded-cp bg-cp-bg-spotlight px-4 py-3 text-cp-text-light-solid shadow-cp-popup">
+            <div class="flex min-w-0 items-center gap-3 rounded-z bg-z-bg-spotlight px-4 py-3 text-z-text-light-solid shadow-z-popup">
               <Info class="size-4 shrink-0" />
-              <span class="min-w-0 text-cp-xs font-heavy">浮层始终使用独立 Surface 与 Shadow Token</span>
+              <span class="min-w-0 text-z-xs font-heavy">浮层始终使用独立 Surface 与 Shadow Token</span>
             </div>
           </div>
         </template>

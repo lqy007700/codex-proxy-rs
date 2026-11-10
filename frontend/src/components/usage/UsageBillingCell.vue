@@ -70,23 +70,23 @@ const amountItems = computed(() => {
 
 function itemValueClass(tone?: string, accent?: boolean) {
   if (tone === 'success')
-    return 'text-cp-success-text'
+    return 'text-z-success-text'
   if (tone === 'info' || accent)
-    return 'text-cp-info-text'
-  return 'text-cp-text'
+    return 'text-z-info-text'
+  return 'text-z-text'
 }
 </script>
 
 <template>
   <div class="flex items-center justify-end gap-1.5">
-    <span class="font-mono text-cp font-heavy tabular-nums text-cp-green-text">
+    <span class="font-mono text-z font-heavy tabular-nums text-z-green-text">
       {{ usageBillingText(record) }}
     </span>
 
     <div v-if="billing" class="flex items-center gap-1">
       <span
         v-if="billing.serviceTierDisplay === 'Fast'"
-        class="inline-flex size-4 items-center justify-center rounded-full bg-cp-warning-container text-cp-warning-on-container"
+        class="inline-flex size-4 items-center justify-center rounded-full bg-z-warning-container text-z-warning-on-container"
         title="Fast 模式"
         role="img"
         aria-label="Fast 模式"
@@ -98,7 +98,7 @@ function itemValueClass(tone?: string, accent?: boolean) {
         :trigger-label="billing.longContextBillingApplied ? '查看长上下文计费明细' : '查看费用明细'"
         :tone="billing.longContextBillingApplied ? 'warning' : 'primary'"
       >
-        <div class="grid gap-1.5 text-cp-text-secondary">
+        <div class="grid gap-1.5 text-z-text-secondary">
           <div v-for="item in amountItems" :key="item.label" class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-4">
             <span class="whitespace-nowrap">{{ item.label }}</span>
             <span class="justify-self-end whitespace-nowrap font-mono font-heavy" :class="itemValueClass(undefined, item.accent)">
@@ -106,7 +106,7 @@ function itemValueClass(tone?: string, accent?: boolean) {
             </span>
           </div>
         </div>
-        <div class="mt-1 grid gap-1.5 rounded-cp bg-cp-fill-tertiary p-2 text-cp-text-secondary">
+        <div class="mt-1 grid gap-1.5 rounded-z bg-z-fill-tertiary p-2 text-z-text-secondary">
           <div v-for="item in billingItems" :key="item.label" class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-4">
             <span class="whitespace-nowrap">{{ item.label }}</span>
             <span class="justify-self-end whitespace-nowrap font-mono font-heavy" :class="itemValueClass(item.tone)">

@@ -21,17 +21,17 @@ const open = defineModel<boolean>({ default: false })
     @closed="emit('afterLeave')"
   >
     <div class="flex flex-col gap-4">
-      <div class="rounded-cp border border-cp-warning-border bg-cp-warning-container px-4 py-3">
-        <p class="m-0 text-cp font-semibold text-cp-warning-on-container">
+      <div class="rounded-z border border-z-warning-border bg-z-warning-container px-4 py-3">
+        <p class="m-0 text-z font-semibold text-z-warning-on-container">
           该密钥具有网关访问权限，请仅发送给可信调用方
         </p>
       </div>
       <div>
-        <p class="mb-2 text-cp font-medium text-cp-text-secondary">
+        <p class="mb-2 text-z font-medium text-z-text-secondary">
           API Key
         </p>
         <div class="flex items-center gap-2">
-          <code class="flex-1 rounded-cp bg-cp-fill-quaternary px-3 py-2.5 font-mono text-cp break-all text-cp-text">
+          <code class="flex-1 rounded-z bg-z-fill-quaternary px-3 py-2.5 font-mono text-z break-all text-z-text">
             {{ createdKey }}
           </code>
           <ZIconButton size="default" aria-label="复制" @click="emit('copy', createdKey)">

@@ -1237,6 +1237,7 @@ OAuth 等待回调期间不持有保护；提交仍拒绝已删除或连接配�
   "source": "upstream",
   "gatewayErrorCode": "rate_limited",
   "sendState": "sent",
+  "proxyHint": null,
   "error": "upstream unavailable",
   "providerErrorCode": "usage_exhausted",
   "providerErrorType": "invalid_request_error",
@@ -1252,6 +1253,9 @@ OAuth 等待回调期间不持有保护；提交仍拒绝已删除或连接配�
 - `source` 为 `gateway`、`provider` 或 `upstream`：分别表示尚未进入 Provider、Provider 本地且未发送、
   已发送/可能已发送或已经捕获到上游事实
 - `gatewayErrorCode` 是 `GatewayErrorKind` 的稳定机器值，管理端据此生成中文摘要
+- `proxyHint` 仅在 Provider 发送前失败且有代理诊断时返回：`invalid_configuration` 表示代理配置无效，
+  `unreachable` 表示无法连接代理端点，`tunnel_failed` 表示代理隧道协商失败。
+  `check_proxy` 表示本次使用代理且建连失败，不能据此判定故障在代理；无提示时为 `null`
 - `sendState` 为 `not_sent`、`sent`、`ambiguous`，非 Provider 错误为 `null`
 - `error`、`providerErrorCode`、`providerErrorType`、`upstreamStatus`、`upstreamContentType` 和
   `upstreamBody` 是实际捕获的原始诊断字段；缺失时为 `null`，不会由本地猜测或翻译
@@ -1410,6 +1414,11 @@ OAuth start 使用：
 客户端不得提交 `credentialRevision`、旧 token 身份或其他并发控制字段。complete 请求也不重复提交
 `accountId`，后端通过 `flowId` 中保存的目标绑定完成授权
 
+OpenAI 重新授权按本次登录更新目标记录的上游用户、工作区、邮箱和套餐，保留本地名称、分组、代理、
+普通／保底用途、模型映射及 `allowCredits`。缺少用户身份或与已有记录身份重复时不提交。
+实际换号会清除旧身份的 Cookie、认证主体、额度耗尽事实和重置卡计划；存在未决自动消费时暂不能换号，
+同身份重新授权不受此限制。本地账号 ID 及其会话／New API 绑定保留，旧身份的上游续接需提供完整输入重建
+
 流程只允许发起它的管理员身份继续；尚未完成的流程过期后需重新发起。
 账号提交成功后，`complete` 保留 24 小时的完成结果。同一管理员使用相同 `provider`、`flowId`
 重试时返回原账号结果，不再执行授权或更新凭据；新提交的 `callbackUrl` 和 `settings` 不会再次应用
@@ -1439,7 +1448,8 @@ OpenAI 授权码交换与令牌刷新请求的连接超时为 30 秒，单次上
   失效后需取得新 PAT 再导入。普通 JWT 导入行为不变
 - 首次 OAuth 保留回调 `state`、PKCE 与官方 token exchange，并持久化 `idToken`、`accessToken`、
   `refreshToken`。刷新响应中的三个 token 字段均按官方语义独立轮换：返回新值时替换，省略时分别保留
-  现值。重新授权也保留这些回调保护，但只轮换目标账号的 token。回调地址只承载 `code`/`state`，
+  现值。重新授权也保留这些回调保护，并更新本次登录身份；授权响应省略 refresh token 时，
+  仅同身份可沿用旧值，实际换号不回退旧令牌。回调地址只承载 `code`/`state`，
   不以 host/path 形式作为拒绝条件
 - OAuth 账号文件导入和 OAuth complete（包括重新授权）在 credential 提交后后台尝试一次额度观测，不等待
   观测完成才返回成功。观测失败只记录告警，不回滚已提交的账号；手工或后台 RT 刷新只更新 token，
@@ -2037,13 +2047,16 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 `openaiAccountAffinity` 控制 OpenAI 账号亲和，默认 `strict`（严格）：
 
 - `relaxed`（宽松）：会话内请求直接按 `rotationStrategy` 选号，不优先主账号
-- `preferred`（优先）：会话内所有可关联请求优先主账号，并发已满、额度耗尽、停用、限流冷却或不支持当前模型时临时分流，保留会话绑定，后续请求仍优先主账号
+- `preferred`（优先）：会话内所有可关联请求优先主账号，繁忙、限流冷却或不支持当前模型时临时分流并保留绑定；账号不可用或确认持续额度耗尽时，安全新链可迁移到可用普通账号
 - `strict`（严格）：同一会话共用账号，后代请求等待当前账号并跟随根请求换号
 
 New API 已识别 Token 在 `preferred` 与 `strict` 下额外保留一个主账号偏好，跨窗口及无会话标识请求均可使用。
-仅首次 attempt、无续接或重放的普通请求可以认领或迁移 Token 主绑定，并优先主账号；主账号不支持模型、繁忙、额度耗尽或冷却时，允许在当前 Key 授权范围内临时分流，保留主绑定。
+仅首次 attempt、无续接或重放的普通请求可以认领或迁移 Token 主绑定，并优先主账号；主账号不支持模型、繁忙或冷却时，允许在当前 Key 授权范围内临时分流，保留主绑定。
 所有候选均不可用时按原有错误或排队规则结束，不修改主绑定，也不替换请求模型。
-主账号已删除、停用、封禁、凭据明确无效、移出当前范围或不再是普通账号时，下次安全新链可迁移到可用普通账号。
+主账号已删除、停用、封禁、凭据明确过期或无效、移出当前范围或不再是普通账号时，下次安全新链可迁移到可用普通账号。
+确认有效额度耗尽且重置时间缺失，或重置时刻距当前时间超过请求冻结的排队等待时限时，也允许迁移；重置前后仍在该宽限内时只临时分流。
+有效额度结合账号 `allowCredits` 与上游点数事实判断，额度未知、查询失败和单模型拒绝均不构成自动迁移依据。
+迁移须先成功取得新账号租约，再复核旧账号当前事实并原子更新绑定；优先模式的会话主绑定使用相同条件。
 `relaxed` 不使用或更新 Token 主绑定；直连及身份识别失败后的降级行为保持其会话规则
 
 原生续写、replay owner、显式固定账号和严格模式后代跟随约束优先于 Token 偏好，原增量只能发往其 owner。

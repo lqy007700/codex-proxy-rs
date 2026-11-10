@@ -49,7 +49,7 @@ watch(() => props.active, (active, _previous, onCleanup) => {
 <template>
   <div class="grid w-full gap-5">
     <div class="flex flex-wrap items-center justify-end gap-2">
-      <span v-if="hasChanges" class="mr-1 text-cp-sm text-cp-text-secondary">有未保存的修改</span>
+      <span v-if="hasChanges" class="mr-1 text-z-sm text-z-text-secondary">有未保存的修改</span>
       <ZIconButton v-if="hasChanges" aria-label="撤销告警配置更改" :disabled="busy" @click="reset">
         <Undo2 class="size-4" />
       </ZIconButton>
@@ -67,7 +67,7 @@ watch(() => props.active, (active, _previous, onCleanup) => {
         </ZButton>
       </template>
     </ZEmpty>
-    <p v-else-if="!form" role="status" class="text-cp-sm text-cp-text-secondary">
+    <p v-else-if="!form" role="status" class="text-z-sm text-z-text-secondary">
       正在加载告警配置
     </p>
     <template v-else>

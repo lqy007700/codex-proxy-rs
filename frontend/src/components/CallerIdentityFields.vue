@@ -52,7 +52,7 @@ onMounted(load)
   <template v-if="policy.mode === 'newApi'">
     <ZFormItem label="接入来源" required>
       <ZSelect :model-value="policy.sourceId" :loading="loading" :disabled="props.disabled || loading" aria-label="接入来源" placeholder="选择 New API 来源" :options="sources.map(source => ({ label: source.enabled ? source.name : `${source.name}（已停用）`, value: source.id, disabled: !source.enabled }))" @update:model-value="policy = { ...policy, sourceId: String($event) }" />
-      <p v-if="error" class="mt-2 text-cp-sm text-cp-error" role="alert">
+      <p v-if="error" class="mt-2 text-z-sm text-z-error" role="alert">
         来源加载失败 <ZButton size="small" :loading="loading" @click="load">
           重试
         </ZButton>
@@ -63,16 +63,16 @@ onMounted(load)
           创建来源
         </ZButton>
       </div>
-      <p class="mt-2 text-cp-xs text-cp-text-tertiary">
+      <p class="mt-2 text-z-xs text-z-text-tertiary">
         同一来源可关联多个 CPR Key，轮换 Key 时复用此来源
       </p>
     </ZFormItem>
     <ZFormItem label="无身份请求隔离">
       <ZSwitch :model-value="policy.allowUnidentified" :disabled="props.disabled" aria-label="无身份请求隔离" @update:model-value="policy = { ...policy, allowUnidentified: $event }" />
-      <p class="mt-2 text-cp-xs text-cp-text-tertiary">
+      <p class="mt-2 text-z-xs text-z-text-tertiary">
         身份缺失或无效时继续接收请求，关闭时按 CPR Key 原有方式处理
       </p>
-      <p class="mt-1 text-cp-xs text-cp-text-tertiary">
+      <p class="mt-1 text-z-xs text-z-text-tertiary">
         开启后每次独立选号，不保存亲和且不能续聊，适合渠道探测
       </p>
     </ZFormItem>

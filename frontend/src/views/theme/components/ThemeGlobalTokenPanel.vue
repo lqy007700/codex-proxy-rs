@@ -1,26 +1,31 @@
 <script setup lang="ts">
-import type { ResolvedTheme, ThemeColorPreset, ThemeColorPresetId, ThemeMode, ThemeSeedOverrides } from '@codex-proxy/ui/theme'
+import type { Theme, ThemeColorPresetId, ThemeMode, ThemePresetId, ThemeSeedOverrides } from '@codex-proxy/ui/theme'
+
 import type { ThemeEditorDraft, ThemeEditorGlobalCategory } from '../composables/useThemeEditor'
-
 import { ZSegmented } from '@codex-proxy/ui'
-import { zhHans } from '@codex-proxy/ui/locale'
-import { resolveThemeSeedTokens, THEME_COLOR_PRESETS } from '@codex-proxy/ui/theme'
 
-import { Check, ChevronDown, Laptop, Moon, Sun } from '@lucide/vue'
+import { zhHans } from '@codex-proxy/ui/locale'
+import { createThemeSeedTokens, themeColorPresets, themePresets, themeProfiles } from '@codex-proxy/ui/theme'
+
+import { Check, ChevronDown, Laptop, Moon, PanelsTopLeft, Sparkles, Sun } from '@lucide/vue'
+import { isEqual } from 'es-toolkit'
 import { computed, shallowRef } from 'vue'
 
+import sceneArtwork from './theme-scenes.svg?no-inline'
 import ThemeColorTokenField from './ThemeColorTokenField.vue'
 import ThemeNumberTokenField from './ThemeNumberTokenField.vue'
 
 const props = defineProps<{
   draft: ThemeEditorDraft
-  resolved: ResolvedTheme
+  resolved: Theme
   query: string
 }>()
 
 const emit = defineEmits<{
   mode: [value: ThemeMode]
-  preset: [value: ThemeColorPresetId]
+  material: [value: ThemePresetId]
+  resetPrimary: []
+  profile: [value: ThemeColorPresetId]
   primary: [value: string]
   seedColor: [
     key: Exclude<
@@ -39,32 +44,72 @@ const emit = defineEmits<{
 const category = defineModel<ThemeEditorGlobalCategory>('category', { required: true })
 const derivedOpen = shallowRef(false)
 
-const localizedPresets = THEME_COLOR_PRESETS.map(preset => ({
-  ...preset,
-  ...zhHans.theme[preset.id],
+const profiles = themeColorPresets.map((preset) => {
+  const options = { ...themeProfiles[preset.id], colorId: preset.id }
+  const light = createThemeSeedTokens({ ...options, scheme: 'light' })
+  return {
+    ...preset,
+    paper: light.colorBgBase,
+    accent: light.colorWarning,
+    ink: createThemeSeedTokens({ ...options, scheme: 'dark' }).colorBgBase,
+  }
+})
+const localizedPresets = computed(() => profiles.map(p => ({
+  ...p,
+  ...zhHans.theme[p.id],
+})))
+const activeProfile = computed(() => {
+  const { color, preset, customization } = props.draft
+  if (color !== 'custom' && themeProfiles[color].preset === preset && isEqual(themeProfiles[color].customization, customization))
+    return color
+  return undefined
+})
+const colorPresets = themeColorPresets.map(preset => preset.seed)
+const themePresetDetails = computed(() => ({
+  default: {
+    label: '默认',
+    icon: PanelsTopLeft,
+  },
+  soft: {
+    label: '柔光',
+    icon: Sparkles,
+  },
 }))
-const colorPresets = THEME_COLOR_PRESETS.map(preset => preset.seed)
-const categoryOptions = [
-  { label: '颜色', value: 'color' },
-  { label: '尺寸', value: 'size' },
-  { label: '风格', value: 'style' },
-]
-const modeOptions = [
-  { label: '跟随系统', value: 'system', icon: Laptop },
-  { label: '浅色', value: 'light', icon: Sun },
-  { label: '深色', value: 'dark', icon: Moon },
-]
-const presetSwatchesById = new Map(
-  THEME_COLOR_PRESETS.map(preset => [
-    preset.id,
-    [
-      resolveThemeSeedTokens('light', preset.seed, undefined, preset.appearance?.light).colorBgBase,
-      preset.seed,
-      resolveThemeSeedTokens('dark', preset.seed, undefined, preset.appearance?.dark).colorBgBase,
-    ],
-  ]),
-)
-
+const themePresetOptions = computed(() => themePresets.map(preset => ({
+  ...themePresetDetails.value[preset.id],
+  value: preset.id,
+})))
+const categoryOptions = computed(() => ([
+  {
+    label: '颜色',
+    value: 'color',
+  },
+  {
+    label: '尺寸',
+    value: 'size',
+  },
+  {
+    label: '风格',
+    value: 'style',
+  },
+]))
+const modeOptions = computed(() => ([
+  {
+    label: '跟随系统',
+    value: 'system',
+    icon: Laptop,
+  },
+  {
+    label: '浅色',
+    value: 'light',
+    icon: Sun,
+  },
+  {
+    label: '深色',
+    value: 'dark',
+    icon: Moon,
+  },
+]))
 const semanticColorFields = computed(() =>
   [
     {
@@ -121,7 +166,7 @@ const semanticColorFields = computed(() =>
 
 const derivedTokens = computed(() =>
   Object.entries(props.resolved.tokens)
-    .filter(([name]) => name.startsWith('--cp-color-') || name.startsWith('--cp-control-'))
+    .filter(([name]) => name.startsWith('color-') || name.startsWith('control-'))
     .filter(([name]) => matches(name)),
 )
 
@@ -133,15 +178,11 @@ function matches(value: string) {
 function seedOverridden(key: keyof ThemeSeedOverrides) {
   return Object.hasOwn(props.draft.customization.seed ?? {}, key)
 }
-
-function presetSwatches(preset: ThemeColorPreset) {
-  return presetSwatchesById.get(preset.id) ?? [preset.seed]
-}
 </script>
 
 <template>
   <div class="grid gap-4">
-    <div class="grid gap-2 rounded-cp-lg bg-cp-bg-container p-2 shadow-cp-tertiary">
+    <div class="grid gap-2 rounded-z-lg bg-z-bg-container p-2 shadow-z-tertiary">
       <ZSegmented
         :model-value="draft.mode"
         aria-label="主题模式"
@@ -152,50 +193,64 @@ function presetSwatches(preset: ThemeColorPreset) {
       />
     </div>
 
+    <section v-if="matches('主题预设') || localizedPresets.some(p => matches(p.label))" class="grid gap-2">
+      <h3 class="m-0 px-1 text-z font-heavy text-z-text">
+        主题预设
+      </h3>
+      <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="主题预设">
+        <button
+          v-for="preset in localizedPresets"
+          :key="preset.id"
+          type="button"
+          role="radio"
+          class="relative flex min-h-20 flex-col items-stretch justify-between gap-2 rounded-z-lg bg-z-fill-quaternary p-2.5 text-left outline-none transition-[background-color,box-shadow] duration-150 hover:bg-z-bg-text-hover focus-visible:ring-2 focus-visible:ring-z-control-outline"
+          :class="activeProfile === preset.id ? 'bg-z-control-item-bg-active shadow-z-tertiary' : undefined"
+          :aria-checked="activeProfile === preset.id"
+          :aria-label="`${preset.label}: ${preset.description}`"
+          :title="preset.description"
+          @click="emit('profile', preset.id)"
+        >
+          <svg
+            class="block h-11 w-full overflow-hidden rounded-z-sm"
+            :style="{ 'color': preset.seed, '--scene-paper': preset.paper, '--scene-ink': preset.ink, '--scene-accent': preset.accent }"
+            viewBox="0 0 160 44"
+            preserveAspectRatio="xMidYMid slice"
+            aria-hidden="true"
+          >
+            <use :href="`${sceneArtwork}#${preset.id}`" width="160" height="44" />
+          </svg>
+          <span class="min-w-0 pr-4">
+            <strong class="block text-z-xs font-heavy text-z-text">{{ preset.label }}</strong>
+            <span class="mt-0.5 block truncate text-[9px] font-emphasis text-z-text-quaternary">
+              {{ preset.description }}
+            </span>
+          </span>
+          <Check
+            v-if="activeProfile === preset.id"
+            class="absolute right-2 bottom-2 size-3 text-z-primary-text"
+            stroke-width="3"
+          />
+        </button>
+      </div>
+    </section>
+
+    <section v-if="matches('表面材质')" class="grid gap-2">
+      <h3 class="m-0 px-1 text-z font-heavy text-z-text">
+        表面材质
+      </h3>
+      <ZSegmented
+        :model-value="draft.preset"
+        aria-label="表面材质"
+        :options="themePresetOptions"
+        class="w-full"
+        @update:model-value="emit('material', $event as ThemePresetId)"
+      />
+    </section>
+
     <ZSegmented v-model="category" aria-label="全局 Token 分类" :options="categoryOptions" class="w-full" />
 
     <template v-if="category === 'color'">
-      <section v-if="matches('预置主题 品牌色 colorPrimary')" class="grid gap-2" aria-labelledby="theme-preset-title">
-        <div class="flex items-center justify-between px-1">
-          <h3 id="theme-preset-title" class="m-0 text-cp font-heavy text-cp-text">
-            品牌色
-          </h3>
-          <code class="font-mono text-[10px] text-cp-text-quaternary">colorPrimary</code>
-        </div>
-        <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="预置主题">
-          <button
-            v-for="preset in localizedPresets"
-            :key="preset.id"
-            type="button"
-            role="radio"
-            class="relative flex min-h-20 flex-col items-stretch justify-between gap-2 rounded-cp-lg bg-cp-fill-quaternary p-2.5 text-left outline-none transition-[background-color,box-shadow] duration-150 hover:bg-cp-bg-text-hover focus-visible:ring-2 focus-visible:ring-cp-control-outline"
-            :class="draft.color === preset.id ? 'bg-cp-control-item-bg-active shadow-cp-tertiary' : undefined"
-            :aria-checked="draft.color === preset.id"
-            :aria-label="`${preset.label}：${preset.description}`"
-            :title="preset.description"
-            @click="emit('preset', preset.id)"
-          >
-            <span class="flex h-4 overflow-hidden rounded-full shadow-cp-tertiary">
-              <span
-                v-for="swatch in presetSwatches(preset)"
-                :key="swatch"
-                class="flex-1"
-                :style="{ backgroundColor: swatch }"
-              />
-            </span>
-            <span class="min-w-0 pr-4">
-              <strong class="block text-cp-xs font-heavy text-cp-text">{{ preset.label }}</strong>
-              <span class="mt-0.5 block truncate text-[9px] font-emphasis text-cp-text-quaternary">
-                {{ preset.description }}
-              </span>
-            </span>
-            <Check
-              v-if="draft.color === preset.id"
-              class="absolute right-2 bottom-2 size-3 text-cp-primary-text"
-              stroke-width="3"
-            />
-          </button>
-        </div>
+      <section v-if="matches('预置主题 品牌色 colorPrimary')" class="grid gap-2">
         <ThemeColorTokenField
           label="品牌主色"
           token="colorPrimary"
@@ -204,12 +259,12 @@ function presetSwatches(preset: ThemeColorPreset) {
           :presets="colorPresets"
           :overridden="draft.color === 'custom'"
           @change="emit('primary', $event)"
-          @reset="emit('preset', 'relay-blue')"
+          @reset="emit('resetPrimary')"
         />
       </section>
 
       <section v-if="semanticColorFields.length > 0" class="grid gap-2" aria-labelledby="theme-semantic-title">
-        <h3 id="theme-semantic-title" class="m-0 px-1 text-cp font-heavy text-cp-text">
+        <h3 id="theme-semantic-title" class="m-0 px-1 text-z font-heavy text-z-text">
           功能色与中性色
         </h3>
         <ThemeColorTokenField
@@ -229,11 +284,11 @@ function presetSwatches(preset: ThemeColorPreset) {
       <details
         v-if="derivedTokens.length > 0"
         :open="derivedOpen"
-        class="group rounded-cp-lg bg-cp-bg-container shadow-cp-tertiary"
+        class="group rounded-z-lg bg-z-bg-container shadow-z-tertiary"
         @toggle="derivedOpen = ($event.target as HTMLDetailsElement).open"
       >
         <summary
-          class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-cp-sm font-bold text-cp-text"
+          class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-z-sm font-bold text-z-text"
         >
           派生变量 Map / Alias Token
           <ChevronDown class="size-3.5 transition-transform duration-150 group-open:rotate-180" />
@@ -242,12 +297,12 @@ function presetSwatches(preset: ThemeColorPreset) {
           <div
             v-for="[name, value] in derivedTokens"
             :key="name"
-            class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-cp bg-cp-fill-quaternary px-2.5 py-2"
+            class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-z bg-z-fill-quaternary px-2.5 py-2"
           >
-            <code class="truncate font-mono text-[9px] text-cp-text-secondary">{{ name.replace('--cp-', '') }}</code>
+            <code class="truncate font-mono text-[9px] text-z-text-secondary">{{ name }}</code>
             <span class="flex items-center gap-2">
-              <span class="size-3 rounded-full shadow-cp-tertiary" :style="{ backgroundColor: value }" />
-              <code class="font-mono text-[9px] text-cp-text-quaternary">{{ value }}</code>
+              <span class="size-3 rounded-full shadow-z-tertiary" :style="{ backgroundColor: value }" />
+              <code class="font-mono text-[9px] text-z-text-quaternary">{{ value }}</code>
             </span>
           </div>
         </div>
@@ -298,11 +353,6 @@ function presetSwatches(preset: ThemeColorPreset) {
     </section>
 
     <section v-else class="grid gap-2" aria-label="风格 Token">
-      <div
-        class="rounded-cp-lg bg-cp-primary-container px-3 py-3 text-[10px] leading-normal font-emphasis text-cp-primary-on-container"
-      >
-        固定无边设计，圆角塑形，阴影分层
-      </div>
       <ThemeNumberTokenField
         label="通用圆角"
         token="borderRadius"

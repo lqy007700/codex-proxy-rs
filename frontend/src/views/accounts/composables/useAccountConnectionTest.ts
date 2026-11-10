@@ -64,12 +64,15 @@ interface ConnectionTestCompleteEvent {
 }
 
 type ConnectionTestFailureSource = 'gateway' | 'provider' | 'upstream'
+type ConnectionTestProxyHint = 'invalid_configuration' | 'unreachable' | 'tunnel_failed' | 'check_proxy'
+
 type ConnectionTestSendState = 'not_sent' | 'sent' | 'ambiguous'
 
 interface ConnectionTestFailureEvent {
   type: 'error'
   source?: ConnectionTestFailureSource
   gatewayErrorCode?: string
+  proxyHint?: ConnectionTestProxyHint | null
   sendState?: ConnectionTestSendState | null
   error?: string
   providerErrorCode?: string | null
@@ -130,7 +133,19 @@ function parseConnectionTestEvent(raw: string): ConnectionTestEvent | null {
   return value as ConnectionTestEvent
 }
 
+const CONNECTION_TEST_PROXY_TEXT: Record<ConnectionTestProxyHint, string> = {
+  invalid_configuration: '账号代理配置无效，请检查代理地址和协议',
+  unreachable: '无法连接账号代理，请检查代理是否在线及网络连通性',
+  tunnel_failed: '账号代理隧道建立失败，请检查代理认证和目标访问权限',
+  check_proxy: '使用账号代理连接失败，请检查代理、网络及目标服务',
+}
+
 function connectionTestFailureText(event: ConnectionTestFailureEvent) {
+  if (event.source === 'provider' && event.sendState === 'not_sent' && event.proxyHint) {
+    const hint = CONNECTION_TEST_PROXY_TEXT[event.proxyHint]
+    if (hint)
+      return hint
+  }
   return event.gatewayErrorCode
     ? CONNECTION_TEST_FAILURE_TEXT[event.gatewayErrorCode] || '未分类错误'
     : '测试连接失败'
@@ -145,6 +160,7 @@ function connectionTestFailureLabel(event: ConnectionTestFailureEvent) {
 function connectionTestFailureDiagnostics(event: ConnectionTestFailureEvent) {
   return {
     error: event.error ?? null,
+    proxyHint: event.proxyHint ?? null,
     gatewayErrorCode: event.gatewayErrorCode ?? null,
     sendState: event.sendState ?? null,
     upstreamStatus: event.upstreamStatus ?? null,
@@ -198,8 +214,8 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
         label: '正在测试',
         description: '正在向所选模型发送请求并接收流式响应',
         icon: Clock3,
-        badge: 'bg-cp-info-container text-cp-info-on-container',
-        iconClass: 'text-cp-info',
+        badge: 'bg-z-info-container text-z-info-on-container',
+        iconClass: 'text-z-info',
       }
     }
     if (connectionTestStatus.value === 'success') {
@@ -207,8 +223,8 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
         label: '连接正常',
         description: '请求已完成，可在下方查看模型、耗时和事件轨迹',
         icon: CheckCircle2,
-        badge: 'bg-cp-success-container text-cp-success-on-container',
-        iconClass: 'text-cp-success',
+        badge: 'bg-z-success-container text-z-success-on-container',
+        iconClass: 'text-z-success',
       }
     }
     if (connectionTestStatus.value === 'error') {
@@ -216,16 +232,16 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
         label: '测试失败',
         description: '请求未完成，请在下方查看失败来源与原始诊断',
         icon: XCircle,
-        badge: 'bg-cp-error-container text-cp-error-on-container',
-        iconClass: 'text-cp-error',
+        badge: 'bg-z-error-container text-z-error-on-container',
+        iconClass: 'text-z-error',
       }
     }
     return {
       label: '准备测试',
       description: '选择模型后，点击“开始测试”发送真实请求',
       icon: Wifi,
-      badge: 'bg-cp-fill-quaternary text-cp-text-secondary',
-      iconClass: 'text-cp-text-quaternary',
+      badge: 'bg-z-fill-quaternary text-z-text-secondary',
+      iconClass: 'text-z-text-quaternary',
     }
   })
 

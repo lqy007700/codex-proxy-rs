@@ -44,9 +44,9 @@ function updateCondition(index: number, condition: ProtectionCondition) {
 <template>
   <div class="grid gap-4 px-3 pb-4 sm:px-4">
     <div class="grid gap-2">
-      <span class="text-cp-sm font-emphasis text-cp-text-secondary">满足全部条件</span>
+      <span class="text-z-sm font-emphasis text-z-text-secondary">满足全部条件</span>
       <template v-for="(condition, index) in rule.conditions" :key="conditionKey(condition)">
-        <span v-if="index > 0" class="pl-3 text-cp-xs font-emphasis text-cp-text-secondary">且</span>
+        <span v-if="index > 0" class="pl-3 text-z-xs font-emphasis text-z-text-secondary">且</span>
         <ProtectionConditionEditor
           :model-value="condition"
           :disabled="disabled"
@@ -68,7 +68,7 @@ function updateCondition(index: number, condition: ProtectionCondition) {
         添加条件
       </ZButton>
     </div>
-    <p v-if="showErrors && error" class="m-0 text-cp-sm text-cp-error-text" role="alert">
+    <p v-if="showErrors && error" class="m-0 text-z-sm text-z-error-text" role="alert">
       {{ error }}
     </p>
   </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ResolvedTheme, ThemeComponentOverrides, ThemeTokenName } from '@codex-proxy/ui/theme'
+import type { Theme, ThemeComponentOverrides, ThemeTokenName } from '@codex-proxy/ui/theme'
 import type { Component } from 'vue'
 import type {
   ThemeEditorComponent,
@@ -40,7 +40,7 @@ interface EditableToken {
 
 const props = defineProps<{
   draft: ThemeEditorDraft
-  resolved: ResolvedTheme
+  resolved: Theme
   query: string
 }>()
 
@@ -95,61 +95,61 @@ const components: readonly ComponentOption[] = [
 const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
   action: [
     {
-      name: '--cp-button-primary-color',
+      name: 'button-primary-color',
       label: '主按钮文字',
       kind: 'color',
       description: 'primaryColor',
     },
     {
-      name: '--cp-button-primary-bg',
+      name: 'button-primary-bg',
       label: '主按钮背景',
       kind: 'color',
       description: 'primaryBg',
     },
     {
-      name: '--cp-button-primary-hover-bg',
+      name: 'button-primary-hover-bg',
       label: '主按钮 Hover',
       kind: 'color',
       description: 'primaryHoverBg',
     },
     {
-      name: '--cp-button-primary-active-bg',
+      name: 'button-primary-active-bg',
       label: '主按钮 Active',
       kind: 'color',
       description: 'primaryActiveBg',
     },
     {
-      name: '--cp-button-secondary-bg',
+      name: 'button-secondary-bg',
       label: '次要按钮背景',
       kind: 'color',
       description: 'secondaryBg',
     },
     {
-      name: '--cp-button-secondary-hover-bg',
+      name: 'button-secondary-hover-bg',
       label: '次要按钮 Hover',
       kind: 'color',
       description: 'secondaryHoverBg',
     },
     {
-      name: '--cp-button-secondary-active-bg',
+      name: 'button-secondary-active-bg',
       label: '次要按钮 Active',
       kind: 'color',
       description: 'secondaryActiveBg',
     },
     {
-      name: '--cp-icon-button-secondary-bg',
+      name: 'icon-button-secondary-bg',
       label: '次要图标按钮背景',
       kind: 'color',
       description: 'secondaryBg',
     },
     {
-      name: '--cp-icon-button-secondary-hover-bg',
+      name: 'icon-button-secondary-hover-bg',
       label: '次要图标按钮 Hover',
       kind: 'color',
       description: 'secondaryHoverBg',
     },
     {
-      name: '--cp-icon-button-secondary-active-bg',
+      name: 'icon-button-secondary-active-bg',
       label: '次要图标按钮 Active',
       kind: 'color',
       description: 'secondaryActiveBg',
@@ -157,37 +157,37 @@ const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
   ],
   form: [
     {
-      name: '--cp-input-bg',
+      name: 'input-bg',
       label: '输入框背景',
       kind: 'color',
       description: 'controlBg',
     },
     {
-      name: '--cp-input-hover-bg',
+      name: 'input-hover-bg',
       label: '输入框 Hover',
       kind: 'color',
       description: 'hoverBg',
     },
     {
-      name: '--cp-input-active-bg',
+      name: 'input-active-bg',
       label: '输入框 Active',
       kind: 'color',
       description: 'activeBg',
     },
     {
-      name: '--cp-input-shadow',
+      name: 'input-shadow',
       label: '输入框阴影',
       kind: 'shadow',
       description: 'shadow',
     },
     {
-      name: '--cp-input-hover-shadow',
+      name: 'input-hover-shadow',
       label: '输入框 Hover 阴影',
       kind: 'shadow',
       description: 'hoverShadow',
     },
     {
-      name: '--cp-input-active-shadow',
+      name: 'input-active-shadow',
       label: '输入框焦点外圈',
       kind: 'shadow',
       description: 'activeShadow',
@@ -195,25 +195,25 @@ const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
   ],
   surface: [
     {
-      name: '--cp-card-bg',
+      name: 'card-bg',
       label: '卡片背景',
       kind: 'color',
       description: 'colorBgContainer',
     },
     {
-      name: '--cp-modal-bg',
+      name: 'modal-bg',
       label: '弹窗背景',
       kind: 'color',
       description: 'contentBg',
     },
     {
-      name: '--cp-popover-header-bg',
+      name: 'popover-header-bg',
       label: '浮层标题背景',
       kind: 'color',
       description: 'headerBg',
     },
     {
-      name: '--cp-card-border-radius',
+      name: 'card-border-radius',
       label: '卡片圆角',
       kind: 'number',
       description: 'borderRadius',
@@ -222,7 +222,7 @@ const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
       max: 32,
     },
     {
-      name: '--cp-card-shadow',
+      name: 'card-shadow',
       label: '卡片阴影',
       kind: 'shadow',
       description: 'cardShadow',
@@ -230,7 +230,7 @@ const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
   ],
   data: [
     {
-      name: '--cp-table-row-height',
+      name: 'table-row-height',
       label: '表格行高',
       kind: 'number',
       description: 'rowHeight',
@@ -239,43 +239,43 @@ const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
       max: 84,
     },
     {
-      name: '--cp-table-header-bg',
+      name: 'table-header-bg',
       label: '表头背景',
       kind: 'color',
       description: 'headerBg',
     },
     {
-      name: '--cp-table-row-bg',
+      name: 'table-row-bg',
       label: '行背景',
       kind: 'color',
       description: 'rowBg',
     },
     {
-      name: '--cp-table-row-stripe-bg',
+      name: 'table-row-stripe-bg',
       label: '斑马纹背景',
       kind: 'color',
       description: 'rowStripeBg',
     },
     {
-      name: '--cp-table-row-hover-bg',
+      name: 'table-row-hover-bg',
       label: '行 Hover',
       kind: 'color',
       description: 'rowHoverBg',
     },
     {
-      name: '--cp-table-row-selected-bg',
+      name: 'table-row-selected-bg',
       label: '选中行背景',
       kind: 'color',
       description: 'rowSelectedBg',
     },
     {
-      name: '--cp-table-row-selected-hover-bg',
+      name: 'table-row-selected-hover-bg',
       label: '选中行 Hover',
       kind: 'color',
       description: 'rowSelectedHoverBg',
     },
     {
-      name: '--cp-progress-remaining-color',
+      name: 'progress-remaining-color',
       label: '进度轨道',
       kind: 'color',
       description: 'progressRemainingColor',
@@ -283,7 +283,7 @@ const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
   ],
   navigation: [
     {
-      name: '--cp-menu-item-selected-bg',
+      name: 'menu-item-selected-bg',
       label: '菜单选中背景',
       kind: 'color',
       description: 'itemSelectedBg',
@@ -291,25 +291,25 @@ const tokenCatalog: Record<ThemeEditorComponent, readonly EditableToken[]> = {
   ],
   layout: [
     {
-      name: '--cp-layout-sider-bg',
+      name: 'layout-sider-bg',
       label: '侧栏背景',
       kind: 'color',
       description: 'siderBg',
     },
     {
-      name: '--cp-layout-sider-shadow',
+      name: 'layout-sider-shadow',
       label: '侧栏阴影',
       kind: 'shadow',
       description: 'siderShadow',
     },
     {
-      name: '--cp-scrollbar-thumb-bg',
+      name: 'scrollbar-thumb-bg',
       label: '滚动条滑块',
       kind: 'color',
       description: 'scrollbarThumbBg',
     },
     {
-      name: '--cp-scrollbar-thumb-hover-bg',
+      name: 'scrollbar-thumb-hover-bg',
       label: '滚动条 Hover',
       kind: 'color',
       description: 'scrollbarThumbHoverBg',
@@ -344,8 +344,8 @@ function numericTokenValue(name: ThemeTokenName) {
   <div class="grid gap-4">
     <section aria-labelledby="component-catalog-title">
       <div class="mb-2 flex items-center gap-2 px-1">
-        <AppWindow class="size-3.5 text-cp-primary-text" />
-        <h3 id="component-catalog-title" class="m-0 text-cp font-heavy text-cp-text">
+        <AppWindow class="size-3.5 text-z-primary-text" />
+        <h3 id="component-catalog-title" class="m-0 text-z font-heavy text-z-text">
           Component Token
         </h3>
       </div>
@@ -355,23 +355,23 @@ function numericTokenValue(name: ThemeTokenName) {
           :key="option.id"
           type="button"
           role="option"
-          class="flex min-h-14 items-center gap-2.5 rounded-cp-lg bg-cp-fill-quaternary px-3 text-left outline-none transition-[background-color,box-shadow] duration-150 hover:bg-cp-bg-text-hover focus-visible:ring-2 focus-visible:ring-cp-control-outline"
-          :class="component === option.id ? 'bg-cp-control-item-bg-active shadow-cp-tertiary' : undefined"
+          class="flex min-h-14 items-center gap-2.5 rounded-z-lg bg-z-fill-quaternary px-3 text-left outline-none transition-[background-color,box-shadow] duration-150 hover:bg-z-bg-text-hover focus-visible:ring-2 focus-visible:ring-z-control-outline"
+          :class="component === option.id ? 'bg-z-control-item-bg-active shadow-z-tertiary' : undefined"
           :aria-selected="component === option.id"
           @click="component = option.id"
         >
-          <component :is="option.icon" class="size-4 shrink-0" :class="component === option.id ? 'text-cp-primary-text' : 'text-cp-text-tertiary'" />
+          <component :is="option.icon" class="size-4 shrink-0" :class="component === option.id ? 'text-z-primary-text' : 'text-z-text-tertiary'" />
           <span class="min-w-0">
-            <strong class="block truncate text-cp-xs font-bold text-cp-text">{{ option.label }}</strong>
-            <span class="mt-0.5 block text-[9px] font-emphasis text-cp-text-quaternary">{{ option.description }}</span>
+            <strong class="block truncate text-z-xs font-bold text-z-text">{{ option.label }}</strong>
+            <span class="mt-0.5 block text-[9px] font-emphasis text-z-text-quaternary">{{ option.description }}</span>
           </span>
         </button>
       </div>
     </section>
 
     <section class="grid gap-2" :aria-label="`${activeComponent.label} Component Token`">
-      <div class="rounded-cp-lg bg-cp-bg-container px-3 py-3 shadow-cp-tertiary">
-        <p class="m-0 text-[10px] leading-normal font-emphasis text-cp-text-secondary">
+      <div class="rounded-z-lg bg-z-bg-container px-3 py-3 shadow-z-tertiary">
+        <p class="m-0 text-[10px] leading-normal font-emphasis text-z-text-secondary">
           调整 {{ activeComponent.label }} 的 Component Token，未修改的值继续由全局 Seed / Alias 算法生成
         </p>
       </div>
@@ -408,7 +408,7 @@ function numericTokenValue(name: ThemeTokenName) {
         />
       </template>
 
-      <div v-if="visibleTokens.length === 0" class="rounded-cp-lg bg-cp-fill-quaternary px-3 py-6 text-center text-cp-xs font-emphasis text-cp-text-quaternary">
+      <div v-if="visibleTokens.length === 0" class="rounded-z-lg bg-z-fill-quaternary px-3 py-6 text-center text-z-xs font-emphasis text-z-text-quaternary">
         没有匹配的 Component Token
       </div>
     </section>

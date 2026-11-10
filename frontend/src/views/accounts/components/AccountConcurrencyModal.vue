@@ -15,10 +15,10 @@ const { data, entries, loading, error, refresh } = useAccountConcurrency(toRef(p
   <ZDialog v-model="open" title="并发明细" description="当前正在处理的请求" width="72rem">
     <div class="grid min-w-0 gap-2">
       <div class="flex items-center justify-between gap-3">
-        <div class="flex items-center text-cp-sm" role="group" aria-label="当前占用 / 并发上限">
+        <div class="flex items-center text-z-sm" role="group" aria-label="当前占用 / 并发上限">
           <span class="whitespace-nowrap font-mono tabular-nums">
-            <strong class="font-emphasis text-cp-text">{{ data?.total ?? account?.capacity.usedSlots ?? '—' }}</strong>
-            <span class="text-cp-text-tertiary"> / {{ account?.capacity.totalSlots ?? '不限' }}</span>
+            <strong class="font-emphasis text-z-text">{{ data?.total ?? account?.capacity.usedSlots ?? '—' }}</strong>
+            <span class="text-z-text-tertiary"> / {{ account?.capacity.totalSlots ?? '不限' }}</span>
           </span>
         </div>
         <ZIconButton

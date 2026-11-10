@@ -96,9 +96,9 @@ function remove(rule: PrivacyRule) {
         </div>
         <RulesTable :rules="model.rules" :disabled="disabled" @edit="edit($event)" @toggle="toggle" @remove="remove" @reorder="model = { ...model, rules: $event }" />
         <div v-if="model.rules.length" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <span class="text-cp-xs text-cp-text-quaternary">按列表顺序执行 · {{ model.rules.length }} 条规则 · {{ stepCount }} / 32 个步骤</span>
+          <span class="text-z-xs text-z-text-quaternary">按列表顺序执行 · {{ model.rules.length }} 条规则 · {{ stepCount }} / 32 个步骤</span>
           <div class="flex items-center gap-2">
-            <span class="text-cp-xs text-cp-text-secondary">执行失败</span>
+            <span class="text-z-xs text-z-text-secondary">执行失败</span>
             <ZSelect v-model="model.onError" size="small" class="w-34" :options="failureOptions" aria-label="规则执行失败" :disabled="disabled" />
             <ZPopover trigger="hover-click" placement="top-end">
               <template #reference="{ open: helpOpen }">
@@ -106,7 +106,7 @@ function remove(rule: PrivacyRule) {
                   <CircleHelp class="size-3.5" />
                 </ZIconButton>
               </template>
-              <div class="max-w-72 space-y-2 p-3 text-cp-sm text-cp-text-secondary">
+              <div class="max-w-72 space-y-2 p-3 text-z-sm text-z-text-secondary">
                 <p class="m-0">
                   跳过时撤销本条规则所有步骤的修改并继续执行，未完成本条脱敏
                 </p><p class="m-0">

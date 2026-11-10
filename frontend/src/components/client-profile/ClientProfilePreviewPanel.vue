@@ -11,27 +11,27 @@ defineProps<{
 </script>
 
 <template>
-  <p v-if="needsVersionInput" role="status" class="m-0 text-cp-sm text-cp-text-tertiary">
+  <p v-if="needsVersionInput" role="status" class="m-0 text-z-sm text-z-text-tertiary">
     填写版本后预览
   </p>
   <ZEmpty v-else-if="error && !previewing" title="预览暂不可用" :description="error" size="small" surface="none" role="alert" />
   <div
     v-else-if="previewing || preview"
-    class="grid min-h-20 min-w-0 content-center gap-2 rounded-cp bg-cp-fill-quaternary p-4"
+    class="grid min-h-20 min-w-0 content-center gap-2 rounded-z bg-z-fill-quaternary p-4"
     aria-live="polite"
     :aria-busy="previewing"
   >
     <template v-if="previewing">
-      <div class="flex h-lh items-center text-cp-sm" role="status" aria-label="正在解析客户端身份">
+      <div class="flex h-lh items-center text-z-sm" role="status" aria-label="正在解析客户端身份">
         <ZSkeleton shape="text" class="w-4/5" aria-hidden="true" />
       </div>
-      <div class="flex h-lh items-center text-cp-xs" aria-hidden="true">
+      <div class="flex h-lh items-center text-z-xs" aria-hidden="true">
         <ZSkeleton shape="text" class="w-52 max-w-full" />
       </div>
     </template>
     <template v-else-if="preview">
-      <code class="break-all text-cp-sm text-cp-text">{{ preview.userAgent }}</code>
-      <p class="m-0 text-cp-xs text-cp-text-tertiary">
+      <code class="break-all text-z-sm text-z-text">{{ preview.userAgent }}</code>
+      <p class="m-0 text-z-xs text-z-text-tertiary">
         {{ preview.versionSource === 'custom' ? '固定身份' : '自动更新' }}
         <template v-if="preview.versionSource === 'official'">
           <template v-if="preview.versionLag">
@@ -40,7 +40,7 @@ defineProps<{
           · {{ preview.checkedAtDisplay ? `检查于 ${preview.checkedAtDisplay}` : '待检查' }}
         </template>
       </p>
-      <p v-if="preview.error && preview.versionSource !== 'custom'" :title="preview.error" class="m-0 text-cp-sm text-cp-warning">
+      <p v-if="preview.error && preview.versionSource !== 'custom'" :title="preview.error" class="m-0 text-z-sm text-z-warning">
         更新失败 · 沿用上次版本
       </p>
     </template>

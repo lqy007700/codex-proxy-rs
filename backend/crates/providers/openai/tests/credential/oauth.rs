@@ -10,7 +10,7 @@ use gateway_admin::model::provider_credentials::{
     AuthorizationMutationTarget, AuthorizationOwnerBinding, PendingAuthorizationMutation,
 };
 use gateway_admin::model::{MutationActor, MutationContext};
-use gateway_core::account::{AccountStatus, ProviderAccountId};
+use gateway_core::account::{AccountStatus, ProviderAccountId, ProviderAccountStore};
 use gateway_core::routing::ProviderKind;
 use provider_openai::credential::token_client::{
     AuthorizationCodeExchangeError, AuthorizationCodeExchanger, AuthorizationCodeGrant,
@@ -98,6 +98,20 @@ impl CodexOAuthPendingStore for PendingStore {
 
 struct Exchanger {
     id_token: String,
+}
+
+struct ExchangeWithoutRefresh(Exchanger);
+
+#[async_trait]
+impl AuthorizationCodeExchanger for ExchangeWithoutRefresh {
+    async fn exchange_authorization_code(
+        &self,
+        grant: AuthorizationCodeGrant,
+    ) -> Result<AuthorizationTokenSet, AuthorizationCodeExchangeError> {
+        let mut tokens = self.0.exchange_authorization_code(grant).await?;
+        tokens.secret.refresh_token = None;
+        Ok(tokens)
+    }
 }
 
 #[async_trait]
@@ -450,6 +464,202 @@ async fn repeated_reauthorization_derives_the_same_surface_id_for_one_account() 
     }
 
     assert_eq!(surface_ids[0], surface_ids[1]);
+}
+
+#[tokio::test]
+async fn reauthorization_binds_the_selected_slot_to_the_new_oauth_account() {
+    use secrecy::ExposeSecret;
+
+    let store = Arc::new(MemoryAccountStore::default());
+    let account_id = ProviderAccountId::new("acct_reauth").unwrap();
+    store
+        .seed_oauth_credential(ImportCodexOAuthCredential {
+            account_id: account_id.to_string(),
+            name: "local label".into(),
+            secret: secret("original-access"),
+            verified_account: account_profile("workspace-a"),
+            next_refresh_at: None,
+            enabled: true,
+        })
+        .await;
+    let pending = Arc::new(PendingStore::default());
+    let service = CodexOAuthAdminService::new(
+        pending.clone(),
+        Arc::new(Exchanger {
+            id_token: id_token(serde_json::json!({
+                "email": "b@example.com",
+                "https://api.openai.com/auth": {
+                    "chatgpt_user_id": "user-b",
+                    "chatgpt_account_id": "workspace-b",
+                    "chatgpt_plan_type": "plus"
+                }
+            })),
+        }),
+        store,
+        CodexCredentialAdmin,
+        profile(),
+    );
+    let started = service
+        .start_authorization(StartCodexOAuthAuthorization {
+            mutation: reauthorization_mutation(account_id.clone(), "reauth-request"),
+        })
+        .await
+        .unwrap();
+    let state = pending
+        .pending
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .state
+        .clone();
+    let completed = service
+        .complete_authorization(CompleteCodexOAuthAuthorization {
+            owner_ref: "test-owner".into(),
+            flow_id: started.flow_id,
+            callback_url: SecretString::from(format!(
+                "http://127.0.0.1:1455/auth/callback?code=browser&state={}",
+                state.expose_secret()
+            )),
+        })
+        .await
+        .unwrap();
+    let CompletedCodexOAuthCredential::Reauthorize(rotation) = completed.credential else {
+        panic!("expected reauthorization")
+    };
+    let identity = rotation.replacement_identity.unwrap();
+    assert_eq!(identity.upstream_user_id(), "user-b");
+    assert_eq!(identity.upstream_account_id(), Some("workspace-b"));
+    assert_eq!(rotation.profile.account_id, account_id);
+    assert_eq!(rotation.profile.name, "local label");
+    assert_eq!(rotation.profile.email.as_deref(), Some("b@example.com"));
+    assert_eq!(rotation.profile.plan_type.as_deref(), Some("plus"));
+    let credential = rotation.credential.into_parts();
+    assert!(!credential.preserve_profile);
+    let runtime = CodexCredentialCodec::decode(&credential.credential).unwrap();
+    assert!(runtime.principal.is_none());
+    assert_eq!(
+        runtime
+            .authentication
+            .oauth()
+            .unwrap()
+            .access_token
+            .expose_secret(),
+        "access-token-from-upstream"
+    );
+}
+
+#[tokio::test]
+async fn reauthorization_isolates_tokens_cookies_and_legacy_continuations_by_identity() {
+    use provider_openai::credential::CodexCookie;
+    use secrecy::ExposeSecret;
+
+    for (user, workspace, already_changed) in [
+        (Some("user-workspace-a"), "workspace-a", false),
+        (Some("user-workspace-a"), "workspace-a", true),
+        (Some("different-user"), "workspace-a", false),
+        (Some("user-workspace-a"), "workspace-b", false),
+        (None, "workspace-a", false),
+    ] {
+        let changed = user != Some("user-workspace-a") || workspace != "workspace-a";
+        let store = Arc::new(MemoryAccountStore::default());
+        let account_id = ProviderAccountId::new("acct_identity_boundary").unwrap();
+        let mut account = CodexCredentialAdmin
+            .prepare_import(ImportCodexOAuthCredential {
+                account_id: account_id.to_string(),
+                name: "local label".into(),
+                secret: secret("original-access"),
+                verified_account: account_profile("workspace-a"),
+                next_refresh_at: None,
+                enabled: true,
+            })
+            .unwrap();
+        let mut original = CodexCredentialCodec::decode_complete(&account.credential).unwrap();
+        let oauth = original.oauth_mut().unwrap();
+        oauth.oauth_identity_changed = already_changed;
+        oauth.cookies.push(CodexCookie {
+            name: "__oailb".into(),
+            value: "old-routing-test-only".into(),
+            domain: "chatgpt.com".into(),
+            path: "/".into(),
+            host_only: true,
+            secure: true,
+            expires_at: None,
+        });
+        account.credential = CodexCredentialCodec::encode_complete(original.clone()).unwrap();
+        store.create_account(account).await.unwrap();
+        let pending = Arc::new(PendingStore::default());
+        let service = CodexOAuthAdminService::new(
+            pending.clone(),
+            Arc::new(ExchangeWithoutRefresh(Exchanger {
+                id_token: id_token(serde_json::json!({
+                    "email": "new@example.com",
+                    "https://api.openai.com/auth": {
+                        "chatgpt_user_id": user,
+                        "chatgpt_account_id": workspace,
+                        "chatgpt_plan_type": "plus"
+                    }
+                })),
+            })),
+            store,
+            CodexCredentialAdmin,
+            profile(),
+        );
+        let started = service
+            .start_authorization(StartCodexOAuthAuthorization {
+                mutation: reauthorization_mutation(account_id, "identity-boundary"),
+            })
+            .await
+            .unwrap();
+        let state = pending
+            .pending
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .state
+            .clone();
+        let completed = service
+            .complete_authorization(CompleteCodexOAuthAuthorization {
+                owner_ref: "test-owner".into(),
+                flow_id: started.flow_id,
+                callback_url: SecretString::from(format!(
+                    "http://127.0.0.1:1455/auth/callback?code=browser&state={}",
+                    state.expose_secret()
+                )),
+            })
+            .await;
+        if user.is_none() {
+            assert!(completed.is_err(), "缺失用户身份不能覆盖目标账号");
+            continue;
+        }
+        let CompletedCodexOAuthCredential::Reauthorize(rotation) = completed.unwrap().credential
+        else {
+            panic!("expected reauthorization")
+        };
+        assert_eq!(rotation.replacement_identity.is_some(), changed);
+        let update = rotation.credential.into_parts();
+        let data = CodexCredentialCodec::decode_complete(&update.credential).unwrap();
+        let oauth = data.oauth().unwrap();
+        assert_eq!(oauth.oauth_identity_changed, changed || already_changed);
+        assert_eq!(
+            oauth.installation_id,
+            original.oauth().unwrap().installation_id
+        );
+        assert_eq!(oauth.access_token, "access-token-from-upstream");
+        assert_eq!(
+            oauth.refresh_token.as_deref(),
+            (!changed).then_some("rt-original-access")
+        );
+        assert_eq!(update.has_refresh_token, !changed);
+        if changed {
+            assert!(oauth.cookies.is_empty());
+            assert!(oauth.principal.is_none());
+        } else {
+            assert_eq!(oauth.cookies, original.oauth().unwrap().cookies);
+            assert_eq!(oauth.principal, original.oauth().unwrap().principal);
+        }
+    }
 }
 
 #[tokio::test]

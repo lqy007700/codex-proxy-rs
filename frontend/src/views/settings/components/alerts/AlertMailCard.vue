@@ -57,7 +57,7 @@ const securityOptions = [
         <ZInput v-model="form.recipients" aria-label="接收邮箱" placeholder="ops@example.com, admin@example.com" :disabled="disabled" maxlength="3210" />
       </ZFormItem>
     </ZForm>
-    <p class="mt-4 text-cp-sm text-cp-text-secondary">
+    <p class="mt-4 text-z-sm text-z-text-secondary">
       测试使用已保存配置，每分钟最多一次，实际发送结果显示在投递记录中
     </p>
   </ZCard>

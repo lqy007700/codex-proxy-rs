@@ -4,20 +4,25 @@ import type {
   ThemeComponentOverrides,
   ThemeCustomization,
   ThemeMode,
-  ThemeName,
+  ThemePresetId,
+  ThemeScheme,
   ThemeSeedOverrides,
   ThemeTokenName,
 } from '@codex-proxy/ui/theme'
 
 import { normalizeHexColor } from '@codex-proxy/ui'
 import {
-  DEFAULT_CUSTOM_THEME_COLOR,
-  DEFAULT_THEME_COLOR,
-  DEFAULT_THEME_MODE,
+  createTheme,
+  createThemeVars,
+  defaultThemeColorId,
+  defaultThemeMode,
+  defaultThemePresetId,
+  defaultThemePrimaryColor,
   isThemeColorId,
   isThemeMode,
+  isThemePresetId,
   normalizeThemeCustomization,
-  resolveTheme,
+  themeProfiles,
 } from '@codex-proxy/ui/theme'
 
 import { storeToRefs } from 'pinia'
@@ -36,6 +41,7 @@ export type ThemeEditorComponent
     | 'layout'
 
 export interface ThemeEditorDraft {
+  preset: ThemePresetId
   mode: ThemeMode
   color: ThemeColorId
   customColor: string
@@ -50,6 +56,7 @@ export function useThemeEditor() {
   const themeStore = useThemeStore()
   const {
     themeMode,
+    themePreset,
     themeColor,
     customThemeColor,
     themeCustomization,
@@ -61,18 +68,19 @@ export function useThemeEditor() {
   const scope = shallowRef<ThemeEditorScope>('global')
   const globalCategory = shallowRef<ThemeEditorGlobalCategory>('color')
   const preview = shallowRef<ThemeEditorPreview>('page')
-  const previewTheme = shallowRef<ThemeName>(effectiveTheme.value)
+  const previewTheme = shallowRef<ThemeScheme>(effectiveTheme.value)
   const component = shallowRef<ThemeEditorComponent>('action')
   const query = shallowRef('')
 
-  const resolvedPreview = computed(() => resolveTheme(
-    previewTheme.value,
-    draft.value.color,
-    draft.value.customColor,
-    draft.value.customization,
-  ))
+  const resolvedPreview = computed(() => createTheme({
+    scheme: previewTheme.value,
+    preset: draft.value.preset,
+    colorId: draft.value.color,
+    primaryColor: draft.value.customColor,
+    customization: draft.value.customization,
+  }))
   const previewStyle = computed<Record<string, string>>(() => ({
-    ...resolvedPreview.value.tokens,
+    ...createThemeVars(resolvedPreview.value.tokens),
     colorScheme: previewTheme.value,
   }))
   const modificationCount = computed(() => countDraftChanges(saved.value, draft.value))
@@ -81,6 +89,7 @@ export function useThemeEditor() {
   watch(
     [
       themeMode,
+      themePreset,
       themeColor,
       customThemeColor,
       themeCustomization,
@@ -103,6 +112,7 @@ export function useThemeEditor() {
 
   function createStoreDraft(): ThemeEditorDraft {
     return {
+      preset: themePreset.value,
       mode: themeMode.value,
       color: themeColor.value,
       customColor: customThemeColor.value,
@@ -110,11 +120,23 @@ export function useThemeEditor() {
     }
   }
 
-  function selectPreset(color: ThemeColorPresetId) {
+  function selectMaterial(preset: ThemePresetId) {
+    draft.value = { ...draft.value, preset }
+  }
+
+  function applyProfile(color: ThemeColorPresetId) {
+    const { preset, customization } = themeProfiles[color]
     draft.value = {
       ...draft.value,
       color,
+      preset,
+      customColor: defaultThemePrimaryColor,
+      customization: normalizeThemeCustomization(customization),
     }
+  }
+
+  function resetPrimaryColor() {
+    draft.value = { ...draft.value, color: defaultThemeColorId, customColor: defaultThemePrimaryColor }
   }
 
   function setPrimaryColor(color: string) {
@@ -216,9 +238,10 @@ export function useThemeEditor() {
 
   function restoreDefaults() {
     draft.value = {
-      mode: DEFAULT_THEME_MODE,
-      color: DEFAULT_THEME_COLOR,
-      customColor: DEFAULT_CUSTOM_THEME_COLOR,
+      preset: defaultThemePresetId,
+      mode: defaultThemeMode,
+      color: defaultThemeColorId,
+      customColor: defaultThemePrimaryColor,
       customization: {},
     }
     previewTheme.value = effectiveTheme.value
@@ -253,7 +276,7 @@ export function useThemeEditor() {
     }
   }
 
-  function resolvedDraftTheme(value: ThemeEditorDraft): ThemeName {
+  function resolvedDraftTheme(value: ThemeEditorDraft): ThemeScheme {
     return value.mode === 'system'
       ? effectiveTheme.value
       : value.mode
@@ -271,7 +294,9 @@ export function useThemeEditor() {
     previewStyle,
     modificationCount,
     dirty,
-    selectPreset,
+    selectMaterial,
+    applyProfile,
+    resetPrimaryColor,
     setPrimaryColor,
     setMode,
     setSeedColor,
@@ -289,9 +314,10 @@ export function useThemeEditor() {
 
 function normalizeDraft(value: ThemeEditorDraft): ThemeEditorDraft | null {
   const customColor = normalizeHexColor(value.customColor)
-  if (!isThemeMode(value.mode) || !isThemeColorId(value.color) || !customColor)
+  if (!isThemePresetId(value.preset) || !isThemeMode(value.mode) || !isThemeColorId(value.color) || !customColor)
     return null
   return {
+    preset: value.preset,
     mode: value.mode,
     color: value.color,
     customColor,
@@ -318,6 +344,8 @@ function cloneDraft(value: ThemeEditorDraft): ThemeEditorDraft {
 
 function countDraftChanges(saved: ThemeEditorDraft, draft: ThemeEditorDraft) {
   let count = 0
+  if (saved.preset !== draft.preset)
+    count += 1
   if (saved.mode !== draft.mode)
     count += 1
   if (saved.color !== draft.color || saved.customColor !== draft.customColor)

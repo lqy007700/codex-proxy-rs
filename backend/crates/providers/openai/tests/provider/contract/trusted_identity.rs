@@ -22,6 +22,13 @@ fn scoped_context(id: &str, key: &str, caller: CallerIdentity) -> AttemptContext
 }
 
 fn token_context(scope: Arc<FrozenAccountScope>) -> AttemptContext {
+    token_context_with_policy(scope, account_policy())
+}
+
+fn token_context_with_policy(
+    scope: Arc<FrozenAccountScope>,
+    policy: gateway_core::account::AccountSelectionPolicy,
+) -> AttemptContext {
     AttemptContext::new(
         RequestAttemptContext::new(
             ModelRequestId::new("req_token_affinity").unwrap(),
@@ -31,7 +38,7 @@ fn token_context(scope: Arc<FrozenAccountScope>) -> AttemptContext {
         .with_request_location(Some(global_request_location())),
         NonZeroU32::MIN,
         SystemTime::now() + Duration::from_secs(10),
-        account_policy(),
+        policy,
         AccountAttemptContext::new(BTreeSet::new(), None, None).with_account_scope(scope),
         None,
         CancellationToken::new(),
@@ -929,33 +936,54 @@ async fn token_store_timeout_and_cancellation_do_not_start_upstream_or_claim_bin
 }
 
 #[tokio::test]
-async fn quota_and_cooldown_spillover_keep_primary_and_recover_on_the_next_request() {
+async fn token_primary_migrates_only_on_confirmed_persistent_quota_exhaustion() {
     use gateway_core::account::{QuotaEvidence, QuotaState};
     use gateway_core::provider_ports::ProviderCooldown;
-    let store = Arc::new(MemoryAccountStore::default());
-    create_account(&store, "acct_subagent_a").await;
-    let affinity = Arc::new(MemorySessionAffinity::default());
-    let cooldowns = Arc::new(MemoryCooldownPort::new());
-    let (provider, _, _) = provider_and_quota_with_runtime_ports(
-        &store,
-        affinity.clone(),
-        MockServer::start().await.uri(),
-        Arc::new(TestLeaseCoordinator::default()),
-        0,
-        cooldowns.clone(),
-        crate::support::runtime_policy(),
-    );
-    let choose = || {
-        provider.clone().execute(
-            planned_request("openai", generate_operation()),
-            token_context(contract_account_scope()),
-        )
-    };
-    drop(choose().await.unwrap());
-    create_account(&store, "acct_subagent_b").await;
-    let account = ProviderAccountId::new("acct_subagent_a").unwrap();
-    for quota in [true, false] {
-        if quota {
+
+    for scenario in [
+        "quota_unknown_reset",
+        "quota_far_reset",
+        "quota_near_reset",
+        "quota_recovers_before_admission",
+        "cooldown",
+        "unknown_quota",
+        "credits_allowed",
+        "credits_disabled",
+    ] {
+        let store = Arc::new(MemoryAccountStore::default());
+        create_account(&store, "acct_subagent_a").await;
+        let affinity = Arc::new(MemorySessionAffinity::default());
+        let cooldowns = Arc::new(MemoryCooldownPort::new());
+        let (provider, _, _) = provider_and_quota_with_runtime_ports(
+            &store,
+            affinity.clone(),
+            MockServer::start().await.uri(),
+            Arc::new(TestLeaseCoordinator::default()),
+            0,
+            cooldowns.clone(),
+            crate::support::runtime_policy(),
+        );
+        // 默认测试策略关闭排队，这里显式冻结恢复宽限以区分临近重置
+        let policy =
+            account_policy().with_queue(gateway_core::concurrency::ConcurrencyQueuePolicy {
+                max_waiting: 10,
+                timeout: Duration::from_secs(30),
+            });
+        let choose = || {
+            provider.clone().execute(
+                planned_request("openai", generate_operation()),
+                token_context_with_policy(contract_account_scope(), policy),
+            )
+        };
+        drop(choose().await.unwrap());
+        create_account(&store, "acct_subagent_b").await;
+        let account = ProviderAccountId::new("acct_subagent_a").unwrap();
+        if scenario.starts_with("quota_") {
+            let reset_at = match scenario {
+                "quota_near_reset" => Some(SystemTime::now() + Duration::from_secs(2)),
+                "quota_far_reset" => Some(SystemTime::now() + Duration::from_secs(3600)),
+                _ => None,
+            };
             store
                 .apply_quota_access(QuotaAccessChange {
                     account_id: account.clone(),
@@ -963,12 +991,22 @@ async fn quota_and_cooldown_spillover_keep_primary_and_recover_on_the_next_reque
                     state: QuotaState::exhausted(
                         QuotaEvidence::UsageLimitReached,
                         SystemTime::now(),
-                        None,
+                        reset_at,
                     ),
                 })
                 .await
                 .unwrap();
-        } else {
+        } else if scenario.starts_with("credits_") {
+            store.set_allow_credits(account.as_str(), scenario == "credits_allowed");
+            store
+                .apply_quota_access(QuotaAccessChange {
+                    account_id: account.clone(),
+                    expected_revision: store.account(account.as_str()).unwrap().revision(),
+                    state: QuotaState::credits_only(SystemTime::now(), None),
+                })
+                .await
+                .unwrap();
+        } else if scenario == "cooldown" {
             cooldowns.cooldowns.lock().unwrap().insert(
                 account.clone(),
                 ProviderCooldown::new(
@@ -978,12 +1016,43 @@ async fn quota_and_cooldown_spillover_keep_primary_and_recover_on_the_next_reque
                 ),
             );
         }
+        if scenario == "quota_recovers_before_admission" {
+            store.on_credential_load(Arc::new(|store, selected, _| {
+                Box::pin(async move {
+                    if selected.as_str() == "acct_subagent_b" {
+                        let primary = store.account("acct_subagent_a").unwrap();
+                        store
+                            .apply_quota_access(QuotaAccessChange {
+                                account_id: primary.id().clone(),
+                                expected_revision: primary.revision(),
+                                state: QuotaState::allowed(SystemTime::now()),
+                            })
+                            .await?;
+                    }
+                    Ok(())
+                })
+            }));
+        }
+        let migrated = matches!(
+            scenario,
+            "quota_unknown_reset" | "quota_far_reset" | "credits_disabled"
+        );
+        let expected_primary = if migrated {
+            "acct_subagent_b"
+        } else {
+            "acct_subagent_a"
+        };
         let stream = choose().await.unwrap();
         assert_eq!(
             stream.metadata().provider_account_id().as_str(),
-            "acct_subagent_b"
+            if matches!(scenario, "unknown_quota" | "credits_allowed") {
+                "acct_subagent_a"
+            } else {
+                "acct_subagent_b"
+            },
+            "{scenario}",
         );
-        assert_eq!(primary(&affinity), "acct_subagent_a");
+        assert_eq!(primary(&affinity), expected_primary, "{scenario}");
         drop(stream);
         store
             .apply_quota_access(QuotaAccessChange {
@@ -1001,7 +1070,8 @@ async fn quota_and_cooldown_spillover_keep_primary_and_recover_on_the_next_reque
                 .metadata()
                 .provider_account_id()
                 .as_str(),
-            "acct_subagent_a"
+            expected_primary,
+            "{scenario}",
         );
     }
 }

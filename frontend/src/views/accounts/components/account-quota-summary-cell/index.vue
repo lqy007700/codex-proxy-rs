@@ -27,7 +27,7 @@ const currentUsageWindow = computed(() => representativeQuotaWindow(recentUsageE
 const currentUsageDisplay = computed(() => currentUsageWindow.value?.usedPercentDisplay ?? '—')
 const currentUsageTextClass = computed(() => currentUsageWindow.value
   ? quotaWindowPresentation(currentUsageWindow.value, '2px').percentTextClass
-  : 'text-cp-text-quaternary')
+  : 'text-z-text-quaternary')
 const additionalEntryCount = computed(() => Math.max(summaryEntries.value.length - 1, 0))
 </script>
 
@@ -38,15 +38,15 @@ const additionalEntryCount = computed(() => Math.max(summaryEntries.value.length
         class="flex min-w-0 items-baseline gap-1 font-mono leading-none tabular-nums"
         title="本地累计总 Token"
       >
-        <strong class="truncate text-cp-xs font-heavy text-cp-text">{{ account.usage.totalTokensDisplay }}</strong>
-        <span class="shrink-0 text-[9px] font-emphasis tracking-[0.02em] text-cp-text-quaternary">Tokens</span>
+        <strong class="truncate text-z-xs font-heavy text-z-text">{{ account.usage.totalTokensDisplay }}</strong>
+        <span class="shrink-0 text-[9px] font-emphasis tracking-[0.02em] text-z-text-quaternary">Tokens</span>
       </span>
       <div class="grid min-w-0 gap-1.5">
         <div class="flex min-w-0 items-start justify-between gap-2 leading-3">
-          <span class="truncate text-[10px] font-bold text-cp-text-quaternary">{{ account.usage.windowLabelDisplay }}</span>
+          <span class="truncate text-[10px] font-bold text-z-text-quaternary">{{ account.usage.windowLabelDisplay }}</span>
           <AccountCapacityIndicator :capacity="account.capacity" @show-details="emit('showConcurrency')" />
         </div>
-        <div class="h-1 w-full rounded-full bg-cp-success" title="上游额度未提供，绿色条不表示剩余额度" aria-hidden="true" />
+        <div class="h-1 w-full rounded-full bg-z-success" title="上游额度未提供，绿色条不表示剩余额度" aria-hidden="true" />
       </div>
     </template>
     <template v-else-if="summaryEntries.length > 0">
@@ -58,16 +58,16 @@ const additionalEntryCount = computed(() => Math.max(summaryEntries.value.length
           class="flex min-w-0 items-baseline gap-1 font-mono tabular-nums"
           :title="`${account.usage.windowLabelDisplay}总 Token`"
         >
-          <strong class="truncate text-cp-xs font-heavy text-cp-text">
+          <strong class="truncate text-z-xs font-heavy text-z-text">
             {{ account.usage.totalTokensDisplay }}
           </strong>
-          <span class="shrink-0 text-[9px] font-emphasis tracking-[0.02em] text-cp-text-quaternary">
+          <span class="shrink-0 text-[9px] font-emphasis tracking-[0.02em] text-z-text-quaternary">
             Tokens
           </span>
         </span>
         <span
           v-if="currentUsageWindow"
-          class="flex shrink-0 items-baseline gap-1 text-[9px] font-emphasis text-cp-text-quaternary"
+          class="flex shrink-0 items-baseline gap-1 text-[9px] font-emphasis text-z-text-quaternary"
           title="最近使用额度的当前已用比例"
         >
           <span>使用率</span>
@@ -93,7 +93,7 @@ const additionalEntryCount = computed(() => Math.max(summaryEntries.value.length
         </div>
         <span
           v-if="additionalEntryCount > 0"
-          class="grid h-5 min-w-5 shrink-0 place-items-center rounded-cp bg-cp-fill-quaternary px-1.5 font-mono text-[9px] font-heavy tabular-nums text-cp-text-tertiary"
+          class="grid h-5 min-w-5 shrink-0 place-items-center rounded-z bg-z-fill-quaternary px-1.5 font-mono text-[9px] font-heavy tabular-nums text-z-text-tertiary"
           :title="`另有 ${additionalEntryCount} 个额度组，可展开账号查看`"
         >
           +{{ additionalEntryCount }}
