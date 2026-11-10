@@ -305,7 +305,6 @@ impl CodexCredentialQuotaService {
         };
         let state = reconcile_refresh(
             account.quota_fact(),
-            account.allow_credits(),
             &mut snapshot,
             previous.as_ref(),
             &mut object,
@@ -554,7 +553,6 @@ impl CodexCredentialQuotaService {
         let state = if observe_access {
             reconcile_refresh(
                 account.quota_fact(),
-                account.allow_credits(),
                 &mut snapshot,
                 previous.as_ref(),
                 &mut object,

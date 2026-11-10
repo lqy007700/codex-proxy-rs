@@ -152,6 +152,10 @@ async fn credits_refresh_clears_old_recovery_and_locks_again_only_when_spent() {
             .await
             .expect("spent credits");
         assert!(snapshot.quota().is_exhausted());
+        assert_ne!(
+            snapshot.quota().evidence(),
+            Some(QuotaEvidence::CreditsAvailable)
+        );
         assert!(
             store
                 .account("acct_credits_recovery")
@@ -281,6 +285,7 @@ async fn credits_are_disabled_by_default_and_refresh_cannot_enable_them() {
     let restored = store.account(account_id).unwrap();
     assert!(!restored.allow_credits());
     assert_eq!(restored.quota().access(), QuotaAccessState::Allowed);
+    assert_eq!(restored.quota_fact().evidence(), None);
 
     mount_usage(
         &server,
@@ -292,4 +297,35 @@ async fn credits_are_disabled_by_default_and_refresh_cannot_enable_them() {
     .await;
     service.refresh_account(&id).await.unwrap();
     assert!(store.account(account_id).unwrap().quota().is_exhausted());
+}
+
+#[tokio::test]
+async fn unknown_refresh_preserves_credit_backed_access_fact_and_spending_policy() {
+    for allow_credits in [false, true] {
+        let store = Arc::new(MemoryAccountStore::default());
+        let account_id = "acct_unknown_credits";
+        create_account(&store, account_id).await;
+        store.set_allow_credits(account_id, allow_credits);
+        let server = MockServer::start().await;
+        let service = quota_service_with_base_url(&store, reqwest::Client::new(), server.uri());
+        let id = gateway_core::account::ProviderAccountId::new(account_id).unwrap();
+        let mut usage = exhausted_usage();
+        usage["credits"] = json!({"has_credits": true});
+        mount_usage(&server, usage).await;
+        service.refresh_account(&id).await.unwrap();
+        let original = store.account(account_id).unwrap();
+        assert_eq!(
+            original.quota_fact().evidence(),
+            Some(QuotaEvidence::CreditsAvailable)
+        );
+
+        for credits in [json!({"has_credits": false}), json!({"has_credits": true})] {
+            mount_usage(&server, json!({"rate_limit": null, "credits": credits})).await;
+            service.refresh_account(&id).await.unwrap();
+            let current = store.account(account_id).unwrap();
+            assert_eq!(current.quota_fact(), original.quota_fact());
+            assert_eq!(current.allow_credits(), allow_credits);
+            assert_eq!(current.quota().is_exhausted(), !allow_credits);
+        }
+    }
 }

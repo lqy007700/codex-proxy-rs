@@ -3759,7 +3759,10 @@ async fn credits_policy_migration_blocks_existing_credit_backed_access_without_b
         .await
         .unwrap();
     }
-    sqlx::raw_sql("alter table provider_accounts drop column allow_credits;
+    // 回退到点数策略迁移前的结构时，先移除后续迁移对该列的触发器依赖
+    sqlx::raw_sql("drop trigger provider_accounts_allow_credits_policy on provider_accounts;
+        drop function apply_allow_credits_policy();
+        alter table provider_accounts drop column allow_credits;
         alter table provider_accounts drop constraint provider_accounts_quota_evidence_ck;
         alter table provider_accounts add constraint provider_accounts_quota_evidence_ck check (
             quota_evidence is null or quota_evidence in ('provider_denied','account_limit_reached','usage_limit_reached','payment_required'))")

@@ -131,22 +131,24 @@ fn window_reset_recovered(window: &CodexQuotaWindow, previous: Option<DateTime<U
 /// 已记录的耗尽窗口全部到期后，允许新的明确放行观察解除，兼容用量百分比滞后
 pub(super) fn reconcile_refresh(
     current: QuotaState,
-    allow_credits: bool,
     refreshed: &mut CodexAccountQuotaSnapshot,
     previous: Option<&CodexAccountQuotaSnapshot>,
     document: &mut Map<String, Value>,
 ) -> Result<QuotaState, CodexCredentialQuotaError> {
     document.remove(RECOVERY_FIELD);
-    if allow_credits && refreshed.credits_usable() {
-        // 点数独立于套餐窗口，恢复后不能继续携带已失效的窗口恢复进度
+    if refreshed.credits_usable() && refreshed.quota().access() != QuotaAccessState::Unknown {
+        // 点数仅提供条件访问事实，是否支出由 Core 结合账号设置决定
+        // 套餐窗口恢复进度不能阻挡新的点数事实，未知观察也不能擦除已确认状态
         refreshed.recovery = None;
         return Ok(refreshed.quota());
     }
-    let state = if current.is_exhausted() {
-        current
-    } else {
-        current.merge_observation(refreshed.quota())
-    };
+    let state =
+        if current.is_exhausted() && current.evidence() != Some(QuotaEvidence::CreditsAvailable) {
+            current
+        } else {
+            // 条件访问必须随新快照更新，避免点数花完后沿用旧事实或套餐恢复后仍被锁定
+            current.merge_observation(refreshed.quota())
+        };
     if !state.is_exhausted() {
         return Ok(state);
     }
