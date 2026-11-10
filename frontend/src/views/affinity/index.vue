@@ -66,10 +66,12 @@ interface AccountAffinityRow {
   bindings: AffinitySession[]
 }
 const expandedAccountIds = ref(new Set<string>())
-const accountRows = computed<AccountAffinityRow[]>(() => accountCatalog.value.map(account => ({
-  account,
-  bindings: sessions.value.filter(session => session.accountId === account.id),
-})))
+const accountRows = computed<AccountAffinityRow[]>(() => accountCatalog.value
+  .filter(account => account.schedulingRole !== 'fallback')
+  .map(account => ({
+    account,
+    bindings: sessions.value.filter(session => session.accountId === account.id),
+  })))
 function callerGroupKey(session: AffinitySession) {
   const caller = session.observation.caller
   return caller.mode === 'newApi'
