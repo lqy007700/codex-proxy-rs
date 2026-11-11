@@ -675,6 +675,65 @@ async fn child_claims_before_root_and_then_follows_the_bound_account() {
 }
 
 #[tokio::test]
+async fn strict_child_waits_for_a_paused_owner_without_claiming_another_account() {
+    let store = Arc::new(MemoryAccountStore::default());
+    let owner = "acct_subagent_a";
+    create_account(&store, owner).await;
+    let affinity = Arc::new(MemorySessionAffinity::default());
+    let leases = Arc::new(TestLeaseCoordinator::default());
+    let server = MockServer::start().await;
+    let provider = provider_with_affinity_and_base_url_and_leases(
+        &store,
+        affinity.clone(),
+        server.uri(),
+        leases.clone(),
+    );
+    drop(
+        provider
+            .clone()
+            .execute(
+                planned_request("openai", turn_request("root", "root-turn")),
+                context("req_pause_seed", CancellationToken::new()),
+            )
+            .await
+            .unwrap(),
+    );
+    create_account(&store, "acct_subagent_b").await;
+    store.set_quota_limits(
+        owner,
+        serde_json::from_value(json!({"codex:18000s":95})).unwrap(),
+    );
+    store.set_quota_paused(owner, true);
+    let before = leases.requests.lock().unwrap().len();
+    let mut pending = Box::pin(provider.clone().execute(
+        planned_request(
+            "openai",
+            Operation::Generate(generate_with_session_context(
+                "root",
+                Some("child"),
+                Some(r#"{"subagent_kind":"thread_spawn"}"#),
+            )),
+        ),
+        context("req_paused_child", CancellationToken::new()),
+    ));
+    assert!(
+        timeout(Duration::from_millis(100), pending.as_mut())
+            .await
+            .is_err()
+    );
+    assert_eq!(leases.requests.lock().unwrap().len(), before);
+    assert_eq!(affinity.binding_count(), 1);
+    store.set_quota_paused(owner, false);
+    let stream = timeout(Duration::from_secs(2), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stream.metadata().provider_account_id().as_str(), owner);
+    assert_eq!(affinity.binding_count(), 1);
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn descendant_images_wait_for_the_owner_even_when_ordinary_queues_are_disabled() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_subagent_a").await;

@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::future::Future;
 use tokio::sync::oneshot;
 
-pub(super) async fn response(
+pub(in crate::openai) async fn response(
     response: impl Future<Output = Response> + Send + 'static,
     admitted: oneshot::Receiver<ResponseCommit>,
 ) -> Response {

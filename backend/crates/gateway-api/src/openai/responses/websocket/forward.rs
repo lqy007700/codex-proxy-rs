@@ -18,12 +18,13 @@ use gateway_core::event::ProviderResponseHeader;
 use gateway_core::operation::ProviderSessionState;
 
 use crate::openai::error::{gateway_error_contract, gateway_error_from_engine};
+use crate::openai::generation::DecodedGenerationRequest;
 use crate::openai::middleware::{PendingExecution, pending_execution_response};
 use crate::openai::response_model::ClientResponseModel;
 use crate::openai::responses::validation::{ResponseValidationFacts, ResponsesDeliveryValidator};
 
 use super::{
-    super::{DecodedResponsesRequest, OpenAiResponsesEncoder, ProtocolErrorBody},
+    super::{OpenAiResponsesEncoder, ProtocolErrorBody},
     connection::{
         ConnectionEvent, FramePhase, ResponsesWebSocketConnection, WriteContext, WriteOutcome,
     },
@@ -46,7 +47,7 @@ pub(super) struct ConnectionReplaySnapshot {
 }
 
 impl ConnectionReplaySnapshot {
-    pub(super) fn prepare(&self, request: DecodedResponsesRequest) -> DecodedResponsesRequest {
+    pub(super) fn prepare(&self, request: DecodedGenerationRequest) -> DecodedGenerationRequest {
         match (
             request.metadata().continuation().previous_response_id(),
             self.last_response_id.as_deref(),

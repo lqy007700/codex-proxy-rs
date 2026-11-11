@@ -34,8 +34,8 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
     drain_analytics(&database.pool).await;
     sqlx::query("insert into provider_accounts
         (id,provider_kind,name,authentication_kind,provider_credentials_json,has_refresh_token,
-         enabled,concurrency_limit,weight,allow_credits,credential_observed_at,created_at,updated_at)
-        values ('backup_credits','openai','credits backup','oauth','{}',false,true,2,1,true,now(),now(),now())")
+         enabled,concurrency_limit,weight,allow_credits,quota_limits,quota_paused,credential_observed_at,created_at,updated_at)
+        values ('backup_credits','openai','credits backup','oauth','{}',false,true,2,1,true,'{\"codex:18000s\":95}',true,now(),now(),now())")
         .execute(&database.pool).await.unwrap();
     sqlx::query("update alert_settings set values_json=jsonb_set(values_json,'{quotaWarning}','{\"enabled\":true,\"shortTermThresholdPercent\":85,\"weeklyThresholdPercent\":90}'::jsonb),quota_runtime_json='{\"accounts\":1}'::jsonb").execute(&database.pool).await.unwrap();
     sqlx::query("insert into quota_alert_windows values('backup_credits','codex:18000s',now()+interval '5 hours',true)").execute(&database.pool).await.unwrap();
@@ -165,6 +165,14 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
         .await
         .unwrap();
         assert!(allow_credits);
+        let (quota_limits, quota_paused): (serde_json::Value, bool) = sqlx::query_as(
+            "select quota_limits, quota_paused from provider_accounts where id='backup_credits'",
+        )
+        .fetch_one(&database.pool)
+        .await
+        .unwrap();
+        assert_eq!(quota_limits, serde_json::json!({"codex:18000s": 95}));
+        assert!(quota_paused);
         let quota_settings: serde_json::Value =
             sqlx::query_scalar("select values_json->'quotaWarning' from alert_settings")
                 .fetch_one(&database.pool)

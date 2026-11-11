@@ -607,10 +607,11 @@ impl QuotaState {
     }
 }
 
-/// 对外唯一的五态账号状态
+/// 对外唯一的账号状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AccountStatus {
     Normal,
+    QuotaPaused,
     QuotaExhausted,
     RateLimited,
     Disabled,
@@ -622,6 +623,7 @@ impl AccountStatus {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Normal => "normal",
+            Self::QuotaPaused => "quota_paused",
             Self::QuotaExhausted => "quota_exhausted",
             Self::RateLimited => "rate_limited",
             Self::Disabled => "disabled",
@@ -633,6 +635,7 @@ impl AccountStatus {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "normal" => Some(Self::Normal),
+            "quota_paused" => Some(Self::QuotaPaused),
             "quota_exhausted" => Some(Self::QuotaExhausted),
             "rate_limited" => Some(Self::RateLimited),
             "disabled" => Some(Self::Disabled),
@@ -760,6 +763,7 @@ impl From<SystemTime> for AccountCooldown {
 /// 唯一状态解析器的完整输入事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountStatusFacts {
+    pub quota_paused: bool,
     pub enabled: bool,
     pub credential_state: CredentialState,
     pub access_token_expires_at: Option<SystemTime>,
@@ -815,6 +819,9 @@ pub fn resolve_account_status(
             error_message: None,
             cooldown: facts.cooldown,
         };
+    }
+    if facts.quota_paused {
+        return status_projection(AccountStatus::QuotaPaused);
     }
     status_projection(AccountStatus::Normal)
 }
@@ -872,6 +879,8 @@ pub struct ProviderAccount {
     concurrency_limit: Option<AccountConcurrencyLimit>,
     weight: AccountWeight,
     scheduling_role: AccountSchedulingRole,
+    quota_limits: super::AccountQuotaLimits,
+    quota_paused: bool,
     model_access: super::AccountModelAccess,
     model_mappings: super::AccountModelMappings,
     allow_credits: bool,
@@ -913,6 +922,8 @@ impl ProviderAccount {
             concurrency_limit: None,
             weight: AccountWeight::DEFAULT,
             scheduling_role: AccountSchedulingRole::Regular,
+            quota_limits: super::AccountQuotaLimits::disabled(),
+            quota_paused: false,
             model_access: super::AccountModelAccess::all(),
             model_mappings: super::AccountModelMappings::empty(),
             allow_credits: false,
@@ -926,6 +937,23 @@ impl ProviderAccount {
             outbound_proxy: None,
             request_location: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_quota_limits(mut self, limits: super::AccountQuotaLimits, paused: bool) -> Self {
+        self.quota_limits = limits;
+        self.quota_paused = paused;
+        self
+    }
+
+    #[must_use]
+    pub const fn quota_limits(&self) -> &super::AccountQuotaLimits {
+        &self.quota_limits
+    }
+
+    #[must_use]
+    pub const fn quota_paused(&self) -> bool {
+        self.quota_paused
     }
 
     #[must_use]
@@ -1184,6 +1212,7 @@ impl ProviderAccount {
     ) -> AccountStatusProjection {
         resolve_account_status(
             &AccountStatusFacts {
+                quota_paused: self.quota_paused,
                 enabled: self.enabled,
                 credential_state: self.credential_state,
                 access_token_expires_at: self.access_token_expires_at,
@@ -1505,6 +1534,10 @@ pub enum CredentialCasOutcome {
 /// Provider quota 的一次完整观察结果
 #[derive(Clone, PartialEq)]
 pub struct QuotaObservation {
+    /// 本地阈值决策与观测一起写入，策略已变时拒绝旧结论
+    pub quota_pause: Option<super::QuotaPauseDecision>,
+    /// 网络观察核对原出口，避免代理变更后的迟到响应覆盖暂停证据
+    pub expected_connection: Option<super::UpstreamConnection>,
     pub account_id: ProviderAccountId,
     pub expected_revision: CredentialRevision,
     pub quota: OpaqueProviderData,
@@ -1520,6 +1553,8 @@ impl fmt::Debug for QuotaObservation {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("QuotaObservation")
+            .field("quota_pause", &self.quota_pause)
+            .field("expected_connection", &self.expected_connection)
             .field("account_id", &self.account_id)
             .field("expected_revision", &self.expected_revision)
             .field("quota", &self.quota)

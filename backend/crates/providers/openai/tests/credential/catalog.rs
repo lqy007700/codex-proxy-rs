@@ -1898,3 +1898,201 @@ async fn installation_seed_partitions_catalog_identity_and_cache_by_key_and_acco
     );
     assert_eq!(ids[0], ids[5]);
 }
+
+#[tokio::test]
+async fn messages_catalog_keeps_native_and_standard_contracts_with_account_mapping_sources() {
+    use gateway_core::account::{AccountModelAccess, AccountModelAccessMode, AccountModelMappings};
+    use gateway_core::routing::ProviderModelContent;
+    use provider_openai::credential::{ApiKeyProtocol, ResponsesTransport};
+    use serde_json::json;
+
+    for native in [false, true] {
+        let store = Arc::new(MemoryAccountStore::default());
+        let upstream = MockServer::start().await;
+        store
+            .seed_api_key_for_protocol(
+                "acct_messages_catalog",
+                upstream.uri(),
+                ResponsesTransport::Http,
+                ApiKeyProtocol::Messages,
+            )
+            .await;
+        let account = store.account("acct_messages_catalog").unwrap();
+        let scope = FrozenAccountScope::new(
+            Arc::new(RuntimeAccountDirectory::new(
+                std::collections::BTreeMap::from([(
+                    account.id().clone(),
+                    RuntimeAccount::new(ProviderKind::new("openai").unwrap(), Default::default())
+                        .with_model_access(
+                            AccountModelAccess::new(
+                                AccountModelAccessMode::Allowlist,
+                                vec!["alias".to_owned()],
+                            )
+                            .unwrap(),
+                        )
+                        .with_model_mappings(
+                            AccountModelMappings::new(std::collections::BTreeMap::from([(
+                                "alias".to_owned(),
+                                "claude-selected".to_owned(),
+                            )]))
+                            .unwrap(),
+                        ),
+                )]),
+            )),
+            ClientRoutingScope::all_accounts(),
+        );
+        let body = if native {
+            json!({"models":[{
+                "slug":"claude-selected", "display_name":"Selected",
+                "future_field":{"opaque":true}, "base_instructions":"keep native instructions"
+            }]})
+        } else {
+            json!({"data":[{
+                "id":"claude-selected", "display_name":"Selected", "max_tokens":8192,
+                "capabilities":{"thinking":{"supported":true}}, "future_field":{"opaque":true}
+            }], "has_more":false})
+        };
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .and(header("x-api-key", "sk-api-test-only"))
+            .and(header("anthropic-version", "2023-06-01"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body.clone()))
+            .expect(2)
+            .mount(&upstream)
+            .await;
+        let service = service_with_catalog_cache(&store, upstream.uri(), catalog_cache());
+        for _ in 0..2 {
+            let models = service
+                .client_model_catalog(&CLIENT_KEY, &scope, "1.0.0")
+                .await
+                .unwrap();
+            assert_eq!(models.len(), 1);
+            assert_eq!(models[0].model.as_str(), "claude-selected");
+            assert_eq!(models[0].source_account.as_ref(), Some(account.id()));
+            if native {
+                let ProviderModelContent::Native(payload) = &models[0].content else {
+                    panic!("native catalog object");
+                };
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(payload.body()).unwrap(),
+                    body["models"][0]
+                );
+            } else {
+                assert!(matches!(
+                    models[0].content,
+                    ProviderModelContent::Adapted(_)
+                ));
+            }
+        }
+        let snapshot = service.synchronize().await.unwrap();
+        assert_eq!(
+            snapshot.account_models(&account).unwrap().unwrap(),
+            ["claude-selected"]
+        );
+        for request in upstream.received_requests().await.unwrap() {
+            for name in ["authorization", "chatgpt-account-id", "cookie"] {
+                assert!(
+                    !request.headers.contains_key(name),
+                    "Messages catalog leaked {name}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn catalog_protocol_rotation_reloads_current_account_revision_without_invalidating_peers() {
+    use gateway_core::account::{CredentialCasOutcome, CredentialCasUpdate, ProviderAccountUpdate};
+    use provider_openai::credential::{
+        ApiKeyProtocol, CodexCredentialCodec, CodexCredentialData, ResponsesTransport,
+    };
+    use serde_json::json;
+
+    let upstream = MockServer::start().await;
+    let store = Arc::new(MemoryAccountStore::default());
+    for id in ["acct_messages_first", "acct_messages_peer"] {
+        store
+            .seed_api_key_for_protocol(
+                id,
+                upstream.uri(),
+                ResponsesTransport::Http,
+                ApiKeyProtocol::Messages,
+            )
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .and(header("x-api-key", "sk-api-test-only"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data":[{"id":"messages-before-rotation"}], "has_more":false
+        })))
+        .expect(2)
+        .mount(&upstream)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .and(header("authorization", "Bearer sk-rotated-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "models":[{"slug":"responses-after-rotation", "display_name":"Rotated"}]
+        })))
+        .expect(1)
+        .mount(&upstream)
+        .await;
+    let first = store.account("acct_messages_first").unwrap();
+    let peer = store.account("acct_messages_peer").unwrap();
+    let service = service_with_catalog_cache(&store, upstream.uri(), catalog_cache());
+    for account in [&first, &peer] {
+        let models = service
+            .client_model_catalog(
+                &CLIENT_KEY,
+                &client_scope(std::slice::from_ref(account)),
+                "1.0.0",
+            )
+            .await
+            .unwrap();
+        assert_eq!(models[0].model.as_str(), "messages-before-rotation");
+    }
+
+    let loaded = store.load_current_credential(first.id()).await.unwrap();
+    let mut data = CodexCredentialCodec::decode_complete(&loaded.credential).unwrap();
+    let CodexCredentialData::ApiKey(configuration) = &mut data else {
+        panic!("API Key account");
+    };
+    configuration.protocol = ApiKeyProtocol::Responses;
+    configuration.api_key = "sk-rotated-test".to_owned();
+    let update = CredentialCasUpdate::new(
+        first.id().clone(),
+        first.revision(),
+        ProviderAccountUpdate {
+            account_id: first.id().clone(),
+            name: first.name().to_owned(),
+            email: None,
+            plan_type: None,
+        },
+        CodexCredentialCodec::encode_complete(data).unwrap(),
+        false,
+        None,
+        None,
+    )
+    .unwrap()
+    .preserving_profile();
+    assert!(matches!(
+        store.compare_and_swap_credential(update).await.unwrap(),
+        CredentialCasOutcome::Updated(_)
+    ));
+
+    for (account, expected) in [
+        (&first, "responses-after-rotation"),
+        (&peer, "messages-before-rotation"),
+    ] {
+        let models = service
+            .client_model_catalog(
+                &CLIENT_KEY,
+                &client_scope(std::slice::from_ref(account)),
+                "1.0.0",
+            )
+            .await
+            .unwrap();
+        assert_eq!(models[0].model.as_str(), expected);
+    }
+}

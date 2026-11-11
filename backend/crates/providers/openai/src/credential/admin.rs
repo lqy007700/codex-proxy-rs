@@ -24,7 +24,7 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
-use super::api_key::{ApiKeyCredentialData, CODEX_AUTHENTICATION_KIND_API_KEY};
+use super::api_key::{ApiKeyCredentialData, ApiKeyProtocol, CODEX_AUTHENTICATION_KIND_API_KEY};
 use super::codec::CodexCredentialCodec;
 use super::recovery_log::{CodexOAuthRecoveryOperation, record_oauth_recovery};
 use super::token_client::{
@@ -257,6 +257,7 @@ struct CodexCprApiKeyExportAccount {
     authentication_kind: &'static str,
     base_url: String,
     api_key: String,
+    protocol: ApiKeyProtocol,
     transport: ResponsesTransport,
 }
 
@@ -433,6 +434,7 @@ impl CodexCredentialAdmin {
         #[serde(deny_unknown_fields)]
         struct Rotation {
             base_url: String,
+            protocol: Option<ApiKeyProtocol>,
             transport: ResponsesTransport,
             api_key: Option<String>,
         }
@@ -445,6 +447,9 @@ impl CodexCredentialAdmin {
             return Err(CodexCredentialAdminError::InvalidCredential);
         };
         data.base_url = rotation.base_url;
+        if let Some(protocol) = rotation.protocol {
+            data.protocol = protocol;
+        }
         data.transport = rotation.transport;
         if let Some(api_key) = rotation.api_key {
             data.api_key = api_key;
@@ -677,6 +682,7 @@ impl CodexCredentialAdmin {
                         authentication_kind: CODEX_AUTHENTICATION_KIND_API_KEY,
                         base_url: data.base_url,
                         api_key: data.api_key,
+                        protocol: data.protocol,
                         transport: data.transport,
                     })
                 }
@@ -1463,6 +1469,12 @@ fn parse_api_key_import(value: &Value) -> Result<ApiKeyCredentialData, CodexCred
         base_url,
         api_key: first_string(credentials, &["api_key"])
             .ok_or(CodexCredentialAdminError::InvalidCredential)?,
+        protocol: credentials
+            .get("protocol")
+            .map(|value| serde_json::from_value(value.clone()))
+            .transpose()
+            .map_err(|_| CodexCredentialAdminError::InvalidInput)?
+            .unwrap_or_default(),
         transport: credentials
             .get("transport")
             .map(|v| serde_json::from_value(v.clone()))

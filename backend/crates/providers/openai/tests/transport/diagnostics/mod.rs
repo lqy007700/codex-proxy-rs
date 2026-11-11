@@ -23,6 +23,73 @@ fn classify(status: u16, body: &str) -> CodexFailureCategory {
 }
 
 #[test]
+fn messages_error_types_keep_structured_categories_and_replay_safety() {
+    for (status, error_type, category, replay) in [
+        (
+            401,
+            "authentication_error",
+            CodexFailureCategory::CredentialExpired,
+            true,
+        ),
+        (
+            429,
+            "rate_limit_error",
+            CodexFailureCategory::RateLimited,
+            true,
+        ),
+        (
+            400,
+            "invalid_request_error",
+            CodexFailureCategory::InvalidRequest,
+            false,
+        ),
+        (
+            403,
+            "permission_error",
+            CodexFailureCategory::PermissionDenied,
+            false,
+        ),
+        (
+            529,
+            "overloaded_error",
+            CodexFailureCategory::CapacityUnavailable,
+            true,
+        ),
+        (500, "api_error", CodexFailureCategory::Unavailable, true),
+        (504, "api_error", CodexFailureCategory::Unavailable, false),
+    ] {
+        // 消息故意包含其他分类的词，只有明确的类型字段提供 Messages 分类证据
+        let body = serde_json::json!({
+            "type":"error",
+            "error":{"type":error_type,"message":"unauthorized; quota; rate limit; identity verification required"}
+        })
+        .to_string();
+        for phase in [
+            CodexUpstreamSendPhase::BeforePayload,
+            CodexUpstreamSendPhase::AfterPayload,
+            CodexUpstreamSendPhase::Ambiguous,
+        ] {
+            let failure = CodexUpstreamFailure::from_response(
+                reqwest::StatusCode::from_u16(status).unwrap(),
+                &body,
+                Some(7),
+                &CodexUpstreamDiagnostics::default(),
+                None,
+                &[],
+                &[],
+                phase,
+            );
+            assert_eq!(failure.category(), category, "{error_type}");
+            assert_eq!(
+                failure.replay_is_safe(),
+                replay && phase != CodexUpstreamSendPhase::Ambiguous,
+                "{error_type} {phase:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn only_empty_http_not_found_responses_are_cloudflare_path_blocks() {
     for body in ["", " \r\n\t"] {
         assert_eq!(
@@ -151,6 +218,16 @@ fn service_failure_replay_requires_explicit_500_or_503_and_unambiguous_send() {
         (
             500,
             r#"{"error":{"code":"server_error","type":"server_error"}}"#,
+            true,
+        ),
+        (
+            500,
+            r#"{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error"}}"#,
+            true,
+        ),
+        (
+            503,
+            r#"{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error"}}"#,
             true,
         ),
         (

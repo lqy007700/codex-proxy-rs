@@ -92,3 +92,68 @@ fn provider_schema_rejects_unknown_public_layer_fields() {
         .is_err()
     );
 }
+
+#[test]
+fn api_key_protocol_defaults_and_messages_http_validation_preserve_runtime_configuration() {
+    use gateway_core::account::PlaintextCredential;
+    use provider_openai::credential::{
+        ApiKeyConfiguration, ApiKeyProtocol, CodexCredentialCodec, CodexRuntimeAuthentication,
+        ResponsesTransport,
+    };
+
+    let legacy = serde_json::json!({
+        "schema_version": 1,
+        "installation_id": "00000000-0000-4000-8000-000000000001",
+        "api_key": "sk-private-protocol-test",
+        "base_url": "https://relay.example/v1"
+    });
+    let configuration: ApiKeyConfiguration = serde_json::from_value(serde_json::json!({
+        "base_url": "https://relay.example/v1"
+    }))
+    .unwrap();
+    assert_eq!(configuration.protocol, ApiKeyProtocol::Responses);
+    assert_eq!(configuration.transport, ResponsesTransport::Http);
+
+    for (protocol, transport, accepted) in [
+        (None, "http", true),
+        (None, "prefer_websocket", true),
+        (Some("responses"), "prefer_websocket", true),
+        (Some("messages"), "http", true),
+        (Some("messages"), "prefer_websocket", false),
+        (Some("chat_completions"), "http", false),
+    ] {
+        let mut document = legacy.clone();
+        document["transport"] = serde_json::json!(transport);
+        if let Some(protocol) = protocol {
+            document["protocol"] = serde_json::json!(protocol);
+        }
+        let credential = PlaintextCredential::new(document.as_object().unwrap().clone());
+        let runtime = CodexCredentialCodec::decode(&credential);
+        assert_eq!(runtime.is_ok(), accepted, "{protocol:?}/{transport}");
+        let complete = CodexCredentialCodec::decode_complete(&credential);
+        assert_eq!(complete.is_ok(), accepted);
+        if !accepted {
+            continue;
+        }
+        let runtime = runtime.unwrap();
+        let CodexRuntimeAuthentication::ApiKey(authentication) = &runtime.authentication else {
+            panic!("API Key runtime authentication");
+        };
+        let expected = if protocol == Some("messages") {
+            ApiKeyProtocol::Messages
+        } else {
+            ApiKeyProtocol::Responses
+        };
+        assert_eq!(authentication.configuration.protocol, expected);
+        assert_eq!(
+            authentication.configuration.transport,
+            serde_json::from_value::<ResponsesTransport>(serde_json::json!(transport)).unwrap()
+        );
+        assert!(!format!("{runtime:?}").contains("sk-private-protocol-test"));
+        let encoded = CodexCredentialCodec::encode_complete(complete.unwrap()).unwrap();
+        assert_eq!(
+            encoded.expose_to_provider()["protocol"],
+            serde_json::to_value(expected).unwrap()
+        );
+    }
+}

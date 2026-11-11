@@ -4,9 +4,11 @@ mod location;
 mod model_access;
 mod model_mappings;
 mod proxy;
+mod quota_limits;
 mod selection;
 mod selection_diagnostics;
 mod smart_scheduling;
+mod upstream;
 
 mod error_protection;
 
@@ -325,6 +327,84 @@ fn rate_limited_projection_carries_only_the_active_cooldown_deadline() {
     let elapsed = account.status_projection(now, Some((now - Duration::from_secs(1)).into()));
     assert_eq!(elapsed.status, AccountStatus::Normal);
     assert_eq!(elapsed.cooldown, None);
+}
+
+#[test]
+fn quota_pause_is_a_local_policy_without_exhaustion_or_cooldown() {
+    let now = SystemTime::now();
+    let limits = gateway_core::account::AccountQuotaLimits::try_from(BTreeMap::from([(
+        "primary".to_owned(),
+        80,
+    )]))
+    .expect("valid limits");
+    let paused = account("acct_paused").with_quota_limits(limits.clone(), true);
+
+    assert_eq!(paused.quota_limits(), &limits);
+    assert!(paused.quota_paused());
+    assert!(!paused.quota().is_exhausted());
+    let projection = paused.status_projection(now, None);
+    assert_eq!(projection.status, AccountStatus::QuotaPaused);
+    assert_eq!(projection.cooldown, None);
+    assert_eq!(projection.error_reason, None);
+    assert_eq!(
+        AccountStatus::parse("quota_paused"),
+        Some(projection.status)
+    );
+    assert_eq!(projection.status.as_str(), "quota_paused");
+
+    let cooling = paused.status_projection(now, Some((now + Duration::from_secs(1)).into()));
+    assert_eq!(cooling.status, AccountStatus::RateLimited);
+    let exhausted = paused.clone().with_account_facts(
+        true,
+        CredentialState::Ready,
+        QuotaState::exhausted(QuotaEvidence::ProviderDenied, now, None),
+        None,
+        None,
+    );
+    assert_eq!(
+        exhausted.status_projection(now, None).status,
+        AccountStatus::QuotaExhausted
+    );
+    let disabled = paused.with_account_facts(
+        false,
+        CredentialState::Ready,
+        QuotaState::unknown(),
+        None,
+        None,
+    );
+    assert_eq!(
+        disabled.status_projection(now, None).status,
+        AccountStatus::Disabled
+    );
+}
+
+#[test]
+fn quota_paused_preferred_account_is_unavailable_without_waiting_for_capacity() {
+    let mut paused = candidate("acct_paused", 0, Some(100));
+    paused.account = paused.account.with_quota_limits(
+        gateway_core::account::AccountQuotaLimits::try_from(BTreeMap::from([(
+            "primary".to_owned(),
+            80,
+        )]))
+        .expect("valid limits"),
+        true,
+    );
+    let mut selection_context = context(RotationStrategy::Sticky);
+    selection_context.preferred_account = Some(paused.account.id().clone());
+    let candidates = [paused, candidate("acct_ready", 0, Some(1))];
+
+    let selected = AccountSelector
+        .select(&candidates, &selection_context)
+        .expect("ready account");
+    assert_eq!(selected.candidate().account.id().as_str(), "acct_ready");
+    assert_eq!(
+        selected.preferred(),
+        PreferredAccountSelection::Blocked(AccountSchedulingBlocker::LocalAvailability)
+    );
+    assert_eq!(
+        AccountSelector.wait_candidates(&candidates, &selection_context),
+        vec![candidates[1].account.id().clone()]
+    );
 }
 
 #[test]

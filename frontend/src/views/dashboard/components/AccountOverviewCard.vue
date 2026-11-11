@@ -101,6 +101,7 @@ const accountStatusCounts = computed(() => {
     return null
   const normal = p.normal ?? 0
   const quotaExhausted = p.quotaExhausted ?? 0
+  const quotaPaused = p.quotaPaused ?? 0
   const rateLimited = p.rateLimited ?? 0
   const disabled = p.disabled ?? 0
   const error = p.error ?? 0
@@ -108,10 +109,11 @@ const accountStatusCounts = computed(() => {
     total: p.total,
     normal,
     quotaExhausted,
+    quotaPaused,
     rateLimited,
     disabled,
     error,
-    unavailable: quotaExhausted + rateLimited + disabled + error,
+    unavailable: quotaPaused + quotaExhausted + rateLimited + disabled + error,
   }
 })
 
@@ -128,7 +130,7 @@ const statusRows = computed(() => {
         icon: CircleCheck,
       },
       {
-        label: '配额耗尽',
+        label: '额度受限',
         description: '暂无账号池观测',
         value: '—',
         tone: 'warning',
@@ -160,9 +162,9 @@ const statusRows = computed(() => {
       icon: CircleCheck,
     },
     {
-      label: '配额耗尽',
-      description: '账号额度已耗尽',
-      value: String(counts.quotaExhausted),
+      label: '额度受限',
+      description: `耗尽 ${counts.quotaExhausted} · 暂停 ${counts.quotaPaused}`,
+      value: String(counts.quotaExhausted + counts.quotaPaused),
       tone: 'warning',
       icon: TriangleAlert,
     },
@@ -196,7 +198,7 @@ const statusBars = computed(() => {
     return []
   return [
     { pct: (counts.normal / counts.total) * 100, cls: 'bg-z-success' },
-    { pct: (counts.quotaExhausted / counts.total) * 100, cls: 'bg-z-warning' },
+    { pct: ((counts.quotaExhausted + counts.quotaPaused) / counts.total) * 100, cls: 'bg-z-warning' },
     { pct: (counts.rateLimited / counts.total) * 100, cls: 'bg-z-warning' },
     { pct: ((counts.disabled + counts.error) / counts.total) * 100, cls: 'bg-z-error' },
   ].filter(b => b.pct > 0)

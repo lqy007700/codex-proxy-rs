@@ -24,6 +24,7 @@ async fn account_model_reads_and_refreshes_preserve_provider_observation_time() 
     let observed_at: DateTime<Utc> = "2026-09-12T08:00:00Z".parse().unwrap();
     *fixture.account.lock().unwrap() = Some(account_page_item(
         AccountStatusFacts {
+            quota_paused: false,
             enabled: true,
             credential_state: CredentialState::Ready,
             access_token_expires_at: None,
@@ -112,6 +113,7 @@ async fn account_proxy_binding_is_distinct_from_the_redacted_endpoint() {
     ] {
         let now = Utc::now();
         let facts = AccountStatusFacts {
+            quota_paused: false,
             enabled: true,
             credential_state: CredentialState::Ready,
             access_token_expires_at: None,
@@ -190,6 +192,7 @@ async fn account_cooldown_returns_an_instant_and_server_formatted_recovery() {
             let now = Utc::now();
             let until = seconds.map(|seconds| now + Duration::seconds(seconds));
             let facts = AccountStatusFacts {
+                quota_paused: false,
                 enabled: true,
                 credential_state: CredentialState::Ready,
                 access_token_expires_at: None,
@@ -273,6 +276,8 @@ fn account_page_item(
     AccountPageItem {
         protection_rules: Vec::new(),
         account: AccountRecord {
+            quota_limits: Default::default(),
+            quota_paused: facts.quota_paused,
             model_mappings: Default::default(),
             scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
             allow_credits: false,
@@ -327,6 +332,7 @@ async fn account_usage_preserves_periods_cache_counts_and_missing_values() {
     fixture.auth.insert_session("valid-session");
     let now = Utc::now();
     let facts = AccountStatusFacts {
+        quota_paused: false,
         enabled: true,
         credential_state: CredentialState::Ready,
         access_token_expires_at: None,
@@ -401,6 +407,7 @@ async fn account_usage_preserves_periods_cache_counts_and_missing_values() {
         *fixture.account_usage.lock().unwrap() = vec![local_usage.clone()];
         *fixture.provider_quota.lock().unwrap() =
             (authentication_kind == "oauth").then(|| ProviderQuota {
+                paused_windows: Vec::new(),
                 windows: vec![ProviderQuotaWindow {
                     key: "rolling-day".to_owned(),
                     group: "shortTerm".to_owned(),
@@ -610,6 +617,7 @@ async fn concurrency_details_require_admin_validate_paging_and_report_lease_time
     fixture.auth.insert_session("valid-session");
     *fixture.account.lock().unwrap() = Some(account_page_item(
         gateway_core::account::AccountStatusFacts {
+            quota_paused: false,
             enabled: true,
             credential_state: gateway_core::account::CredentialState::Ready,
             access_token_expires_at: None,
@@ -688,6 +696,7 @@ async fn native_quota_refresh_waits_for_provider_and_preserves_observation() {
     let observed_at = Utc::now();
     *fixture.account.lock().unwrap() = Some(account_page_item(
         AccountStatusFacts {
+            quota_paused: false,
             enabled: true,
             credential_state: CredentialState::Ready,
             access_token_expires_at: None,
@@ -700,6 +709,7 @@ async fn native_quota_refresh_waits_for_provider_and_preserves_observation() {
         "oauth",
     ));
     *fixture.provider_quota.lock().unwrap() = Some(ProviderQuota {
+        paused_windows: Vec::new(),
         plan_type: Some("plus".to_owned()),
         observed_at: Some(observed_at),
         ..Default::default()
@@ -730,4 +740,89 @@ async fn native_quota_refresh_waits_for_provider_and_preserves_observation() {
         .unwrap();
     assert_eq!(result.quota.observed_at, Some(observed_at));
     assert_eq!(result.account.plan_type.as_deref(), Some("plus"));
+}
+
+#[tokio::test]
+async fn quota_paused_accounts_expose_local_policy_without_faking_exhaustion() {
+    use chrono::Utc;
+    use gateway_admin::model::provider_credentials::{
+        ProviderQuota, ProviderQuotaWindow, QuotaLocalUsageAttribution,
+    };
+    use gateway_core::account::{AccountStatusFacts, CredentialState, QuotaState};
+    use serde_json::json;
+
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let now = Utc::now();
+    let mut account = account_page_item(
+        AccountStatusFacts {
+            quota_paused: true,
+            enabled: true,
+            credential_state: CredentialState::Ready,
+            access_token_expires_at: None,
+            quota: QuotaState::allowed(now.into()),
+            cooldown: None,
+            last_error_reason: None,
+            last_error_message: None,
+        },
+        now,
+        "oauth",
+    );
+    account.account.quota_limits = serde_json::from_value(json!({"week": 80})).unwrap();
+    *fixture.account.lock().unwrap() = Some(account);
+    *fixture.provider_quota.lock().unwrap() = Some(ProviderQuota {
+        observed_at: Some(now),
+        paused_windows: vec!["week".to_owned()],
+        windows: [
+            ("week", QuotaLocalUsageAttribution::AccountWide),
+            ("model", QuotaLocalUsageAttribution::Unavailable),
+        ]
+        .into_iter()
+        .map(|(key, local_usage_attribution)| ProviderQuotaWindow {
+            key: key.to_owned(),
+            group: "shortTerm".to_owned(),
+            label: key.to_owned(),
+            limit_id: None,
+            limit_name: None,
+            role: None,
+            local_usage_attribution,
+            window_seconds: Some(604_800),
+            used_percent: Some(80.0),
+            reset_at: None,
+            limit_reached: false,
+            local_usage: None,
+            provider_data: None,
+        })
+        .collect(),
+        ..Default::default()
+    });
+    let response = admin::accounts::router::<AdminTestState>()
+        .with_state(fixture.state())
+        .oneshot(
+            Request::builder()
+                .uri("/api/admin/accounts?status=quota_paused")
+                .header("x-request-id", "req_quota_paused")
+                .header(header::COOKIE, "cpr_session=valid-session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 32_768).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(status, StatusCode::OK, "{value}");
+    let account = &value["data"]["items"][0];
+    assert_eq!(account["status"], "quota_paused");
+    assert_eq!(account["quotaLimits"], json!({"week": 80}));
+    assert_eq!(account["capabilities"]["quotaLimitsSupported"], true);
+    assert_eq!(account["allowCredits"], false);
+    assert_eq!(account["quota"]["pausedWindows"], json!(["week"]));
+    assert_eq!(account["quota"]["limitReached"], false);
+    assert_eq!(account["quota"]["windows"][0]["usedPercent"], 80.0);
+    assert_eq!(account["quota"]["windows"][0]["accountWide"], true);
+    assert_eq!(account["quota"]["windows"][1]["accountWide"], false);
+    assert_eq!(value["data"]["summary"]["quotaPaused"], 1);
+    assert_eq!(value["data"]["summary"]["quotaExhausted"], 0);
+    assert_eq!(value["data"]["summary"]["normal"], 0);
 }

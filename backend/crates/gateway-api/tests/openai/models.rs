@@ -736,3 +736,93 @@ async fn models_should_authenticate_before_applying_the_version_gate() {
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn anthropic_models_use_explicit_headers_and_cursor_pagination() {
+    let router = api_router(ModelsExecution::new()).await;
+    for (path, id, more) in [
+        ("/v1/models?limit=1", "model-a", true),
+        ("/v1/models?limit=1&after_id=model-a", "model-b", false),
+        ("/v1/models?limit=1&before_id=model-b", "model-a", false),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header("x-api-key", "sk_models_test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["data"].as_array().unwrap().len(), 1);
+        assert_eq!(body["data"][0]["type"], "model");
+        assert_eq!(body["first_id"], id);
+        assert_eq!(body["last_id"], id);
+        assert_eq!(body["has_more"], more);
+        assert!(body.get("object").is_none());
+    }
+    for path in [
+        "/v1/models?limit=0",
+        "/v1/models?limit=1001",
+        "/v1/models?limit=invalid",
+        "/v1/models?after_id=unknown",
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header("authorization", "Bearer sk_models_test")
+                    .header("anthropic-version", "2023-06-01")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["type"], "error");
+        assert_eq!(body["error"]["type"], "invalid_request_error");
+    }
+}
+
+#[tokio::test]
+async fn anthropic_model_detail_keeps_public_model_access() {
+    let router = api_router(ModelsExecution::new()).await;
+    for (path, expected) in [
+        ("/v1/models/model-a", StatusCode::OK),
+        ("/v1/models/unknown", StatusCode::NOT_FOUND),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header("x-api-key", "sk_models_test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+        let body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        if expected == StatusCode::NOT_FOUND {
+            assert_eq!(body["error"]["type"], "not_found_error");
+        }
+        assert_eq!(
+            body["type"],
+            if expected == StatusCode::OK {
+                "model"
+            } else {
+                "error"
+            }
+        );
+    }
+}

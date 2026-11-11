@@ -7,7 +7,7 @@
 | 任务 | 入口 |
 | --- | --- |
 | 安装与启动 | [手动安装](#手动安装) · [启动](#启动) · [公网访问](#公网访问) |
-| 接入客户端 | [客户端配置](#客户端配置) · [时区与客户端环境信息](#时区与客户端环境信息) · [登录与生图排查](#登录与生图排查) |
+| 接入客户端 | [Codex 配置](#客户端配置) · [Messages 客户端](#messages-客户端) · [时区与客户端环境信息](#时区与客户端环境信息) · [登录与生图排查](#登录与生图排查) |
 | 日常运维 | [运行设置](#启动后的运行设置) · [小内存优化](#小内存优化) · [持久化与日志](#持久化与备份) · [请求排查](#请求错误排查) · [密码轮换](#密码语义) |
 | 更新与恢复 | [镜像升级](#镜像升级与源码构建) · [在线更新](#管理端在线更新) · [备份与恢复](#备份与恢复) · [停止与重启](#停止与重启) |
 | 运行源码 | [开发与源码联调](../docs/development.md) |
@@ -453,8 +453,29 @@ metrics_exporter = "none"
 - 地址包含 `5173/dev/v1`：这是开发代理地址，依赖 Vite 服务。日常使用改成后端或 HTTPS 地址；
   验证 WebSocket 时直接连接后端，当前 Vite 代理未显式开启 WebSocket 转发
 
-其他客户端使用 Responses API、`/v1` Base URL 和代理密钥即可，不需要 Actor 标记。
-路由与请求格式见 [API 参考](../docs/api.md#3-openai-数据面与模型目录)
+其他 Responses / Chat Completions 客户端使用 `/v1` Base URL 和代理密钥，不需要 Actor 标记。
+路由与请求格式见 [API 参考](../docs/api.md#3-模型数据面与模型目录)
+
+### Messages 客户端
+
+Claude Code 或 Anthropic SDK 使用网关根地址，客户端自行追加 `/v1/messages`，不要把 `/v1/messages` 填成 Base URL。
+Claude Code 可使用以下环境变量，替换为网关地址、管理端创建的客户端密钥及该 Key 可见的模型：
+
+```bash
+export ANTHROPIC_BASE_URL="https://gateway.example.com"
+export ANTHROPIC_AUTH_TOKEN="<client-api-key>"
+export ANTHROPIC_MODEL="<model-id>"
+claude
+```
+
+`ANTHROPIC_AUTH_TOKEN` 使用 Bearer；使用 `x-api-key` 时改设 `ANTHROPIC_API_KEY`，不要同时设置不同凭据。
+模型及额外小模型调用需落在该 Key 的可用目录，变量含义见 [Claude Code 官方环境变量](https://code.claude.com/docs/en/env-vars)。
+Anthropic SDK 同样使用网关根地址与 Client Key，可通过 `messages.create`、流式调用和 `messages.count_tokens` 接入
+
+上游与客户端分别配置：在「账号」中新建 OpenAI API Key 账号，选择 Responses 或 Messages 上游协议。
+Messages 上游只用 HTTP/SSE，官方 API 前缀为 `https://api.anthropic.com/v1`，兼容服务填写自己的前缀。
+原有 API Key 账号默认 Responses；协议切换会更新凭据版本，不改变账号的分组、用途、权重、模型映射或额度配置。
+同协议保持原生字段，跨协议转换及输入计数限制见 [Messages 请求](../docs/api.md#messages-请求)
 
 ## 停止与重启
 

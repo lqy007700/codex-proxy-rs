@@ -18,6 +18,7 @@ export function emptyApiKeyAccountForm(): ApiKeyAccountForm {
     name: '',
     base_url: '',
     apiKey: '',
+    protocol: 'responses',
     transport: 'http',
   }
 }
@@ -25,7 +26,12 @@ export function emptyApiKeyAccountForm(): ApiKeyAccountForm {
 export function parseApiKeyConfiguration(value: Record<string, unknown> | undefined): ApiKeyConfiguration | undefined {
   if (!value || typeof value.base_url !== 'string' || (value.transport !== 'http' && value.transport !== 'prefer_websocket'))
     return undefined
-  return { base_url: value.base_url, transport: value.transport }
+  const protocol = value.protocol ?? 'responses'
+  if (protocol !== 'responses' && protocol !== 'messages')
+    return undefined
+  if (protocol === 'messages' && value.transport !== 'http')
+    return undefined
+  return { base_url: value.base_url, protocol, transport: value.transport }
 }
 
 export function apiKeyAccountError(form: ApiKeyAccountForm, editing = false): string | undefined {

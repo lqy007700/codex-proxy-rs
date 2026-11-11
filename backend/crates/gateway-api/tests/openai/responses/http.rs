@@ -41,7 +41,7 @@ use gateway_core::upstream::{OpaqueUpstreamValue, UpstreamSendState};
 use gateway_protocol::openai::sse::{encode_sse_event, parse_sse_events};
 use serde_json::{Value, json};
 
-use gateway_api::openai::responses::{collect_execution_response, stream_execution_response};
+use gateway_api::openai::generation::{collect_execution_response, stream_execution_response};
 use tower::ServiceExt;
 
 use crate::openai::middleware::{RequestMiddleware, ResponseFrameAction};

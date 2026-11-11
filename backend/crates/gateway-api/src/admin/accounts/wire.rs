@@ -61,6 +61,7 @@ pub struct ListQuery {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BatchUpdateAccountsRequest {
+    pub quota_limits: Option<gateway_core::account::AccountQuotaLimits>,
     pub outbound_proxy_id: Option<String>,
     pub outbound_proxy_url: Option<AccountProxyUpdate>,
     pub account_ids: Vec<String>,
@@ -120,7 +121,8 @@ impl BatchUpdateAccountsRequest {
             .map(parse_concurrency_limit)
             .transpose()?;
         self.weight.map(parse_account_weight).transpose()?;
-        if self.allow_credits.is_none()
+        if self.quota_limits.is_none()
+            && self.allow_credits.is_none()
             && self.enabled.is_none()
             && self.concurrency_limit.is_none()
             && self.weight.is_none()
@@ -139,6 +141,7 @@ impl BatchUpdateAccountsRequest {
     pub(super) fn into_command(self) -> Result<BatchUpdateAccounts, WireValidationError> {
         self.validate()?;
         Ok(BatchUpdateAccounts {
+            quota_limits: self.quota_limits,
             outbound_proxy: proxy_selection(self.outbound_proxy_id, self.outbound_proxy_url)?,
             account_ids: self.account_ids,
             enabled: self.enabled,
@@ -265,6 +268,7 @@ pub struct AccountPageData {
 pub struct AccountSummaryView {
     pub total: u64,
     pub normal: u64,
+    pub quota_paused: u64,
     pub quota_exhausted: u64,
     pub rate_limited: u64,
     pub disabled: u64,
@@ -275,6 +279,7 @@ pub struct AccountSummaryView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountView {
+    pub quota_limits: gateway_core::account::AccountQuotaLimits,
     pub capabilities: AccountCapabilitiesView,
     pub outbound_proxy_id: Option<String>,
     pub outbound_proxy_endpoint: Option<String>,
@@ -330,6 +335,7 @@ pub struct AccountCapacityView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountCapabilitiesView {
+    pub quota_limits_supported: bool,
     pub quota: bool,
     pub quota_refresh: bool,
     pub profile: bool,
@@ -342,6 +348,7 @@ pub struct AccountCapabilitiesView {
 impl From<gateway_admin::model::accounts::ProviderAccountCapabilities> for AccountCapabilitiesView {
     fn from(value: gateway_admin::model::accounts::ProviderAccountCapabilities) -> Self {
         Self {
+            quota_limits_supported: value.quota_limits_supported,
             quota: value.quota,
             quota_refresh: value.quota_refresh,
             profile: value.profile,
@@ -398,6 +405,7 @@ pub use crate::admin::account_groups::AccountGroupRefView;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountQuotaView {
+    pub paused_windows: Vec<String>,
     pub refreshed_at_display: String,
     pub limit_reached: bool,
     /// 冷却到期或可开始恢复探测的时间；非限流中为 `null`
@@ -423,6 +431,7 @@ pub struct AccountQuotaCreditsView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountQuotaWindowView {
+    pub account_wide: bool,
     pub key: String,
     pub group: String,
     pub limit_id: Option<String>,

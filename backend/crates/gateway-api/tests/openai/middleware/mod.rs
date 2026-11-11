@@ -38,6 +38,8 @@ pub(super) struct RequestMiddleware {
     pub(super) response_headers: Vec<MiddlewareHeader>,
     pub(super) short_circuit_json: Option<Bytes>,
     pub(super) request_model: Option<&'static str>,
+    pub(super) request_capabilities:
+        Option<gateway_core::engine::middleware::MiddlewareCapabilityDeclaration>,
     pub(super) settings:
         Option<fn(&mut gateway_core::routing::request_settings::ExecutionSettings)>,
 }
@@ -120,6 +122,7 @@ impl MiddlewarePlan for RequestMiddleware {
         let response_headers = self.response_headers.clone();
         let short_circuit_json = self.short_circuit_json.clone();
         let request_model = self.request_model;
+        let request_capabilities = self.request_capabilities.clone();
         if let Some(update) = self.settings {
             let settings = request.settings().expect("effective request settings");
             let mut values = settings.execution_values().expect("execution scope");
@@ -143,7 +146,7 @@ impl MiddlewarePlan for RequestMiddleware {
                     protocol,
                     headers,
                     Bytes::from(body.to_string()),
-                    None,
+                    request_capabilities,
                 )?;
             }
             if let Some(body) = short_circuit_json {

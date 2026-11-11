@@ -74,6 +74,77 @@ fn capability_requirements_should_read_known_openai_fields_without_rewriting_bod
 }
 
 #[test]
+fn messages_capabilities_track_body_updates_and_preserve_translation_source() {
+    let body = json!({
+        "model": "claude-test",
+        "max_tokens": 2048,
+        "messages": [{"role": "user", "content": [{
+            "type": "image", "source": {"type": "url", "url": "https://example.invalid/image.png"}
+        }]}],
+        "tools": [{"name": "lookup", "input_schema": {"type": "object"}}],
+        "thinking": {"type": "enabled", "budget_tokens": 1024},
+        "output_config": {"format": {"type": "json_schema", "schema": {"type": "object"}}}
+    });
+    let original = Operation::Generate(GenerateRequest::from_protocol_payload(
+        ProtocolPayload::json_object("anthropic", body.as_object().unwrap().clone()).unwrap(),
+    ));
+    let requirements = original.capability_requirements();
+    assert_eq!(requirements.requested_output_tokens(), Some(2048));
+    assert_eq!(
+        requirements.features(),
+        &[
+            Feature::Tools,
+            Feature::Vision,
+            Feature::Reasoning,
+            Feature::JsonSchema
+        ]
+        .into()
+    );
+
+    let context_only = original
+        .clone()
+        .replace_protocol_wire(None, Map::from_iter([("local".into(), json!(true))]))
+        .unwrap();
+    assert_eq!(context_only.capability_requirements(), requirements);
+    let replaced = context_only.replace_protocol_wire(
+        Some(Bytes::from_static(br#"{"model":"claude-test","max_tokens":512,"messages":[{"role":"user","content":"hello"}]}"#)),
+        Map::new(),
+    ).unwrap();
+    assert_eq!(
+        replaced.capability_requirements().requested_output_tokens(),
+        Some(512)
+    );
+    assert_eq!(
+        replaced.capability_requirements().features(),
+        &Default::default()
+    );
+    assert_eq!(original.capability_requirements(), requirements);
+
+    let translated = replaced
+        .translate_protocol_wire(
+            "openai",
+            Bytes::from_static(br#"{"model":"gpt-test","input":"hello","max_output_tokens":256}"#),
+        )
+        .unwrap();
+    assert_eq!(
+        translated
+            .capability_requirements()
+            .requested_output_tokens(),
+        Some(512)
+    );
+    let Operation::Generate(request) = translated else {
+        panic!("generate request")
+    };
+    assert_eq!(request.max_output_tokens(), Some(256));
+    assert_eq!(
+        request
+            .wire_capability_requirements()
+            .requested_output_tokens(),
+        Some(256)
+    );
+}
+
+#[test]
 fn middleware_protocol_change_keeps_source_capability_facts_without_interpreting_target_json() {
     let operation = Operation::Generate(generate(json!({
         "model":"gpt-test",

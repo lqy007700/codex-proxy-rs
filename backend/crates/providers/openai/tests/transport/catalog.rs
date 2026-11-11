@@ -1,7 +1,12 @@
 //! 验证原生模型目录保留未知字段并生成安全能力投影
 
+use std::sync::Arc;
+
 use chrono::{TimeZone, Utc};
 use gateway_core::routing::ModelServiceTier;
+use provider_openai::credential::{
+    ApiKeyProtocol, CodexCredentialCatalogService, ResponsesTransport,
+};
 use provider_openai::transport::profile::{CodexWireProfile, CodexWireProfileState};
 use provider_openai::transport::{
     CodexBackendClient, CodexCatalogCapabilityEvidence, CodexCatalogVisibility,
@@ -10,6 +15,8 @@ use provider_openai::transport::{
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+use crate::support::{MemoryAccountStore, catalog_cache};
 
 const OFFICIAL_FIXTURE: &[u8] = include_bytes!("fixtures/official_models_snapshot.json");
 
@@ -441,5 +448,368 @@ fn context() -> CodexRequestContext<'static> {
         client_request_id: None,
         turn_id: None,
         account_selection: Default::default(),
+    }
+}
+
+async fn api_catalog_fixture(
+    server: &MockServer,
+    protocol: ApiKeyProtocol,
+) -> (Arc<MemoryAccountStore>, CodexCredentialCatalogService) {
+    let store = Arc::new(MemoryAccountStore::default());
+    store
+        .seed_api_key_for_protocol(
+            "acct_transport_catalog",
+            format!("{}/v1", server.uri()),
+            ResponsesTransport::Http,
+            protocol,
+        )
+        .await;
+    let service = CodexCredentialCatalogService::new(
+        store.repository(),
+        profile(),
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+        "http://unused-oauth.invalid".to_owned(),
+        catalog_cache(),
+    );
+    (store, service)
+}
+
+#[tokio::test]
+async fn messages_catalog_follows_official_cursors_without_openai_identity_or_version_query() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .and(header("x-api-key", "sk-api-test-only"))
+        .and(header("anthropic-version", "2023-06-01"))
+        .and(query_param("limit", "1000"))
+        .respond_with(|request: &wiremock::Request| {
+            let cursor = request
+                .url
+                .query_pairs()
+                .find(|(name, _)| name == "after_id")
+                .map(|(_, value)| value.into_owned());
+            let body = match cursor.as_deref() {
+                None => json!({
+                    "data":[{"id":"claude-first","display_name":"First","max_tokens":4096,"capabilities":{"thinking":{"supported":true}}}],
+                    "has_more":true,"last_id":"claude-first"
+                }),
+                Some("claude-first") => json!({
+                    "data":[{"id":"claude-second","display_name":"Second"}],
+                    "has_more":false,"last_id":"claude-second"
+                }),
+                other => panic!("unexpected Messages cursor: {other:?}"),
+            };
+            ResponseTemplate::new(200)
+                .insert_header("etag", "\"messages-v1\"")
+                .set_body_json(body)
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    let (store, service) = api_catalog_fixture(&server, ApiKeyProtocol::Messages).await;
+    let account = store.account("acct_transport_catalog").unwrap();
+
+    let (models, _) = service.account_catalog_documents(&account).await.unwrap();
+
+    assert_eq!(
+        models
+            .iter()
+            .map(|model| (model.request_model().as_str(), model.display_name()))
+            .collect::<Vec<_>>(),
+        [("claude-first", "First"), ("claude-second", "Second")]
+    );
+    for model in &models {
+        assert_eq!(
+            model.capabilities().responses_api(),
+            CodexCatalogCapabilityEvidence::Unknown
+        );
+        assert_eq!(model.document().protocol(), "openai");
+    }
+    for request in server.received_requests().await.unwrap() {
+        assert!(
+            !request
+                .url
+                .query_pairs()
+                .any(|(name, _)| name == "client_version")
+        );
+        for name in [
+            "authorization",
+            "chatgpt-account-id",
+            "cookie",
+            "originator",
+            "user-agent",
+            "version",
+            "x-codex-installation-id",
+            "session-id",
+            "thread-id",
+            "openai-beta",
+        ] {
+            assert!(!request.headers.contains_key(name), "unexpected {name}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn messages_catalog_rejects_invalid_pagination_and_duplicate_models_atomically() {
+    for (first, second, requests) in [
+        (
+            json!({"data":[{"id":"claude-a"}],"has_more":true}),
+            json!({}),
+            1,
+        ),
+        (
+            json!({"data":[{"id":"claude-a"}],"has_more":true,"last_id":""}),
+            json!({}),
+            1,
+        ),
+        (
+            json!({"data":[{"id":"claude-a"}],"has_more":true,"last_id":"claude-a"}),
+            json!({"data":[{"id":"claude-b"}],"has_more":true,"last_id":"claude-a"}),
+            2,
+        ),
+        (
+            json!({"data":[{"id":"claude-a"}],"has_more":true,"last_id":"claude-a"}),
+            json!({"data":[{"id":"claude-a"}],"has_more":false}),
+            2,
+        ),
+        (
+            json!({"data":[{"id":"claude-a"}],"has_more":true,"last_id":"claude-a"}),
+            json!({"has_more":false}),
+            2,
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(move |request: &wiremock::Request| {
+                let body = if request
+                    .url
+                    .query_pairs()
+                    .any(|(name, _)| name == "after_id")
+                {
+                    second.clone()
+                } else {
+                    first.clone()
+                };
+                ResponseTemplate::new(200).set_body_json(body)
+            })
+            .expect(requests)
+            .mount(&server)
+            .await;
+        let (store, service) = api_catalog_fixture(&server, ApiKeyProtocol::Messages).await;
+        let account = store.account("acct_transport_catalog").unwrap();
+
+        assert!(service.account_catalog_documents(&account).await.is_err());
+        assert_eq!(
+            server.received_requests().await.unwrap().len() as u64,
+            requests
+        );
+    }
+}
+
+#[tokio::test]
+async fn messages_catalog_applies_the_model_limit_across_pages() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(|request: &wiremock::Request| {
+            let after = request
+                .url
+                .query_pairs()
+                .any(|(name, _)| name == "after_id");
+            let data = if after {
+                vec![json!({"id":"claude-overflow"})]
+            } else {
+                (0..2048)
+                    .map(|index| json!({"id":format!("claude-{index}")}))
+                    .collect()
+            };
+            ResponseTemplate::new(200).set_body_json(json!({
+                "data":data,"has_more":!after,"last_id":"claude-2047"
+            }))
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    let (store, service) = api_catalog_fixture(&server, ApiKeyProtocol::Messages).await;
+    let account = store.account("acct_transport_catalog").unwrap();
+
+    assert!(service.account_catalog_documents(&account).await.is_err());
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn api_catalogs_distinguish_native_objects_from_standard_ids_without_protocol_regressions() {
+    for (protocol, native, with_data) in [
+        (ApiKeyProtocol::Responses, false, true),
+        (ApiKeyProtocol::Responses, true, false),
+        (ApiKeyProtocol::Responses, true, true),
+        (ApiKeyProtocol::Messages, false, true),
+        (ApiKeyProtocol::Messages, true, false),
+        (ApiKeyProtocol::Messages, true, true),
+    ] {
+        let server = MockServer::start().await;
+        let original = json!({
+            "slug":"vendor/model","display_name":"Native","base_instructions":"preserved",
+            "supported_in_api":true,"future":{"keep":true}
+        });
+        let mut body = if native {
+            json!({"models":[original]})
+        } else {
+            json!({"data":[{"id":"vendor/model","future":{"keep":true}}],"models":[{"id":"ignored-extension"}]})
+        };
+        if native && with_data {
+            body["data"] = json!([{"id":"ignored-standard"}]);
+            body["has_more"] = json!(true);
+        }
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .and(header(
+                if protocol == ApiKeyProtocol::Messages {
+                    "x-api-key"
+                } else {
+                    "authorization"
+                },
+                if protocol == ApiKeyProtocol::Messages {
+                    "sk-api-test-only"
+                } else {
+                    "Bearer sk-api-test-only"
+                },
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let (store, service) = api_catalog_fixture(&server, protocol).await;
+        let account = store.account("acct_transport_catalog").unwrap();
+
+        let (models, _) = service.account_catalog_documents(&account).await.unwrap();
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].request_model().as_str(), "vendor/model");
+        let document: Value = serde_json::from_slice(models[0].document().body()).unwrap();
+        assert_eq!(
+            document,
+            if native {
+                original
+            } else {
+                json!({"id":"vendor/model"})
+            }
+        );
+        let requests = server.received_requests().await.unwrap();
+        let request = &requests[0];
+        if protocol == ApiKeyProtocol::Messages {
+            assert!(
+                request
+                    .url
+                    .query_pairs()
+                    .any(|(name, value)| name == "limit" && value == "1000")
+            );
+            assert!(!request.headers.contains_key("authorization"));
+            assert_eq!(request.headers["anthropic-version"], "2023-06-01");
+        } else {
+            assert!(
+                !request
+                    .url
+                    .query_pairs()
+                    .any(|(name, _)| matches!(name.as_ref(), "limit" | "after_id"))
+            );
+            assert!(!request.headers.contains_key("x-api-key"));
+            assert!(!request.headers.contains_key("anthropic-version"));
+        }
+        assert!(!request.headers.contains_key("chatgpt-account-id"));
+    }
+}
+
+#[tokio::test]
+async fn messages_catalog_does_not_publish_a_partial_snapshot_after_a_later_page_failure() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(|request: &wiremock::Request| {
+            if request.url.query_pairs().any(|(name, _)| name == "after_id") {
+                ResponseTemplate::new(429)
+                    .insert_header("retry-after", "7")
+                    .set_body_json(json!({"type":"error","error":{"type":"rate_limit_error","message":"next page limited"}}))
+            } else {
+                ResponseTemplate::new(200).set_body_json(json!({
+                    "data":[{"id":"claude-first"}],"has_more":true,"last_id":"claude-first"
+                }))
+            }
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    let (store, service) = api_catalog_fixture(&server, ApiKeyProtocol::Messages).await;
+    let account = store.account("acct_transport_catalog").unwrap();
+
+    assert!(service.account_catalog_documents(&account).await.is_err());
+    assert!(
+        service
+            .read_account_catalog(&account)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn messages_catalog_does_not_downgrade_invalid_native_models_to_standard_data() {
+    for models in [
+        json!([{"slug":"native-model"}]),
+        json!([{"display_name":"Missing slug"}]),
+        json!([{"slug":null,"display_name":"Native model"}]),
+        json!([{"slug":"vendor/model","display_name":"Native model","context_window":-1}]),
+        json!([
+            {"slug":"native-model","display_name":"First"},
+            {"slug":"native-model","display_name":"Duplicate"}
+        ]),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "models":models,"data":[{"id":"valid-standard"}],"has_more":false
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let (store, service) = api_catalog_fixture(&server, ApiKeyProtocol::Messages).await;
+        let account = store.account("acct_transport_catalog").unwrap();
+
+        assert!(service.account_catalog_documents(&account).await.is_err());
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn messages_standard_catalog_ignores_unrelated_models_metadata() {
+    for metadata in [
+        json!(null),
+        json!({"display_name":"top-level metadata"}),
+        json!([]),
+        json!(["metadata"]),
+        json!([{"id":"unrelated-extension"}]),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "models":metadata,"data":[{"id":"vendor/standard"}],"has_more":false
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let (store, service) = api_catalog_fixture(&server, ApiKeyProtocol::Messages).await;
+        let account = store.account("acct_transport_catalog").unwrap();
+
+        let (models, _) = service.account_catalog_documents(&account).await.unwrap();
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].request_model().as_str(), "vendor/standard");
+        assert_eq!(models[0].document().protocol(), "openai");
+        let document: Value = serde_json::from_slice(models[0].document().body()).unwrap();
+        assert_eq!(document, json!({"id":"vendor/standard"}));
     }
 }

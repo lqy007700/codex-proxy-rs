@@ -153,6 +153,7 @@ export function useAccountEditor(options: {
       const connectionChanged = isApiKey && (
         apiKey.value.apiKey !== ''
         || apiKey.value.base_url.trim() !== savedConfiguration.value?.base_url
+        || apiKey.value.protocol !== savedConfiguration.value?.protocol
         || apiKey.value.transport !== savedConfiguration.value?.transport
       )
       await updateAccount({
@@ -160,6 +161,7 @@ export function useAccountEditor(options: {
         connection: connectionChanged
           ? {
               baseUrl: apiKey.value.base_url.trim(),
+              protocol: apiKey.value.protocol,
               transport: apiKey.value.transport,
               apiKey: apiKey.value.apiKey || undefined,
             }

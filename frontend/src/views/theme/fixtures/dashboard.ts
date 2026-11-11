@@ -369,6 +369,7 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
       metricValue: '926K',
       usageWindow: {
         key: 'short',
+        accountWide: true,
         group: 'shortTerm',
         limitId: null,
         limitName: null,
@@ -403,6 +404,7 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
       metricValue: '894',
       usageWindow: {
         key: 'free-rolling-24h',
+        accountWide: false,
         group: 'shortTerm',
         limitId: null,
         limitName: null,
@@ -442,6 +444,7 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
       metricValue: '512K',
       usageWindow: {
         key: 'short',
+        accountWide: true,
         group: 'shortTerm',
         limitId: null,
         limitName: null,
@@ -670,6 +673,7 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
   poolSummary: {
     total: 52,
     normal: 47,
+    quotaPaused: 0,
     quotaExhausted: 3,
     rateLimited: 1,
     disabled: 0,

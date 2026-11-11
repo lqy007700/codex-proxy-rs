@@ -72,7 +72,7 @@ export function useSettingsForm() {
       probeModel: '',
     } as ProtectionDraft,
     accountWarmupEnabled: false,
-    accountWarmupScheduleTime: '08:00',
+    accountWarmupCron: '',
     accountWarmupModel: '',
     resetCreditLeadMinutes: 10 as number | null,
     resetCreditMaxWeeklyRemainingPercent: null as number | null,
@@ -173,7 +173,7 @@ export function useSettingsForm() {
       probeModel: data.accountErrorProtection.probeModel ?? '',
     }
     form.accountWarmupEnabled = data.accountWarmupEnabled
-    form.accountWarmupScheduleTime = data.accountWarmupScheduleTime ?? '08:00'
+    form.accountWarmupCron = data.accountWarmupCron ?? ''
     form.accountWarmupModel = data.accountWarmupModel ?? ''
     form.resetCreditLeadMinutes = data.resetCreditLeadMinutes
     form.resetCreditMaxWeeklyRemainingPercent = data.resetCreditMaxWeeklyRemainingPercent
@@ -349,10 +349,9 @@ export function useSettingsForm() {
       ZNotification.warning({ message: protectionError })
       return
     }
-    const scheduleTime = form.accountWarmupScheduleTime.trim()
-    const timeRegex = /^(?:[01]\d|2[0-3]):[0-5]\d(?:,(?:[01]\d|2[0-3]):[0-5]\d)*$/
-    if (!scheduleTime || !timeRegex.test(scheduleTime)) {
-      ZNotification.warning({ message: '预激活时间格式无效，请输入 HH:MM 格式（如 08:00 或 08:00,13:00）' })
+    const cron = form.accountWarmupCron.trim()
+    if ((form.accountWarmupEnabled && !cron) || (cron && (cron.length > 255 || cron.split(/\s+/).length !== 5))) {
+      ZNotification.warning({ message: '请输入有效的五段 Cron 表达式，例如 0 8 * * *（最多 255 个字符）' })
       return
     }
     const warmupModel = form.accountWarmupModel.trim()
@@ -404,7 +403,7 @@ export function useSettingsForm() {
           probeModel: trimProtectionText(form.accountErrorProtection.probeModel) || null,
         },
         accountWarmupEnabled: form.accountWarmupEnabled,
-        accountWarmupScheduleTime: scheduleTime,
+        accountWarmupCron: cron,
         accountWarmupModel: warmupModel || null,
         resetCreditLeadMinutes,
         resetCreditMaxWeeklyRemainingPercent,

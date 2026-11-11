@@ -32,7 +32,13 @@ pub(crate) async fn standalone_search(
     body: Bytes,
 ) -> Response {
     let service = state.openai();
-    let client = match authenticate_client(service, &headers).await {
+    let client = match authenticate_client(
+        service,
+        &headers,
+        crate::openai::auth::ClientKeyHeaders::Bearer,
+    )
+    .await
+    {
         Ok(client) => client,
         Err(error) => return client_access_error_response(error),
     };

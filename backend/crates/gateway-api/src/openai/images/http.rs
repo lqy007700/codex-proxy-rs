@@ -73,7 +73,13 @@ async fn handle_image_request(
     endpoint: &'static str,
 ) -> Response {
     let service = state.openai();
-    let client = match authenticate_client(service, &headers).await {
+    let client = match authenticate_client(
+        service,
+        &headers,
+        crate::openai::auth::ClientKeyHeaders::Bearer,
+    )
+    .await
+    {
         Ok(client) => client,
         Err(error) => return client_access_error_response(error),
     };

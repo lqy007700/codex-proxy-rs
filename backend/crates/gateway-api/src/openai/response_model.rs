@@ -22,6 +22,12 @@ struct ModelFields<'a> {
     headers: Option<&'a RawValue>,
 }
 
+#[derive(Deserialize)]
+struct MessageStartFields<'a> {
+    #[serde(borrow)]
+    message: Option<&'a RawValue>,
+}
+
 type Replacement = (Range<usize>, String);
 
 impl ClientResponseModel {
@@ -62,10 +68,15 @@ impl ClientResponseModel {
         response
     }
 
-    pub(super) fn project_response(&self, response: &mut Value) {
-        if let Some(model) = response.get_mut("model").filter(|value| value.is_string()) {
+    /// Messages 仅投影顶层协议模型，不解释自定义 headers 或业务内容
+    pub(super) fn project_message(&self, message: &mut Value) {
+        if let Some(model) = message.get_mut("model").filter(|value| value.is_string()) {
             *model = Value::String(self.0.clone());
         }
+    }
+
+    pub(super) fn project_response(&self, response: &mut Value) {
+        self.project_message(response);
         if let Some(headers) = response.get_mut("headers").and_then(Value::as_object_mut) {
             for (name, value) in headers {
                 if is_model_header(name) {
@@ -107,14 +118,43 @@ impl ClientResponseModel {
     }
 
     pub(super) fn project_json(&self, json: &str, kind: &str) -> Option<String> {
+        if !is_response_event(kind) && !is_metadata_event(kind) {
+            return None;
+        }
+        self.project_json_inner(json, kind)
+    }
+
+    fn project_json_inner(&self, json: &str, kind: &str) -> Option<String> {
         let replacements = self.replacements(json, kind)?;
         Some(apply_replacements(json, replacements))
+    }
+
+    pub(super) fn project_message_json(&self, json: &str, kind: &str) -> Option<String> {
+        self.project_json_inner(
+            json,
+            match kind {
+                "message" => "anthropic.message",
+                "message_start" => "anthropic.message_start",
+                _ => return None,
+            },
+        )
+    }
+
+    pub(super) fn project_message_sse(&self, raw: &Bytes, kind: &str) -> Option<Bytes> {
+        if kind != "message_start" {
+            return None;
+        }
+        self.project_sse_inner(raw, "anthropic.message_start")
     }
 
     pub(super) fn project_sse(&self, raw: &Bytes, kind: &str) -> Option<Bytes> {
         if !is_response_event(kind) && !is_metadata_event(kind) {
             return None;
         }
+        self.project_sse_inner(raw, kind)
+    }
+
+    fn project_sse_inner(&self, raw: &Bytes, kind: &str) -> Option<Bytes> {
         let raw = std::str::from_utf8(raw).ok()?;
         let mut data = String::new();
         let mut segments = Vec::new();
@@ -157,11 +197,30 @@ impl ClientResponseModel {
     }
 
     fn replacements(&self, json: &str, kind: &str) -> Option<Vec<Replacement>> {
-        if !is_response_event(kind) && !is_metadata_event(kind) {
+        if !is_response_event(kind)
+            && !is_metadata_event(kind)
+            && !matches!(kind, "anthropic.message" | "anthropic.message_start")
+        {
             return None;
         }
-        let fields: ModelFields<'_> = serde_json::from_str(json).ok()?;
         let mut replacements = Vec::new();
+        if kind == "anthropic.message_start" {
+            let fields: MessageStartFields<'_> = serde_json::from_str(json).ok()?;
+            if let Some(message) = fields.message
+                && let Ok(message) = serde_json::from_str::<ModelFields<'_>>(message.get())
+                && let Some(model) = message.model
+            {
+                self.replace_string(json, model, &mut replacements);
+            }
+            return (!replacements.is_empty()).then_some(replacements);
+        }
+        let fields: ModelFields<'_> = serde_json::from_str(json).ok()?;
+        if kind == "anthropic.message" {
+            if let Some(model) = fields.model {
+                self.replace_string(json, model, &mut replacements);
+            }
+            return (!replacements.is_empty()).then_some(replacements);
+        }
         if is_response_event(kind)
             && let Some(response) = fields.response
             && let Ok(response) = serde_json::from_str::<ModelFields<'_>>(response.get())

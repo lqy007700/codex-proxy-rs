@@ -21,6 +21,7 @@ pub use gateway_core::account::{
 /// 账号可用的管理操作
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ProviderAccountCapabilities {
+    pub quota_limits_supported: bool,
     pub quota: bool,
     pub quota_refresh: bool,
     pub profile: bool,
@@ -135,6 +136,8 @@ pub struct AccountRecord {
     pub model_access: gateway_core::account::AccountModelAccess,
     pub model_mappings: gateway_core::account::AccountModelMappings,
     pub allow_credits: bool,
+    pub quota_limits: gateway_core::account::AccountQuotaLimits,
+    pub quota_paused: bool,
     pub outbound_proxy_id: Option<String>,
     pub outbound_proxy: Option<gateway_core::account::OutboundProxy>,
     pub outbound_proxy_enabled: bool,
@@ -260,6 +263,7 @@ pub struct BatchUpdateAccounts {
     pub account_ids: Vec<String>,
     pub enabled: Option<bool>,
     pub allow_credits: Option<bool>,
+    pub quota_limits: Option<gateway_core::account::AccountQuotaLimits>,
     pub concurrency_limit: Option<Option<AccountConcurrencyLimit>>,
     pub weight: Option<AccountWeight>,
     pub model_access: Option<gateway_core::account::AccountModelAccess>,
@@ -268,6 +272,16 @@ pub struct BatchUpdateAccounts {
     pub outbound_proxy: Option<super::proxies::AccountProxySelection>,
     pub scheduling_role: Option<gateway_core::account::AccountSchedulingRole>,
 }
+
+/// 已按拟提交策略重算的账号暂停结果，以快照版本防止旧判断覆盖新观测
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedQuotaPause {
+    pub observed_at: Option<DateTime<Utc>>,
+    pub revision: Revision,
+    pub paused: bool,
+}
+
+pub type PreparedQuotaPauses = BTreeMap<String, PreparedQuotaPause>;
 
 /// 批量账号更新结果
 #[derive(Debug, Clone, PartialEq, Eq)]

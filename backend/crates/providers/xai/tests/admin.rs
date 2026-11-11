@@ -59,6 +59,7 @@ async fn account_capabilities_advertise_only_xai_oauth_quota_operations() {
     let provider = bundle.admin_provider();
     let id = ProviderAccountId::new("acct_capabilities").unwrap();
     let oauth = provider.account_capabilities(&id, "oauth");
+    assert!(!oauth.quota_limits_supported);
     assert_eq!(
         oauth,
         gateway_admin::model::accounts::ProviderAccountCapabilities {
@@ -566,8 +567,11 @@ async fn xai_admin_provider_projects_cached_quota_models_and_canonical_export() 
         quota.usage_window().map(|(_, period)| period),
         Some(AccountUsagePeriod::Daily)
     );
+    assert!(quota.paused_windows.is_empty());
     store
         .compare_and_swap_quota(gateway_core::account::QuotaObservation {
+            quota_pause: None,
+            expected_connection: None,
             plan_type: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
@@ -767,6 +771,8 @@ fn provider_ports_with_catalog(
 fn account_record(account: &ProviderAccount) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
+        quota_limits: account.quota_limits().clone(),
+        quota_paused: account.quota_paused(),
         model_mappings: Default::default(),
         scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
         allow_credits: false,

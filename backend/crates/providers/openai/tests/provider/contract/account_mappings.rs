@@ -364,3 +364,107 @@ async fn mapped_native_continuation_keeps_same_target_on_its_original_account() 
     assert_eq!(body["model"], "gpt-5.5");
     assert_eq!(body["previous_response_id"], "upstream_previous");
 }
+
+#[tokio::test]
+async fn messages_generation_and_local_count_keep_the_selected_account_mapping() {
+    use provider_openai::credential::ApiKeyProtocol;
+
+    for protocol in [ApiKeyProtocol::Messages, ApiKeyProtocol::Responses] {
+        assert_messages_account_mapping(protocol).await;
+    }
+}
+
+async fn assert_messages_account_mapping(protocol: provider_openai::credential::ApiKeyProtocol) {
+    use gateway_core::operation::TokenCountRequest;
+    use provider_openai::credential::{ApiKeyProtocol, ResponsesTransport};
+
+    let server = MockServer::start().await;
+    let store = Arc::new(MemoryAccountStore::default());
+    store
+        .seed_api_key_for_protocol(
+            "acct_scope_new",
+            server.uri(),
+            ResponsesTransport::Http,
+            protocol,
+        )
+        .await;
+    Mock::given(method("POST"))
+        .and(path(match protocol {
+            ApiKeyProtocol::Messages => "/messages",
+            ApiKeyProtocol::Responses => "/responses",
+        }))
+        .respond_with(match protocol {
+            ApiKeyProtocol::Messages => ResponseTemplate::new(200).set_body_json(json!({
+                "id":"msg_mapped","type":"message","model":"gpt-5.5",
+                "role":"assistant","content":[{"type":"text","text":"mapped"}],
+                "stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":1}
+            })),
+            ApiKeyProtocol::Responses => ResponseTemplate::new(200).set_body_raw(
+                CAPTURE_COMPLETED_SSE.replace("gpt-5.4", "gpt-5.5"),
+                "text/event-stream",
+            ),
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    let provider = provider(&store);
+    for source in ["openai", "anthropic", "messages-count", "token-count"] {
+        let counting = matches!(source, "messages-count" | "token-count");
+        let operation = match source {
+            "openai" => operation(None),
+            "anthropic" => Operation::Generate(GenerateRequest::from_protocol_payload(
+                ProtocolPayload::json_object(
+                    "anthropic",
+                    json!({
+                        "model":"alias","max_tokens":64,
+                        "messages":[{"role":"user","content":"hello"}]
+                    })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                )
+                .unwrap(),
+            )),
+            _ => Operation::CountTokens(TokenCountRequest::from_raw_json(
+                RawJsonPayload::new(
+                    if source == "messages-count" {
+                        "anthropic"
+                    } else {
+                        "token-count"
+                    },
+                    Bytes::from_static(br#"{"messages":[{"role":"user","content":"hello"}]}"#),
+                )
+                .unwrap(),
+            )),
+        };
+        let (request, context) = mapped_request(operation, "acct_scope_new", None);
+        let mut stream = provider.clone().execute(request, context).await.unwrap();
+        assert_eq!(
+            stream.metadata().upstream_model().unwrap().as_str(),
+            "gpt-5.5"
+        );
+        let mut count = None;
+        while let Some(event) = stream.next().await {
+            let event = event.unwrap();
+            if counting {
+                assert!(!event.canonical_facts().iter().any(|fact| matches!(
+                    fact,
+                    GatewayEvent::Usage(_) | GatewayEvent::CalculatedCost(_)
+                )));
+                if let Some(wire) = event.wire_event() {
+                    let body: Value =
+                        serde_json::from_slice(wire.raw_json_body().unwrap()).unwrap();
+                    count = body.get("input_tokens").and_then(Value::as_u64);
+                }
+            }
+        }
+        if counting {
+            assert!(count.is_some_and(|count| count > 0));
+        }
+    }
+    let requests = server.received_requests().await.unwrap();
+    for request in requests.iter().filter(|request| request.method == "POST") {
+        assert_eq!(captured_request_body(request)["model"], "gpt-5.5");
+    }
+    server.verify().await;
+}

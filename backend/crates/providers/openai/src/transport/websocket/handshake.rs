@@ -380,8 +380,18 @@ async fn connect_tcp(host: &str, port: u16) -> Result<tokio::net::TcpStream, tun
         .call(uri)
         .await
         .map(|stream| stream.into_inner())
-        .map_err(|_| {
-            tungstenite::Error::Io(std::io::Error::other("account WebSocket connection failed"))
+        .map_err(|error| {
+            // Hyper 包装了底层 IO 错误，保留原因链及其 kind，不能降为通用 io_error
+            let mut source = std::error::Error::source(&error);
+            let mut kind = std::io::ErrorKind::Other;
+            while let Some(cause) = source {
+                if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+                    kind = io.kind();
+                    break;
+                }
+                source = cause.source();
+            }
+            tungstenite::Error::Io(std::io::Error::new(kind, error))
         })
 }
 

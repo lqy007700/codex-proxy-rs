@@ -32,6 +32,7 @@ use provider_openai::credential::{
     ImportCodexOAuthCredential,
 };
 use secrecy::SecretString;
+use tokio::sync::oneshot;
 
 #[derive(Clone)]
 struct StoredAccount {
@@ -53,6 +54,7 @@ type CredentialLoadHook = dyn for<'a> Fn(
 pub(crate) struct MemoryAccountStore {
     accounts: Mutex<BTreeMap<ProviderAccountId, StoredAccount>>,
     quota_reads: AtomicUsize,
+    next_quota_read: Mutex<Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>>,
     account_reads: AtomicUsize,
     provider_list_reads: AtomicUsize,
     fail_provider_listing: AtomicBool,
@@ -119,6 +121,22 @@ impl MemoryAccountStore {
         base_url: String,
         transport: provider_openai::credential::ResponsesTransport,
     ) {
+        self.seed_api_key_for_protocol(
+            id,
+            base_url,
+            transport,
+            provider_openai::credential::ApiKeyProtocol::Responses,
+        )
+        .await;
+    }
+
+    pub(crate) async fn seed_api_key_for_protocol(
+        &self,
+        id: &str,
+        base_url: String,
+        transport: provider_openai::credential::ResponsesTransport,
+        protocol: provider_openai::credential::ApiKeyProtocol,
+    ) {
         let credential = provider_openai::credential::CodexCredentialCodec::encode_complete(
             provider_openai::credential::CodexCredentialData::ApiKey(
                 provider_openai::credential::ApiKeyCredentialData {
@@ -126,6 +144,7 @@ impl MemoryAccountStore {
                     installation_id: uuid::Uuid::new_v4().to_string(),
                     base_url,
                     api_key: "sk-api-test-only".to_owned(),
+                    protocol,
                     transport,
                 },
             ),
@@ -163,6 +182,29 @@ impl MemoryAccountStore {
             .expect("account store lock")
             .get(&id)
             .map(|stored| stored.account.clone())
+    }
+
+    pub(crate) fn set_quota_limits(
+        &self,
+        id: &str,
+        limits: gateway_core::account::AccountQuotaLimits,
+    ) {
+        let mut accounts = self.accounts.lock().unwrap();
+        let stored = accounts
+            .get_mut(&ProviderAccountId::new(id).unwrap())
+            .unwrap();
+        stored.account = stored.account.clone().with_quota_limits(limits, false);
+    }
+
+    pub(crate) fn set_quota_paused(&self, id: &str, paused: bool) {
+        let mut accounts = self.accounts.lock().unwrap();
+        let stored = accounts
+            .get_mut(&ProviderAccountId::new(id).unwrap())
+            .unwrap();
+        stored.account = stored
+            .account
+            .clone()
+            .with_quota_limits(stored.account.quota_limits().clone(), paused);
     }
 
     pub(crate) fn enable_quota_credits(&self, id: &str) {
@@ -228,6 +270,13 @@ impl MemoryAccountStore {
             .with_request_location(location);
     }
 
+    pub(crate) fn hold_next_quota_read(&self) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (read, ready) = oneshot::channel();
+        let (release, held) = oneshot::channel();
+        *self.next_quota_read.lock().unwrap() = Some((read, held));
+        (ready, release)
+    }
+
     pub(crate) fn quota_reads(&self) -> usize {
         self.quota_reads.load(Ordering::SeqCst)
     }
@@ -253,6 +302,14 @@ impl MemoryAccountStore {
             .map(|observation| {
                 serde_json::Value::Object(observation.quota.expose_to_provider().clone())
             })
+    }
+
+    pub(crate) fn set_quota_observation(&self, observation: QuotaObservation) {
+        let mut accounts = self.accounts.lock().expect("account store lock");
+        let stored = accounts
+            .get_mut(&observation.account_id)
+            .expect("account for quota observation");
+        stored.quota = Some(observation);
     }
 
     pub(crate) fn fail_provider_listing(&self) {
@@ -489,11 +546,19 @@ impl ProviderAccountStore for MemoryAccountStore {
         accounts: &[ProviderAccountId],
     ) -> Result<Vec<QuotaObservation>, StoreError> {
         self.quota_reads.fetch_add(1, Ordering::SeqCst);
-        let stored = self.accounts.lock().expect("account store lock");
-        Ok(accounts
-            .iter()
-            .filter_map(|account| stored.get(account)?.quota.clone())
-            .collect())
+        let result = {
+            let stored = self.accounts.lock().expect("account store lock");
+            accounts
+                .iter()
+                .filter_map(|account| stored.get(account)?.quota.clone())
+                .collect()
+        };
+        let held = self.next_quota_read.lock().unwrap().take();
+        if let Some((read, held)) = held {
+            read.send(()).unwrap();
+            held.await.expect("release quota read");
+        }
+        Ok(result)
     }
 
     async fn compare_and_swap_quota(
@@ -505,6 +570,25 @@ impl ProviderAccountStore for MemoryAccountStore {
             .get_mut(&observation.account_id)
             .ok_or_else(|| store_error(StoreErrorKind::InvalidData))?;
         if stored.account.revision() != observation.expected_revision {
+            return Ok(QuotaWriteOutcome::Conflict);
+        }
+        if observation
+            .expected_connection
+            .as_ref()
+            .is_some_and(|expected| {
+                expected != &gateway_core::account::UpstreamConnection::for_account(&stored.account)
+            })
+        {
+            return Ok(QuotaWriteOutcome::Conflict);
+        }
+        let current_version = stored.quota.as_ref().map(|quota| quota.observed_at);
+        if observation.quota_pause.as_ref().is_some_and(|decision| {
+            &decision.limits != stored.account.quota_limits()
+                || current_version == Some(observation.observed_at)
+                || decision
+                    .merge_base
+                    .is_some_and(|base| base.observed_at != current_version)
+        }) {
             return Ok(QuotaWriteOutcome::Conflict);
         }
         if stored
@@ -534,8 +618,13 @@ impl ProviderAccountStore for MemoryAccountStore {
                 Some(plan_type.clone()),
             ));
         }
+        let paused = observation
+            .quota_pause
+            .as_ref()
+            .map_or(stored.account.quota_paused(), |decision| decision.paused);
         stored.quota = Some(observation);
-        stored.account = rebuild_account(&stored.account, replacement);
+        stored.account = rebuild_account(&stored.account, replacement)
+            .with_quota_limits(stored.account.quota_limits().clone(), paused);
         Ok(QuotaWriteOutcome::Updated)
     }
 
@@ -743,6 +832,7 @@ fn rebuild_account(current: &ProviderAccount, rebuild: AccountRebuild) -> Provid
         rebuild.last_error_message,
     )
     .with_allow_credits(current.allow_credits())
+    .with_quota_limits(current.quota_limits().clone(), current.quota_paused())
     .with_scheduling(current.concurrency_limit(), current.weight())
     .with_scheduling_role(current.scheduling_role())
     .with_refresh_schedule(rebuild.has_refresh_token, rebuild.next_refresh_at)

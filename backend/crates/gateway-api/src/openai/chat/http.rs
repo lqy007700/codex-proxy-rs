@@ -23,13 +23,13 @@ use gateway_protocol::openai::chat::decode_chat_request;
 use crate::openai::{
     auth::{authenticate_client, client_access_error_response},
     error::{gateway_error_response, protocol_error_response},
+    generation::execution_response,
     middleware::{
         ExpectedBody, RequestInput, error_response, into_http_response, invoke_request,
         request_parts,
     },
     responses::{
         ProtocolError, ProtocolErrorBody, decode_request_with_headers, decompress_request_body,
-        execution_response,
     },
     router::CHAT_COMPLETIONS_PATH,
 };
@@ -50,7 +50,13 @@ pub(in crate::openai) async fn chat_completions(
     body: Bytes,
 ) -> Response {
     let service = state.openai().clone();
-    let client = match authenticate_client(&service, &headers).await {
+    let client = match authenticate_client(
+        &service,
+        &headers,
+        crate::openai::auth::ClientKeyHeaders::Bearer,
+    )
+    .await
+    {
         Ok(client) => client,
         Err(error) => return client_access_error_response(error),
     };
@@ -156,7 +162,7 @@ pub(in crate::openai) async fn chat_completions(
                         None
                     };
                     let started = service
-                        .start_prepared_response(
+                        .start_prepared_generation(
                             prepared,
                             decoded,
                             transport,
@@ -200,6 +206,7 @@ pub(in crate::openai) async fn chat_completions(
                     } else {
                         ExpectedBody::SingleJson
                     },
+                    "openai",
                 )
                 .await
             }

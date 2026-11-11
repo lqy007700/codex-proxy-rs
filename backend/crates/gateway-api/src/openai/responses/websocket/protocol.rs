@@ -10,9 +10,10 @@ use serde_json::{Map, Value, json};
 use thiserror::Error;
 
 use crate::openai::error::{gateway_error_contract, gateway_error_from_engine};
+use crate::openai::generation::DecodedGenerationRequest;
 
 use super::super::{
-    DecodedResponsesRequest, ProtocolErrorBody, RequestDecodeError,
+    ProtocolErrorBody, RequestDecodeError,
     request::{OpenAiRequestHeaders, RequestDecodeSource},
 };
 
@@ -27,7 +28,7 @@ use super::super::{
 pub fn decode_response_create_with_context(
     payload: &str,
     request_headers: &OpenAiRequestHeaders,
-) -> Result<DecodedResponsesRequest, ResponseCreateFrameError> {
+) -> Result<DecodedGenerationRequest, ResponseCreateFrameError> {
     decode_response_create_inner(payload, request_headers)
 }
 
@@ -52,7 +53,7 @@ pub(super) fn is_response_create(payload: &str) -> bool {
 fn decode_response_create_inner(
     payload: &str,
     request_headers: &OpenAiRequestHeaders,
-) -> Result<DecodedResponsesRequest, ResponseCreateFrameError> {
+) -> Result<DecodedGenerationRequest, ResponseCreateFrameError> {
     let Value::Object(mut body) = serde_json::from_str::<Value>(payload)
         .map_err(|_| ResponseCreateFrameError::InvalidJson)?
     else {

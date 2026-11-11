@@ -12,6 +12,7 @@ export interface AccountPageMeta {
 export interface AccountSummary {
   total: number
   normal: number
+  quotaPaused: number
   quotaExhausted: number
   rateLimited: number
   disabled: number
@@ -53,7 +54,7 @@ interface AccountListParams {
 
 interface AccountUpdateParam {
   schedulingRole?: AccountSchedulingRole
-  connection?: { baseUrl?: string, transport: ApiKeyConfiguration['transport'], apiKey?: string }
+  connection?: { baseUrl?: string, protocol?: ApiKeyConfiguration['protocol'], transport: ApiKeyConfiguration['transport'], apiKey?: string }
   outboundProxyUrl?: string
   outboundProxyId?: string
   accountId: string
@@ -67,6 +68,7 @@ interface AccountUpdateParam {
 }
 
 interface AccountBatchUpdateParam {
+  quotaLimits?: Record<string, number>
   schedulingRole?: AccountSchedulingRole
   outboundProxyUrl?: string
   outboundProxyId?: string
@@ -139,6 +141,7 @@ export function deleteAccounts(data: AccountDeleteParams, options: RequestOption
 
 export interface ApiKeyConfiguration {
   base_url: string
+  protocol: 'responses' | 'messages'
   transport: 'http' | 'prefer_websocket'
 }
 

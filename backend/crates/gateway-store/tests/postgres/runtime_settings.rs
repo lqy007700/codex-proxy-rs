@@ -49,7 +49,7 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
             audit_retention_days: 90,
             account_error_protection: enabled_protection(),
             account_warmup_enabled: false,
-            account_warmup_schedule_time: "08:00".to_owned(),
+            account_warmup_cron: String::new(),
             account_warmup_model: None,
             reset_credit_lead_minutes: 10,
             reset_credit_max_weekly_remaining_percent: None,
@@ -166,6 +166,7 @@ fn runtime_settings_require_model_when_warmup_is_enabled() {
         RuntimeSettingsUpdate {
             values: gateway_admin::model::settings::RuntimeSettingsValues {
                 account_warmup_enabled: true,
+                account_warmup_cron: "0 8 * * *".to_owned(),
                 ..runtime_settings_base.values
             },
             ..runtime_settings_base
@@ -180,9 +181,16 @@ async fn warmup_settings_round_trip_with_database_constraint() {
         return;
     };
     let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    let defaults = repository.load_runtime_settings().await.unwrap();
+    assert!(!defaults.values.account_warmup_enabled);
+    assert!(defaults.values.account_warmup_cron.is_empty());
+    repository
+        .update_runtime_settings(settings_with_margin(3_600))
+        .await
+        .expect("disabled warmup accepts an empty cron");
     let mut update = settings_with_margin(3_600);
     update.values.account_warmup_enabled = true;
-    update.values.account_warmup_schedule_time = "08:00,13:00".to_owned();
+    update.values.account_warmup_cron = "0 8,13 * * MON-FRI".to_owned();
     update.values.account_warmup_model = Some("test-model".to_owned());
     repository
         .update_runtime_settings(update)
@@ -194,7 +202,7 @@ async fn warmup_settings_round_trip_with_database_constraint() {
         .await
         .expect("load warmup settings");
     assert!(settings.values.account_warmup_enabled);
-    assert_eq!(settings.values.account_warmup_schedule_time, "08:00,13:00");
+    assert_eq!(settings.values.account_warmup_cron, "0 8,13 * * MON-FRI");
     assert_eq!(
         settings.values.account_warmup_model.as_deref(),
         Some("test-model")
@@ -204,6 +212,17 @@ async fn warmup_settings_round_trip_with_database_constraint() {
         .execute(&database.pool)
         .await
         .expect_err("enabled warmup requires a model");
+    assert_eq!(
+        error
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
+        Some("23514")
+    );
+    let error = sqlx::query("update runtime_settings set account_warmup_cron = '' where id = 1")
+        .execute(&database.pool)
+        .await
+        .expect_err("enabled warmup requires a nonempty cron");
     assert_eq!(
         error
             .as_database_error()
@@ -1087,10 +1106,11 @@ async fn warmup_cursor_survives_restart_and_settings_updates_without_rewinding()
         !restarted.claim_warmup_slot(zone, slot).await.unwrap(),
         "another slot cannot erase prior deduplication"
     );
-    restarted
-        .update_runtime_settings(settings_with_margin(3600))
-        .await
-        .unwrap();
+    let mut update = settings_with_margin(3600);
+    update.values.account_warmup_enabled = true;
+    update.values.account_warmup_cron = "*/5 * * * *".to_owned();
+    update.values.account_warmup_model = Some("test-model".to_owned());
+    restarted.update_runtime_settings(update).await.unwrap();
     assert!(!restarted.claim_warmup_slot(zone, slot).await.unwrap());
     assert!(
         !restarted

@@ -3,7 +3,7 @@ import type { AccountGroupRef } from '../groups'
 export type AccountSchedulingRole = 'regular' | 'fallback'
 
 export type AccountStatus
-  = 'normal' | 'quota_exhausted' | 'rate_limited' | 'disabled' | 'error'
+  = 'normal' | 'quota_paused' | 'quota_exhausted' | 'rate_limited' | 'disabled' | 'error'
 
 export type AccountErrorReason
   = 'account_unverified'
@@ -14,6 +14,7 @@ export type AccountErrorReason
 
 export interface AccountQuotaWindow {
   key: string
+  accountWide: boolean
   group: string
   limitId: string | null
   limitName: string | null
@@ -40,6 +41,7 @@ export interface AccountProtectionRule {
 }
 
 export interface AccountQuota {
+  pausedWindows: string[]
   refreshedAtDisplay: string
   limitReached: boolean
   // 429 临时限流（Redis 冷却）到期时间；非限流中为 null。
@@ -133,6 +135,7 @@ export interface AccountModelAccess {
 }
 
 export interface Account {
+  quotaLimits: Record<string, number>
   capabilities: AccountCapabilities
   outboundProxyId: string | null
   outboundProxyEndpoint: string | null
@@ -179,6 +182,7 @@ export interface Account {
 }
 
 export interface AccountCapabilities {
+  quotaLimitsSupported: boolean
   quota: boolean
   quotaRefresh: boolean
   profile: boolean

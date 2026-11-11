@@ -33,19 +33,6 @@ impl CodexCredentialQuotaService {
                 .values()
                 .any(|details| passive_rate_limit_snapshot(details).is_some())
         });
-        let existing = self
-            .store
-            .get_quotas(std::slice::from_ref(account.id()))
-            .await?
-            .into_iter()
-            .find(|observation| {
-                observation.account_id == *account.id()
-                    && observation.expected_revision == account.revision()
-            });
-        let existing_state = existing.as_ref().map(|observation| observation.state);
-        let existing = existing
-            .map(|observation| observation.quota.into_inner())
-            .unwrap_or_default();
         // 只用本次响应明确携带的套餐更新账号，不能把合并前的旧快照重新当作新证据
         let observed_plan = rate_limits
             .iter()
@@ -56,56 +43,78 @@ impl CodexCredentialQuotaService {
                 })
             })
             .next();
-        let plan_type = observed_account_plan(account.plan_type(), observed_plan);
-        // 套餐、credits 等元数据可以更新，但没有额度窗口事实时必须保留旧观察时刻，
-        // 也不能借旧快照重新推导 quota state
-        if !has_quota_facts {
-            let Some(state) = existing_state else {
+        // 冲突只重做合并，不能把迟到响应重新标成新的用量证据
+        let observed_at = SystemTime::now();
+        for _ in 0..QUOTA_MERGE_ATTEMPTS {
+            let existing = self
+                .store
+                .get_quotas(std::slice::from_ref(account.id()))
+                .await?
+                .into_iter()
+                .find(|observation| {
+                    observation.account_id == *account.id()
+                        && observation.expected_revision == account.revision()
+                });
+            let merge_base = QuotaMergeBase {
+                observed_at: existing.as_ref().map(|observation| observation.observed_at),
+            };
+            if merge_base.observed_at.is_some_and(|at| at >= observed_at) {
                 return Ok(false);
+            }
+            let previous = if account.quota_limits().is_empty() {
+                None
+            } else {
+                existing.as_ref().and_then(quota_snapshot_from_observation)
+            };
+            let existing_state = existing.as_ref().map(|observation| observation.state);
+            if !has_quota_facts && existing_state.is_none() {
+                return Ok(false);
+            }
+            let existing = existing
+                .map(|observation| observation.quota.into_inner())
+                .unwrap_or_default();
+            let mut quota = merge_passive_quota(existing, rate_limits);
+            let mut snapshot = parse_account_quota_snapshot(
+                account.id().clone(),
+                account.revision(),
+                observed_at,
+                &Value::Object(quota.clone()),
+            )?;
+            snapshot.retain_limit_evidence(account.quota_limits(), previous.as_ref(), &mut quota);
+            // 元数据不重新推导访问事实，点数与套餐的本地策略仍由账号层组合
+            let state = if !has_quota_facts {
+                existing_state.unwrap_or_else(|| account.quota_fact())
+            } else if snapshot.quota().is_exhausted() {
+                snapshot.quota()
+            } else {
+                QuotaState::allowed(observed_at)
             };
             let outcome = self
                 .store
                 .compare_and_swap_quota(QuotaObservation {
-                    plan_type,
+                    expected_connection: Some(
+                        gateway_core::account::UpstreamConnection::for_account(account),
+                    ),
+                    quota_pause: Some(
+                        snapshot.pause_decision(account.quota_limits(), Some(merge_base)),
+                    ),
+                    plan_type: observed_account_plan(account.plan_type(), observed_plan),
                     account_id: account.id().clone(),
                     expected_revision: account.revision(),
-                    quota: OpaqueProviderData::new(merge_passive_quota(existing, rate_limits)),
-                    observed_at: SystemTime::now(),
+                    quota: OpaqueProviderData::new(quota),
+                    observed_at,
                     state,
                 })
                 .await?;
-            return Ok(outcome != QuotaWriteOutcome::Conflict);
+            if outcome == QuotaWriteOutcome::Conflict {
+                continue;
+            }
+            if has_quota_facts {
+                self.scheduling.observe(&snapshot);
+            }
+            return Ok(true);
         }
-        let quota = merge_passive_quota(existing, rate_limits);
-        let observed_at = SystemTime::now();
-        let snapshot = parse_account_quota_snapshot(
-            account.id().clone(),
-            account.revision(),
-            observed_at,
-            &Value::Object(quota.clone()),
-        )?;
-        // 成功响应不能覆盖同一响应明确携带的窗口耗尽事实
-        let state = if snapshot.quota().is_exhausted() {
-            snapshot.quota()
-        } else {
-            QuotaState::allowed(observed_at)
-        };
-        let outcome = self
-            .store
-            .compare_and_swap_quota(QuotaObservation {
-                plan_type,
-                account_id: account.id().clone(),
-                expected_revision: account.revision(),
-                quota: OpaqueProviderData::new(quota),
-                observed_at,
-                state,
-            })
-            .await?;
-        if outcome == QuotaWriteOutcome::Conflict {
-            return Ok(false);
-        }
-        self.scheduling.observe(&snapshot);
-        Ok(true)
+        Ok(false)
     }
 }
 

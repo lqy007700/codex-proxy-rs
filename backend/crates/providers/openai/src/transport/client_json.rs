@@ -41,7 +41,11 @@ impl CodexBackendClient {
         };
         let profile = self.profile.snapshot();
         let mut headers = self.model_request_headers(&profile, context)?;
-        super::headers::append_passthrough_headers(&mut headers, passthrough_headers);
+        super::headers::append_passthrough_headers(
+            &mut headers,
+            passthrough_headers,
+            self.protocol,
+        );
         // 独立端点没有 Responses 原连接归属，续接状态不能跨账号继承
         // turn metadata 随后仅使用当前 lease 已处理的值
         headers.remove("x-codex-turn-state");

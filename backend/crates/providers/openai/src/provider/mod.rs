@@ -109,6 +109,7 @@ mod execution;
 mod failure;
 mod guardian;
 mod live;
+mod messages;
 mod observation;
 mod portable_history;
 mod upstream_adapter;
@@ -546,6 +547,9 @@ impl Provider for CodexProvider {
                     Operation::GenerateImage(request) => {
                         observation::endpoint_requested_model(request.payload())
                     }
+                    Operation::CountTokens(request) => {
+                        observation::endpoint_requested_model(request.payload())
+                    }
                     _ => None,
                 },
                 continuation: ContinuationRequestObservation {
@@ -658,6 +662,9 @@ impl Provider for CodexProvider {
         }
         if let Operation::Search(search) = request.operation() {
             return self.execute_search(search, candidate, context).await;
+        }
+        if let Operation::CountTokens(count) = request.operation() {
+            return self.execute_count_tokens(count, candidate, context).await;
         }
         if let Operation::ProviderHttp(request) = request.operation() {
             return self
@@ -837,7 +844,7 @@ impl Provider for CodexProvider {
                             );
                         }
                         provider
-                            .execute_selected_generate(
+                            .execute_selected_protocol_generate(
                                 operation,
                                 middleware_headers,
                                 terminal_model,
@@ -877,7 +884,7 @@ impl CodexProvider {
             ));
         };
         if generate.protocol_payload().protocol() != PROVIDER_NAME
-            || native_request_requirements(&generate) != frozen_requirements
+            || generate.wire_capability_requirements() != frozen_requirements
         {
             return Err(provider_error(
                 ProviderErrorKind::InvalidRequest,
@@ -893,6 +900,7 @@ impl CodexProvider {
         );
         let mut upstream = encode_generate_request(&generate, upstream_model.as_str(), None)
             .map_err(map_request_error)?;
+        gateway_protocol::anthropic::strip_foreign_reasoning_for_responses(upstream.body_mut());
         upstream.client_account_follow_only = crate::request_identity::follows_session_with_headers(
             generate.protocol_payload().body(),
             generate.protocol_payload().context(),
@@ -1295,14 +1303,6 @@ impl CodexProvider {
             stream
         })
     }
-}
-
-fn native_request_requirements(request: &GenerateRequest) -> CapabilityRequirements {
-    // 此处只解释已知 OpenAI wire；不在 Core 的通用转换路径推断任意目标协议
-    Operation::Generate(GenerateRequest::from_protocol_payload(
-        request.protocol_payload().clone(),
-    ))
-    .capability_requirements()
 }
 
 fn prepare_generate_operation(

@@ -355,6 +355,7 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
             let error = admin
                 .batch_update_accounts(
                     BatchUpdateAccounts {
+                        quota_limits: None,
                         model_mappings: Default::default(),
                         scheduling_role: None,
                         allow_credits: None,
@@ -369,6 +370,7 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
                         group_ids: None,
                         outbound_proxy: Some(AccountProxySelection::Saved(saved.id.clone())),
                     },
+                    Default::default(),
                     &context(),
                 )
                 .await
@@ -1181,6 +1183,7 @@ async fn legacy_urls_join_one_catalog_entry_and_invalid_batch_rolls_back() {
         admin
             .batch_update_accounts(
                 BatchUpdateAccounts {
+                    quota_limits: None,
                     model_mappings: Default::default(),
                     scheduling_role: None,
                     allow_credits: None,
@@ -1194,6 +1197,7 @@ async fn legacy_urls_join_one_catalog_entry_and_invalid_batch_rolls_back() {
                         OutboundProxy::parse("http://127.0.0.1:9090").unwrap()
                     )),
                 },
+                Default::default(),
                 &context()
             )
             .await

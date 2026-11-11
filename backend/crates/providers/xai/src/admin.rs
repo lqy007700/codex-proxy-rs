@@ -1246,6 +1246,7 @@ fn project_quota(
         }
     };
     ProviderQuota {
+        paused_windows: Vec::new(),
         credits: None,
         plan_type: billing
             .and_then(|billing| billing.plan_type())

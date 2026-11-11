@@ -31,8 +31,8 @@ use futures::StreamExt as _;
 use gateway_core::account::{
     AccountErrorReason, AccountQuotaSignals, CredentialRevision, CredentialState,
     OpaqueProviderData, ProviderAccount, ProviderAccountId, ProviderAccountStore,
-    QuotaAccessChange, QuotaAccessState, QuotaEvidence, QuotaObservation, QuotaObservationTouch,
-    QuotaState, QuotaWriteOutcome,
+    QuotaAccessChange, QuotaAccessState, QuotaEvidence, QuotaMergeBase, QuotaObservation,
+    QuotaObservationTouch, QuotaState, QuotaWriteOutcome,
 };
 use gateway_core::provider_ports::{
     ProviderCooldown, ProviderCooldownPort, ProviderRuntimePolicyPort,
@@ -68,6 +68,9 @@ use snapshot::{
     scheduling_signals_from_snapshot,
 };
 
+// 同一份上游观测只重做本地合并，高并发时不无限争抢写入
+const QUOTA_MERGE_ATTEMPTS: usize = 3;
+const LIMIT_EVIDENCE_FIELD: &str = "_cpr_quota_limit_evidence";
 const DEFAULT_RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(60);
 pub(crate) const QUOTA_SCHEDULING_TTL: Duration = Duration::from_secs(10 * 60);
 const QUOTA_HYDRATION_FAILURE_TTL: Duration = Duration::from_secs(5);
@@ -91,7 +94,7 @@ const WARMUP_STREAM_MAX_BYTES: usize = 256 * 1024;
 
 /// OpenAI Provider 主动额度刷新的调度策略
 ///
-/// 正常账号依赖请求响应的被动额度同步；周期 worker 仅复核已耗尽账号
+/// 正常账号依赖请求响应的被动额度同步；周期 worker 复核已耗尽或本地暂停账号
 /// 该策略保留模型目录的周期刷新频率；额度到期检查使用独立的短周期，
 /// 避免到达 reset 后还要等待完整的目录刷新周期
 #[derive(Debug, Clone, Copy)]

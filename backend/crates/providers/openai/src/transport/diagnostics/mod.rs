@@ -197,14 +197,15 @@ impl CodexUpstreamFailure {
         self.category
     }
 
-    /// 普通 500/503 与无状态码的 server_error/server_busy 共用恢复策略，特殊错误分类保留各自策略
+    /// 普通 500/503 与无状态码的明确服务错误共用恢复策略，特殊错误分类保留各自策略
     pub(crate) fn is_retryable_service_unavailable(&self) -> bool {
         self.category == CodexFailureCategory::Unavailable
             && (matches!(
                 self.status,
                 Some(StatusCode::INTERNAL_SERVER_ERROR | StatusCode::SERVICE_UNAVAILABLE)
             ) || (self.status.is_none()
-                && matches!(self.code.as_deref(), Some("server_error" | "server_busy"))))
+                && (matches!(self.code.as_deref(), Some("server_error" | "server_busy"))
+                    || self.client_error_type.as_deref() == Some("api_error"))))
     }
 
     /// 只对明确识别的账号、容量拒绝或可恢复服务故障提供重放资格
@@ -500,6 +501,17 @@ fn classify_upstream_failure(
     ) {
         return CodexFailureCategory::ModelUnsupported;
     }
+    // Messages 明确的类型字段优先于自由文本，不从错误消息猜测账号或额度状态
+    match error_type.as_str() {
+        "authentication_error" => return CodexFailureCategory::CredentialExpired,
+        "rate_limit_error" => return CodexFailureCategory::RateLimited,
+        "invalid_request_error" if status.is_none_or(|status| status.is_client_error()) => {
+            return CodexFailureCategory::InvalidRequest;
+        }
+        "permission_error" => return CodexFailureCategory::PermissionDenied,
+        "api_error" => return CodexFailureCategory::Unavailable,
+        _ => {}
+    }
     let identity_signals = [
         identity_code.as_str(),
         identity_authorization.as_str(),
@@ -706,6 +718,9 @@ pub(crate) fn is_capacity_error(
 ) -> bool {
     let code = normalized(code);
     let error_type = normalized(error_type);
+    if error_type == "overloaded_error" {
+        return true;
+    }
     // 明确额度窗口/账号错误保留原分类，不能被描述中的容量词覆盖
     if !matches!(
         error_type.as_str(),

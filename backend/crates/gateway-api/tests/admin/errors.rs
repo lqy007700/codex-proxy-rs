@@ -563,6 +563,7 @@ mod provider {
     fn account(provider: &str) -> AccountPageItem {
         let now = Utc::now();
         let facts = AccountStatusFacts {
+            quota_paused: false,
             enabled: true,
             credential_state: CredentialState::Ready,
             access_token_expires_at: None,
@@ -578,6 +579,8 @@ mod provider {
                 total_slots: None,
             },
             account: AccountRecord {
+                quota_limits: Default::default(),
+                quota_paused: false,
                 model_mappings: Default::default(),
                 scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
                 allow_credits: false,

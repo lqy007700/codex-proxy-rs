@@ -43,7 +43,8 @@ async fn dashboard_summary_should_include_quota_exhaustion_in_unavailable_headli
         provider_accounts: AccountPoolMetrics {
             total: 1002,
             normal: 943,
-            quota_exhausted: 52,
+            quota_paused: 2,
+            quota_exhausted: 50,
             rate_limited: 0,
             disabled: 3,
             error: 4,
@@ -79,6 +80,8 @@ async fn dashboard_summary_should_include_quota_exhaustion_in_unavailable_headli
     assert!(value["data"]["analytics"]["coverageStart"].is_string());
     assert!(value["data"]["analytics"]["generatedAtDisplay"].is_string());
     assert!(value["data"]["analytics"].get("generation").is_none());
+    assert_eq!(value["data"]["poolSummary"]["quotaPaused"], 2);
+    assert_eq!(value["data"]["poolSummary"]["quotaExhausted"], 50);
 
     assert_eq!(
         (

@@ -1,4 +1,4 @@
-//! OpenAI 客户端协议的 Bearer API key 认证
+//! 数据面客户端 Bearer 与 Anthropic x-api-key 的入口隔离认证
 
 use axum::{
     http::{HeaderMap, header::AUTHORIZATION},
@@ -87,8 +87,9 @@ impl ClientApiKeyAuthError {
 pub(crate) async fn authenticate_client(
     service: &OpenAiService,
     headers: &HeaderMap,
+    accepted: ClientKeyHeaders,
 ) -> Result<AuthenticatedClient, ClientAccessError> {
-    let request = client_authentication_request(headers)?;
+    let request = client_authentication_request(headers, accepted)?;
     let client = service.authenticate(request).await?;
     if let Some(identified) = identify_codex_client(headers) {
         client
@@ -104,19 +105,38 @@ pub(crate) async fn verify_client(
     service: &OpenAiService,
     headers: &HeaderMap,
 ) -> Result<AuthenticatedClient, ClientApiKeyAuthError> {
-    let request = client_authentication_request(headers)?;
+    let request = client_authentication_request(headers, ClientKeyHeaders::Bearer)?;
     service.verify(request).await
+}
+
+/// 入口显式声明允许的认证头，不从任意请求头推断协议权限
+#[derive(Clone, Copy)]
+pub(crate) enum ClientKeyHeaders {
+    Bearer,
+    Anthropic,
 }
 
 fn client_authentication_request(
     headers: &HeaderMap,
+    accepted: ClientKeyHeaders,
 ) -> Result<ClientAuthenticationRequest, ClientApiKeyAuthError> {
-    let raw = headers
-        .get(AUTHORIZATION)
-        .ok_or(ClientApiKeyAuthError::MissingAuthorization)?
-        .to_str()
-        .map_err(|_| ClientApiKeyAuthError::MalformedAuthorization)?;
-    let request = ClientAuthenticationRequest::new(raw.to_owned())
+    let raw = if let Some(authorization) = headers.get(AUTHORIZATION) {
+        authorization
+            .to_str()
+            .map_err(|_| ClientApiKeyAuthError::MalformedAuthorization)?
+            .to_owned()
+    } else if matches!(accepted, ClientKeyHeaders::Anthropic)
+        && let Some(key) = headers.get("x-api-key")
+    {
+        format!(
+            "Bearer {}",
+            key.to_str()
+                .map_err(|_| ClientApiKeyAuthError::MalformedAuthorization)?
+        )
+    } else {
+        return Err(ClientApiKeyAuthError::MissingAuthorization);
+    };
+    let request = ClientAuthenticationRequest::new(raw)
         .map_err(|_| ClientApiKeyAuthError::MalformedAuthorization)?;
     let request = request.with_forwarded_caller(gateway_core::policy::ForwardedCallerHeaders {
         token_names: headers

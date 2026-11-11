@@ -555,6 +555,24 @@ async fn recovery_rotation_and_fallback_do_not_overwrite_token_primary() {
             None,
             CancellationToken::new(),
         );
+        store.set_quota_limits(
+            "acct_subagent_b",
+            serde_json::from_value(json!({"codex:18000s":95})).unwrap(),
+        );
+        store.set_quota_paused("acct_subagent_b", true);
+        let paused_error = provider
+            .clone()
+            .execute(
+                planned_request("openai", generate_operation()),
+                attempt.clone(),
+            )
+            .await
+            .err()
+            .expect("paused account cannot serve recovery or fallback");
+        assert_eq!(paused_error.send_state(), UpstreamSendState::NotSent);
+        assert_ne!(paused_error.kind(), ProviderErrorKind::QuotaExhausted);
+        assert_eq!(primary(&affinity), "acct_subagent_a");
+        store.set_quota_paused("acct_subagent_b", false);
         let stream = provider
             .clone()
             .execute(planned_request("openai", generate_operation()), attempt)
@@ -949,6 +967,7 @@ async fn token_primary_migrates_only_on_confirmed_persistent_quota_exhaustion() 
         "unknown_quota",
         "credits_allowed",
         "credits_disabled",
+        "local_quota_pause",
     ] {
         let store = Arc::new(MemoryAccountStore::default());
         create_account(&store, "acct_subagent_a").await;
@@ -978,7 +997,13 @@ async fn token_primary_migrates_only_on_confirmed_persistent_quota_exhaustion() 
         drop(choose().await.unwrap());
         create_account(&store, "acct_subagent_b").await;
         let account = ProviderAccountId::new("acct_subagent_a").unwrap();
-        if scenario.starts_with("quota_") {
+        if scenario == "local_quota_pause" {
+            store.set_quota_limits(
+                account.as_str(),
+                serde_json::from_value(json!({"codex:18000s":95})).unwrap(),
+            );
+            store.set_quota_paused(account.as_str(), true);
+        } else if scenario.starts_with("quota_") {
             let reset_at = match scenario {
                 "quota_near_reset" => Some(SystemTime::now() + Duration::from_secs(2)),
                 "quota_far_reset" => Some(SystemTime::now() + Duration::from_secs(3600)),
@@ -1062,6 +1087,7 @@ async fn token_primary_migrates_only_on_confirmed_persistent_quota_exhaustion() 
             })
             .await
             .unwrap();
+        store.set_quota_paused(account.as_str(), false);
         cooldowns.cooldowns.lock().unwrap().clear();
         assert_eq!(
             choose()

@@ -1098,10 +1098,103 @@ async fn api_key_import_export_preserves_target_without_oauth_exchange() {
             panic!("API credential")
         };
         assert_eq!(data.base_url, base_url);
+        assert_eq!(
+            data.protocol,
+            provider_openai::credential::ApiKeyProtocol::Responses
+        );
         assert_eq!(data.api_key, "sk-test-only");
         assert_eq!(
             data.transport,
             provider_openai::credential::ResponsesTransport::Http
+        );
+    }
+}
+
+#[tokio::test]
+async fn messages_api_key_import_export_preserves_protocol_proxy_and_rejects_websocket() {
+    use gateway_core::account::LoadedCredential;
+    use provider_openai::credential::{
+        ApiKeyProtocol, CodexCredentialAdmin, CodexCredentialData, ExportManagedCodexCredential,
+        ResponsesTransport,
+    };
+
+    let service = CodexCredentialAdminService::new(
+        Arc::new(UnusedRefresher),
+        Arc::new(TestLeaseCoordinator::default()),
+        runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
+    );
+    let document = serde_json::json!({
+        "provider": "openai",
+        "authentication_kind": "api_key",
+        "name": "messages",
+        "base_url": "https://relay.example/anthropic/v1",
+        "api_key": "sk-messages-private",
+        "protocol": "messages",
+        "outboundProxyUrl": "http://proxy.example:8080"
+    });
+    let imported = service
+        .prepare_import_document_with_proxy(document.clone(), None)
+        .await
+        .unwrap()
+        .into_accounts()
+        .pop()
+        .unwrap();
+    let CodexCredentialData::ApiKey(data) =
+        CodexCredentialCodec::decode_complete(&imported.credential).unwrap()
+    else {
+        panic!("API Key credential");
+    };
+    assert_eq!(data.protocol, ApiKeyProtocol::Messages);
+    assert_eq!(data.transport, ResponsesTransport::Http);
+    assert_eq!(data.base_url, "https://relay.example/anthropic/v1");
+    assert!(!format!("{data:?}").contains("sk-messages-private"));
+    let now = Utc::now();
+    let exported = CodexCredentialAdmin
+        .format_cpr_export(vec![ExportManagedCodexCredential {
+            current: LoadedCredential {
+                account: imported.account,
+                credential: imported.credential,
+            },
+            added_at: now,
+            updated_at: now,
+        }])
+        .unwrap()
+        .into_json()
+        .unwrap();
+    let restored = service
+        .prepare_import_document_with_proxy(exported, None)
+        .await
+        .unwrap()
+        .into_accounts()
+        .pop()
+        .unwrap();
+    let CodexCredentialData::ApiKey(restored_data) =
+        CodexCredentialCodec::decode_complete(&restored.credential).unwrap()
+    else {
+        panic!("restored API Key credential");
+    };
+    assert_eq!(restored_data.protocol, ApiKeyProtocol::Messages);
+    assert_eq!(restored_data.api_key, data.api_key);
+    assert_eq!(restored_data.base_url, data.base_url);
+    assert_eq!(restored_data.transport, ResponsesTransport::Http);
+    assert_eq!(
+        restored.account.outbound_proxy().unwrap().endpoint(),
+        "http://proxy.example:8080/"
+    );
+
+    for (protocol, transport) in [
+        ("messages", "prefer_websocket"),
+        ("chat_completions", "http"),
+    ] {
+        let mut invalid = document.clone();
+        invalid["protocol"] = serde_json::json!(protocol);
+        invalid["transport"] = serde_json::json!(transport);
+        assert!(
+            service
+                .prepare_import_document_with_proxy(invalid, None)
+                .await
+                .is_err()
         );
     }
 }

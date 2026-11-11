@@ -11,6 +11,7 @@ mod authorization;
 mod core_adapter;
 mod deletion;
 mod protection_revision;
+mod quota;
 mod quota_forecast;
 mod reset_credit_automation;
 mod timestamps;
@@ -205,6 +206,8 @@ async fn core_quota_batch_reads_only_observed_accounts_in_one_contract_call() {
         let observed_at = SystemTime::now();
         let outcome = repository
             .compare_and_swap_quota(QuotaObservation {
+                expected_connection: None,
+                quota_pause: None,
                 plan_type: None,
                 account_id: ProviderAccountId::new(id).expect("account id"),
                 expected_revision: revision,
@@ -280,6 +283,8 @@ async fn quota_observation_touch_preserves_quota_state_and_advances_account_upda
     assert_eq!(
         repository
             .compare_and_swap_quota(QuotaObservation {
+                quota_pause: None,
+                expected_connection: None,
                 plan_type: None,
                 account_id: account_id.clone(),
                 expected_revision: revision,
@@ -376,6 +381,8 @@ async fn delayed_provider_observations_cannot_overwrite_newer_state_or_quota() {
         .checked_sub(Duration::from_secs(30))
         .expect("older observation time");
     let quota = |marker: &str, observed_at| QuotaObservation {
+        expected_connection: None,
+        quota_pause: None,
         plan_type: Some(if marker == "newer" { "pro" } else { "plus" }.to_owned()),
         account_id: account_id.clone(),
         expected_revision: revision,
@@ -460,6 +467,8 @@ async fn quota_plan_changes_survive_inflight_background_and_manual_token_refresh
     let config_revision = current_revision(&database.pool).await;
     let observed_at = SystemTime::now();
     let observation = QuotaObservation {
+        expected_connection: None,
+        quota_pause: None,
         account_id: id.clone(),
         expected_revision: original.revision(),
         plan_type: Some("pro".to_owned()),
@@ -523,6 +532,8 @@ async fn quota_plan_changes_survive_inflight_background_and_manual_token_refresh
         saved_quota
     );
     let stale = QuotaObservation {
+        expected_connection: None,
+        quota_pause: None,
         plan_type: Some("free".to_owned()),
         ..observation
     };
@@ -562,6 +573,8 @@ async fn quota_plan_changes_survive_inflight_background_and_manual_token_refresh
     let observed_at = SystemTime::now();
     repository
         .compare_and_swap_quota(QuotaObservation {
+            expected_connection: None,
+            quota_pause: None,
             account_id: id.clone(),
             expected_revision: refreshed.revision(),
             plan_type: None,
@@ -790,6 +803,7 @@ async fn terminal_admin_list_filters_and_sorts_before_pagination_with_retained_u
     assert_eq!(
         usage_page.summary.total,
         usage_page.summary.normal
+            + usage_page.summary.quota_paused
             + usage_page.summary.quota_exhausted
             + usage_page.summary.rate_limited
             + usage_page.summary.disabled
@@ -912,6 +926,35 @@ async fn terminal_admin_list_filters_and_sorts_before_pagination_with_retained_u
     assert_eq!(error_accounts.items.len(), 2);
     assert_eq!(error_accounts.items[0].account.id, "acct_beta");
     assert_eq!(error_accounts.items[1].account.id, "acct_invalid");
+    // 上游耗尽优先显示，本地暂停不重复计数
+    sqlx::query("update provider_accounts set quota_paused = true where id in ('acct_alpha', 'acct_charlie')")
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    let paused = store
+        .list_accounts(
+            AccountListQuery {
+                page: 1,
+                page_size: PageSize::new(1).unwrap(),
+                provider_kind: None,
+                group_filter: None,
+                search: None,
+                status: Some(AccountStatus::QuotaPaused),
+                sort: None,
+            },
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(paused.total, 1);
+    assert_eq!(paused.items[0].account.id, "acct_alpha");
+    assert_eq!(
+        paused.items[0].projection.status,
+        AccountStatus::QuotaPaused
+    );
+    assert_eq!(paused.summary.quota_paused, 1);
+    assert_eq!(paused.summary.normal, 0);
+    assert_eq!(paused.summary.quota_exhausted, 2);
     database.close().await;
 }
 
@@ -1381,6 +1424,7 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                quota_limits: None,
                 model_mappings: Default::default(),
                 scheduling_role: None,
                 allow_credits: None,
@@ -1392,6 +1436,7 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
                 model_access: None,
                 outbound_proxy: None,
             },
+            Default::default(),
             &context,
         )
         .await
@@ -1555,6 +1600,8 @@ async fn account_enable_preserves_facts_and_explicit_recovery_clears_them() {
     let observed_at = SystemTime::now();
     repository
         .compare_and_swap_quota(QuotaObservation {
+            expected_connection: None,
+            quota_pause: None,
             plan_type: None,
             account_id: ProviderAccountId::new("acct_recovery").expect("account ID"),
             expected_revision: CredentialRevision::new(1).expect("credential revision"),
@@ -1621,6 +1668,7 @@ async fn account_enable_preserves_facts_and_explicit_recovery_clears_them() {
     let enabled = store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                quota_limits: None,
                 model_mappings: Default::default(),
                 scheduling_role: None,
                 allow_credits: None,
@@ -1632,6 +1680,7 @@ async fn account_enable_preserves_facts_and_explicit_recovery_clears_them() {
                 group_ids: None,
                 outbound_proxy: None,
             },
+            Default::default(),
             &MutationContext {
                 actor: MutationActor::System,
                 request_id: "request_account_enable".to_owned(),
@@ -1746,6 +1795,7 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
     let result = store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                quota_limits: None,
                 model_mappings: Default::default(),
                 scheduling_role: None,
                 allow_credits: None,
@@ -1757,6 +1807,7 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
                 weight: Some(gateway_core::account::AccountWeight::new(25).expect("weight")),
                 group_ids: Some(vec![AccountGroupId::new(GROUP_ID).expect("group ID")]),
             },
+            Default::default(),
             &context,
         )
         .await
@@ -1784,6 +1835,7 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                quota_limits: None,
                 model_mappings: Default::default(),
                 scheduling_role: None,
                 allow_credits: None,
@@ -1798,6 +1850,7 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
                         .expect("missing group ID"),
                 ]),
             },
+            Default::default(),
             &context,
         )
         .await
@@ -2513,6 +2566,8 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
     assert_eq!(unchanged.4.as_deref(), Some("workspace-admin-rebound"));
     let revision = repository
         .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
+            pauses: Default::default(),
+            quota_limits: None,
             model_mappings: Default::default(),
             scheduling_role: None,
             allow_credits: None,
@@ -3509,6 +3564,7 @@ async fn model_access_only_batch_update_preserves_other_settings_and_survives_re
     .expect("policy");
     let store = admin_account_store(&database.pool);
     let command = BatchUpdateAccounts {
+        quota_limits: None,
         model_mappings: Default::default(),
         scheduling_role: None,
         allow_credits: None,
@@ -3525,7 +3581,7 @@ async fn model_access_only_batch_update_preserves_other_settings_and_survives_re
         request_id: "request_model_access".to_owned(),
     };
     store
-        .batch_update_accounts(command.clone(), &context)
+        .batch_update_accounts(command.clone(), Default::default(), &context)
         .await
         .expect("update policy only");
     let loaded = repository
@@ -3560,10 +3616,12 @@ async fn model_access_only_batch_update_preserves_other_settings_and_survives_re
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                quota_limits: None,
                 scheduling_role: None,
                 model_access: Some(AccountModelAccess::all()),
                 ..command
             },
+            Default::default(),
             &context,
         )
         .await
@@ -3657,6 +3715,8 @@ async fn credits_policy_updates_do_not_change_quota_facts_or_other_account_setti
     ProviderAccountStore::compare_and_swap_quota(
         &repository,
         QuotaObservation {
+            expected_connection: None,
+            quota_pause: None,
             account_id: id.clone(),
             expected_revision: original.revision(),
             quota: OpaqueProviderData::new(serde_json::Map::new()),
@@ -3679,6 +3739,7 @@ async fn credits_policy_updates_do_not_change_quota_facts_or_other_account_setti
         request_id: "credits-policy".to_owned(),
     };
     let command = BatchUpdateAccounts {
+        quota_limits: None,
         model_mappings: Default::default(),
         scheduling_role: None,
         account_ids: vec![input.id.clone()],
@@ -3691,7 +3752,7 @@ async fn credits_policy_updates_do_not_change_quota_facts_or_other_account_setti
         outbound_proxy: None,
     };
     store
-        .batch_update_accounts(command.clone(), &context)
+        .batch_update_accounts(command.clone(), Default::default(), &context)
         .await
         .unwrap();
     let enabled = ProviderAccountStore::get_account(&repository, &id)
@@ -3726,10 +3787,12 @@ async fn credits_policy_updates_do_not_change_quota_facts_or_other_account_setti
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                quota_limits: None,
                 scheduling_role: None,
                 allow_credits: Some(false),
                 ..command
             },
+            Default::default(),
             &context,
         )
         .await
@@ -3771,6 +3834,8 @@ async fn credits_policy_migration_blocks_existing_credit_backed_access_without_b
         ProviderAccountStore::compare_and_swap_quota(
             &repository,
             QuotaObservation {
+                expected_connection: None,
+                quota_pause: None,
                 account_id: ProviderAccountId::new(id).unwrap(),
                 expected_revision: CredentialRevision::new(1).unwrap(),
                 quota: OpaqueProviderData::new(usage.as_object().unwrap().clone()),
@@ -3849,6 +3914,7 @@ async fn scheduling_role_updates_preserve_credentials_and_survive_reimport() {
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                quota_limits: None,
                 model_mappings: Default::default(),
                 account_ids: vec![input.id.clone()],
                 scheduling_role: Some(AccountSchedulingRole::Fallback),
@@ -3860,6 +3926,7 @@ async fn scheduling_role_updates_preserve_credentials_and_survive_reimport() {
                 group_ids: None,
                 outbound_proxy: None,
             },
+            Default::default(),
             &context,
         )
         .await
@@ -3960,6 +4027,7 @@ async fn account_model_mappings_preserve_other_settings_and_survive_reimport_and
         request_id: "mapping-update".to_owned(),
     };
     let command = BatchUpdateAccounts {
+        quota_limits: None,
         account_ids: vec![input.id.clone()],
         model_mappings: Some(mappings.clone()),
         model_access: None,
@@ -3972,7 +4040,7 @@ async fn account_model_mappings_preserve_other_settings_and_survive_reimport_and
         scheduling_role: None,
     };
     store
-        .batch_update_accounts(command.clone(), &context)
+        .batch_update_accounts(command.clone(), Default::default(), &context)
         .await
         .unwrap();
     let loaded = repository
@@ -3992,10 +4060,12 @@ async fn account_model_mappings_preserve_other_settings_and_survive_reimport_and
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                quota_limits: None,
                 model_mappings: None,
                 weight: Some(input.weight),
                 ..command.clone()
             },
+            Default::default(),
             &context,
         )
         .await
@@ -4022,9 +4092,11 @@ async fn account_model_mappings_preserve_other_settings_and_survive_reimport_and
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                quota_limits: None,
                 model_mappings: Some(AccountModelMappings::empty()),
                 ..command
             },
+            Default::default(),
             &context,
         )
         .await

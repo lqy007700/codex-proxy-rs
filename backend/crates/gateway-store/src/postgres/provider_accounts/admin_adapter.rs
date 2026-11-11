@@ -592,6 +592,8 @@ impl AccountStore for PgAdminAccountStore {
             .accounts
             .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
                 account_ids: vec![command.account_id.clone()],
+                pauses: Default::default(),
+                quota_limits: None,
                 notes: command.notes,
                 allow_credits: None,
                 enabled: Some(command.enabled),
@@ -655,6 +657,7 @@ impl AccountStore for PgAdminAccountStore {
     async fn batch_update_accounts(
         &self,
         command: BatchUpdateAccounts,
+        pauses: gateway_admin::model::accounts::PreparedQuotaPauses,
         context: &MutationContext,
     ) -> AdminStoreResult<AccountsUpdateResult> {
         let account_ids = command
@@ -677,6 +680,7 @@ impl AccountStore for PgAdminAccountStore {
         };
         let mut changed_fields = Vec::new();
         for (changed, field) in [
+            (command.quota_limits.is_some(), "quota_limits"),
             (command.enabled.is_some(), "enabled"),
             (command.allow_credits.is_some(), "allow_credits"),
             (command.concurrency_limit.is_some(), "concurrency_limit"),
@@ -703,6 +707,8 @@ impl AccountStore for PgAdminAccountStore {
             .accounts
             .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
                 account_ids: command.account_ids,
+                pauses,
+                quota_limits: command.quota_limits,
                 notes: None,
                 allow_credits: command.allow_credits,
                 enabled: command.enabled,

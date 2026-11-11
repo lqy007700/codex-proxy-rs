@@ -15,12 +15,16 @@ pub use model_access::{
     MAX_ACCOUNT_ACCESS_MODELS,
 };
 pub use model_mappings::{AccountModelMappings, InvalidAccountModelMappings};
+mod quota_limits;
+pub use quota_limits::{AccountQuotaLimits, QuotaMergeBase, QuotaPauseDecision};
 mod proxy;
 pub use proxy::{InvalidOutboundProxy, OutboundProxy};
 pub mod scope;
 mod selection;
 mod smart_scheduling;
 mod store;
+mod upstream;
+pub use upstream::UpstreamConnection;
 
 pub use error::CredentialError;
 pub use model::*;

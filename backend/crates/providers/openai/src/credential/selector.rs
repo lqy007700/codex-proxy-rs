@@ -11,7 +11,8 @@ use gateway_core::account::{
     AccountAffinity, AccountCandidate, AccountCapacitySnapshot, AccountErrorReason,
     AccountFeedbackStats, AccountQuotaSignals, AccountRuntimeSignals, AccountSchedulingBlocker,
     AccountSelectionContext, AccountSelectionPolicy, AccountSelector, AccountStatus,
-    CredentialState, PreferredAccountSelection, ProviderAccount, ProviderAccountId, QuotaEvidence,
+    CredentialRevision, CredentialState, PreferredAccountSelection, ProviderAccount,
+    ProviderAccountId, QuotaEvidence,
 };
 use gateway_core::concurrency::{CapacityWait, ConcurrencyWaitQueue, QueueRejection, WaitPriority};
 use gateway_core::engine::{AttemptContext, ContinuationAttempt, policy::AccountPolicyError};
@@ -28,6 +29,7 @@ use thiserror::Error;
 use url::Url;
 
 use super::affinity::{CodexSessionAffinity, derive_newapi_token_affinity};
+use super::api_key::ApiKeyProtocol;
 use super::catalog::CodexCredentialCatalogService;
 use super::codec::CodexRuntimeAuthentication;
 use super::cookie::CodexCookiePolicy;
@@ -144,6 +146,8 @@ pub struct CodexCredentialSelector {
     risk_recovery: Mutex<HashMap<String, RiskRecoveryState>>,
     account_feedback: Arc<AccountFeedbackStats>,
     scheduling_projection: SchedulingProjectionCache,
+    endpoint_protocols:
+        Mutex<lru::LruCache<ProviderAccountId, (CredentialRevision, ApiKeyProtocol)>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,6 +302,9 @@ impl CodexCredentialSelector {
             waiting: ConcurrencyWaitQueue::default(),
             reserved_waiting: ConcurrencyWaitQueue::default(),
             account_feedback,
+            endpoint_protocols: Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(8192).expect("positive capacity"),
+            )),
         }
     }
 
@@ -884,10 +891,29 @@ impl CodexCredentialSelector {
                     }
                     native_accounts.insert(account.id().clone());
                 }
-                if request.requires_websocket
-                    && adapter.is_none()
-                    && pinned_account.as_ref().is_none_or(|id| id == account.id())
-                {
+                let endpoint_requires_responses =
+                    !matches!(model, CodexSelectionModel::Requested(_))
+                        && account.authentication_kind()
+                            == super::CODEX_AUTHENTICATION_KIND_API_KEY;
+                let check_ws = request.requires_websocket
+                    && pinned_account.as_ref().is_none_or(|id| id == account.id());
+                if adapter.is_none() && (endpoint_requires_responses || check_ws) {
+                    // 只复用同 revision 的协议类型；选中后仍以完整账号快照重读凭据
+                    if endpoint_requires_responses && !check_ws {
+                        let cached = self
+                            .endpoint_protocols
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .get(account.id())
+                            .copied()
+                            .filter(|(revision, _)| *revision == account.revision());
+                        if let Some((_, protocol)) = cached {
+                            if protocol == ApiKeyProtocol::Responses {
+                                eligible.push(account);
+                            }
+                            continue;
+                        }
+                    }
                     let runtime = match self.repository.reload_selected_credential(&account).await {
                         Ok((_, runtime)) => runtime,
                         Err(CredentialRepositoryError::RevisionConflict(_)) => {
@@ -910,7 +936,19 @@ impl CodexCredentialSelector {
                         }
                         Err(error) => return Err(error.into()),
                     };
-                    if runtime.transport == super::ResponsesTransport::Http {
+                    if endpoint_requires_responses {
+                        self.endpoint_protocols
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .put(
+                                account.id().clone(),
+                                (account.revision(), runtime.authentication.api_protocol()),
+                            );
+                    }
+                    if (check_ws && runtime.transport == super::ResponsesTransport::Http)
+                        || (endpoint_requires_responses
+                            && runtime.authentication.api_protocol() == ApiKeyProtocol::Messages)
+                    {
                         continue;
                     }
                 }
@@ -1116,6 +1154,15 @@ impl CodexCredentialSelector {
                 .and_then(|scope| scope.state.as_ref())
             {
                 excluded.extend(state.excluded_accounts().iter().cloned());
+            }
+            // 本地用量上限是临时调度门禁，插件也不能绕过
+            if !diagnostic {
+                excluded.extend(
+                    candidates
+                        .iter()
+                        .filter(|candidate| candidate.account.quota_paused())
+                        .map(|candidate| candidate.account.id().clone()),
+                );
             }
             // 原生续写归属和显式固定账号优先于会话偏好，不能把增量状态发送给其他账号
             if let Some(required) = pinned_account.as_ref() {
@@ -1389,6 +1436,13 @@ impl CodexCredentialSelector {
                     }
                     Err(error) => return Err(error.into()),
                 };
+                if !diagnostic && account.quota_paused() {
+                    if let Some(key) = projection_key.as_ref() {
+                        self.scheduling_projection.invalidate(key);
+                    }
+                    refresh_candidates = true;
+                    continue 'capacity;
+                }
                 // 凭据重读和插件选号都可能挂起，取得租约前再次让位于新队首
                 if !waiting.can_try(account.id()) {
                     busy_accounts.insert(account.id().clone());
@@ -2237,7 +2291,8 @@ fn affinity_selection_for_bound_account(
         .status
     {
         AccountStatus::Normal => AffinitySelection::preferred(account_id),
-        AccountStatus::QuotaExhausted
+        AccountStatus::QuotaPaused
+        | AccountStatus::QuotaExhausted
         | AccountStatus::RateLimited
         | AccountStatus::Disabled
         | AccountStatus::Error => {
@@ -2256,7 +2311,7 @@ fn affinity_unavailable_reason(
         .status
     {
         AccountStatus::QuotaExhausted => AffinityEscapeReason::QuotaExhausted,
-        AccountStatus::RateLimited => AffinityEscapeReason::Cooldown,
+        AccountStatus::RateLimited | AccountStatus::QuotaPaused => AffinityEscapeReason::Cooldown,
         AccountStatus::Normal => AffinityEscapeReason::SelectionInvariant,
         AccountStatus::Disabled | AccountStatus::Error => AffinityEscapeReason::HardUnavailable,
     }

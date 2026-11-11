@@ -86,9 +86,21 @@ async fn authentication_unknown_routes_and_method_errors_are_observable() {
         ),
         (
             "POST",
-            "/v1/messages?secret=SENSITIVE_QUERY",
+            "/v1/unmatched-messages?secret=SENSITIVE_QUERY",
             StatusCode::NOT_FOUND,
             "unknown_endpoint",
+        ),
+        (
+            "POST",
+            "/v1/messages?secret=SENSITIVE_QUERY",
+            StatusCode::UNAUTHORIZED,
+            "missing_authorization",
+        ),
+        (
+            "POST",
+            "/v1/messages/count_tokens",
+            StatusCode::UNAUTHORIZED,
+            "missing_authorization",
         ),
         (
             "DELETE",
@@ -275,5 +287,42 @@ async fn original_rejected_request_is_dumped_only_when_explicitly_enabled() {
                         || value.contains("unused-client-route-key"))
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn messages_validation_keeps_native_errors_and_safe_ingress_diagnostics() {
+    for path in ["/v1/messages", "/v1/messages/count_tokens"] {
+        let (router, diagnostics) = fixture().await;
+        let response = router
+            .oneshot(
+                Request::post(path)
+                    .header("x-api-key", "unused-client-route-key")
+                    .header("x-correlation-id", "messages-rejection")
+                    .body(Body::from(
+                        json!({"model":42,"messages":"SENSITIVE_CONTENT"}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["type"], "error");
+        assert_eq!(body["error"]["type"], "invalid_request_error");
+        let failures = diagnostics.0.lock().unwrap();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(
+            failures[0].correlation_id.as_deref(),
+            Some("messages-rejection")
+        );
+        let summary: Value = serde_json::from_str(&failures[0].message).unwrap();
+        assert_eq!(summary["endpoint"], path);
+        assert!(!failures[0].message.contains("SENSITIVE_CONTENT"));
+        assert!(!failures[0].message.contains("unused-client-route-key"));
+        assert!(failures[0].upstream_status.is_none());
+        assert!(failures[0].account_id.is_none());
     }
 }

@@ -20,6 +20,7 @@ pub(crate) fn account_status_projection(
 ) -> AccountStatusProjection {
     resolve_account_status(
         &AccountStatusFacts {
+            quota_paused: account.quota_paused,
             enabled: account.enabled,
             credential_state: account.credential_state,
             access_token_expires_at: account.access_token_expires_at.map(Into::into),
@@ -72,7 +73,7 @@ pub(crate) async fn load_account_statuses<'e, E: sqlx::Executor<'e, Database = s
 ) -> crate::StoreResult<Vec<ProviderAccountStatus>> {
     use super::rows::{account_status_facts_from_row, get};
     let rows = sqlx::query(
-        "select id, enabled, allow_credits, concurrency_limit, credential_state, access_token_expires_at,
+        "select id, enabled, quota_paused, allow_credits, concurrency_limit, credential_state, access_token_expires_at,
                 quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
                 last_error_reason, last_error_message
          from provider_accounts",

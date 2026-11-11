@@ -673,7 +673,7 @@ impl SettingsStore for MemorySettingsStore {
                 audit_retention_days: command.values.audit_retention_days,
                 account_error_protection: command.values.account_error_protection,
                 account_warmup_enabled: false,
-                account_warmup_schedule_time: "08:00".to_owned(),
+                account_warmup_cron: String::new(),
                 account_warmup_model: None,
                 reset_credit_lead_minutes: 10,
                 reset_credit_max_weekly_remaining_percent: None,
@@ -888,6 +888,7 @@ impl AccountGroupStore for MemoryAccountGroupStore {
                 group_id: group_id(PRIMARY_GROUP_ID),
                 account_id: "acct_group_ready".to_owned(),
                 status: AccountStatusFacts {
+                    quota_paused: false,
                     enabled: true,
                     credential_state: CredentialState::Ready,
                     access_token_expires_at: None,
@@ -902,6 +903,7 @@ impl AccountGroupStore for MemoryAccountGroupStore {
                 group_id: group_id(PRIMARY_GROUP_ID),
                 account_id: "acct_group_disabled".to_owned(),
                 status: AccountStatusFacts {
+                    quota_paused: false,
                     enabled: false,
                     credential_state: CredentialState::Ready,
                     access_token_expires_at: None,
@@ -1190,6 +1192,9 @@ impl AccountStore for UnusedStore {
                 summary: gateway_admin::model::accounts::AccountSummary {
                     total: 1,
                     normal: u64::from(status == gateway_core::account::AccountStatus::Normal),
+                    quota_paused: u64::from(
+                        status == gateway_core::account::AccountStatus::QuotaPaused,
+                    ),
                     quota_exhausted: u64::from(
                         status == gateway_core::account::AccountStatus::QuotaExhausted,
                     ),
@@ -1347,6 +1352,7 @@ impl AccountStore for UnusedStore {
     async fn batch_update_accounts(
         &self,
         _: BatchUpdateAccounts,
+        _: gateway_admin::model::accounts::PreparedQuotaPauses,
         _: &MutationContext,
     ) -> AdminStoreResult<AccountsUpdateResult> {
         Err(unavailable("account batch update"))
@@ -1631,6 +1637,18 @@ impl ProviderAdmin for UnusedProvider {
         &self.kind
     }
 
+    fn account_capabilities(
+        &self,
+        _: &ProviderAccountId,
+        authentication_kind: &str,
+    ) -> gateway_admin::model::accounts::ProviderAccountCapabilities {
+        gateway_admin::model::accounts::ProviderAccountCapabilities {
+            quota_limits_supported: self.kind.as_str() == "openai"
+                && authentication_kind != "api_key",
+            ..Default::default()
+        }
+    }
+
     async fn account_unavailable(&self, _: &ProviderAccountId) {}
     async fn connection_test_operation(
         &self,
@@ -1850,7 +1868,7 @@ fn test_runtime_settings() -> RuntimeSettings {
             audit_retention_days: 90,
             account_error_protection: Default::default(),
             account_warmup_enabled: false,
-            account_warmup_schedule_time: "08:00".to_owned(),
+            account_warmup_cron: String::new(),
             account_warmup_model: None,
             reset_credit_lead_minutes: 10,
             reset_credit_max_weekly_remaining_percent: None,

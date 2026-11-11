@@ -10,6 +10,7 @@ use super::{
     chat::chat_completions,
     images::{image_edits, image_generations},
     live,
+    messages::{count_tokens, messages},
     models::{model_detail, models},
     responses::{responses, responses_websocket},
     search::standalone_search,
@@ -20,6 +21,8 @@ use crate::ApiState;
 
 // 公开协议路径由 API 层统一定义；Core 使用操作类型，不根据这些路径分派业务
 pub(super) const RESPONSES_PATH: &str = "/v1/responses";
+pub(super) const MESSAGES_PATH: &str = "/v1/messages";
+pub(super) const MESSAGE_TOKENS_PATH: &str = "/v1/messages/count_tokens";
 pub(super) const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
 pub(super) const IMAGE_GENERATIONS_PATH: &str = "/v1/images/generations";
 pub(super) const IMAGE_EDITS_PATH: &str = "/v1/images/edits";
@@ -30,7 +33,12 @@ pub(super) const USAGE_PATH: &str = "/v1/usage";
 
 /// 构造 OpenAI 客户端协议路由
 pub(crate) fn router() -> Router<ApiState> {
+    let messages_router = Router::new()
+        .route(MESSAGES_PATH, post(messages))
+        .route(MESSAGE_TOKENS_PATH, post(count_tokens))
+        .method_not_allowed_fallback(super::messages::method_not_allowed);
     Router::new()
+        .merge(messages_router)
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions))
         .route(IMAGE_GENERATIONS_PATH, post(image_generations))
         .route(IMAGE_EDITS_PATH, post(image_edits))

@@ -91,6 +91,12 @@ OpenAI OAuth 账号的 `allowCredits` 默认关闭，在账号“额度重置”
 | 点数事实解释与策略保留 | [quota/snapshot.rs](../backend/crates/providers/openai/src/credential/quota/snapshot.rs)、[quota/service.rs](../backend/crates/providers/openai/src/credential/quota/service.rs)、[点数测试](../backend/crates/providers/openai/tests/credential/quota/credits.rs) |
 | 设置界面 | [AccountSettingsFields.vue](../frontend/src/views/accounts/components/AccountSettingsFields.vue)、[CreditsPolicy.vue](../frontend/src/views/accounts/components/account-quota-panel/CreditsPolicy.vue) |
 
+### 通用额度窗口上限
+
+账号可在额度面板设置通用窗口的使用率上限，默认不限制；达到上限时暂停新请求，不终止在途请求。
+暂停与真实耗尽、点数支出开关分别保存，普通／保底用途、可信调用方主绑定及恢复预算保持原合同。
+字段、恢复与配置边界见 [通用额度窗口使用率上限](api.md#通用额度窗口使用率上限)
+
 ## WebSocket 降级与恢复
 
 OpenAI 临时传输恢复状态按“账号 + 逻辑会话”隔离，同一个会话在一个账号上失败，不会把其他账号一起降级。
@@ -118,24 +124,34 @@ OpenAI 临时传输恢复状态按“账号 + 逻辑会话”隔离，同一个�
 
 ### 客户端模型名称
 
-Responses 与 Chat 文本生成统一向客户端投影入口请求模型名，内部仍保留实际发送模型和上游报告。
+Responses、Chat 与 Messages 文本生成统一向客户端投影入口请求模型名，内部仍保留实际发送模型和上游报告。
 字段范围、中间件优先级与不透明帧边界见 [OpenAI 透传](api.md#openai-透传)
 
 | 职责 | 代码与回归入口 |
 | --- | --- |
 | 模型字段、响应头与原文跨度投影 | [response_model.rs](../backend/crates/gateway-api/src/openai/response_model.rs)、[投影回归](../backend/crates/gateway-api/tests/openai/responses/response_model.rs) |
-| HTTP、SSE 与逐轮 WS 交付 | [Responses HTTP](../backend/crates/gateway-api/src/openai/responses/http.rs)、[WS forward](../backend/crates/gateway-api/src/openai/responses/websocket/forward.rs) |
+| HTTP、SSE 与逐轮 WS 交付 | [共享生成 HTTP](../backend/crates/gateway-api/src/openai/generation/http.rs)、[WS forward](../backend/crates/gateway-api/src/openai/responses/websocket/forward.rs) |
 
 ### Chat Completions
 
 `POST /v1/chat/completions` 在 API 层转为已有 Responses 执行，支持 JSON 与流式 Chat 输出，
 复用 Client Key、模型映射、账号范围、并发、额度和费用结算，不维护独立的推理调度链。
-请求中间件看到 Chat 合同，Provider 和 attempt 中间件仍使用 Responses 合同
+请求中间件看到 Chat 合同，Provider 和 attempt 中间件使用选中账号的上游协议合同
 
 消息、图片、文件、音频输入、函数与自定义工具、拒答、JSON 输出和公开推理的范围见 [Chat Completions](api.md#chat-completions)。
 `max_tokens` 和 `max_completion_tokens` 映射为 `max_output_tokens`，同时提供时后者优先，Codex 路径按自身合同移除该字段，不能把它当成费用上限。
 明确不支持的执行模式按字段返回 `400`；无对应 Responses 控制的选项按协议说明处理，Chat 响应 ID 不用于 Responses 原生续接。
 SSE 等待复用注释心跳，流开始后的错误保留 Chat 错误表达，不补造成功终态
+
+### Messages 与上游协议
+
+`POST /v1/messages` 与输入计数复用既有 Client Key、冻结账号范围、模型映射、并发、额度及结算，不另建 Claude 调度链。
+API Key 在原 OpenAI Provider 中选择 Responses 或 Messages 上游；同协议保留原生载荷，跨协议转换不更改普通／保底用途、
+亲和主绑定、恢复预算和发送安全边界。缺失用量保持未知，不能通过补 0 形成完整费用事实
+
+入口、转换和计数的字段与边界见 [Messages 请求](api.md#messages-请求)；原生续接和账号身份隔离仍遵循本节既有约束。
+回归入口为 [Messages API](../backend/crates/gateway-api/tests/openai/messages.rs)、
+[协议转换](../backend/crates/gateway-protocol/tests/anthropic/mod.rs)和[上游合同](../backend/crates/providers/openai/tests/provider/contract/messages.rs)
 
 ### 三方模型目录格式
 

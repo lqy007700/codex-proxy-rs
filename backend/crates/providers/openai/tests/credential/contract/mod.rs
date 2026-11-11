@@ -599,6 +599,80 @@ fn selector_rejects_quota_exhaustion_observed_after_selection() {
 }
 
 #[test]
+fn selector_rejects_quota_pause_observed_before_lease_for_native_and_new_requests() {
+    for (native, messages, allow_credits) in [
+        (false, false, false),
+        (true, false, false),
+        (false, true, false),
+        (true, true, false),
+        (false, true, true),
+        (true, true, true),
+    ] {
+        let store = Arc::new(MemoryAccountStore::default());
+        if messages {
+            block_on(store.seed_api_key_for_protocol(
+                "acct_primary",
+                "https://messages.example/v1".to_owned(),
+                provider_openai::credential::ResponsesTransport::Http,
+                provider_openai::credential::ApiKeyProtocol::Messages,
+            ));
+        } else {
+            create_account(&store, "acct_primary", "at-primary");
+        }
+        store.set_allow_credits("acct_primary", allow_credits);
+        store.set_quota_limits(
+            "acct_primary",
+            serde_json::from_value(json!({"codex:18000s":95})).unwrap(),
+        );
+        store.on_credential_load(Arc::new(|store, id, count| {
+            Box::pin(async move {
+                if count == 1 {
+                    store.set_quota_paused(id.as_str(), true);
+                }
+                Ok(())
+            })
+        }));
+        let leases = Arc::new(TestLeaseCoordinator::default());
+        let selector = selector(&store, leases.clone());
+        let continuation = native.then(|| {
+            ContinuationBinding::Pinned(NativeContinuationPin::new(
+                PreviousResponseId::new("client_response"),
+                PreviousResponseId::new("upstream_response"),
+                ClientApiKeyId::new("key_codex_contract").unwrap(),
+                ProviderKind::new("openai").unwrap(),
+                ProviderAccountId::new("acct_primary").unwrap(),
+            ))
+        });
+        let attempt = AttemptContext::new(
+            RequestAttemptContext::new(
+                ModelRequestId::new("req_pause_reread").unwrap(),
+                ClientApiKeyId::new("key_codex_contract").unwrap(),
+            ),
+            NonZeroU32::MIN,
+            SystemTime::now() + Duration::from_secs(30),
+            account_policy(),
+            AccountAttemptContext::new(BTreeSet::new(), None, None)
+                .with_account_scope(contract_account_scope()),
+            continuation,
+            CancellationToken::new(),
+        );
+        let error = block_on(selector.select(&SelectCodexCredential {
+            upstream_model: "gpt-5.4",
+            request_url: &Url::parse(OFFICIAL_CODEX_BASE_URL).unwrap(),
+            attempt: &attempt,
+            session_affinity_key: None,
+        }))
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CredentialSelectionError::NoEligibleCredential
+        ));
+        assert_eq!(store.credential_loads(), 1);
+        assert!(leases.requests.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
 fn selector_uses_rotated_credentials_after_a_snapshot_conflict() {
     use gateway_core::account::{CredentialCasOutcome, CredentialCasUpdate, ProviderAccountUpdate};
 
@@ -1591,6 +1665,8 @@ fn native_continuation_surfaces_the_original_accounts_quota_signal_to_the_coordi
     });
     let observed_at = SystemTime::now();
     let outcome = block_on(store.compare_and_swap_quota(QuotaObservation {
+        quota_pause: None,
+        expected_connection: None,
         plan_type: None,
         account_id: original.id().clone(),
         expected_revision: original.revision(),

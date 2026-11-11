@@ -113,6 +113,7 @@ async fn account_capabilities_distinguish_oauth_from_api_key_and_unknown_credent
     let oauth = provider.account_capabilities(&id, "oauth");
     assert!(
         oauth.quota
+            && oauth.quota_limits_supported
             && oauth.quota_refresh
             && oauth.profile
             && oauth.subscription
@@ -1367,6 +1368,89 @@ async fn openai_admin_quota_projects_credit_balance_from_refresh_and_cached_obse
 }
 
 #[tokio::test]
+async fn quota_pause_windows_preserve_missing_general_evidence_in_cached_and_batch_views() {
+    let store = Arc::new(MemoryAccountStore::default());
+    let id = "acct_admin_threshold";
+    store
+        .seed_oauth_credential(ImportCodexOAuthCredential {
+            account_id: id.to_owned(),
+            name: id.to_owned(),
+            secret: secret("threshold-admin-token"),
+            verified_account: profile("chatgpt-admin-threshold"),
+            next_refresh_at: None,
+            enabled: true,
+        })
+        .await;
+    store.set_quota_limits(
+        id,
+        serde_json::from_value(json!({"codex:604800s":95})).unwrap(),
+    );
+    let server = MockServer::start().await;
+    let mut config = valid_config();
+    config.config.api.base_url = server.uri();
+    let bundle = provider_openai::initialize(
+        config.config,
+        provider_ports_with(store.clone(), Arc::new(TestOAuthPending::default())),
+    )
+    .await
+    .unwrap();
+    for (rate, expected) in [
+        (
+            json!({"secondary_window":{"limit_window_seconds":604800,"used_percent":95}}),
+            vec!["codex:604800s"],
+        ),
+        (
+            json!({"primary_window":{"limit_window_seconds":18000,"used_percent":8}}),
+            vec!["codex:604800s"],
+        ),
+        (
+            json!({"secondary_window":{"limit_window_seconds":604800,"used_percent":94.99}}),
+            Vec::new(),
+        ),
+    ] {
+        let _mock = Mock::given(method("GET"))
+            .and(path("/api/codex/usage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "rate_limit":rate,
+                "code_review_rate_limit":{"primary_window":{"limit_window_seconds":18000,"used_percent":100}}
+            })))
+            .expect(1)
+            .mount_as_scoped(&server)
+            .await;
+        for refresh in [true, false] {
+            let quota = bundle
+                .admin_provider()
+                .quota(ProviderQuotaRequest {
+                    account_id: ProviderAccountId::new(id).unwrap(),
+                    refresh,
+                    rolling_usage: None,
+                })
+                .await
+                .unwrap();
+            assert_eq!(quota.paused_windows, expected);
+            assert!(
+                !quota.limit_reached,
+                "local pause must not fabricate upstream exhaustion"
+            );
+        }
+        let record = account_record(&store.account(id).unwrap());
+        let batch = bundle
+            .admin_provider()
+            .read_quotas(&[
+                gateway_admin::model::provider_credentials::ProviderQuotaReadRequest {
+                    account: &record,
+                    rolling_usage: None,
+                },
+            ])
+            .await;
+        assert_eq!(
+            batch.into_iter().next().unwrap().unwrap().paused_windows,
+            expected
+        );
+    }
+}
+
+#[tokio::test]
 async fn openai_admin_projects_free_plan_from_cached_quota_when_account_claims_omit_it() {
     let store = Arc::new(MemoryAccountStore::default());
     let mut verified_account = profile("chatgpt-free-plan");
@@ -1385,6 +1469,8 @@ async fn openai_admin_projects_free_plan_from_cached_quota_when_account_claims_o
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            quota_pause: None,
+            expected_connection: None,
             plan_type: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
@@ -1499,6 +1585,8 @@ async fn openai_admin_provider_projects_official_codex_quota_and_independent_buc
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            quota_pause: None,
+            expected_connection: None,
             plan_type: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
@@ -1600,6 +1688,8 @@ async fn openai_admin_keeps_confirmed_exhaustion_separate_from_raw_usage_display
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            quota_pause: None,
+            expected_connection: None,
             plan_type: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
@@ -1710,6 +1800,8 @@ async fn openai_admin_preserves_expired_window_usage_and_exhaustion_attribution(
         };
         store
             .compare_and_swap_quota(QuotaObservation {
+                quota_pause: None,
+                expected_connection: None,
                 plan_type: None,
                 account_id: account.id().clone(),
                 expected_revision: account.revision(),
@@ -2108,6 +2200,8 @@ fn provider_ports_with_catalog(
 fn account_record(account: &ProviderAccount) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
+        quota_limits: account.quota_limits().clone(),
+        quota_paused: account.quota_paused(),
         model_mappings: Default::default(),
         scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
         allow_credits: false,
@@ -2982,7 +3076,8 @@ async fn api_key_admin_exposes_only_configuration_and_preserves_key_when_rotatin
         .unwrap()
         .unwrap();
     let configuration = configuration.expose_to_provider().expose_to_provider();
-    assert_eq!(configuration.len(), 2);
+    assert_eq!(configuration.len(), 3);
+    assert_eq!(configuration.get("protocol"), Some(&json!("responses")));
     assert_eq!(
         configuration.get("base_url"),
         Some(&json!("https://first.example/v1"))
@@ -3013,6 +3108,7 @@ async fn api_key_admin_exposes_only_configuration_and_preserves_key_when_rotatin
             .expose_to_provider();
         assert_eq!(material.get("api_key"), Some(&json!("sk-api-test-only")));
         assert_eq!(material.get("base_url"), Some(&json!(base_url)));
+        assert_eq!(material.get("protocol"), Some(&json!("responses")));
         assert!(!prepared.facts().has_refresh_token);
         assert_eq!(prepared.facts().account_id, *account.id());
     }
@@ -3034,6 +3130,101 @@ async fn api_key_admin_exposes_only_configuration_and_preserves_key_when_rotatin
         admin.reset_credits(account.id()).await.unwrap_err().kind(),
         ProviderAdminErrorKind::Unsupported
     );
+}
+
+#[tokio::test]
+async fn messages_api_key_admin_details_and_rotations_preserve_protocol_and_secret() {
+    use provider_openai::credential::{ApiKeyProtocol, ResponsesTransport};
+
+    let store = Arc::new(MemoryAccountStore::default());
+    store
+        .seed_api_key_for_protocol(
+            "acct_messages_admin",
+            "https://messages.example/v1".to_owned(),
+            ResponsesTransport::Http,
+            ApiKeyProtocol::Messages,
+        )
+        .await;
+    let account = store.account("acct_messages_admin").unwrap();
+    let config = valid_config();
+    let bundle = provider_openai::initialize(
+        config.config.clone(),
+        provider_ports_with(Arc::clone(&store), Arc::new(TestOAuthPending::default())),
+    )
+    .await
+    .unwrap();
+    let admin = bundle.admin_provider();
+    let configuration = admin
+        .account_configuration(account.id())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        configuration.expose_to_provider().expose_to_provider(),
+        json!({
+            "base_url": "https://messages.example/v1",
+            "protocol": "messages",
+            "transport": "http"
+        })
+        .as_object()
+        .unwrap()
+    );
+    assert!(!format!("{configuration:?}").contains("sk-api-test-only"));
+
+    for (settings, expected_protocol, expected_key) in [
+        (
+            json!({"base_url":"https://new.example/custom", "transport":"http"}),
+            "messages",
+            "sk-api-test-only",
+        ),
+        (
+            json!({"base_url":"https://new.example/custom", "protocol":"messages", "transport":"http", "api_key":"sk-replacement-private"}),
+            "messages",
+            "sk-replacement-private",
+        ),
+        (
+            json!({"base_url":"https://new.example/custom", "protocol":"responses", "transport":"prefer_websocket"}),
+            "responses",
+            "sk-api-test-only",
+        ),
+    ] {
+        let prepared = admin
+            .prepare_rotation(PrepareCredentialRotation {
+                account: account_record(&account),
+                provider_material: ProviderDocument::new(OpaqueProviderData::new(
+                    settings.as_object().unwrap().clone(),
+                )),
+            })
+            .await
+            .unwrap();
+        let material = prepared
+            .facts()
+            .provider_material
+            .expose_to_provider()
+            .expose_to_provider();
+        assert_eq!(material.get("protocol"), Some(&json!(expected_protocol)));
+        assert_eq!(material.get("api_key"), Some(&json!(expected_key)));
+        assert_eq!(material.get("base_url"), settings.get("base_url"));
+        assert_eq!(material.get("transport"), settings.get("transport"));
+        assert!(!prepared.facts().has_refresh_token);
+    }
+
+    for settings in [
+        json!({"base_url":"https://new.example/v1", "transport":"prefer_websocket"}),
+        json!({"base_url":"https://new.example/v1", "protocol":"messages", "transport":"prefer_websocket"}),
+        json!({"base_url":"https://new.example/v1", "protocol":"chat_completions", "transport":"http"}),
+    ] {
+        let error = admin
+            .prepare_rotation(PrepareCredentialRotation {
+                account: account_record(&account),
+                provider_material: ProviderDocument::new(OpaqueProviderData::new(
+                    settings.as_object().unwrap().clone(),
+                )),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), ProviderAdminErrorKind::Invalid);
+    }
 }
 
 #[tokio::test]
@@ -3235,6 +3426,8 @@ async fn api_key_quota_ignores_legacy_peer_snapshot_without_network_or_state_res
     let now = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            quota_pause: None,
+            expected_connection: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
             quota: OpaqueProviderData::new(

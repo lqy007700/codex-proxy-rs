@@ -119,10 +119,22 @@ impl CodexBackendClient {
         profile: &CodexWireProfile,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<HeaderMap> {
+        if self.protocol == OpenAiUpstreamProtocol::MessagesApi {
+            let mut headers = HeaderMap::new();
+            let api_key = context
+                .authorization
+                .strip_prefix("Bearer ")
+                .unwrap_or(context.authorization);
+            headers.insert("x-api-key", HeaderValue::from_str(api_key)?);
+            headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+            return Ok(headers);
+        }
         // 客户端画像与认证方式无关；API Key 不携带 OAuth 账号身份和 Cookie
         let (account_id, cookie_header) = match self.protocol {
             OpenAiUpstreamProtocol::Codex => (context.account_id, context.cookie_header),
-            OpenAiUpstreamProtocol::ResponsesApi => (None, None),
+            OpenAiUpstreamProtocol::ResponsesApi | OpenAiUpstreamProtocol::MessagesApi => {
+                (None, None)
+            }
         };
         let mut headers = build_codex_model_headers(profile, context.authorization, account_id)?;
         insert_optional_header(&mut headers, "cookie", cookie_header)?;
@@ -225,7 +237,7 @@ impl CodexBackendClient {
             None => format!("model={}", request.model()),
         };
         insert_optional_protocol_header(&mut headers, "x-codex-routing-hint", Some(&routing_hint));
-        append_passthrough_headers(&mut headers, &request.passthrough_headers);
+        append_passthrough_headers(&mut headers, &request.passthrough_headers, self.protocol);
         self.append_middleware_headers(&mut headers)?;
         Ok(headers)
     }
@@ -247,10 +259,16 @@ impl CodexBackendClient {
     }
 }
 
-pub(super) fn append_passthrough_headers(headers: &mut HeaderMap, passthrough: &HeaderMap) {
+pub(super) fn append_passthrough_headers(
+    headers: &mut HeaderMap,
+    passthrough: &HeaderMap,
+    protocol: OpenAiUpstreamProtocol,
+) {
     for name in passthrough.keys() {
         // 身份与传输字段只由画像/正文生成；其余协议头保留原始多值字节
         if is_managed_identity_header(name.as_str())
+            || (protocol == OpenAiUpstreamProtocol::MessagesApi
+                && is_openai_protocol_header(name.as_str()))
             || matches!(
                 name.as_str(),
                 "openai-beta"
@@ -269,6 +287,24 @@ pub(super) fn append_passthrough_headers(headers: &mut HeaderMap, passthrough: &
             headers.append(name.clone(), value.clone());
         }
     }
+}
+
+/// OpenAI 专属协议与会话头不能由下游带入 Messages 上游
+pub(crate) fn is_openai_protocol_header(name: &str) -> bool {
+    [
+        "openai-",
+        "x-openai-",
+        "x-codex-",
+        "x-oai-",
+        "x-responsesapi-",
+        "chatgpt-",
+    ]
+    .iter()
+    .any(|prefix| name.starts_with(prefix))
+        || matches!(
+            name,
+            "session-id" | "conversation-id" | "thread-id" | "turn-id" | "session_id"
+        )
 }
 
 pub(super) fn insert_optional_header(

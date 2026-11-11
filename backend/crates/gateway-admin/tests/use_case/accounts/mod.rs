@@ -84,6 +84,7 @@ pub(super) struct FakeProviderAdmin {
     export_inputs: Mutex<Vec<ProviderExportCredentialInput>>,
     import_account_ids: Mutex<Vec<String>>,
     quota_requests: Mutex<Vec<ProviderQuotaRequest>>,
+    quota_read_limits: Mutex<Vec<gateway_core::account::AccountQuotaLimits>>,
     quota_started: tokio::sync::Notify,
     quota_gate: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
     quota: Mutex<ProviderQuota>,
@@ -121,6 +122,7 @@ impl FakeProviderAdmin {
             export_inputs: Mutex::new(Vec::new()),
             import_account_ids: Mutex::new(vec!["acct_prepared".to_owned()]),
             quota_requests: Mutex::new(Vec::new()),
+            quota_read_limits: Mutex::default(),
             quota_started: tokio::sync::Notify::new(),
             quota_gate: Mutex::new(None),
             quota: Mutex::new(empty_quota()),
@@ -294,9 +296,12 @@ impl ProviderAdmin for FakeProviderAdmin {
     fn account_capabilities(
         &self,
         _account_id: &ProviderAccountId,
-        _authentication_kind: &str,
+        authentication_kind: &str,
     ) -> gateway_admin::model::accounts::ProviderAccountCapabilities {
-        *self.capabilities.lock().unwrap()
+        let mut capabilities = *self.capabilities.lock().unwrap();
+        capabilities.quota_limits_supported &=
+            self.kind.as_str() == "openai" && authentication_kind != "api_key";
+        capabilities
     }
 
     fn account_runtime_state(
@@ -536,6 +541,39 @@ impl ProviderAdmin for FakeProviderAdmin {
         Ok(self.quota.lock().expect("provider quota").clone())
     }
 
+    async fn read_quotas(
+        &self,
+        requests: &[gateway_admin::model::provider_credentials::ProviderQuotaReadRequest<'_>],
+    ) -> Vec<Result<ProviderQuota, ProviderAdminError>> {
+        futures::future::join_all(requests.iter().map(|request| async {
+            self.quota_read_limits
+                .lock()
+                .unwrap()
+                .push(request.account.quota_limits.clone());
+            let mut quota = self
+                .quota(ProviderQuotaRequest {
+                    account_id: ProviderAccountId::new(request.account.id.clone()).unwrap(),
+                    refresh: false,
+                    rolling_usage: request.rolling_usage.cloned(),
+                })
+                .await?;
+            quota.paused_windows = quota
+                .windows
+                .iter()
+                .filter(|window| {
+                    window.local_usage_attribution == QuotaLocalUsageAttribution::AccountWide
+                        && request
+                            .account
+                            .quota_limits
+                            .reached(&window.key, window.used_percent)
+                })
+                .map(|window| window.key.clone())
+                .collect();
+            Ok(quota)
+        }))
+        .await
+    }
+
     async fn reset_credits(
         &self,
         _: &ProviderAccountId,
@@ -640,6 +678,12 @@ pub(super) struct FakeAccountStore {
     quota_window_queries: Mutex<Vec<AccountUsageWindowQuery>>,
     quota_forecast_history: Mutex<QuotaForecastHistory>,
     update_commands: Mutex<Vec<UpdateAccount>>,
+    batch_updates: Mutex<
+        Vec<(
+            BatchUpdateAccounts,
+            gateway_admin::model::accounts::PreparedQuotaPauses,
+        )>,
+    >,
     automations: Mutex<
         BTreeMap<String, gateway_admin::model::reset_credit_automation::ResetCreditAutomation>,
     >,
@@ -663,6 +707,7 @@ impl FakeAccountStore {
             quota_window_queries: Mutex::new(Vec::new()),
             quota_forecast_history: Mutex::new(QuotaForecastHistory::default()),
             update_commands: Mutex::new(Vec::new()),
+            batch_updates: Mutex::default(),
             automations: Mutex::default(),
         })
     }
@@ -750,6 +795,7 @@ impl FakeAccountStore {
 
     fn page_item(account: AccountRecord) -> AccountPageItem {
         let facts = AccountStatusFacts {
+            quota_paused: account.quota_paused,
             enabled: account.enabled,
             credential_state: account.credential_state,
             access_token_expires_at: account.access_token_expires_at.map(Into::into),
@@ -805,18 +851,30 @@ impl AccountStore for FakeAccountStore {
         self.record("store.list_accounts");
         let accounts = self.accounts.lock().expect("accounts").clone();
         let total = accounts.len() as u64;
+        let items = accounts
+            .into_iter()
+            .map(Self::page_item)
+            .collect::<Vec<_>>();
+        let mut summary = AccountSummary {
+            total,
+            ..Default::default()
+        };
+        for item in &items {
+            use gateway_core::account::AccountStatus;
+            match item.projection.status {
+                AccountStatus::Normal => summary.normal += 1,
+                AccountStatus::QuotaPaused => summary.quota_paused += 1,
+                AccountStatus::QuotaExhausted => summary.quota_exhausted += 1,
+                AccountStatus::RateLimited => summary.rate_limited += 1,
+                AccountStatus::Disabled => summary.disabled += 1,
+                AccountStatus::Error => summary.error += 1,
+            }
+        }
         Ok(AccountPage {
             config_revision: revision(1),
-            items: accounts.into_iter().map(Self::page_item).collect(),
+            items,
             total,
-            summary: AccountSummary {
-                total,
-                normal: 1,
-                quota_exhausted: 0,
-                rate_limited: 0,
-                disabled: 0,
-                error: 0,
-            },
+            summary,
         })
     }
 
@@ -1094,18 +1152,28 @@ impl AccountStore for FakeAccountStore {
     async fn batch_update_accounts(
         &self,
         command: BatchUpdateAccounts,
+        pauses: gateway_admin::model::accounts::PreparedQuotaPauses,
         context: &MutationContext,
     ) -> AdminStoreResult<AccountsUpdateResult> {
         self.record("store.batch_update_accounts");
         self.record_context(context);
         self.require_commit()?;
-        if let Some(enabled) = command.enabled {
-            for account in self.accounts.lock().expect("accounts").iter_mut() {
-                if command.account_ids.contains(&account.id) {
-                    account.enabled = enabled;
-                }
+        for account in self.accounts.lock().expect("accounts").iter_mut() {
+            if !command.account_ids.contains(&account.id) {
+                continue;
+            }
+            if let Some(enabled) = command.enabled {
+                account.enabled = enabled;
+            }
+            if let Some(limits) = &command.quota_limits {
+                account.quota_limits = limits.clone();
+                account.quota_paused = pauses.get(&account.id).is_some_and(|pause| pause.paused);
             }
         }
+        self.batch_updates
+            .lock()
+            .unwrap()
+            .push((command.clone(), pauses));
         Ok(AccountsUpdateResult {
             config_revision: revision(2),
             account_ids: command
@@ -1197,7 +1265,7 @@ impl SettingsStore for StaticSettingsStore {
                 audit_retention_days: 30,
                 account_error_protection: gateway_core::account::AccountErrorProtection::default(),
                 account_warmup_enabled: false,
-                account_warmup_schedule_time: "08:00".to_owned(),
+                account_warmup_cron: String::new(),
                 account_warmup_model: None,
                 reset_credit_lead_minutes: 10,
                 reset_credit_max_weekly_remaining_percent: self
@@ -1611,6 +1679,7 @@ async fn accounts_recover_disabled_should_only_enable_scheduling_and_preserve_qu
             );
         }
         let quota = ProviderQuota {
+            paused_windows: Vec::new(),
             credits: None,
             observed_at: Some(Utc::now()),
             windows: vec![ProviderQuotaWindow {
@@ -1791,6 +1860,7 @@ async fn accounts_batch_update_should_commit_once_and_notify_each_provider() {
         .batch_update(
             &context("batch-update-request"),
             BatchUpdateAccounts {
+                quota_limits: None,
                 model_mappings: Default::default(),
                 scheduling_role: None,
                 allow_credits: None,
@@ -1917,6 +1987,7 @@ async fn accounts_should_fill_missing_plan_from_quota_without_overriding_known_s
     ] {
         let provider = FakeProviderAdmin::new("openai", events());
         provider.set_quota(ProviderQuota {
+            paused_windows: Vec::new(),
             plan_type: quota_plan.map(str::to_owned),
             ..empty_quota()
         });
@@ -1960,6 +2031,7 @@ async fn accounts_list_should_degrade_quota_failure_to_empty_window_without_drop
     let events = events();
     let openai = FakeProviderAdmin::new("openai", events.clone());
     openai.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
@@ -2088,6 +2160,7 @@ async fn accounts_list_should_map_unknown_credential_to_error_not_normal() {
 async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view() {
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
@@ -2135,6 +2208,7 @@ async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view()
 async fn accounts_list_should_not_derive_exhaustion_from_provider_quota_view() {
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
@@ -2185,6 +2259,7 @@ async fn quota_forecast_reads_raw_snapshot_and_limits_usage_to_observation_time(
     let observed = now - TimeDelta::hours(1);
     let reset = now + TimeDelta::days(1);
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         credits: None,
         observed_at: Some(observed),
         limit_reached: true,
@@ -2298,6 +2373,7 @@ async fn quota_forecast_only_queries_the_two_selected_source_windows() {
         })
         .collect();
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         plan_type: Some("pro".to_owned()),
         observed_at: Some(observed),
         windows,
@@ -2348,6 +2424,7 @@ async fn quota_forecast_same_window_reversal_keeps_recorded_usage_in_the_report(
         let reset = now + TimeDelta::days(1);
         let provider = FakeProviderAdmin::new("openai", events());
         provider.set_quota(ProviderQuota {
+            paused_windows: Vec::new(),
             plan_type: Some("pro".to_owned()),
             observed_at: Some(observed),
             windows: vec![ProviderQuotaWindow {
@@ -2426,6 +2503,7 @@ async fn quota_forecast_mid_cycle_sampling_accepts_small_reset_jitter_but_not_a_
     let added = now - TimeDelta::hours(5);
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         credits: None,
         plan_type: Some("pro".to_owned()),
         observed_at: Some(observed),
@@ -2573,6 +2651,7 @@ async fn accounts_list_should_attach_local_usage_to_quota_windows() {
     let provider = FakeProviderAdmin::new("openai", events());
     let reset_at = Utc::now() + TimeDelta::hours(1);
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
@@ -2672,6 +2751,7 @@ async fn accounts_list_and_quota_refresh_should_select_the_same_weekly_or_monthl
         (vec![short, month], "month", 3000, 30),
     ] {
         provider.set_quota(ProviderQuota {
+            paused_windows: Vec::new(),
             windows,
             ..empty_quota()
         });
@@ -2729,6 +2809,7 @@ async fn accounts_list_should_not_attach_account_usage_to_model_specific_quota_w
     let provider = FakeProviderAdmin::new("openai", events());
     let reset_at = Utc::now() + TimeDelta::days(7);
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
@@ -3019,6 +3100,7 @@ pub(super) fn document() -> ProviderDocument {
 
 fn empty_quota() -> ProviderQuota {
     ProviderQuota {
+        paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
         observed_at: None,
@@ -3055,6 +3137,8 @@ fn quota_local_usage(account_id: &str, total_tokens: u64) -> AccountUsage {
 pub(super) fn account_record(kind: &str) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
+        quota_limits: Default::default(),
+        quota_paused: false,
         model_mappings: Default::default(),
         scheduling_role: gateway_core::account::AccountSchedulingRole::Regular,
         allow_credits: false,
@@ -3601,4 +3685,242 @@ impl gateway_admin::ports::reset_credit_automation::ResetCreditAutomationStore
         }
         Ok(revision)
     }
+}
+
+fn quota_limit_command(
+    quota_limits: Option<gateway_core::account::AccountQuotaLimits>,
+) -> BatchUpdateAccounts {
+    BatchUpdateAccounts {
+        account_ids: vec!["acct_test".to_owned()],
+        quota_limits,
+        enabled: None,
+        allow_credits: None,
+        concurrency_limit: None,
+        weight: None,
+        model_access: None,
+        model_mappings: None,
+        group_ids: None,
+        outbound_proxy: None,
+        scheduling_role: None,
+    }
+}
+
+fn quota_limits(entries: &[(&str, u8)]) -> gateway_core::account::AccountQuotaLimits {
+    entries
+        .iter()
+        .map(|(key, limit)| ((*key).to_owned(), *limit))
+        .collect::<BTreeMap<_, _>>()
+        .try_into()
+        .unwrap()
+}
+
+fn quota_limit_window(
+    key: &str,
+    local_usage_attribution: QuotaLocalUsageAttribution,
+    used_percent: f64,
+) -> ProviderQuotaWindow {
+    ProviderQuotaWindow {
+        key: key.to_owned(),
+        group: "shortTerm".to_owned(),
+        label: key.to_owned(),
+        limit_id: None,
+        limit_name: None,
+        role: None,
+        local_usage_attribution,
+        window_seconds: Some(604_800),
+        used_percent: Some(used_percent),
+        reset_at: None,
+        limit_reached: false,
+        local_usage: None,
+        provider_data: None,
+    }
+}
+
+#[tokio::test]
+async fn quota_limits_reject_unsupported_accounts_before_reading_or_committing() {
+    for (kind, authentication_kind, supported) in [
+        ("xai", "oauth", true),
+        ("openai", "api_key", true),
+        ("openai", "oauth", false),
+    ] {
+        let provider = FakeProviderAdmin::new(kind, events());
+        provider.capabilities.lock().unwrap().quota_limits_supported = supported;
+        let mut account = account_record(kind);
+        account.authentication_kind = authentication_kind.to_owned();
+        let store = FakeAccountStore::with_account(account, events());
+        let services = accounts_service(provider.clone(), store.clone()).await;
+        assert!(
+            services
+                .accounts()
+                .batch_update(
+                    &context("unsupported-quota-limits"),
+                    quota_limit_command(Some(quota_limits(&[("week", 80)]))),
+                )
+                .await
+                .is_err()
+        );
+        assert!(provider.quota_read_limits.lock().unwrap().is_empty());
+        assert!(store.batch_updates.lock().unwrap().is_empty());
+        assert!(store.audit_requests().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn quota_limits_reject_new_unknown_and_model_specific_windows_without_writing() {
+    for windows in [
+        Vec::new(),
+        vec![quota_limit_window(
+            "week",
+            QuotaLocalUsageAttribution::Unavailable,
+            90.0,
+        )],
+        vec![quota_limit_window(
+            "other",
+            QuotaLocalUsageAttribution::AccountWide,
+            90.0,
+        )],
+    ] {
+        let provider = FakeProviderAdmin::new("openai", events());
+        provider.capabilities.lock().unwrap().quota_limits_supported = true;
+        provider.set_quota(ProviderQuota {
+            windows,
+            ..Default::default()
+        });
+        let store = FakeAccountStore::new("openai", events());
+        let services = accounts_service(provider, store.clone()).await;
+        assert!(
+            services
+                .accounts()
+                .batch_update(
+                    &context("invalid-quota-window"),
+                    quota_limit_command(Some(quota_limits(&[("week", 80)]))),
+                )
+                .await
+                .is_err()
+        );
+        assert!(store.batch_updates.lock().unwrap().is_empty());
+        assert!(store.audit_requests().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn quota_limits_prepare_pause_using_proposed_policy_and_exact_threshold() {
+    for (used, paused) in [(79.9, false), (80.0, true), (90.0, true)] {
+        let events = events();
+        let provider = FakeProviderAdmin::new("openai", events.clone());
+        provider.capabilities.lock().unwrap().quota_limits_supported = true;
+        let observed_at = Utc::now();
+        provider.set_quota(ProviderQuota {
+            observed_at: Some(observed_at),
+            windows: vec![quota_limit_window(
+                "week",
+                QuotaLocalUsageAttribution::AccountWide,
+                used,
+            )],
+            ..Default::default()
+        });
+        let mut account = account_record("openai");
+        account.quota_limits = quota_limits(&[("week", 95)]);
+        account.credential_revision = revision(7);
+        let store = FakeAccountStore::with_account(account, events.clone());
+        let services = accounts_service(provider.clone(), store.clone()).await;
+        let proposed = quota_limits(&[("week", 80)]);
+        services
+            .accounts()
+            .batch_update(
+                &context("save-quota-limits"),
+                quota_limit_command(Some(proposed.clone())),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            provider.quota_read_limits.lock().unwrap().as_slice(),
+            std::slice::from_ref(&proposed)
+        );
+        let updates = store.batch_updates.lock().unwrap();
+        let prepared = updates[0].1.get("acct_test").unwrap();
+        assert_eq!(prepared.revision, revision(7));
+        assert_eq!(prepared.observed_at, Some(observed_at));
+        assert_eq!(prepared.paused, paused);
+        assert_eq!(store.audit_requests(), ["save-quota-limits"]);
+        let saved = store.accounts.lock().unwrap()[0].clone();
+        assert_eq!(saved.quota_limits, proposed);
+        assert_eq!(saved.quota_paused, paused);
+        assert!(!saved.quota.is_exhausted());
+        assert!(!saved.allow_credits);
+        assert_eq!(
+            FakeAccountStore::page_item(saved)
+                .projection
+                .status
+                .as_str(),
+            if paused { "quota_paused" } else { "normal" }
+        );
+        assert!(recorded(&events).contains(&"provider.account_facts_changed"));
+    }
+}
+
+#[tokio::test]
+async fn quota_limits_allow_existing_missing_windows_and_distinguish_omission_from_clear() {
+    let provider = FakeProviderAdmin::new("openai", events());
+    provider.capabilities.lock().unwrap().quota_limits_supported = true;
+    let mut account = account_record("openai");
+    account.quota_limits = quota_limits(&[("week", 80), ("month", 90)]);
+    account.quota_paused = true;
+    let store = FakeAccountStore::with_account(account, events());
+    let services = accounts_service(provider.clone(), store.clone()).await;
+    let mut omitted = quota_limit_command(None);
+    omitted.enabled = Some(true);
+    services
+        .accounts()
+        .batch_update(&context("preserve-quota-limits"), omitted)
+        .await
+        .unwrap();
+    assert!(provider.quota_read_limits.lock().unwrap().is_empty());
+    assert!(store.accounts.lock().unwrap()[0].quota_paused);
+    assert_eq!(
+        store.accounts.lock().unwrap()[0].quota_limits,
+        quota_limits(&[("week", 80), ("month", 90)])
+    );
+    services
+        .accounts()
+        .batch_update(
+            &context("adjust-missing-quota-window"),
+            quota_limit_command(Some(quota_limits(&[("week", 70)]))),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store.accounts.lock().unwrap()[0].quota_limits,
+        quota_limits(&[("week", 70)])
+    );
+    assert_eq!(provider.quota_read_limits.lock().unwrap().len(), 1);
+    services
+        .accounts()
+        .batch_update(
+            &context("clear-quota-limits"),
+            quota_limit_command(Some(Default::default())),
+        )
+        .await
+        .unwrap();
+    assert_eq!(provider.quota_read_limits.lock().unwrap().len(), 1);
+    let saved = store.accounts.lock().unwrap()[0].clone();
+    assert!(saved.quota_limits.is_empty());
+    assert!(!saved.quota_paused);
+    assert_eq!(
+        FakeAccountStore::page_item(saved)
+            .projection
+            .status
+            .as_str(),
+        "normal"
+    );
+    assert!(
+        store
+            .batch_updates
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .1
+            .is_empty()
+    );
 }

@@ -1447,10 +1447,12 @@ impl RuntimeSnapshot {
         account_scope: Arc<FrozenAccountScope>,
         context: &RoutingContext,
     ) -> Result<RoutingPlan, RoutingError> {
-        if matches!(operation, Operation::Generate(_))
-            && account_scope
-                .directory()
-                .has_model_mapping(public_model.as_str())
+        if matches!(
+            operation,
+            Operation::Generate(_) | Operation::CountTokens(_)
+        ) && account_scope
+            .directory()
+            .has_model_mapping(public_model.as_str())
             && account_scope.allowed_account_ids().any(|account| {
                 account_scope
                     .model_override(account, public_model.as_str())

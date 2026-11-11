@@ -103,6 +103,13 @@ const displayDefinitions: Record<AccountStatusDisplayMode, AccountStatusDisplayD
     recoveryHint: '重新测试连接以获取最新状态',
     icon: CircleCheck,
   },
+  quota_paused: {
+    tone: statusTones.quota_paused,
+    label: statusLabels.quota_paused,
+    description: '通用额度窗口已达到设置的使用率上限，暂停接收新请求',
+    recoveryHint: '使用率回落后恢复调度，也可调整或清除额度上限',
+    icon: Gauge,
+  },
   quota_exhausted: {
     tone: statusTones.quota_exhausted,
     label: statusLabels.quota_exhausted,
@@ -171,7 +178,7 @@ export function resolveAccountStatusPresentation(
     && input.errorReason
     ? errorRecoveryHints[input.errorReason]
     : definition.recoveryHint
-  const hasDetail = input.status === 'error' || mode === 'rate_limited' || isBackoff
+  const hasDetail = input.status === 'error' || mode === 'quota_paused' || mode === 'rate_limited' || isBackoff
   const retry = nextRefreshDisplay
     ? `，下次尝试：${nextRefreshDisplay}`
     : ''

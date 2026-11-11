@@ -15,7 +15,7 @@
 
 Codex Proxy RS 是单进程、单副本运行的多 Provider AI 网关，同时提供：
 
-- 面向客户端的 OpenAI Responses、Chat Completions、Images、standalone Search 和模型目录协议
+- 面向客户端的 OpenAI Responses、Chat Completions、Anthropic Messages、Images、standalone Search 和模型目录协议
 - 面向管理员的 `/api/admin/*` 控制面和 Vue 管理端
 - 面向 Key 持有者的 `/api/key-usage/*` 用量与客户端配置接口、独立 `/key-usage` 页面，以及复用数据面认证的 `/v1/usage` 额度查询
 - 固定的 OpenAI 与 xAI 两个编译期 Provider
@@ -54,13 +54,13 @@ flowchart TB
 | 路径 | 责任 |
 | --- | --- |
 | `backend/apps/gateway` | 读取顶层配置、连接 Bundle、注册 Provider 与 Worker |
-| `gateway-protocol` | 跨层共享的 OpenAI wire contract、SSE 编解码与无业务 owner 的解析事实，不依赖其他 workspace crate |
+| `gateway-protocol` | 跨层共享的 Responses、Chat、Messages wire contract、双向转换、请求事实与 SSE 编解码，不依赖其他 workspace crate |
 | `gateway-core` | operation、canonical event、请求快照、路由、admission、attempt 协调、交付边界和计量 |
 | `gateway-admin` | 管理领域、Key 用量、Provider/Store 端口、审计语义、备份与历史保留策略 |
 | `gateway-api` | HTTP/WS/SSE 解码与交付、Admin 与 Key 用量 wire、静态 Web UI；不直接访问 Store 或具体 Provider |
 | `gateway-store` | PostgreSQL、Redis、S3/R2、`pg_dump` 适配器；不拥有业务策略 |
 | `gateway-host` | 配置加载、日志、HTTP 生命周期、Worker 监督与历史保留任务、系统更新及外部价格源适配 |
-| `providers/openai` | OpenAI OAuth、账号选择、目录、额度、Responses/Images/Search transport |
+| `providers/openai` | OpenAI OAuth、Responses/Messages API Key、账号选择、目录、额度和上游 transport |
 | `providers/xai` | xAI OAuth session、账号选择、目录、额度和 Grok/Responses 转换 |
 | `frontend` | Vue 管理端与 Key 用量页，仅通过各自身份允许的控制面 API 访问状态 |
 | 独立仓库 `codex-proxy-ui` | 管理端使用的 Vue 基础组件、纯主题算法和样式，不依赖宿主业务状态、路由或 API |
@@ -261,7 +261,7 @@ Client Key 鉴权完成后，API adapter 从有界请求头识别客户端，Cor
   原生 Responses HTTP/SSE 与 WebSocket 即时交付正常事件，仅 Provider 明确标记的可替换前导保留重试资格；Core 单独维护重放屏障，
   仍检查错误分类、续接归属、发送状态、副作用及预算。中间件链不启用此前导例外
 - API 在最终错误编码出口投影客户端恢复信号；该投影不修改 Provider 上游事实，也不改变 Core 的
-  重试与提交边界。具体错误合同见 [数据面接口](api.md#3-openai-数据面与模型目录)
+  重试与提交边界。具体错误合同见 [数据面接口](api.md#3-模型数据面与模型目录)
 - Provider 为有界退避显式选择耗尽动作及预算范围，Core 在既有安全重放边界内执行
   OpenAI 明确容量拒绝与普通服务故障共用恢复预算，普通服务故障包含显式 `500/503`（不要求特定 error code）与无状态码且 `error.code` 为 `server_error` 或 `server_busy` 的流内失败，保留上游原始状态码
   普通账号先按既有调度与亲和选出 A，请求冻结的 `recoveryAttempts=N`（默认 4）包含 A 的首次尝试
@@ -305,11 +305,12 @@ Search body 中的模型及其他字段保持原始 bytes 并由上游解释
 Core 只理解 `Operation`、能力要求、Provider 候选、稳定错误和 canonical event，不读取 Provider SDK
 类型。Provider 独占 credential schema、OAuth、账号选择、模型目录、额度投影和上游 transport
 
-Chat Completions 的客户端协议转换由 API 拥有，纯消息、工具和输出转换位于 `gateway-protocol`。
-API 在请求中间件之后把 Chat 转为现有 Responses `Generate`，复用执行、提交与结算守卫，
-在响应返回请求中间件前完成 Chat 编码，并在最终交付前复核响应身份与终态。
-Core 保留原入口观测但不解析 Chat 正文，Provider 和 attempt 中间件继续使用 Responses 合同，
-不新增一套账号调度、历史缓存或计量来源
+Responses、Chat Completions 与 Messages 的 HTTP 入口由 API 的 `openai/generation` 共用请求、准入和交付生命周期。
+Chat 在请求中间件之后转为 Responses，Messages 保持原生 operation；纯消息、工具、推理、用量与输出转换归 `gateway-protocol`。
+OpenAI Provider 先按冻结范围选择账号，再根据凭据的上游协议执行原生请求或跨协议转换，不新增调度器、历史缓存或计量来源。
+同协议保留原生 wire，跨协议响应转换与 canonical 事实旁路分开，模型名投影只修改客户端交付副本。
+Core 只读取共享请求事实推导能力；中间件声明实际消除的功能时仍保留其余输入要求，不得抹去原生续接权限。
+Messages 输入计数复用既有 CountTokens operation，不通过生成响应猜测输入用量；原生计数和本地估算边界见[接口](api.md#messages-输入计数)
 
 OpenAI Provider 按 Client Key、本地账号、真实 OAuth 用户／工作区和父响应 ID 关联 WS 握手的路由 Cookie 快照，
 只供 Guardian 使用，不参与选号或写入账号凭据。进程内最多保存 4096 个父响应，保留 30 分钟；
@@ -331,6 +332,8 @@ credential state 调度，不以是否存在上游用户 ID 推断可用性；OA
 状态恢复和未补齐身份的凭据轮换保留 `unknown`。
 API Key 默认 HTTP/SSE，可选 WS 优先；选号先验证传输资格，WS pool 与 continuation 按凭据版本隔离。
 OAuth 与 API Key 共用业务请求、响应和能力透传链路，差异限定在上游地址、认证、传输配置及明确的上游请求合同适配。
+API Key 的 `protocol` 默认为 Responses，旧凭据不改变行为；Messages 仅使用 HTTP/SSE，认证与模型能力由所选账号持有。
+连接配置随凭据 revision 更新，协议切换与密钥、地址、账号设置共同提交，失效旧目录及连接归属。
 OpenAI 原生选号读取既有目录快照：OAuth 按已知套餐隔离，API Key 按账号及凭据版本隔离。
 有效目录明确缺项时默认排除账号，精确白名单的目录例外遵循[账号模型限制](api.md#账号模型限制)。
 未知套餐或没有有效目录时交由上游验证，不为每次推理新增目录请求。
@@ -364,7 +367,7 @@ OpenAI 仅按结构化模型拒绝写入冷却，具体字段与状态见 [模�
   状态随 socket 生命周期维护，不缓存对话正文，HTTP 与 WS 入站共用该判断
   `transport/headers.rs` 负责上游身份保护和官方头组装。
   会话别名只规范化请求头，不清除正文身份字段；未知业务扩展与响应诊断头不受影响，字段见
-  [Responses 合同](api.md#3-openai-数据面与模型目录)。Grok 专属请求标记和已知指令开场白的兼容只在
+  [Responses 合同](api.md#3-模型数据面与模型目录)。Grok 专属请求标记和已知指令开场白的兼容只在
   `downstream/grok.rs` 内判断，且仅用于 Codex/OAuth 上游；普通请求的提示词、工具及业务正文不做品牌清洗
 - Live 共用 OpenAI 的头部身份、下游环境和传输边界，业务扩展不使用固定白名单。
   引导、sideband 与 hangup 由 Provider 在选定或加载钉住账号后统一处理出站关联标识；
@@ -613,7 +616,7 @@ Continuation 受原请求的调用方、当前 Key 账号范围、Provider 和�
   完整历史。体积测量复用 WS 编码结构，Provider session state 仍只携带元数据，不保存 transcript
 - OpenAI 在有效输出交付前收到可安全重放的明确额度拒绝时，先隔离账号，再投影 `ClientReplayRequired`；
   丢弃未交付的原错误帧，由客户端提交完整历史开启新链，不把原增量输入交给其他账号。
-  真实错误分类、状态码、发送状态和上游诊断保持不变，客户端合同见 [Responses API](api.md#3-openai-数据面与模型目录)
+  真实错误分类、状态码、发送状态和上游诊断保持不变，客户端合同见 [Responses API](api.md#3-模型数据面与模型目录)
 - OpenAI 按 native → replay owner → replay any 推进，并保留官方 `previous_response_id` 语义；
   已知为 connection-local 的原生续接进入重放阶段时，在选号前返回 `ClientReplayRequired`，不认领或迁移会话绑定。
   正常 native 续接仍由连接池核对原连接及 response ID 是否可用
@@ -820,9 +823,9 @@ PostgreSQL 周期对账才是正确性基础
 | Provider 公开模型与官方发布资料 | Provider/runtime cache | 由官方目录或发布源刷新，与 PostgreSQL 中的用户身份选择分别管理 |
 | Windows 安装包临时直链 | Host 进程内短缓存 | 按需解析、严格校验、到期前丢弃；不写 PostgreSQL/Redis，也不代理包字节 |
 
-账号对外状态不是独立列，而是 PostgreSQL credential/quota 事实与 Redis cooldown 的统一投影：
-`normal`、`quota_exhausted`、`rate_limited`、`disabled`、`error`。只有明确上游证据才能恢复或终态化账号，
-本地时钟和不确定响应不能伪造事实
+账号对外状态不是独立列，而是 PostgreSQL credential/quota 事实、本地额度策略与 Redis cooldown 的统一投影：
+`normal`、`quota_paused`、`quota_exhausted`、`rate_limited`、`disabled`、`error`。
+上游访问状态的恢复需要明确证据，本地时钟和不确定响应不能伪造上游事实
 
 错误保护与上游限流共用冷却投影，探测恢复由 Admin 负责，详见[Worker 与账号冻结](#worker-与账号冻结)
 
@@ -861,6 +864,11 @@ OpenAI Provider 的额度快照统一解释点数可用性，主动查询、耗�
 无可用点数的失败回读保留已确认的拒绝；常规刷新在到期前仍按窗口证据恢复，本次耗尽之后的
 已记录窗口 reset 全部到期后可依据新的明确放行观察恢复。查询沿用 credential revision 与
 观察时间隔离，不允许旧查询撤销较新的失败；恢复条件和后台复核节奏见 [账号 API](api.md#账号能力导入与-oauth)
+
+通用额度窗口上限属于账号本地策略。Core 拥有阈值和暂停状态合同，OpenAI Provider 仅按账号级窗口判断，
+Store 将策略版本、凭据版本、观测时间与出站连接校验纳入提交，避免保存策略与额度刷新交错时写回过期结论。
+缺失窗口保留已经触顶的证据，代理更新不清除暂停依据；主动刷新和被动同步使用同一解释。
+暂停只限制新租约，不终止在途请求，不改写点数支出策略、原生续接归属或既有恢复预算
 
 OpenAI 订阅周期属于按需个人信息，不是额度事实。Admin 账号用例通过现有 Provider 管理端口并发读取
 个人资料统计与订阅，汇聚为一次只读响应；Provider 继续拥有各自的认证、出站代理与上游协议处理。
@@ -949,7 +957,7 @@ Store 按生命周期原子更新所属分组，保留其他阶段的事实；�
 进程退出后停止刷新，Worker 按过期租约收敛遗留的 running 记录；该观测续期失败不取消客户端执行
 
 模型执行以 `model_requests.id` 标识，上游身份由 `upstream_request_id` 保存。
-API 输出模型执行与上游请求的关联信息，具体响应头规则见 [数据面接口](api.md#3-openai-数据面与模型目录)。
+API 输出模型执行与上游请求的关联信息，具体响应头规则见 [数据面接口](api.md#3-模型数据面与模型目录)。
 入口 middleware 的 ID 用于入口日志，不作为模型请求的主键或检索映射。
 失败终态及中间失败的上游请求 ID 优先取对应 `ProviderError`，缺失时再取该 attempt 的响应
 observation、调用 metadata；最终失败的关联头不与 opening 身份混合
@@ -1009,8 +1017,9 @@ Host 据此清除连续失败与当前错误、重置重启退避，并保持 `R
 已退出运行的通知不影响新运行。周期任务按调度间隔检查成功新鲜度，daemon 的空闲或长任务
 不受重启退避时长限制，运行中的依赖健康由相应探针和业务 owner 负责
 
-预热与备份按部署时区解释本地时刻，缺失时刻跳过、重复时刻取较早一次。
-预热由 Store 在运行设置记录中持久化 UTC 执行游标，只领取晚于游标的时刻，重启或回拨不重复执行历史时段。
+预热的五段 Cron 与备份按部署时区解释本地时刻，缺失时刻跳过、重复时刻取较早一次。
+预热计划由 Core 的 Provider 运行策略统一校验，Provider 负责额度资格和执行；Store 在运行设置记录中持久化
+UTC 执行游标，只领取晚于游标的时刻，重启或回拨不重复执行历史时段。
 游标独立于管理配置的替换与版本发布；取消仍沿既有 worker lease 生命周期释放。
 备份设置中的时区仅记录游标来源，切换后从当前时刻重算未来游标，不补跑旧计划。
 游标重算核对启停、Cron、来源时区及旧游标；任务入队与游标推进同事务提交，冲突时只跳过任务

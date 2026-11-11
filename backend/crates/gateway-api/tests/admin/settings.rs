@@ -69,7 +69,7 @@ fn update_body() -> Value {
         "auditRetentionDays": 91,
         "accountErrorProtection": gateway_core::account::AccountErrorProtection::default(),
         "accountWarmupEnabled": false,
-        "accountWarmupScheduleTime": "08:00",
+        "accountWarmupCron": "",
         "accountWarmupModel": null,
         "resetCreditLeadMinutes": 10,
         "resetCreditMaxWeeklyRemainingPercent": null
@@ -402,9 +402,34 @@ fn settings_request_accepts_unlimited_default_account_concurrency() {
 }
 
 #[test]
+fn settings_request_validates_cron_and_allows_disabled_empty_schedule() {
+    for (enabled, cron, valid) in [
+        (false, "", true),
+        (true, "", false),
+        (false, "08:00", false),
+        (false, "0 8 * * MON-FRI", true),
+        (true, "0 8 * * MON-FRI", true),
+        (true, "60 8 * * *", false),
+        (true, "0 8 * * *\n30 13 * * *", false),
+    ] {
+        let mut body = update_body();
+        body["accountWarmupEnabled"] = json!(enabled);
+        body["accountWarmupCron"] = json!(cron);
+        body["accountWarmupModel"] = json!("test-model");
+        let request: UpdateRuntimeSettingsRequest = serde_json::from_value(body).unwrap();
+        let result = request.validate();
+        assert_eq!(result.is_ok(), valid, "{enabled}: {cron:?}");
+        if let Err(error) = result {
+            assert_eq!(error.field(), "accountWarmupCron");
+        }
+    }
+}
+
+#[test]
 fn settings_request_requires_model_when_warmup_is_enabled() {
     let mut body = update_body();
     body["accountWarmupEnabled"] = json!(true);
+    body["accountWarmupCron"] = json!("0 8 * * *");
     let request: UpdateRuntimeSettingsRequest =
         serde_json::from_value(body).expect("decode settings");
 
@@ -484,7 +509,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             audit_retention_days: 91,
             account_error_protection: Default::default(),
             account_warmup_enabled: false,
-            account_warmup_schedule_time: "08:00".to_owned(),
+            account_warmup_cron: String::new(),
             account_warmup_model: None,
             reset_credit_lead_minutes: 10,
             reset_credit_max_weekly_remaining_percent: None,
@@ -529,7 +554,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             "auditRetentionDays": 91,
             "accountErrorProtection": gateway_core::account::AccountErrorProtection::default(),
                 "accountWarmupEnabled": false,
-                "accountWarmupScheduleTime": "08:00",
+                "accountWarmupCron": "",
                 "accountWarmupModel": null,
                 "resetCreditLeadMinutes": 10,
                 "resetCreditMaxWeeklyRemainingPercent": null,

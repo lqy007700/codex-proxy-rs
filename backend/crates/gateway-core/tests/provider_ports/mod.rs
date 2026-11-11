@@ -221,30 +221,66 @@ fn scheduling_state_preserves_provider_neutral_signals() {
 }
 
 #[test]
-fn warmup_schedule_time_and_policy_validation() {
-    use gateway_core::provider_ports::{ProviderWarmupPolicy, valid_warmup_schedule_time};
+fn warmup_cron_rejects_legacy_times_and_non_five_field_expressions() {
+    use gateway_core::provider_ports::valid_warmup_cron;
 
-    assert!(valid_warmup_schedule_time("08:00"));
-    assert!(valid_warmup_schedule_time("08:00,13:00"));
-    assert!(valid_warmup_schedule_time("00:00,23:59"));
-    assert!(!valid_warmup_schedule_time(""));
-    assert!(!valid_warmup_schedule_time("8:00"));
-    assert!(!valid_warmup_schedule_time("24:00"));
-    assert!(!valid_warmup_schedule_time("08:60"));
-    assert!(!valid_warmup_schedule_time("08:00,"));
-    assert!(!valid_warmup_schedule_time("08:00, 13:00"));
+    assert!(valid_warmup_cron("0 8 * * *"));
+    assert!(valid_warmup_cron("*/15 8-18 * * MON-FRI"));
+    for invalid in [
+        "",
+        "08:00",
+        "08:00,13:00",
+        "0 8 * *",
+        "0 0 8 * * *",
+        "60 * * * *",
+        "0 24 * * *",
+        "0 8 32 * *",
+        "0 8 * 13 *",
+        " 0 8 * * *",
+        "0 8 * * * ",
+        "0\t8 * * *",
+    ] {
+        assert!(!valid_warmup_cron(invalid), "accepted {invalid:?}");
+    }
+}
+
+#[test]
+fn warmup_cron_matches_calendar_steps_and_lists_at_minute_precision() {
+    use gateway_core::provider_ports::ProviderWarmupPolicy;
 
     let policy = ProviderWarmupPolicy::try_new(
         true,
-        "08:00,13:00".to_owned(),
+        "*/15 8,13 * NOV MON-FRI".to_owned(),
         Some("test-model".to_owned()),
     )
-    .expect("valid warmup policy");
-    assert!(policy.enabled());
-    assert_eq!(policy.schedule_time(), "08:00,13:00");
-    assert_eq!(policy.model(), Some("test-model"));
-    assert_eq!(policy.scheduled_times(), vec![(8, 0), (13, 0)]);
+    .unwrap();
+    let slot =
+        |value: &str| chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S").unwrap();
+    assert!(policy.matches_slot(slot("2026-11-11 08:15:00")));
+    assert!(policy.matches_slot(slot("2026-11-11 13:30:00")));
+    for unmatched in [
+        "2026-11-11 08:14:00",
+        "2026-11-11 08:15:01",
+        "2026-11-11 09:15:00",
+        "2026-11-14 08:15:00",
+        "2026-12-11 08:15:00",
+    ] {
+        assert!(!policy.matches_slot(slot(unmatched)), "matched {unmatched}");
+    }
+}
 
-    assert!(ProviderWarmupPolicy::try_new(true, "invalid".to_owned(), None).is_err());
-    assert!(ProviderWarmupPolicy::try_new(true, "08:00".to_owned(), None).is_err());
+#[test]
+fn warmup_policy_requires_a_schedule_and_model_only_when_enabled() {
+    use gateway_core::provider_ports::ProviderWarmupPolicy;
+
+    let disabled = ProviderWarmupPolicy::try_new(false, String::new(), None).unwrap();
+    assert!(ProviderWarmupPolicy::try_new(true, String::new(), Some("model".to_owned())).is_err());
+    assert!(ProviderWarmupPolicy::try_new(false, "08:00".to_owned(), None).is_err());
+    assert!(ProviderWarmupPolicy::try_new(true, "0 8 * * *".to_owned(), None).is_err());
+    assert!(
+        ProviderWarmupPolicy::try_new(true, "0 8 * * *".to_owned(), Some(" ".to_owned())).is_err()
+    );
+    assert!(!disabled.matches_slot(
+        chrono::NaiveDateTime::parse_from_str("2026-11-11 08:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
+    ));
 }

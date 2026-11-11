@@ -163,6 +163,15 @@ mod query {
     }
 
     #[test]
+    fn account_query_accepts_quota_paused_as_a_distinct_status() {
+        let query: ListQuery = serde_json::from_value(json!({"status": "quota_paused"})).unwrap();
+        assert_eq!(
+            query.validate().unwrap().status,
+            Some(AccountStatus::QuotaPaused)
+        );
+    }
+
+    #[test]
     fn account_query_should_reject_unbounded_page_size() {
         let query: ListQuery =
             serde_json::from_value(json!({"pageSize": 201})).expect("deserialize account query");
@@ -324,6 +333,56 @@ mod profile_avatar {
 mod batch_update {
     use gateway_api::admin::accounts::{BatchUpdateAccountsRequest, UpdateAccountRequest};
     use serde_json::json;
+
+    #[test]
+    fn quota_limits_distinguish_omitted_empty_and_configured_values() {
+        let omitted: BatchUpdateAccountsRequest = serde_json::from_value(json!({
+            "accountIds": ["acct_test"], "enabled": true
+        }))
+        .unwrap();
+        omitted.validate().unwrap();
+        assert!(omitted.quota_limits.is_none());
+        assert!(omitted.allow_credits.is_none());
+
+        let cleared: BatchUpdateAccountsRequest = serde_json::from_value(json!({
+            "accountIds": ["acct_test"], "quotaLimits": {}
+        }))
+        .unwrap();
+        cleared.validate().unwrap();
+        assert!(cleared.quota_limits.unwrap().is_empty());
+        assert!(cleared.enabled.is_none());
+        assert!(cleared.allow_credits.is_none());
+
+        for limit in [1, 100] {
+            let configured: BatchUpdateAccountsRequest = serde_json::from_value(json!({
+                "accountIds": ["acct_test"], "quotaLimits": {"week": limit}
+            }))
+            .unwrap();
+            configured.validate().unwrap();
+            assert!(configured.quota_limits.unwrap().contains("week"));
+        }
+    }
+
+    #[test]
+    fn quota_limits_reject_invalid_percentages_and_window_identifiers() {
+        for limits in [
+            json!({"week": 0}),
+            json!({"week": 101}),
+            json!({"week": -1}),
+            json!({"week": 1.5}),
+            json!({"week": "80"}),
+            json!({"": 80}),
+            json!({"week\n": 80}),
+            json!({("x".repeat(257)): 80}),
+        ] {
+            assert!(
+                serde_json::from_value::<BatchUpdateAccountsRequest>(json!({
+                    "accountIds": ["acct_test"], "quotaLimits": limits
+                }))
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn batch_update_accepts_credits_only_without_overwriting_other_settings() {
@@ -705,6 +764,7 @@ mod actions {
         for (field, value, expected) in [
             ("baseUrl", "", "connection.baseUrl"),
             ("transport", "websocket", "connection.transport"),
+            ("protocol", "unknown", "connection.protocol"),
             ("apiKey", "invalid key", "connection.apiKey"),
         ] {
             let mut invalid = request.clone();

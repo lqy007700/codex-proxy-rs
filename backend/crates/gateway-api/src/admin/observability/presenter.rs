@@ -1070,6 +1070,7 @@ pub(crate) fn dashboard_view(
         pool_summary: DashboardPoolSummaryView {
             total: provider_accounts.total,
             normal: provider_accounts.normal,
+            quota_paused: provider_accounts.quota_paused,
             quota_exhausted: provider_accounts.quota_exhausted,
             rate_limited: provider_accounts.rate_limited,
             disabled: provider_accounts.disabled,

@@ -704,6 +704,7 @@ fn rebuild_account(previous: &ProviderAccount, replacement: AccountReplacement) 
         replacement.last_error_message,
     )
     .with_scheduling(previous.concurrency_limit(), previous.weight())
+    .with_quota_limits(previous.quota_limits().clone(), previous.quota_paused())
     .with_refresh_schedule(replacement.has_refresh_token, replacement.next_refresh_at)
     .with_outbound_proxy(previous.outbound_proxy().cloned())
 }

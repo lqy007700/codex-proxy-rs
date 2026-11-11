@@ -193,3 +193,14 @@ fn client_model_is_json_escaped_and_terminal_snapshot_is_projected() {
         7
     );
 }
+
+#[test]
+fn openai_message_start_extensions_are_not_anthropic_projection_targets() {
+    for kind in ["message_start", "anthropic.message_start"] {
+        let raw = format!(
+            r#"{{ "type":"{kind}", "message":{{"model":"upstream"}}, "model":"business-root" }}"#
+        );
+        let event = websocket_event(kind, &raw);
+        assert_eq!(encoder().push_websocket(&event), vec![raw]);
+    }
+}

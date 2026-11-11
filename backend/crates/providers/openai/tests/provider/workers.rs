@@ -1,4 +1,4 @@
-//! 验证 OpenAI 目录 ETag worker 的失败交接、重启恢复与取消
+//! 验证 OpenAI 目录 worker 的故障恢复与预热 worker 的租约、禁用和取消
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,7 +7,9 @@ use chrono::Utc;
 use futures::StreamExt;
 use gateway_core::lifecycle::CancellationToken;
 use gateway_core::operation::{GenerateRequest, Operation, ProtocolPayload};
-use gateway_core::task::{WorkerContribution, WorkerDaemonContext, WorkerRunnable};
+use gateway_core::task::{
+    WorkerContribution, WorkerCycleContext, WorkerDaemonContext, WorkerRunnable,
+};
 use provider_openai::credential::ImportCodexOAuthCredential;
 use serde_json::{Map, json};
 use tokio::time::timeout;
@@ -146,4 +148,66 @@ async fn catalog_etag_failure_returns_to_supervisor_and_recovers_pending_refresh
         .await
         .expect("idle worker must stop on cancellation")
         .expect("cancelled worker");
+}
+
+#[tokio::test]
+async fn warmup_worker_keeps_its_lease_and_sends_nothing_when_disabled_or_cancelled() {
+    let server = MockServer::start().await;
+    let store = Arc::new(MemoryAccountStore::default());
+    store
+        .seed_oauth_credential(ImportCodexOAuthCredential {
+            account_id: "acct_disabled_warmup".to_owned(),
+            name: "disabled warmup".to_owned(),
+            secret: secret("at-disabled-warmup"),
+            verified_account: profile("chatgpt-disabled-warmup"),
+            next_refresh_at: Some(Utc::now() + chrono::Duration::minutes(30)),
+            enabled: true,
+        })
+        .await;
+    let mut bundle = initialized_test_bundle(store, server.uri()).await;
+    let worker = bundle
+        .take_worker_contributions()
+        .into_iter()
+        .find_map(|contribution| match contribution {
+            WorkerContribution::Registration(registration)
+                if registration.id.owner() == "openai-account-warmup" =>
+            {
+                Some(registration)
+            }
+            _ => None,
+        })
+        .expect("account warmup worker");
+    let WorkerRunnable::Scheduled {
+        schedule,
+        lease,
+        task,
+    } = worker.runnable
+    else {
+        panic!("account warmup worker must be scheduled");
+    };
+    assert_eq!(schedule.interval(), Duration::from_secs(30));
+    assert_eq!(schedule.leader_lease_ttl(), Duration::from_secs(15 * 60));
+    assert_eq!(
+        schedule.leader_lease_renewal_interval(),
+        Duration::from_secs(5 * 60)
+    );
+    let lease = lease.expect("account warmup requires the existing worker lease");
+    assert_eq!(lease.worker(), &worker.id);
+    assert_eq!(lease.ttl(), schedule.leader_lease_ttl());
+
+    for cancelled in [false, true] {
+        let cancellation = CancellationToken::new();
+        if cancelled {
+            cancellation.cancel();
+        }
+        task.run_cycle(WorkerCycleContext::new(
+            worker.id.clone(),
+            None,
+            cancellation,
+        ))
+        .await
+        .expect("disabled or cancelled warmup cycle");
+    }
+
+    assert!(server.received_requests().await.unwrap().is_empty());
 }

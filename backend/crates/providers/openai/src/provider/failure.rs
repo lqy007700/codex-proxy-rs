@@ -14,6 +14,7 @@ const OPENAI_ACCOUNT_SCORE_FAILURE_REASONS: &[&str] = &[
     "slow_down",
     "rate_limit_exceeded",
     "rate_limit_error",
+    "overloaded_error",
     "server_error",
     "service_unavailable_error",
 ];
@@ -1425,6 +1426,11 @@ pub(super) fn map_upstream_failure(
         && is_cyber_policy_code(failure.code.as_deref());
     let continuation_failure = failure
         .upstream_code()
+        .filter(|_| {
+            !failure
+                .status
+                .is_some_and(|status| status.is_server_error())
+        })
         .filter(|code| is_history_failure_code(code))
         .map(|_| ContinuationFailure::HistoryUnavailable);
     let send_state = upstream_send_state(failure.send_phase);

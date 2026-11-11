@@ -357,6 +357,7 @@ fn member(account_id: &str, total_slots: u64) -> AccountGroupMemberFact {
         group_id: group_id(),
         account_id: account_id.to_owned(),
         status: AccountStatusFacts {
+            quota_paused: false,
             enabled: true,
             credential_state: CredentialState::Ready,
             access_token_expires_at: None,

@@ -8,6 +8,8 @@ mod cookies;
 mod correlation;
 mod error_details;
 mod image_model_access;
+mod messages;
+mod messages_transport;
 mod model_account_eligibility;
 mod outbound;
 pub(super) use outbound::outbound_context;
@@ -100,6 +102,117 @@ use crate::support::{
     TestLeaseCoordinator, account_policy, catalog_cache, profile, secret,
 };
 use crate::transport::accept_codex_test_websocket;
+
+#[tokio::test]
+async fn general_quota_limits_filter_requests_and_native_owners_until_every_window_recovers() {
+    let store = Arc::new(MemoryAccountStore::default());
+    let limited = "acct_provider_contract";
+    let backup = "acct_scope_new";
+    create_account(&store, limited).await;
+    create_account(&store, backup).await;
+    store.set_quota_limits(
+        limited,
+        serde_json::from_value(json!({"codex:18000s":99,"codex:604800s":95})).unwrap(),
+    );
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/codex/responses"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(CAPTURE_COMPLETED_SSE),
+        )
+        .mount(&server)
+        .await;
+    let leases = Arc::new(TestLeaseCoordinator::default());
+    let (provider, quota) = provider_and_quota_with_affinity_and_base_url_and_leases(
+        &store,
+        Arc::new(MemorySessionAffinity::default()),
+        server.uri(),
+        leases.clone(),
+        0,
+    );
+    for (index, (short, weekly, paused)) in
+        [(99.0, 96.0, true), (0.0, 95.0, true), (98.99, 94.99, false)]
+            .into_iter()
+            .enumerate()
+    {
+        let account = store.account(limited).unwrap();
+        let usage = Mock::given(method("GET"))
+            .and(path("/api/codex/usage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "rate_limit": {
+                    "allowed":true,
+                    "primary_window":{"limit_window_seconds":18000,"used_percent":short},
+                    "secondary_window":{"limit_window_seconds":604800,"used_percent":weekly}
+                },
+                "code_review_rate_limit":{"primary_window":{"limit_window_seconds":18000,"used_percent":100}}
+            })))
+            .mount_as_scoped(&server)
+            .await;
+        quota.refresh_account(account.id()).await.unwrap();
+        drop(usage);
+        assert_eq!(store.account(limited).unwrap().quota_paused(), paused);
+        let pinned = pinned_continuation_context(
+            &format!("req_threshold_owner_{index}"),
+            limited,
+            "client-previous",
+            "upstream-previous",
+            1,
+            ContinuationAttempt::Native,
+        );
+        let before = leases.requests.lock().unwrap().len();
+        let result = provider
+            .clone()
+            .execute(planned_request("openai", http_generate_operation()), pinned)
+            .await;
+        if paused {
+            let error = result
+                .err()
+                .expect("paused native owner must not acquire a lease");
+            assert_eq!(error.send_state(), UpstreamSendState::NotSent);
+            assert_ne!(error.kind(), ProviderErrorKind::QuotaExhausted);
+            assert_eq!(leases.requests.lock().unwrap().len(), before);
+            drop(
+                provider
+                    .clone()
+                    .execute(
+                        planned_request("openai", http_generate_operation()),
+                        context(
+                            &format!("req_threshold_backup_{index}"),
+                            CancellationToken::new(),
+                        ),
+                    )
+                    .await
+                    .unwrap(),
+            );
+            assert_eq!(
+                leases
+                    .requests
+                    .lock()
+                    .unwrap()
+                    .last()
+                    .unwrap()
+                    .account_id()
+                    .as_str(),
+                backup
+            );
+        } else {
+            drop(result.expect("full named bucket does not pause a recovered general window"));
+            assert_eq!(
+                leases
+                    .requests
+                    .lock()
+                    .unwrap()
+                    .last()
+                    .unwrap()
+                    .account_id()
+                    .as_str(),
+                limited
+            );
+        }
+    }
+}
 
 #[tokio::test]
 async fn account_client_preparation_keeps_ca_read_cause_without_exposing_path() {
@@ -7497,6 +7610,8 @@ async fn affinity_quota_switch_should_clear_old_turn_state_without_a_provider_st
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            quota_pause: None,
+            expected_connection: None,
             plan_type: None,
             account_id: first_account.id().clone(),
             expected_revision: first_account.revision(),
@@ -8119,7 +8234,7 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 false,
                 Some(json!("default")),
                 Some("priority"),
-                Some("default"),
+                None,
                 Some(3_437_500),
             ),
             (
@@ -8135,7 +8250,7 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 false,
                 Some(json!("priority")),
                 Some("priority"),
-                Some("default"),
+                None,
                 Some(3_437_500),
             ),
             (
@@ -8143,7 +8258,7 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 false,
                 Some(json!("fast")),
                 None,
-                Some("default"),
+                None,
                 Some(3_437_500),
             ),
             (
@@ -8151,7 +8266,7 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 false,
                 Some(json!("default")),
                 None,
-                Some("default"),
+                None,
                 Some(3_437_500),
             ),
             (FastMode::Disabled, false, None, None, None, Some(3_437_500)),
@@ -8224,8 +8339,8 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 true,
                 Some(json!("auto")),
                 None,
-                Some("auto"),
                 None,
+                Some(3_437_500),
             ),
             (FastMode::Enabled, false, None, None, None, Some(3_437_500)),
             (
@@ -8233,7 +8348,7 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 false,
                 Some(json!("default")),
                 None,
-                Some("default"),
+                None,
                 Some(3_437_500),
             ),
         ] {
@@ -8501,6 +8616,8 @@ async fn official_usage_limit_failure_persists_fact_without_fabricating_usage() 
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            quota_pause: None,
+            expected_connection: None,
             plan_type: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
@@ -10085,6 +10202,8 @@ async fn quota_limited_account_diagnostic_uses_upstream() {
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            quota_pause: None,
+            expected_connection: None,
             plan_type: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
@@ -12384,24 +12503,18 @@ async fn fast_policy_changes_preserve_the_websocket_continuation_and_meter_each_
         let mut websocket =
             crate::transport::accept_codex_test_websocket_with(socket, |request, response| {
                 // 提示头只在首次握手发送；后续档位由各自 response.create 正文指定
-                assert_eq!(
-                    request.headers()["x-codex-routing-hint"],
-                    "model=gpt-5.4;tier=default"
-                );
+                assert_eq!(request.headers()["x-codex-routing-hint"], "model=gpt-5.4");
                 response.headers_mut().insert(
                     "sec-websocket-extensions",
                     "permessage-deflate".parse().unwrap(),
                 );
             })
             .await;
-        for (index, tier) in ["default", "priority", "default", "default"]
-            .into_iter()
-            .enumerate()
-        {
+        for (index, tier) in [None, Some("priority"), None, None].into_iter().enumerate() {
             let message = websocket.next().await.unwrap().unwrap();
             let frame: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
             assert_eq!(frame["type"], "response.create");
-            assert_eq!(frame["service_tier"], tier);
+            assert_eq!(frame.get("service_tier").and_then(Value::as_str), tier);
             assert_eq!(
                 frame.get("previous_response_id").cloned(),
                 index
@@ -12558,11 +12671,7 @@ async fn fast_policy_changes_preserve_the_websocket_continuation_and_meter_each_
         );
         assert_eq!(
             observed_tier.as_deref(),
-            Some(if fast_mode == FastMode::Enabled {
-                "priority"
-            } else {
-                "default"
-            })
+            (fast_mode == FastMode::Enabled).then_some("priority")
         );
         assert_eq!(
             costs,

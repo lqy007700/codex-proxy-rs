@@ -17,7 +17,7 @@
 </div>
 
 > [!NOTE]
-> 本项目提供 Responses API 与 `/v1/chat/completions` 兼容接口，Chat 的功能与参数范围见 [API 参考](docs/api.md#chat-completions)
+> 本项目提供 Responses、Chat Completions 和 Anthropic Messages 接口，协议范围与转换边界见 [API 参考](docs/api.md#3-模型数据面与模型目录)
 
 本仓库是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人维护版本，开发与发布均使用 `main`。
 安装包、容器镜像与管理端在线更新来自 `lqy007700/codex-proxy-rs`，维护流程见 [main 分支维护](docs/development.md#main-分支维护)
@@ -100,12 +100,15 @@ API Key 持有者可在登录页切换身份，查看自己的用量与额度，
 
 完整步骤、生图配置与排障见[客户端配置](deploy/README.md#客户端配置)
 
-**其他 Responses API 客户端**：填写以下信息：
+**其他 Responses / Chat Completions 客户端**：填写以下信息：
 
 | 配置 | 值 |
 | --- | --- |
 | Base URL | `http://127.0.0.1:8080/v1`；远程接入使用服务器的 HTTPS 地址 |
 | API Key | 管理端创建的客户端密钥 |
+
+**Claude Code / Anthropic SDK**：使用网关根地址和同一客户端密钥，详见 [Messages 客户端](deploy/README.md#messages-客户端)。
+上游 API Key 账号可选择 Responses 或 Messages 协议，不要求客户端与上游使用同一协议
 
 查询该密钥可见的模型目录：
 

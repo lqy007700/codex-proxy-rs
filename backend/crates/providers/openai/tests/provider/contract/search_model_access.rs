@@ -369,3 +369,101 @@ async fn search_model_selection_does_not_restrict_plugin_body_rewrites() {
         "plugin-model"
     );
 }
+
+#[tokio::test]
+async fn search_reuses_protocol_projection_until_credential_revision_changes() {
+    use gateway_core::account::{CredentialCasOutcome, CredentialCasUpdate, ProviderAccountUpdate};
+    use provider_openai::credential::{
+        ApiKeyProtocol, CodexCredentialCodec, CodexCredentialData, ResponsesTransport,
+    };
+
+    let store = Arc::new(MemoryAccountStore::default());
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/alpha/search"))
+        .and(body_bytes(BODY.to_vec()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"output":"result"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    store
+        .seed_api_key_for_protocol(
+            FIRST,
+            server.uri(),
+            ResponsesTransport::Http,
+            ApiKeyProtocol::Messages,
+        )
+        .await;
+    let provider = provider(&store);
+    let ctx = || {
+        attempt(
+            AccountAttemptContext::new(BTreeSet::new(), None, None)
+                .with_account_scope(scope(AccountModelAccess::all(), AccountModelAccess::all())),
+            AccountAffinity::Strict,
+            1,
+            None,
+        )
+    };
+    let loads = store.credential_loads();
+    for _ in 0..2 {
+        let error = provider
+            .clone()
+            .execute(search(BODY), ctx())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ProviderErrorKind::NoEligibleAccount);
+        assert_eq!(error.send_state(), UpstreamSendState::NotSent);
+    }
+    assert_eq!(store.credential_loads() - loads, 1);
+    assert!(server.received_requests().await.unwrap().is_empty());
+
+    let id = ProviderAccountId::new(FIRST).unwrap();
+    for protocol in [ApiKeyProtocol::Responses, ApiKeyProtocol::Messages] {
+        let loaded = store.load_current_credential(&id).await.unwrap();
+        let mut data = CodexCredentialCodec::decode_complete(&loaded.credential).unwrap();
+        let CodexCredentialData::ApiKey(configuration) = &mut data else {
+            panic!("API Key account");
+        };
+        configuration.protocol = protocol;
+        let update = CredentialCasUpdate::new(
+            id.clone(),
+            loaded.account.revision(),
+            ProviderAccountUpdate {
+                account_id: id.clone(),
+                name: FIRST.to_owned(),
+                email: None,
+                plan_type: None,
+            },
+            CodexCredentialCodec::encode_complete(data).unwrap(),
+            false,
+            None,
+            None,
+        )
+        .unwrap()
+        .preserving_profile();
+        assert!(matches!(
+            store.compare_and_swap_credential(update).await.unwrap(),
+            CredentialCasOutcome::Updated(_)
+        ));
+        if protocol == ApiKeyProtocol::Responses {
+            let mut stream = provider.clone().execute(search(BODY), ctx()).await.unwrap();
+            assert_eq!(stream.metadata().provider_account_id(), &id);
+            while let Some(event) = stream.next().await {
+                event.unwrap();
+            }
+        } else {
+            let loads = store.credential_loads();
+            for _ in 0..2 {
+                let error = provider
+                    .clone()
+                    .execute(search(BODY), ctx())
+                    .await
+                    .err()
+                    .unwrap();
+                assert_eq!(error.kind(), ProviderErrorKind::NoEligibleAccount);
+            }
+            assert_eq!(store.credential_loads() - loads, 1);
+        }
+    }
+}

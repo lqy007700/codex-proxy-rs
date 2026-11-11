@@ -682,27 +682,31 @@ fn websocket_connection_profile(
     profile
 }
 
+/// HTTP 正文共用逐块空闲上限；抓取与协议观测由各自调用方执行
+pub(super) fn http_response_stream(response: ReqwestResponse) -> CodexBackendSseStream {
+    let stream: CodexBackendSseStream =
+        Box::pin(response.bytes_stream().map_err(CodexClientError::Http));
+    Box::pin(futures::stream::unfold(Some(stream), |stream| async move {
+        let mut stream = stream?;
+        match tokio::time::timeout(UPSTREAM_STREAM_IDLE_TIMEOUT, stream.next()).await {
+            Ok(Some(chunk)) => Some((chunk, Some(stream))),
+            Ok(None) => None,
+            Err(_) => Some((
+                Err(CodexClientError::StreamIdleTimeout {
+                    timeout: UPSTREAM_STREAM_IDLE_TIMEOUT,
+                }),
+                None,
+            )),
+        }
+    }))
+}
+
 fn http_sse_stream(
     response: ReqwestResponse,
     rate_limit_updates: CodexRateLimitUpdates,
     trace: TraceContext,
 ) -> CodexBackendSseStream {
-    let stream: CodexBackendSseStream =
-        Box::pin(response.bytes_stream().map_err(CodexClientError::Http));
-    let stream: CodexBackendSseStream =
-        Box::pin(futures::stream::unfold(Some(stream), |stream| async move {
-            let mut stream = stream?;
-            match tokio::time::timeout(UPSTREAM_STREAM_IDLE_TIMEOUT, stream.next()).await {
-                Ok(Some(chunk)) => Some((chunk, Some(stream))),
-                Ok(None) => None,
-                Err(_) => Some((
-                    Err(CodexClientError::StreamIdleTimeout {
-                        timeout: UPSTREAM_STREAM_IDLE_TIMEOUT,
-                    }),
-                    None,
-                )),
-            }
-        }));
+    let stream = http_response_stream(response);
     let stream = Box::pin(async_stream::stream! {
         let mut stream = stream;
         let mut capture = StreamCapture::new(trace.clone(), StreamFormat::Sse);

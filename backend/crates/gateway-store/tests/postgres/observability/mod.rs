@@ -1492,6 +1492,10 @@ async fn dashboard_account_metrics_should_partition_account_statuses() {
     .execute(&database.pool)
     .await
     .expect("seed account metric states");
+    sqlx::query("update provider_accounts set quota_paused = true where id in ('acct_rate_cooldown', 'acct_usage_limit')")
+        .execute(&database.pool)
+        .await
+        .unwrap();
     super::drain_analytics(&database.pool).await;
     let repository = observability_repository(&database.pool);
     let range = ObservabilityRange::new(now - TimeDelta::hours(1), now + TimeDelta::hours(1))
@@ -1518,16 +1522,18 @@ async fn dashboard_account_metrics_should_partition_account_statuses() {
         (
             metrics.total,
             metrics.normal,
+            metrics.quota_paused,
             metrics.quota_exhausted,
             metrics.rate_limited,
             metrics.disabled,
             metrics.error,
         ),
-        (6, 2, 1, 0, 1, 2),
+        (6, 1, 1, 1, 0, 1, 2),
     );
     assert_eq!(
         metrics.total,
         metrics.normal
+            + metrics.quota_paused
             + metrics.quota_exhausted
             + metrics.rate_limited
             + metrics.disabled

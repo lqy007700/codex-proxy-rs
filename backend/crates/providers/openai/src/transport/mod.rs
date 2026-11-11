@@ -1,4 +1,4 @@
-//! Codex HTTP/SSE/WebSocket 上游 transport
+//! Codex HTTP/SSE/WebSocket 与 Messages HTTP/SSE 上游 transport
 
 mod automatic_context;
 pub mod canonical;
@@ -7,6 +7,7 @@ pub mod client;
 mod client_catalog;
 mod client_json;
 mod client_live;
+mod client_messages;
 mod client_stream;
 pub(crate) mod connection;
 mod correlation;

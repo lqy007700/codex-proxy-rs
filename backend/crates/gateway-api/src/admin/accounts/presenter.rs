@@ -25,6 +25,7 @@ pub(super) fn account_page_data(
         summary: AccountSummaryView {
             total: result.summary.total,
             normal: result.summary.normal,
+            quota_paused: result.summary.quota_paused,
             quota_exhausted: result.summary.quota_exhausted,
             rate_limited: result.summary.rate_limited,
             disabled: result.summary.disabled,
@@ -98,6 +99,7 @@ pub(super) fn account_view(
     let (mut quota, refresh_token_expires_at) = account_quota_view(quota, cooldown, now, time);
     quota.protection_rules = protection_rules;
     AccountView {
+        quota_limits: account.quota_limits,
         capabilities: capabilities.into(),
         id: account.id.clone(),
         name: account.name,
@@ -256,6 +258,7 @@ pub(super) fn account_quota_view(
     let recovery_probe_required = cooldown.is_some_and(|value| value.kind.requires_probe());
     (
         AccountQuotaView {
+            paused_windows: quota.paused_windows,
             refreshed_at_display,
             limit_reached: quota.limit_reached,
             rate_limited_until,
@@ -285,7 +288,7 @@ pub(crate) fn quota_window_view(
         limit_id,
         limit_name,
         role,
-        local_usage_attribution: _,
+        local_usage_attribution,
         window_seconds,
         used_percent,
         reset_at,
@@ -297,6 +300,8 @@ pub(crate) fn quota_window_view(
         .as_ref()
         .map_or_else(|| label.clone(), |name| format!("{name} · {label}"));
     AccountQuotaWindowView {
+        account_wide: local_usage_attribution
+            == gateway_admin::model::provider_credentials::QuotaLocalUsageAttribution::AccountWide,
         label_display,
         window_label_display: label,
         key,

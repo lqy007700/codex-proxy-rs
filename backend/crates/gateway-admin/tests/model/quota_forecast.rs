@@ -58,6 +58,7 @@ fn window(key: &str, days: u64) -> ProviderQuotaWindow {
 
 fn quota(windows: Vec<ProviderQuotaWindow>) -> ProviderQuota {
     ProviderQuota {
+        paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
         observed_at: Some(now()),

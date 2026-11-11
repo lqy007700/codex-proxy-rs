@@ -514,6 +514,7 @@ async fn threshold_services(
 
 fn weekly_quota(used_percent: f64) -> ProviderQuota {
     ProviderQuota {
+        paused_windows: Vec::new(),
         windows: vec![ProviderQuotaWindow {
             key: "week".into(),
             group: "shortTerm".into(),
@@ -658,6 +659,7 @@ async fn automation_defers_missing_invalid_or_failed_weekly_quota() {
         (empty_quota(), None),
         (
             ProviderQuota {
+                paused_windows: Vec::new(),
                 windows: vec![short, model, month],
                 ..empty_quota()
             },
@@ -665,6 +667,7 @@ async fn automation_defers_missing_invalid_or_failed_weekly_quota() {
         ),
         (
             ProviderQuota {
+                paused_windows: Vec::new(),
                 windows: vec![missing_percent],
                 ..empty_quota()
             },

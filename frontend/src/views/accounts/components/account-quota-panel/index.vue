@@ -11,6 +11,7 @@ import { groupedAccountQuotaWindows, orderedPanelQuotaWindows } from '../../cons
 import AccountProfileModal from '../account-profile-modal/index.vue'
 import AccountQuotaForecastModal from '../account-quota-forecast-modal/index.vue'
 import AccountQuotaPanelEntry from './Entry.vue'
+import AccountQuotaLimits from './QuotaLimits.vue'
 import AccountResetCredits from './ResetCredits.vue'
 
 const props = defineProps<{
@@ -32,7 +33,7 @@ const forecastOpen = shallowRef(false)
 const hasForecast = computed(() => props.account.authenticationKind !== 'api_key')
 const hasPersonalInfo = computed(() => props.account.capabilities.profile || props.account.capabilities.subscription)
 const canRefresh = computed(() => props.account.enabled && props.account.capabilities.quotaRefresh)
-const hasActions = computed(() => hasPersonalInfo.value || hasForecast.value || canRefresh.value || props.account.capabilities.resetCredits)
+const hasActions = computed(() => hasPersonalInfo.value || hasForecast.value || canRefresh.value || props.account.capabilities.resetCredits || props.account.capabilities.quotaLimitsSupported)
 watch(hasPersonalInfo, (available) => {
   if (!available)
     profileOpen.value = false
@@ -69,6 +70,11 @@ watch(hasPersonalInfo, (available) => {
         >
           <UserRound class="size-3.5" />
         </ZIconButton>
+        <AccountQuotaLimits
+          v-if="account.capabilities.quotaLimitsSupported"
+          :account="account"
+          @account-updated="emit('accountUpdated', $event)"
+        />
         <AccountResetCredits
           v-if="account.capabilities.resetCredits"
           :account="account"
