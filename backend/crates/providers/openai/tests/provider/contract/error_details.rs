@@ -63,29 +63,43 @@ async fn upstream_codes_survive_http_and_websocket_opening_without_normalization
         .finish();
     let _subscriber = tracing::subscriber::set_default(subscriber);
     for use_websocket in [false, true] {
-        for (body_code, header_code, expected_kind) in [
+        for (status, body_code, header_code, expected_kind) in [
             (
+                503,
                 Some("Vendor.Future.v2"),
                 None,
                 ProviderErrorKind::Unavailable,
             ),
-            (Some(" SERVER_ERROR "), None, ProviderErrorKind::Unavailable),
             (
+                503,
+                Some(" SERVER_ERROR "),
+                None,
+                ProviderErrorKind::Unavailable,
+            ),
+            (
+                503,
                 None,
                 Some("Vendor.Identity.v2"),
                 ProviderErrorKind::Unavailable,
             ),
             (
+                400,
                 Some("PrEvIoUs_ReSpOnSe_NoT_FoUnD"),
                 None,
                 ProviderErrorKind::ContinuationRecoveryRequired,
+            ),
+            (
+                503,
+                Some("PrEvIoUs_ReSpOnSe_NoT_FoUnD"),
+                None,
+                ProviderErrorKind::Unavailable,
             ),
         ] {
             let store = Arc::new(MemoryAccountStore::default());
             create_account(&store, "acct_provider_contract").await;
             let server = MockServer::start().await;
             let body = json!({"error": {"code": body_code, "message": "PRIVATE_UPSTREAM_DETAIL"}});
-            let mut response = ResponseTemplate::new(503).set_body_json(&body);
+            let mut response = ResponseTemplate::new(status).set_body_json(&body);
             if let Some(code) = header_code {
                 response = response.insert_header(
                     "x-error-json",
@@ -121,7 +135,17 @@ async fn upstream_codes_survive_http_and_websocket_opening_without_normalization
                 error.upstream_code().map(|code| code.as_str()),
                 Some(original_code)
             );
-            assert_eq!(error.kind(), expected_kind);
+            assert_eq!(
+                error.kind(),
+                expected_kind,
+                "status={status}, websocket={use_websocket}, code={original_code}"
+            );
+            assert_eq!(error.upstream_status(), Some(status));
+            assert_eq!(
+                error.continuation_failure(),
+                (expected_kind == ProviderErrorKind::ContinuationRecoveryRequired)
+                    .then_some(ContinuationFailure::HistoryUnavailable)
+            );
             assert_eq!(
                 serde_json::from_str::<Value>(error.raw_upstream_error().unwrap().as_str())
                     .unwrap(),
