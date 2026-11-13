@@ -58,7 +58,7 @@ export function useUsageAffinity(record: Readonly<Ref<UsageListRecord | null>>, 
         search: search.trim() || undefined,
       }, { signal: accountQuery.signal, silent: true })
       if (accountQuery.isCurrent(requestId))
-        accounts.value = page.items
+        accounts.value = page.items.filter(account => account.schedulingRole !== 'fallback')
     }
     catch (cause) { accountQuery.fail(requestId, cause) }
     finally { accountQuery.finish(requestId) }

@@ -376,7 +376,7 @@ async function loadTargetAccounts(search = '') {
         : undefined,
     }, { signal: accountQuery.signal })
     if (accountQuery.isCurrent(requestId))
-      targetAccounts.value = page.items
+      targetAccounts.value = page.items.filter(account => account.schedulingRole !== 'fallback')
   }
   catch (cause) { accountQuery.fail(requestId, cause) }
   finally { accountQuery.finish(requestId) }
