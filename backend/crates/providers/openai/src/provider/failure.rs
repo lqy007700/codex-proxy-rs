@@ -1422,7 +1422,7 @@ fn transient_retry_policy(
     match category {
         // 容量与可恢复服务故障共用已消耗次数，错误类别变化不能重置计数
         _ if category == CodexFailureCategory::CapacityUnavailable
-            || failure.is_retryable_service_unavailable() =>
+            || failure.is_retryable_service_failure() =>
         {
             Some(TransientRetryPolicy::RetryThenRotateAccountWithBudget {
                 max_total_retries: NonZeroU32::new(gateway_core::account::MAX_RECOVERY_ATTEMPTS)
@@ -1617,7 +1617,9 @@ pub(super) const fn provider_error_kind(category: CodexFailureCategory) -> Provi
         | CodexFailureCategory::FlexUnavailable
         | CodexFailureCategory::Unavailable => ProviderErrorKind::Unavailable,
         CodexFailureCategory::CapacityUnavailable => ProviderErrorKind::UpstreamCapacityUnavailable,
-        CodexFailureCategory::InvalidRequest => ProviderErrorKind::InvalidRequest,
+        CodexFailureCategory::InvalidRequest | CodexFailureCategory::GenericBadRequest => {
+            ProviderErrorKind::InvalidRequest
+        }
         CodexFailureCategory::PermissionDenied => ProviderErrorKind::PermissionDenied,
         CodexFailureCategory::Timeout => ProviderErrorKind::Timeout,
         CodexFailureCategory::Transport => ProviderErrorKind::Transport,
@@ -1667,6 +1669,7 @@ pub(super) fn account_failure(
         CodexFailureCategory::ModelUnsupported
         | CodexFailureCategory::TurnRateLimited
         | CodexFailureCategory::InvalidRequest
+        | CodexFailureCategory::GenericBadRequest
         | CodexFailureCategory::PermissionDenied
         | CodexFailureCategory::Timeout
         | CodexFailureCategory::CapacityUnavailable

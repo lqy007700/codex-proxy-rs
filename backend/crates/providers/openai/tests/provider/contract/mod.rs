@@ -3,6 +3,7 @@
 mod account_eligibility;
 mod account_isolation;
 mod account_mappings;
+mod bad_request;
 mod capacity;
 mod catalog_startup;
 mod cookies;

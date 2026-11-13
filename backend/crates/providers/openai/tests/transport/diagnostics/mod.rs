@@ -23,6 +23,63 @@ fn classify(status: u16, body: &str) -> CodexFailureCategory {
 }
 
 #[test]
+fn generic_bad_request_recovery_requires_exact_http_shape_and_explicit_rejection() {
+    for (status, body, generic) in [
+        (400, r#"{"detail":"Bad Request"}"#, true),
+        (400, "{ \"detail\" : \"Bad Request\" }\n", true),
+        (400, r#"{"detail":"Invalid input"}"#, false),
+        (400, r#"{"detail":"Bad Request","param":"input"}"#, false),
+        (
+            400,
+            r#"{"detail":"Bad Request","code":"unsupported_value"}"#,
+            false,
+        ),
+        (
+            400,
+            r#"{"error":{"message":"Bad Request","type":"invalid_request_error"}}"#,
+            false,
+        ),
+        (400, r#"{"error":{"message":"Bad Request"}}"#, false),
+        (400, "Bad Request", false),
+        (400, r#""Bad Request""#, false),
+        (400, "{}", false),
+        (404, r#"{"detail":"Bad Request"}"#, false),
+        (409, r#"{"detail":"Bad Request"}"#, false),
+    ] {
+        for phase in [
+            CodexUpstreamSendPhase::BeforePayload,
+            CodexUpstreamSendPhase::AfterPayload,
+            CodexUpstreamSendPhase::Ambiguous,
+        ] {
+            let failure = CodexUpstreamFailure::from_response(
+                reqwest::StatusCode::from_u16(status).unwrap(),
+                body,
+                None,
+                &CodexUpstreamDiagnostics::default(),
+                None,
+                &[],
+                &[],
+                phase,
+            );
+            assert_eq!(
+                failure.category(),
+                if generic {
+                    CodexFailureCategory::GenericBadRequest
+                } else {
+                    CodexFailureCategory::InvalidRequest
+                },
+                "status={status}, body={body}"
+            );
+            assert_eq!(
+                failure.replay_is_safe(),
+                generic && phase == CodexUpstreamSendPhase::AfterPayload,
+                "phase={phase:?}, status={status}, body={body}"
+            );
+        }
+    }
+}
+
+#[test]
 fn messages_error_types_keep_structured_categories_and_replay_safety() {
     for (status, error_type, category, replay) in [
         (

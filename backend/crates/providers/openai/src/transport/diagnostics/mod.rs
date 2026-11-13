@@ -54,6 +54,8 @@ pub enum CodexFailureCategory {
     CloudflareChallenge,
     CloudflarePathBlocked,
     InvalidRequest,
+    /// HTTP 400 仅含通用 Bad Request 详情，未提供具体参数错误
+    GenericBadRequest,
     PermissionDenied,
     Timeout,
     /// 模型容量暂时不足，只影响当前请求，不证明账号健康异常
@@ -158,6 +160,7 @@ impl CodexUpstreamFailure {
             message: failure.message.clone(),
             client_message: Some(failure.message.clone()),
             resets_at: None,
+            generic_bad_request: false,
         };
         let status = failure
             .explicit_status_code
@@ -201,22 +204,24 @@ impl CodexUpstreamFailure {
         self.category
     }
 
-    /// 普通 500/503 与无状态码的明确服务错误共用恢复策略，特殊错误分类保留各自策略
-    pub(crate) fn is_retryable_service_unavailable(&self) -> bool {
-        self.category == CodexFailureCategory::Unavailable
-            && (matches!(
-                self.status,
-                Some(StatusCode::INTERNAL_SERVER_ERROR | StatusCode::SERVICE_UNAVAILABLE)
-            ) || (self.status.is_none()
-                && (matches!(self.code.as_deref(), Some("server_error" | "server_busy"))
-                    || self.client_error_type.as_deref() == Some("api_error"))))
+    /// 通用 HTTP 400 拒绝与明确服务故障共用有界恢复，不扩大 WS opening 的恢复范围
+    pub(crate) fn is_retryable_service_failure(&self) -> bool {
+        (self.category == CodexFailureCategory::GenericBadRequest
+            && self.send_phase == CodexUpstreamSendPhase::AfterPayload)
+            || (self.category == CodexFailureCategory::Unavailable
+                && (matches!(
+                    self.status,
+                    Some(StatusCode::INTERNAL_SERVER_ERROR | StatusCode::SERVICE_UNAVAILABLE)
+                ) || (self.status.is_none()
+                    && (matches!(self.code.as_deref(), Some("server_error" | "server_busy"))
+                        || self.client_error_type.as_deref() == Some("api_error")))))
     }
 
-    /// 只对明确识别的账号、容量拒绝或可恢复服务故障提供重放资格
+    /// 仅对识别的账号、容量、服务故障及通用 HTTP 400 明确拒绝提供重放资格
     #[must_use]
     pub fn replay_is_safe(&self) -> bool {
         !matches!(self.send_phase, CodexUpstreamSendPhase::Ambiguous)
-            && (self.is_retryable_service_unavailable()
+            && (self.is_retryable_service_failure()
                 || matches!(
                     self.category,
                     CodexFailureCategory::ModelUnsupported
@@ -244,6 +249,7 @@ struct ParsedUpstreamError {
     message: String,
     client_message: Option<String>,
     resets_at: Option<i64>,
+    generic_bad_request: bool,
 }
 
 impl ParsedUpstreamError {
@@ -261,6 +267,7 @@ impl ParsedUpstreamError {
                 message: body.to_owned(),
                 client_message: None,
                 resets_at: None,
+                generic_bad_request: false,
             };
         };
         let error = value
@@ -312,6 +319,11 @@ impl ParsedUpstreamError {
             message,
             client_message,
             resets_at,
+            // 只识别已观测到的完整响应形态，额外字段可能携带参数错误，不能一并重试
+            generic_bad_request: value.as_object().is_some_and(|object| {
+                object.len() == 1
+                    && object.get("detail").and_then(Value::as_str) == Some("Bad Request")
+            }),
         }
     }
 }
@@ -595,6 +607,12 @@ fn classify_upstream_failure(
     }
     if status == Some(StatusCode::TOO_MANY_REQUESTS) {
         return CodexFailureCategory::RateLimited;
+    }
+    if matches!(source, UpstreamFailureSource::HttpResponse)
+        && status == Some(StatusCode::BAD_REQUEST)
+        && fields.generic_bad_request
+    {
+        return CodexFailureCategory::GenericBadRequest;
     }
     match status.map(|status| status.as_u16()) {
         Some(status) => match status {
