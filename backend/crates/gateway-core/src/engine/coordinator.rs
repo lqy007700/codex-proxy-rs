@@ -1775,6 +1775,7 @@ where
             .await;
         }
         let provider_proved_replay_safe = provider_proved_replay_safe(&error);
+        let same_account_retry_blocked = error.same_account_retry_blocked();
         let request_recovery = error
             .request_recovery()
             .filter(|_| {
@@ -1784,6 +1785,7 @@ where
                         Some(crate::error::PreDeliveryRetry::SameAccountRequestRecovery)
                     )
                     && !error.retry_is_prohibited()
+                    && !same_account_retry_blocked
                     && !execution_effect_observed
                     && !self.replay_barrier_reached
                     && !self.delivery_pending
@@ -1793,7 +1795,8 @@ where
                     && !self.deadline.is_elapsed()
             })
             .cloned();
-        let continuation_retry = !execution_effect_observed
+        let continuation_retry = !same_account_retry_blocked
+            && !execution_effect_observed
             && self.prepare_continuation_retry(
                 &current,
                 &error,
@@ -1825,7 +1828,8 @@ where
         // 改写成安全证明；外部副作用、取消、预算与下游提交仍由 Core 拦截
         let transport_recovery = match error.pre_delivery_retry() {
             Some(crate::error::PreDeliveryRetry::SameAccountConnectionRetry { transport })
-                if !execution_effect_observed
+                if !same_account_retry_blocked
+                    && !execution_effect_observed
                     && !self.connection_budget.exhausted()
                     && !self.replay_barrier_reached
                     && !self.delivery_pending
@@ -1843,7 +1847,8 @@ where
             Some(crate::error::PreDeliveryRetry::SameAccountTransportRetry {
                 retry_index,
                 delay,
-            }) if !retry_after_exceeds_limit
+            }) if !same_account_retry_blocked
+                && !retry_after_exceeds_limit
                 && !execution_effect_observed
                 && !self.connection_budget.exhausted()
                 && !self.replay_barrier_reached
@@ -1852,7 +1857,8 @@ where
                 Some((AttemptTransport::Retry(retry_index), delay))
             }
             Some(crate::error::PreDeliveryRetry::SameAccountTransportFallback)
-                if !retry_after_exceeds_limit
+                if !same_account_retry_blocked
+                    && !retry_after_exceeds_limit
                     && !execution_effect_observed
                     && !self.connection_budget.exhausted()
                     && !self.replay_barrier_reached
@@ -1928,7 +1934,8 @@ where
                 max_delay,
                 jitter,
                 ..
-            }) if ordinary_retry
+            }) if !same_account_retry_blocked
+                && ordinary_retry
                 && !suppress_transient_retry
                 && !bounded_transient_retry
                 && !retry_after_exceeds_limit =>
@@ -1968,9 +1975,9 @@ where
             && ((bounded_transient_retry && ordinary_retry && !suppress_transient_retry)
                 || account_rotation_retry);
         if staged_recovery {
-            let mut retry_same = self
-                .account_recovery
-                .record_failure(account_rotation_retry || retry_after_exceeds_limit);
+            let mut retry_same = self.account_recovery.record_failure(
+                account_rotation_retry || retry_after_exceeds_limit || same_account_retry_blocked,
+            );
             let budget_exhausted = match error.pre_delivery_retry() {
                 Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
                     policy:
@@ -1993,7 +2000,7 @@ where
                 retry_same = false;
             }
             // 本地业务同账号重试固定等待一秒；上游明确等待仍优先，跨账号不继承旧账号退避
-            let delay = if retry_same && !retry_after_exceeds_limit {
+            let delay = if retry_same && !retry_after_exceeds_limit && !same_account_retry_blocked {
                 error.retry_after().unwrap_or(Duration::from_secs(1))
             } else {
                 Duration::ZERO
@@ -2007,7 +2014,8 @@ where
                 }
             }
         }
-        let same_account_retry = !execution_effect_observed
+        let same_account_retry = !same_account_retry_blocked
+            && !execution_effect_observed
             && error.retries_same_account()
             && provider_proved_replay_safe
             && !self.replay_barrier_reached
@@ -2087,6 +2095,7 @@ where
             "reserveConnectionRotation": reserve_connection_rotation,
             "transientRetry": transient_retry.is_some(),
             "retryAfterExceeded": retry_after_exceeds_limit,
+            "sameAccountRetryBlocked": same_account_retry_blocked,
             "maxRetryAfterSeconds": self.plan.max_retry_after().as_secs(),
             "clientRetrySuppressed": suppress_transient_retry,
             "rotationRetry": rotation_retry, "accountRotations": self.account_rotations,
