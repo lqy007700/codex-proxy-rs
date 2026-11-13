@@ -72,9 +72,8 @@ async fn usage_detail_preserves_upstream_error_fields_without_exporting_other_bo
     let Some(database) = TestDatabase::create("usage_upstream_error").await else {
         return;
     };
-    seed_observability_facts(&database.pool, Utc::now())
-        .await
-        .unwrap();
+    let now = Utc::now();
+    seed_observability_facts(&database.pool, now).await.unwrap();
     let repository = observability_repository(&database.pool);
     let error = serde_json::json!({
         "code": "turn_rate_limit_exceeded", "type": "rate_limit_error",
@@ -94,6 +93,35 @@ async fn usage_detail_preserves_upstream_error_fields_without_exporting_other_bo
             .await
             .unwrap();
         assert_eq!(detail.request.retry_after_ms, Some(206_000));
+        assert_eq!(
+            detail.request.error_origin(),
+            admin_observability::UsageErrorOrigin::Upstream
+        );
+        let page = repository
+            .list_usage_records(UsageRecordQuery {
+                scope: admin_observability::UsageRecordScope::All,
+                range: ObservabilityRange::new(
+                    now - TimeDelta::hours(1),
+                    now + TimeDelta::hours(1),
+                )
+                .unwrap(),
+                filter: UsageRecordFilter::default(),
+                current_page: 1,
+                page_size: ObservabilityPageSize::new(10).unwrap(),
+            })
+            .await
+            .unwrap();
+        let record = page
+            .items
+            .iter()
+            .find(|record| record.id == "req_observe_failed")
+            .unwrap();
+        assert!(record.has_upstream_error);
+        assert_eq!(
+            record.upstream_status_code,
+            detail.request.upstream_status_code
+        );
+        assert_eq!(record.error_origin(), detail.request.error_origin());
         let upstream = detail.request.upstream_error.unwrap();
         assert_eq!(
             upstream,
@@ -196,6 +224,8 @@ async fn usage_error_facts_preserve_recovery_and_validate_saved_close_frames() {
             .await
             .expect("detail with saved error facts");
         assert_eq!(detail.request.websocket_close_code, close_code);
+        assert_eq!(record.error_origin(), detail.request.error_origin());
+        assert!(!record.has_upstream_error);
         assert!(detail.request.recovered);
         assert_eq!(
             detail.request.continuation_unavailable_reason,

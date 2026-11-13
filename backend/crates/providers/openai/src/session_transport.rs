@@ -1,4 +1,4 @@
-//! 根会话的连续 WS 失败预算；耗尽后保持 HTTP，空闲过期后释放状态
+//! 按账号、会话及恢复代次维护 WS 失败预算，空闲过期后释放状态
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -7,11 +7,6 @@ use std::time::Duration;
 use gateway_core::account::ProviderAccountId;
 use gateway_core::provider_ports::ProviderSessionAffinityKey;
 use tokio::time::Instant;
-
-// 在上游 WS 帧边界前预留余量，并使用回差避免传输频繁切换
-const MIB: usize = 1024 * 1024;
-pub(crate) const WS_PAYLOAD_LIMIT: usize = 15 * MIB + MIB / 2;
-const WS_PAYLOAD_RESUME: usize = WS_PAYLOAD_LIMIT - 2 * MIB;
 
 const SESSION_IDLE_RETENTION: Duration = Duration::from_secs(8 * 60 * 60);
 const MAX_SESSION_TRANSPORTS: usize = 16_384;
@@ -29,7 +24,6 @@ struct TransportRecoveryState {
 
 struct SessionTransport {
     state: TransportState,
-    oversized: bool,
     last_used: Instant,
 }
 
@@ -114,30 +108,10 @@ impl CodexSessionTransportRecovery {
     }
 
     pub(crate) fn websocket_succeeded(&self, scope: &SessionTransportScope) {
-        // 增量或预热成功不能证明下一份完整请求可以放入 WS，保留大小偏好
         self.update(scope, |session| {
             session.state = TransportState::WebSocket { failures: 0 };
             false
         });
-    }
-
-    /// 大小偏好与失败预算使用相同账号、会话和管理恢复代次隔离
-    pub(crate) fn http_for_full_payload(
-        &self,
-        scope: Option<&SessionTransportScope>,
-        bytes: usize,
-    ) -> bool {
-        let Some(scope) = scope else {
-            return bytes >= WS_PAYLOAD_LIMIT;
-        };
-        self.update(scope, |session| {
-            if bytes >= WS_PAYLOAD_LIMIT {
-                session.oversized = true;
-            } else if bytes < WS_PAYLOAD_RESUME {
-                session.oversized = false;
-            }
-            session.oversized
-        })
     }
 
     pub(crate) fn account_is_degraded(&self, account_id: &ProviderAccountId) -> bool {
@@ -179,12 +153,10 @@ impl CodexSessionTransportRecovery {
             })
             .unwrap_or(SessionTransport {
                 state: TransportState::WebSocket { failures: 0 },
-                oversized: false,
                 last_used: now,
             });
         let result = update(&mut session);
-        if !session.oversized && matches!(session.state, TransportState::WebSocket { failures: 0 })
-        {
+        if matches!(session.state, TransportState::WebSocket { failures: 0 }) {
             return result;
         }
         session.last_used = now;

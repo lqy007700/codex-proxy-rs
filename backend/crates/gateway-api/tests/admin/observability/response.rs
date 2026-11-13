@@ -891,6 +891,8 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         .lock()
         .expect("usage records")
         .push(UsageListRecord {
+            has_upstream_error: false,
+            upstream_status_code: None,
             caller_identity: None,
             caller_token_name: None,
             error_code: None,

@@ -973,7 +973,7 @@ async fn token_primary_migrates_only_on_confirmed_persistent_quota_exhaustion() 
         create_account(&store, "acct_subagent_a").await;
         let affinity = Arc::new(MemorySessionAffinity::default());
         let cooldowns = Arc::new(MemoryCooldownPort::new());
-        let (provider, _, _) = provider_and_quota_with_runtime_ports(
+        let (provider, _, _, _) = provider_and_quota_with_runtime_ports(
             &store,
             affinity.clone(),
             MockServer::start().await.uri(),

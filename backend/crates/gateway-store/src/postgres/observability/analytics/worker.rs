@@ -32,6 +32,7 @@ pub struct AnalyticsStatus {
 pub struct PgRequestAnalyticsRepository {
     pool: PgPool,
     query_budget: ObservabilityQueryBudget,
+    projection_work_mem_mb: Option<u32>,
     billing_projector: Option<Arc<dyn UsageBillingProjector>>,
 }
 
@@ -41,8 +42,15 @@ impl PgRequestAnalyticsRepository {
         Self {
             pool,
             query_budget,
+            projection_work_mem_mb: None,
             billing_projector: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_projection_work_mem_mb(mut self, work_mem_mb: Option<u32>) -> Self {
+        self.projection_work_mem_mb = work_mem_mb;
+        self
     }
 
     #[must_use]
@@ -82,6 +90,7 @@ impl PgRequestAnalyticsRepository {
                 transaction.commit().await.map_err(|error| postgres_unavailable("save analytics reset progress", error))?;
                 return Ok(AnalyticsMaintenance { reset_progress: true, ..Default::default() });
             }
+            self.configure_projection_transaction(&mut transaction).await?;
             let mut result = AnalyticsMaintenance::default();
             // 历史删除可能一次排入大量旧任务，给仍存在的请求预留半批名额，避免实时统计饥饿
             // 其余名额仍按最早入队消费，两类任务都能前进；同一快照内选版本，沿用精确版本 ACK
@@ -125,6 +134,7 @@ impl PgRequestAnalyticsRepository {
             let reset_in_progress: bool = sqlx::query_scalar("select reset_phase <> 0 or schema_version <> $1 or histogram_version <> $2 from request_analytics_build_state where singleton")
                 .bind(SCHEMA_VERSION).bind(HISTOGRAM_VERSION).fetch_one(&mut *transaction).await.map_err(|error|postgres_unavailable("check analytics rebuild epoch",error))?;
             if reset_in_progress { return Ok(result); }
+            self.configure_projection_transaction(&mut transaction).await?;
             for bucket in pending_batch(&mut transaction).await? {
                 match rebuild_bucket_batch(&mut transaction,bucket,batch_size).await? {
                     BucketProgress::Waiting => {},
@@ -136,6 +146,23 @@ impl PgRequestAnalyticsRepository {
             transaction.commit().await.map_err(|error| postgres_unavailable("publish analytics buckets",error))?;
             Ok(result)
         }).await
+    }
+
+    /// 仅配置持有的统计事务，提交或回滚后连接恢复原值
+    async fn configure_projection_transaction(
+        &self,
+        transaction: &mut sqlx::Transaction<'_, Postgres>,
+    ) -> StoreResult<()> {
+        if let Some(mb) = self.projection_work_mem_mb {
+            sqlx::query("select set_config('work_mem',$1,true)")
+                .bind(format!("{mb}MB"))
+                .execute(&mut **transaction)
+                .await
+                .map_err(|error| {
+                    postgres_unavailable("set analytics projection work_mem", error)
+                })?;
+        }
+        Ok(())
     }
 
     async fn project_batch(

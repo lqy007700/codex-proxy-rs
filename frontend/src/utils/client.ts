@@ -40,7 +40,9 @@ X-OpenAI-Actor-Authorization = "proxy-managed"
 
 [features]
 image_generation = true
-goals = true`
+goals = true
+# Codex 0.163.0+ 实验功能，需启用 V2 远程压缩，按需取消注释
+# async_compaction = true`
 }
 
 interface CodexCcSwitchImportInput {

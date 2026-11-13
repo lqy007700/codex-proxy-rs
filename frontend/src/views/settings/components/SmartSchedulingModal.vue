@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SmartSchedulingConfig } from '@/api'
-import { ZButton, ZDialog, ZFormItem, ZIconButton, ZInput, ZPopover } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZFormItem, ZIconButton, ZInput, ZPopover, ZSwitch } from '@codex-proxy/ui'
 import { CircleHelp } from '@lucide/vue'
 import { computed, reactive, shallowRef, useId, watch } from 'vue'
 
@@ -28,7 +28,22 @@ const draft = reactive({
   resetWeight: '',
   queueWeight: '',
 })
+const windowFields = [
+  { key: 'fiveHour', label: '5 小时窗口系数' },
+  { key: 'weekly', label: '周窗口系数' },
+  { key: 'monthly', label: '月窗口系数' },
+] as const
+const windowDraft = reactive({ fiveHour: '1', weekly: '1', monthly: '1' })
+const useWindowWeights = shallowRef(false)
 const submitted = shallowRef(false)
+const windowErrors = computed(() => Object.fromEntries(windowFields.map(({ key }) => {
+  const value = Number(windowDraft[key])
+  const valid = windowDraft[key].trim() && Number.isFinite(value) && value >= 0 && value <= 10 && Math.round(value * 10) / 10 === value
+  return [
+    key,
+    valid ? undefined : '请输入 0～10 的数值，最多一位小数',
+  ]
+})))
 const errors = computed(() => Object.fromEntries(fields.map(({ key }) => {
   const value = Number(draft[key])
   const valid = draft[key].trim() && Number.isFinite(value) && value >= 0 && value <= 10 && Math.round(value * 10) / 10 === value
@@ -42,6 +57,9 @@ const emptyWeights = computed(() => fields.every(({ key }) => Number(draft[key])
 function replaceDraft(config: SmartSchedulingConfig) {
   for (const { key } of fields)
     draft[key] = String(config[key])
+  useWindowWeights.value = config.resetWindowWeights !== undefined
+  for (const { key } of windowFields)
+    windowDraft[key] = String(config.resetWindowWeights?.[key] ?? 1)
   submitted.value = false
 }
 
@@ -52,7 +70,7 @@ watch(open, (value) => {
 
 function confirm() {
   submitted.value = true
-  if (Object.values(errors.value).some(Boolean) || emptyWeights.value)
+  if (Object.values(errors.value).some(Boolean) || emptyWeights.value || (useWindowWeights.value && Object.values(windowErrors.value).some(Boolean)))
     return
   emit('confirm', {
     loadWeight: Number(draft.loadWeight),
@@ -61,6 +79,15 @@ function confirm() {
     latencyWeight: Number(draft.latencyWeight),
     resetWeight: Number(draft.resetWeight),
     queueWeight: Number(draft.queueWeight),
+    ...(useWindowWeights.value
+      ? {
+          resetWindowWeights: {
+            fiveHour: Number(windowDraft.fiveHour),
+            weekly: Number(windowDraft.weekly),
+            monthly: Number(windowDraft.monthly),
+          },
+        }
+      : {}),
   })
   open.value = false
 }
@@ -94,6 +121,17 @@ function confirm() {
         <p v-if="submitted && emptyWeights" role="alert" class="mt-2 mb-0 text-z-sm text-z-danger">
           至少一项系数需要大于 0
         </p>
+      </div>
+      <div class="grid gap-3">
+        <ZSwitch v-model="useWindowWeights" label="按额度窗口分别设置重置权重" />
+        <p class="m-0 text-z-sm text-z-text-secondary">
+          {{ useWindowWeights ? '窗口系数决定重置得分的占比，再乘以额度重置系数；全部为 0 时不加分' : '使用最近一次额度重置时间评分，保持原有调度效果' }}
+        </p>
+        <div v-if="useWindowWeights" class="grid gap-4 sm:grid-cols-3">
+          <ZFormItem v-for="field in windowFields" :key="field.key" :label="field.label" :error="submitted ? windowErrors[field.key] : undefined">
+            <ZInput v-model="windowDraft[field.key]" type="number" min="0" max="10" step="0.1" :aria-label="field.label" />
+          </ZFormItem>
+        </div>
       </div>
     </form>
     <template #footer>

@@ -49,12 +49,10 @@ impl CodexProvider {
                 gateway_protocol::anthropic::strip_foreign_thinking_for_messages(&mut body);
                 body
             } else {
-                let capabilities = tokio::select! {
-                    biased;
-                    _ = context.cancellation().cancelled() => return Err(provider_error(ProviderErrorKind::Cancelled, UpstreamSendState::NotSent)),
-                    _ = context.deadline().wait() => return Err(provider_error(ProviderErrorKind::Timeout, UpstreamSendState::NotSent)),
-                    result = self.catalog.messages_model_capabilities(selected.lease.account(), &model) => result.ok().flatten().unwrap_or_default(),
-                };
+                let capabilities = self
+                    .catalog
+                    .messages_model_capabilities(selected.lease.account(), &model)
+                    .unwrap_or_default();
                 let mut body = responses_to_messages_request(original, &capabilities)
                     .map_err(|_| invalid_request())?;
                 // Responses 的 HTTP JSON 和 SSE 共用事件输出，跨协议上游统一请求事件流
@@ -89,8 +87,18 @@ impl CodexProvider {
             let mut source_context = generate.protocol_payload().context().clone();
             retain_target_headers(source, &mut source_context, &mut headers);
             let translator = translator::ResponsesResponseTranslator::new(original);
-            let translated =
+            let mut translated =
                 messages_to_responses_request(original).map_err(|_| invalid_request())?;
+            // 仅省略 Messages 转向 OAuth 时生成的默认档位，原生 Responses 保留调用方声明
+            if matches!(
+                selected.lease.authentication(),
+                CodexRuntimeAuthentication::OAuth(_)
+            ) && matches!(
+                translated.get("service_tier").and_then(Value::as_str),
+                Some("auto" | "default")
+            ) {
+                translated.shift_remove("service_tier");
+            }
             let body = serde_json::to_vec(&translated).map_err(|_| invalid_request())?;
             let operation = operation
                 .replace_protocol_wire(None, source_context)

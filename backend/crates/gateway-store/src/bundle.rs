@@ -338,7 +338,8 @@ async fn connect(
             }),
         ),
     };
-    let analytics = postgres::PgRequestAnalyticsRepository::new(pool, observability_query_budget);
+    let analytics = postgres::PgRequestAnalyticsRepository::new(pool, observability_query_budget)
+        .with_projection_work_mem_mb(config.pool.analytics_projection_work_mem_mb);
     Ok(StoreBundle {
         analytics,
         diagnostics,

@@ -366,7 +366,11 @@ pub(crate) fn usage_list_record_from_row(
     )?;
     let upstream_error =
         saved_upstream_error(get::<Option<String>>(row, "error_details")?.as_deref());
+    let has_upstream_error =
+        usage_upstream_error(upstream_error.as_ref()).is_some_and(|error| error.has_error_fields());
     Ok(UsageListRecord {
+        has_upstream_error,
+        upstream_status_code: optional_status(row, "upstream_status_code")?,
         caller_identity: get::<Option<sqlx::types::Json<gateway_core::policy::CallerIdentity>>>(
             row,
             "caller_identity_json",

@@ -42,8 +42,8 @@ pub use admin::{
     PreparedCodexCredentialRotationGuard,
 };
 pub use catalog::{
-    CodexCatalogScope, CodexCredentialCatalogError, CodexCredentialCatalogService,
-    CodexCredentialCatalogSnapshot, CodexPlanCatalog,
+    CodexAccountCatalog, CodexCatalogScope, CodexCredentialCatalogError,
+    CodexCredentialCatalogService, CodexCredentialCatalogSnapshot,
 };
 pub use codec::{
     CodexCredentialCodec, CodexCredentialDataError, CodexRuntimeAuthentication,

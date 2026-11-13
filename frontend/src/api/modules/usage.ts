@@ -79,7 +79,10 @@ export interface UsageRecordMetadata {
   [key: string]: unknown
 }
 
+export type UsageErrorOrigin = 'proxy' | 'upstream' | 'connection' | 'unknown'
+
 export interface UsageErrorFacts {
+  errorOrigin?: UsageErrorOrigin
   callerIdentity: CallerIdentity | null
   logicalOutcome: string
   attemptCount: number
@@ -93,6 +96,8 @@ export interface UsageErrorFacts {
 }
 
 export interface UsageListRecord extends UsageErrorFacts {
+  clientStatusCode?: number | null
+  upstreamStatusCode?: number | null
   logicalOutcome: string
   errorMessage: string | null
   clientApiKeyName: string | null

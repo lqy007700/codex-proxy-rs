@@ -375,7 +375,10 @@ Messages 上游的单个非流式 JSON 响应最多 16 MiB，该限制不针对 
 推理签名和加密内容按来源处理，不能作为另一协议的原生签名；可选扩展可能忽略或降级，要求完整保留时使用同协议上游。
 无法执行的工具约束在发送前拒绝，明确因输出长度中断的结果保持未完成状态，不补造成功终态。
 推理模式与预算读取所选账号已发现的模型能力，不根据客户端别名猜测；不为每次生成额外查询目录。
-服务档位按目标协议转换，`priority` 与 `speed: fast` 的映射不代表相同服务承诺，目标支持情况由上游校验
+服务档位按目标协议转换，`priority` 与 `speed: fast` 的映射不代表相同服务承诺，目标支持情况由上游校验。
+Messages 转向 Codex OAuth 时省略转换生成的 `auto/default`，转向 Responses API Key 时保留。
+Messages 推理强度只观测顶层 `output_config.effort` 的非空字符串，不根据 `thinking.budget_tokens`
+或模型默认值推断；该记录不代表上游最终执行的档位
 
 错误使用 `{"type":"error","error":{"type":"...","message":"..."}}`，SSE 开始后使用 `event: error`。
 请求中间件读取原生 Messages 正文，隐私策略读取实际发送的目标协议结构。
@@ -627,12 +630,13 @@ OAuth 账号默认 `prefer_websocket`，客户端使用 HTTP/SSE 时仍可能选
 `400 unsupported_prewarm`，不会将其当作普通生成调用。`generate=true` 或省略该字段正常执行；
 客户端可跳过预热继续正式请求
 
-Codex OAuth backend 的候选上游为 WS 时，无 `previous_response_id` 的普通新链若规范化
-`response.create` 达到 15 MiB，发送前选择 HTTP/SSE；HTTP 和 WS 入站均适用，下游交付协议不变。
-该阈值为已观察到的上游消息大小边界预留余量，不是网关输入长度上限或 OpenAI 公布的统一限制；
-API Key 账号不使用此大小策略。小请求、显式 warmup、未知外部 previous ID 和持久化续接保持原行为
+上游 WS 握手声明 `x-codex-websocket-max-message-bytes` 时，按当前连接的上限检查最终
+`response.create` 的 UTF-8 字节数，包含 JSON 转义；等于上限仍可发送。未声明或值无效时不做大小预判。
+OAuth 与配置 `prefer_websocket` 的 API Key 账号均适用，HTTP 和 WS 入站的下游交付协议不变。
+超过上限的新链、持久化续接及未知外部 previous ID 在发送前选择 HTTP/SSE，下一请求重新按连接判断；
+显式 `generate=false` 预热返回 `websocket_message_too_large`，不转为 HTTP 或自动重试
 
-OAuth 的大 connection-local WS 续接，以及 HTTP `store=false` 成功后标记为 `ReplayRequired`
+超过当前连接声明上限的 connection-local WS 续接，以及 HTTP `store=false` 成功后标记为 `ReplayRequired`
 的 WS 增量，均在发送前返回 `status: 400 / previous_response_not_found`。客户端应清除旧 ID，
 携带完整历史及工具调用／输出重试。官方 Codex 支持重连 WS 后完整重发，也可能按自身重试预算
 切到 HTTP；其他客户端需要自行实现此合同。代理不缓存 transcript，不把增量输入当作独立新链，
@@ -677,22 +681,25 @@ xAI 没有 Codex 原生目录，使用官方 CLI proxy 当前目录生成通用�
 未知模型只在当前范围与路由约束下存在唯一 Provider 透传候选时发送；无法确定归属时返回不可用错误，
 可通过 Client Key 分组限定目标平台。一个 Provider 内的多个 API Key 账号仍按账号模型政策与调度规则选择，
 原生账号默认排除有效目录未收录的模型；OpenAI 精确白名单的目录例外见[账号模型限制](#账号模型限制)。
-未知套餐或没有有效目录时交由上游验证。
-OAuth 目录资格按已知套餐隔离，API Key 按账号及凭据版本隔离；权重、亲和和固定账号不能绕过资格。
+同账号、凭据版本和套餐没有成功目录时交由上游验证；已有目录不因过期或刷新失败而放开模型排除。
+OAuth 与 API Key 目录均按账号、凭据版本和套餐隔离；权重、亲和和固定账号不能绕过资格。
 OpenAI 仅按结构化 `model_not_found` 与 HTTP 400/403/404 或无状态码的流内错误识别模型拒绝，
 只冷却该账号与模型 30 分钟，不从消息正文推断权限。`unsupported_value` 属于请求参数错误，
 不触发模型冷却或换号；受管适配器使用自身模型合同。
 ChatGPT OAuth 账号不接受 Grok 模型
 
-目录账号只能来自本次 Client Key 冻结的账号范围。OpenAI 的 OAuth 目录按账号 ID 排序，使用首个成功读取的
-合格账号，最多尝试三个账号；API Key 目录按账号模型权限过滤后聚合。同名模型优先采用 OAuth 原生对象，
+目录账号只能来自本次 Client Key 冻结的账号范围，OAuth 与 API Key 均聚合该范围内已有成功目录的合格账号。同名模型优先采用 OAuth 原生对象，
 其次采用 API Key 的完整 Codex 对象，再使用普通模型 ID；同类 API Key 目录按账号 ID 确定来源，不跨账号
 或套餐混拼字段。因此单账号、无别名时可保持该账号的模型对象一致，多账号/多 Provider 聚合不代表
 “与某个官方账号的整个目录完全一致”，也不会固定后续推理账号。
 读取失败返回 `503 model_catalog_unavailable`，不以简化模板或空成功响应覆盖客户端缓存。
 成功获取的 API Key 目录被账号模型政策全部过滤时返回空列表，区别于读取失败。
 
-原生目录可能返回缓存结果，成功缓存有效期为 5 分钟。每次查询都检查账号资格和 Client Key 范围。
+原生目录读取后台已发布的账号快照，不在请求中查询上游。启动恢复最后一次成功目录，后台刷新缺失、
+超过 30 分钟或收到新 ETag 的账号；失败保留原有结果，凭据或套餐变化后旧目录不再作为新身份的证据。
+每次查询都检查当前账号资格与 Client Key 冻结范围；账号模型映射先保留来源对象，再由 Core 投影公开模型名。
+后台及管理端查询 Responses 上游目录时携带服务端画像版本 `client_version`，仅在上游明确以
+`unknown_parameter/unsupported_parameter` 拒绝该参数时无参重试一次；Messages 分页规则不变。
 成功目录响应带 `Cache-Control: private, no-store`，不借用上游 ETag 标识经过选择/别名/聚合后的正文
 
 `service_tiers` 的 `name` 用于生成 `/fast` 等命令，`id` 是请求使用的 `service_tier` 值，二者不能互换。
@@ -1746,6 +1753,7 @@ GET 和 POST 均返回 `enabled`、`leadMinutes`、`nextDiscoveryAtDisplay`、`n
 - 关闭：将 `priority`（含 `fast` 别名）改为显式 `default`，继续处理请求
 
 策略只作用于 OpenAI Responses 的顶层 `service_tier`，不改变 `flex`、`ultrafast` 等其他显式档位、嵌套字段或其他 Provider。
+OAuth 和 Responses API Key 共用上述档位规则，出站兼容层不额外删除原生 Responses 的 `auto/default`。
 宿主策略在 request 中间件之后应用，形成 attempt 输入基线；attempt 中间件继续改写档位时，以改写后的实际发送值为准。
 HTTP 和每个 WebSocket `response.create` 均使用请求开始时的分组策略，同一请求重试保持该策略；
 HTTP 请求头及新建 WS 的握手提示按当时的最终出站档位构造；复用 WS 时不重发握手头，
@@ -2020,9 +2028,10 @@ Redis 操作回执保留 30 天；预览日志在到期 30 天后随新预览按
 
 ### 账号预热
 
-定时账号预热默认关闭，`accountWarmupCron` 默认空字符串，使用部署时区中的单条五段 Cron：分钟、小时、日、月、星期。
+定时账号预热默认关闭，`accountWarmupCron` 默认空字符串，使用部署时区中的五段 Cron：分钟、小时、日、月、星期。
+多条表达式使用半角分号 `;` 分隔，单条配置直接兼容；任一规则命中后，同一分钟只领取并执行一次预热。
 例如 `0 8 * * *` 表示每天 08:00，`*/30 8-18 * * MON-FRI` 表示工作日 08:00–18:59 内每半小时执行。
-表达式最多 255 字节，禁止首尾空白和控制字符，不接受 `HH:MM` 时间列表、秒位、年份位或 `accountWarmupScheduleTime` 字段
+全部表达式与分隔符合计最多 255 字节，每条表达式禁止首尾空白和控制字符，不接受 `HH:MM` 时间列表、秒位、年份位或 `accountWarmupScheduleTime` 字段
 
 关闭时允许空 Cron，非空表达式仍须有效；开启时必须提供有效 Cron 和明确的 `accountWarmupModel`，模型默认 `null`。
 任务只读取已落库额度，不额外刷新额度；面向启用且凭据可用的 OpenAI OAuth 账号，跳过真实耗尽、本地额度暂停
@@ -2194,10 +2203,15 @@ New API 已识别 Token 在 `preferred` 与 `strict` 下额外保留一个主账
 
 六项系数分别调整负载、剩余额度、健康、首个有效输出延迟、额度重置和排队压力的评分偏好，范围 `0～10`、最多一位小数，
 至少一项大于 `0`。`0` 仅关闭对应评分维度，不放宽账号资格、额度或并发限制；系数不表示流量百分比。
-缺字段、`null`、未知字段及无效数值均返回 `422`，不写入配置。读取设置额外返回只读
+六项系数缺字段、`null`、未知字段及无效数值均返回 `422`，不写入配置。读取设置额外返回只读
 `smartSchedulingDefaults`，内容为上述默认对象，用于恢复默认与自定义状态比较，不可提交到更新接口
 
-`resetWeight` 越大越偏向即将重置额度的账号，复用已有有效重置时间，未知或已过期时不加分。
+`resetWeight` 越大越偏向即将重置额度的账号。省略可选 `resetWindowWeights` 或设为 `null` 时沿用最近有效重置时间及一小时半衰尺度，
+读取、保存和备份仍省略该字段，保持旧配置的评分效果。显式设置该字段时，必须完整提供 `fiveHour`、`weekly`、`monthly` 三项系数，
+每项范围同为 `0～10`、最多一位小数，例如 `{"fiveHour":1,"weekly":2,"monthly":0}`。
+分窗口模式只使用 Provider 确认为账号通用的 5 小时、周、月窗口，以周期的七分之一为半衰尺度；同周期取最近有效重置，
+缺失、未知或已过期窗口不加分，按全部已配置窗口系数归一化后乘以 `resetWeight`，避免少报窗口抬高得分。
+窗口系数全为 `0` 时关闭重置得分且不扩大选号容差；删除该字段恢复旧模式，不改写其他调度策略
 `queueWeight` 只在没有可立即使用的账号、需要选择等待队列时参与评分，越大越偏向等待人数少的账号。
 设为 `0` 时沿用最短队列规则；启用后结合其余五项评分选择队列。队列人数限于当前进程，只有开启账号排队才会生效，
 不影响已入队请求的位置、队内 FIFO、容量上限或等待超时。两项默认均为 `0`
@@ -2760,6 +2774,11 @@ OAuth 字段依据 CPR 导出结构及官方 Codex `TokenData`，不按 `token /
 导出另有文本、节点与深度预算，正文截断仍保留格式版本、目标和缺口；超限会写入 `exportTruncated`、`redaction.truncatedValues` 和缺口记录。
 `availability.gaps` 明示未记录、淘汰、截断、读取失败与旧记录缺少的决策事实，`omitted` 说明主动省略范围。
 异步观测尚未落盘、已过期记录、未采集的请求正文与上游内部状态无法由导出补回，`null` 不表示没有发生错误
+
+管理端请求列表和详情的 `errorOrigin` 取值为 `proxy`、`upstream`、`connection` 或 `unknown`，
+表示已保存事实能够确定的错误位置，不表示责任归属。上游结构化错误、关闭码和失败状态优先，
+仅有客户端状态码、错误文案或含义不明确的分类时保持 `unknown`。
+列表同时返回 `clientStatusCode` 与 `upstreamStatusCode`，未记录时为 `null`；来源投影不参与重试、计费或请求健康统计
 
 错误记录中的“已自动恢复”表示系统关联到了后续成功请求，不会把原来的失败记录改为成功。
 `upstreamSendState = ambiguous` 表示无法确认该次上游执行结果，不代表后续恢复请求失败；

@@ -2080,7 +2080,7 @@ where
             }
         };
 
-        self.trace.attempt(current.index.get()).record("retry.decided", json!({
+        let mut retry_decision = json!({
             "phase": "execute",
             "retryable": retryable, "continuationRetry": continuation_retry,
             "sameAccountRetry": same_account_retry, "accountRotationRetry": account_rotation_retry,
@@ -2088,9 +2088,6 @@ where
             "requestRecovery": request_recovery.is_some(),
             "recoveryStage": self.account_recovery.stage().as_str(),
             "ordinaryRetryBlockers": ordinary_retry_blockers,
-            "providerReplaySafe": error.replay_is_safe(),
-            "retryProhibited": error.retry_is_prohibited(),
-            "middlewareRetrySuppressed": retry_allowed_before_policy && !retryable,
             "connectionRotation": connection_rotation.is_some(),
             "reserveConnectionRotation": reserve_connection_rotation,
             "transientRetry": transient_retry.is_some(),
@@ -2124,7 +2121,15 @@ where
             "credentialRecoveryAttempted": self.credential_recovery_attempted_accounts.contains(current.metadata.provider_account_id()),
             "hasRetryPolicy": self.request_policy.is_some(),
             "sendState": format!("{attempt_send_state:?}"),
-        }));
+        });
+        // 单独编码重放门禁，避免大型诊断对象触及 json 宏展开深度上限
+        retry_decision["providerReplaySafe"] = json!(error.replay_is_safe());
+        retry_decision["retryProhibited"] = json!(error.retry_is_prohibited());
+        retry_decision["middlewareRetrySuppressed"] =
+            json!(retry_allowed_before_policy && !retryable);
+        self.trace
+            .attempt(current.index.get())
+            .record("retry.decided", retry_decision);
         if retryable {
             if bounded_transient_retry && (transient_retry.is_some() || rotation_retry) {
                 self.bounded_transient_retries = self.bounded_transient_retries.saturating_add(1);

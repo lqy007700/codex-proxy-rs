@@ -143,6 +143,29 @@ async fn smart_settings_round_trip_publish_and_restore_database_defaults() {
         serde_json::to_value(expected).unwrap()
     );
     assert!(snapshot.config_revision > before.config_revision);
+    let mut windows = serde_json::to_value(expected).unwrap();
+    windows["resetWindowWeights"] = serde_json::json!({"fiveHour":1.0,"weekly":2.0,"monthly":0.0});
+    let expected: SmartSchedulingConfig = serde_json::from_value(windows.clone()).unwrap();
+    let mut update = settings_with_margin(3600);
+    update.values.smart_scheduling = expected;
+    repository.update_runtime_settings(update).await.unwrap();
+    assert_eq!(
+        repository
+            .load_runtime_settings()
+            .await
+            .unwrap()
+            .values
+            .smart_scheduling,
+        expected
+    );
+    let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+        .load_runtime_snapshot()
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&snapshot.settings).unwrap()["smart_scheduling"],
+        windows
+    );
     sqlx::query("update runtime_settings set smart_scheduling_json = default where id = 1")
         .execute(&database.pool)
         .await
@@ -190,7 +213,7 @@ async fn warmup_settings_round_trip_with_database_constraint() {
         .expect("disabled warmup accepts an empty cron");
     let mut update = settings_with_margin(3_600);
     update.values.account_warmup_enabled = true;
-    update.values.account_warmup_cron = "0 8,13 * * MON-FRI".to_owned();
+    update.values.account_warmup_cron = "0 8,13 * * MON-FRI;59 10 * * *".to_owned();
     update.values.account_warmup_model = Some("test-model".to_owned());
     repository
         .update_runtime_settings(update)
@@ -202,7 +225,10 @@ async fn warmup_settings_round_trip_with_database_constraint() {
         .await
         .expect("load warmup settings");
     assert!(settings.values.account_warmup_enabled);
-    assert_eq!(settings.values.account_warmup_cron, "0 8,13 * * MON-FRI");
+    assert_eq!(
+        settings.values.account_warmup_cron,
+        "0 8,13 * * MON-FRI;59 10 * * *"
+    );
     assert_eq!(
         settings.values.account_warmup_model.as_deref(),
         Some("test-model")

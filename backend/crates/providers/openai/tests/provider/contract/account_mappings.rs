@@ -161,12 +161,14 @@ async fn mapped_allowlists_send_their_own_unlisted_target_and_report_the_same_mo
             .await;
     }
     let leases = Arc::new(TestLeaseCoordinator::default());
-    let provider = provider_with_affinity_and_base_url_and_leases(
+    let (provider, _) = provider_and_quota_with_catalog(
         &store,
         Arc::default(),
         first.uri(),
         leases.clone(),
-    );
+        u32::try_from(DEFAULT_STREAM_MAX_RETRIES).unwrap(),
+    )
+    .await;
     provider.query_model_capabilities().await.unwrap();
     for (id, server, target) in [
         ("acct_provider_contract", &first, "gpt-5.4"),
@@ -243,12 +245,14 @@ async fn mapped_catalog_exception_requires_the_frozen_request_name() {
         .mount(&upstream)
         .await;
     let leases = Arc::new(TestLeaseCoordinator::default());
-    let provider = provider_with_affinity_and_base_url_and_leases(
+    let (provider, _) = provider_and_quota_with_catalog(
         &store,
         Arc::default(),
         upstream.uri(),
         leases.clone(),
-    );
+        u32::try_from(DEFAULT_STREAM_MAX_RETRIES).unwrap(),
+    )
+    .await;
     provider.query_model_capabilities().await.unwrap();
     for requested_model in [None, Some("unapproved-alias")] {
         let (request, context) = mapped_request_with_requested_model(

@@ -466,7 +466,7 @@ async fn read_http_request(stream: &mut TcpStream) -> String {
     String::from_utf8(request).expect("HTTP request is UTF-8")
 }
 
-async fn read_http_request_with_body(stream: &mut TcpStream) -> Vec<u8> {
+pub(crate) async fn read_http_request_with_body(stream: &mut TcpStream) -> Vec<u8> {
     let mut request = Vec::new();
     let mut buffer = [0_u8; 4096];
     loop {

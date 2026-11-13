@@ -1,5 +1,7 @@
 //! 验证管理观测查询的时间范围、健康投影与运行态聚合
 
+mod errors;
+
 use std::{
     str::FromStr as _,
     sync::{
@@ -1440,6 +1442,8 @@ fn total_record(
     now: DateTime<Utc>,
 ) -> UsageListRecord {
     UsageListRecord {
+        has_upstream_error: false,
+        upstream_status_code: None,
         caller_identity: None,
         caller_token_name: None,
         error_code: None,

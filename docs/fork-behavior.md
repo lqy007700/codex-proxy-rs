@@ -7,11 +7,11 @@
 
 | 项目 | 核对范围 |
 | --- | --- |
-| 核对日期 | 2026-11-06 |
+| 核对日期 | 2026-11-13 |
 | 本仓库源码 | 当前 `main` 源码，发行版本以 [`release/version.yaml`](../release/version.yaml) 为准 |
 | 最近完整合并的上游基线 | `v3.29.7`，`78bc57c5cf24b01a38e985cdd739bb4ae89ce11f` |
 | 差异依据 | 上述上游基线到当前源码的最终文件差异，结合调用链和现有测试 |
-| 上游主题移植 | 已采用能力与暂缓项分别记录于[上游同步清单](upstream-sync.md)，核对目标为 `v3.41.2` |
+| 上游主题移植 | 已采用能力与暂缓项分别记录于[上游同步清单](upstream-sync.md)，核对目标为 `v3.47.0` |
 
 源码版本、发布完成和运行实例升级是不同事实，本文不代表某个实例已部署该版本。
 这里的“二开”包含主动定制和为保留本发行线而存在的兼容适配，不表示相关基础能力都由本仓库原创
@@ -166,7 +166,7 @@ API Key 上游支持标准 OpenAI `data[].id` 列表和完整 Codex `models[]` �
 | --- | --- |
 | Chat 入口、校验和交付 | [API chat](../backend/crates/gateway-api/src/openai/chat/http.rs)、[入口测试](../backend/crates/gateway-api/tests/openai/chat/http.rs) |
 | 纯协议转换 | [Chat request](../backend/crates/gateway-protocol/src/openai/chat/request.rs)、[response](../backend/crates/gateway-protocol/src/openai/chat/response.rs)、[stream](../backend/crates/gateway-protocol/src/openai/chat/stream.rs)、[协议测试](../backend/crates/gateway-protocol/tests/openai/chat/request.rs) |
-| 上游目录判别及校验 | [transport/catalog.rs](../backend/crates/providers/openai/src/transport/catalog.rs)、[credential/catalog.rs 测试](../backend/crates/providers/openai/tests/credential/catalog.rs) |
+| 上游目录判别及校验 | [transport/catalog.rs](../backend/crates/providers/openai/src/transport/catalog.rs)、[credential/catalog 测试](../backend/crates/providers/openai/tests/credential/catalog/mod.rs) |
 
 ### 原生模型资格
 

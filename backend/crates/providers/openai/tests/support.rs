@@ -53,6 +53,15 @@ type CredentialLoadHook = dyn for<'a> Fn(
 #[derive(Default)]
 pub(crate) struct MemoryAccountStore {
     accounts: Mutex<BTreeMap<ProviderAccountId, StoredAccount>>,
+    catalogs: Mutex<
+        BTreeMap<
+            ProviderAccountId,
+            (
+                gateway_core::account::AccountCatalogObservation,
+                bytes::Bytes,
+            ),
+        >,
+    >,
     quota_reads: AtomicUsize,
     next_quota_read: Mutex<Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>>,
     account_reads: AtomicUsize,
@@ -70,6 +79,20 @@ impl MemoryAccountStore {
 
     pub(crate) fn provider_list_reads(&self) -> usize {
         self.provider_list_reads.load(Ordering::SeqCst)
+    }
+
+    fn record_provider_list_read(&self) -> Result<(), StoreError> {
+        self.provider_list_reads.fetch_add(1, Ordering::SeqCst);
+        if self.fail_provider_listing.load(Ordering::SeqCst) {
+            return Err(StoreError::caused_by(
+                StoreErrorKind::Unavailable,
+                std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    "PRIVATE_DATABASE_CAUSE",
+                ),
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn with_pending_account_reads() -> Self {
@@ -330,6 +353,62 @@ impl MemoryAccountStore {
 
 #[async_trait]
 impl ProviderAccountStore for MemoryAccountStore {
+    async fn load_account_catalogs(
+        &self,
+        provider: &ProviderKind,
+    ) -> Result<Vec<gateway_core::account::StoredAccountCatalog>, StoreError> {
+        let accounts = self.accounts.lock().unwrap();
+        let mut groups = BTreeMap::<bytes::Bytes, Vec<_>>::new();
+        for (id, (observation, document)) in self.catalogs.lock().unwrap().iter() {
+            if accounts.get(id).is_some_and(|row| {
+                row.account.provider() == provider
+                    && row.account.enabled()
+                    && matches!(
+                        row.account.credential_state(),
+                        CredentialState::Ready | CredentialState::Unknown
+                    )
+                    && row
+                        .account
+                        .access_token_expires_at()
+                        .is_none_or(|ts| ts > SystemTime::now())
+                    && row.account.revision() == observation.revision
+                    && row.account.plan_type() == observation.plan.as_deref()
+            }) {
+                groups
+                    .entry(document.clone())
+                    .or_default()
+                    .push(observation.clone());
+            }
+        }
+        Ok(groups
+            .into_iter()
+            .map(
+                |(document, accounts)| gateway_core::account::StoredAccountCatalog {
+                    accounts,
+                    document,
+                },
+            )
+            .collect())
+    }
+    async fn save_account_catalog(
+        &self,
+        observation: &gateway_core::account::AccountCatalogObservation,
+        document: &[u8],
+    ) -> Result<bool, StoreError> {
+        let rows = self.accounts.lock().unwrap();
+        if !rows.get(&observation.account_id).is_some_and(|a| {
+            a.account.revision() == observation.revision
+                && a.account.plan_type() == observation.plan.as_deref()
+        }) {
+            return Ok(false);
+        }
+        self.catalogs.lock().unwrap().insert(
+            observation.account_id.clone(),
+            (observation.clone(), bytes::Bytes::copy_from_slice(document)),
+        );
+        Ok(true)
+    }
+
     async fn create_account(&self, input: NewProviderAccount) -> Result<(), StoreError> {
         let mut accounts = self.accounts.lock().expect("account store lock");
         if accounts.contains_key(input.account.id()) {
@@ -377,16 +456,7 @@ impl ProviderAccountStore for MemoryAccountStore {
         &self,
         provider: &ProviderKind,
     ) -> Result<Vec<ProviderAccount>, StoreError> {
-        self.provider_list_reads.fetch_add(1, Ordering::SeqCst);
-        if self.fail_provider_listing.load(Ordering::SeqCst) {
-            return Err(StoreError::caused_by(
-                StoreErrorKind::Unavailable,
-                std::io::Error::new(
-                    std::io::ErrorKind::ConnectionRefused,
-                    "PRIVATE_DATABASE_CAUSE",
-                ),
-            ));
-        }
+        self.record_provider_list_read()?;
         // 与 Postgres 实现的调度列表语义一致：停用账号不进入常规候选
         Ok(self
             .accounts
@@ -406,11 +476,16 @@ impl ProviderAccountStore for MemoryAccountStore {
         if account_ids.is_empty() {
             return Ok(Vec::new());
         }
-        Ok(self
-            .list_for_provider(provider)
-            .await?
+        self.record_provider_list_read()?;
+        let accounts = self.accounts.lock().expect("account store lock");
+        // 与 Postgres 按指定 ID 查询一致，不能为单账号读取克隆整个账号池
+        Ok(account_ids
+            .iter()
+            .collect::<BTreeSet<_>>()
             .into_iter()
-            .filter(|account| account_ids.contains(account.id()))
+            .filter_map(|id| accounts.get(id))
+            .filter(|stored| stored.account.provider() == provider && stored.account.enabled())
+            .map(|stored| stored.account.clone())
             .collect())
     }
 
@@ -879,6 +954,7 @@ impl ProviderLeasePort for TestLeaseCoordinator {
                                 in_flight: 0,
                                 last_started_at: None,
                                 quota_reset_at: None,
+                                quota_reset_windows: None,
                                 quota_remaining_rank: None,
                                 cooldown: None,
                                 failure_rate_basis_points: None,

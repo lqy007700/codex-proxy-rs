@@ -86,6 +86,9 @@ pub struct ImageBillingView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageListRecordView {
+    pub error_origin: &'static str,
+    pub client_status_code: Option<u16>,
+    pub upstream_status_code: Option<u16>,
     pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
     pub caller_token_name: Option<String>,
     pub error_code: Option<String>,
@@ -147,6 +150,7 @@ pub struct UsageUpstreamErrorView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageRecordView {
+    pub error_origin: &'static str,
     pub caller_identity: Option<gateway_core::policy::CallerIdentity>,
     pub caller_token_name: Option<String>,
     pub error_details: Option<String>,

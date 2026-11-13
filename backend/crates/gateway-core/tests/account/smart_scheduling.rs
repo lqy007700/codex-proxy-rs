@@ -1,7 +1,8 @@
 //! 验证智能调度权重、软亲和与容量约束的组合行为
 
 use gateway_core::account::{
-    AccountSelector, PreferredAccountSelection, RotationStrategy, SmartSchedulingConfig,
+    AccountQuotaResetWindow, AccountSelector, PreferredAccountSelection, QuotaResetPeriod,
+    RotationStrategy, SmartSchedulingConfig,
 };
 use serde_json::json;
 use std::time::{Duration, Instant, SystemTime};
@@ -347,5 +348,168 @@ fn higher_weight_recovery_preserves_usable_soft_affinity() {
                 .id(),
             candidates[1].account.id()
         );
+    }
+}
+
+#[test]
+fn window_reset_weight_rewards_future_periods_and_preserves_capacity_checks() {
+    let mut context = context(RotationStrategy::Smart);
+    context.policy = context.policy.with_smart_scheduling(serde_json::from_value(json!({
+        "loadWeight":0, "quotaWeight":0, "healthWeight":0, "latencyWeight":0, "resetWeight":1, "queueWeight":0,
+        "resetWindowWeights":{"fiveHour":0,"weekly":1,"monthly":0}
+    })).unwrap());
+    let mut candidates = [
+        candidate_with_concurrency("acct_unknown", 0, 2),
+        candidate_with_concurrency("acct_past", 0, 2),
+        candidate_with_concurrency("acct_now", 0, 2),
+        candidate_with_concurrency("acct_near", 0, 2),
+        candidate_with_concurrency("acct_far", 0, 2),
+    ];
+    for (candidate, reset_at) in candidates[1..].iter_mut().zip([
+        context.now - Duration::from_secs(1),
+        context.now,
+        context.now + Duration::from_secs(3600),
+        context.now + Duration::from_secs(86_400),
+    ]) {
+        candidate.signals.quota_reset_windows = Some(
+            [AccountQuotaResetWindow {
+                period: QuotaResetPeriod::Weekly,
+                reset_at,
+            }]
+            .into(),
+        );
+    }
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &context)
+            .unwrap()
+            .candidate()
+            .account
+            .id()
+            .as_str(),
+        "acct_near"
+    );
+    let trace = gateway_core::diagnostics::TraceContext::new("req_reset_scores");
+    trace.account_selection(&candidates, &context, None);
+    let snapshot = trace.snapshot().unwrap();
+    let scores = snapshot["events"][0]["data"]["candidates"]
+        .as_array()
+        .unwrap();
+    for (candidate, expected) in scores.iter().zip([0.0, 0.0, 0.0, 0.96, 0.5]) {
+        assert!((candidate["smartScore"].as_f64().unwrap() - expected).abs() < 1e-10);
+    }
+    candidates[3].signals.in_flight = 2;
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &context)
+            .unwrap()
+            .candidate()
+            .account
+            .id()
+            .as_str(),
+        "acct_far"
+    );
+    candidates[3].signals.in_flight = 0;
+    context.now += Duration::from_secs(3600);
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &context)
+            .unwrap()
+            .candidate()
+            .account
+            .id()
+            .as_str(),
+        "acct_far"
+    );
+}
+
+#[test]
+fn missing_expired_and_duplicate_periods_do_not_inflate_reset_score() {
+    let mut context = context(RotationStrategy::Smart);
+    let mut candidate = candidate_with_concurrency("acct_partial", 0, 2);
+    candidate.signals.quota_reset_at = Some(context.now + Duration::from_secs(1));
+    candidate.signals.quota_reset_windows = Some(
+        [
+            (QuotaResetPeriod::Weekly, 86400),
+            (QuotaResetPeriod::Weekly, 90000),
+            (QuotaResetPeriod::Weekly, 0),
+            (QuotaResetPeriod::FiveHour, 0),
+        ]
+        .map(|(period, delta)| AccountQuotaResetWindow {
+            period,
+            reset_at: context.now + Duration::from_secs(delta),
+        })
+        .into(),
+    );
+    for scale in [1.0, 0.5] {
+        let mut config = serde_json::to_value(
+            SmartSchedulingConfig::new([0.0, 0.0, 0.0, 0.0, 1.0, 0.0]).unwrap(),
+        )
+        .unwrap();
+        config["resetWindowWeights"] = json!({
+            "weekly": 2.0*scale, "fiveHour": 4.0*scale, "monthly": 4.0*scale
+        });
+        context.policy = context
+            .policy
+            .with_smart_scheduling(serde_json::from_value(config).unwrap());
+        let trace = gateway_core::diagnostics::TraceContext::new("req_partial");
+        trace.account_selection(std::slice::from_ref(&candidate), &context, None);
+        assert_eq!(
+            trace.snapshot().unwrap()["events"][0]["data"]["candidates"][0]["smartScore"],
+            0.1
+        );
+    }
+}
+
+#[test]
+fn legacy_wire_preserves_reset_score_and_tolerance_while_explicit_zero_disables_it() {
+    let mut context = context(RotationStrategy::Smart);
+    let mut candidate = candidate_with_concurrency("acct_reset", 0, 2);
+    candidate.signals.quota_reset_at = Some(context.now + Duration::from_secs(3600));
+    candidate.signals.quota_reset_windows = Some(
+        [AccountQuotaResetWindow {
+            period: QuotaResetPeriod::Monthly,
+            reset_at: context.now + Duration::from_secs(1),
+        }]
+        .into(),
+    );
+    let legacy = json!({"loadWeight":0,"quotaWeight":0,"healthWeight":0,"latencyWeight":0,"resetWeight":10,"queueWeight":0});
+    let mut disabled = legacy.clone();
+    disabled["resetWindowWeights"] = json!({"fiveHour":0,"weekly":0,"monthly":0});
+    for (wire, score, tolerance) in [(legacy, 5.0, 0.05 * 100.0 / 33.0), (disabled, 0.0, 0.0)] {
+        let config: SmartSchedulingConfig = serde_json::from_value(wire.clone()).unwrap();
+        let encoded = serde_json::to_value(config).unwrap();
+        assert_eq!(
+            encoded.get("resetWindowWeights").is_some(),
+            wire.get("resetWindowWeights").is_some()
+        );
+        assert_eq!(
+            serde_json::from_value::<SmartSchedulingConfig>(encoded).unwrap(),
+            config
+        );
+        context.policy = context.policy.with_smart_scheduling(config);
+        let trace = gateway_core::diagnostics::TraceContext::new("req_legacy_reset");
+        trace.account_selection(std::slice::from_ref(&candidate), &context, None);
+        let snapshot = trace.snapshot().unwrap();
+        let data = &snapshot["events"][0]["data"];
+        assert_eq!(data["candidates"][0]["smartScore"], score);
+        assert!((data["smartScoreTolerance"].as_f64().unwrap() - tolerance).abs() < 0.00001);
+    }
+}
+
+#[test]
+fn window_config_rejects_invalid_or_incomplete_period_weights() {
+    let base = serde_json::to_value(SmartSchedulingConfig::default()).unwrap();
+    for invalid in [
+        json!({}),
+        json!({"weekly":1}),
+        json!({"fiveHour":-0.1,"weekly":1,"monthly":1}),
+        json!({"fiveHour":1,"weekly":10.1,"monthly":1}),
+        json!({"fiveHour":1,"weekly":1,"monthly":0.01}),
+        json!({"fiveHour":1,"weekly":1,"monthly":1,"other":1}),
+    ] {
+        let mut wire = base.clone();
+        wire["resetWindowWeights"] = invalid;
+        assert!(serde_json::from_value::<SmartSchedulingConfig>(wire).is_err());
     }
 }

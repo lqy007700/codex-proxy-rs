@@ -66,9 +66,7 @@ use crate::credential::{
     derive_previous_response_id_hash, derive_turn_alias,
 };
 use crate::request_identity::{account_session_with_headers, turn_id_with_headers};
-use crate::session_transport::{
-    CodexSessionTransportRecovery, SessionTransportScope, WS_PAYLOAD_LIMIT,
-};
+use crate::session_transport::{CodexSessionTransportRecovery, SessionTransportScope};
 use crate::transport::canonical::{
     CodexCanonicalDecoder, CodexCanonicalError, CodexCanonicalOutcome,
 };
@@ -85,7 +83,6 @@ use crate::transport::protocol::responses::{
     CodexResponsesRequest, PREVIOUS_RESPONSE_NOT_FOUND_CODE, PREVIOUS_RESPONSE_NOT_FOUND_MESSAGE,
     PreviousResponseScope, ResponseEventSignals, TransportRequirement, transport_requirement,
 };
-use crate::transport::protocol::websocket::websocket_response_create_payload_len;
 use crate::transport::request::{
     CodexRequestEncodeError, RequestAccountScope, align_structured_location_fields,
     clear_request_turn_state, encode_generate_request, scope_request_to_account,
@@ -559,6 +556,16 @@ impl Provider for CodexProvider {
                 ..Default::default()
             };
         };
+        let payload = request.protocol_payload();
+        if payload.protocol() == gateway_protocol::anthropic::ANTHROPIC_PROTOCOL {
+            return ProviderRequestObservation {
+                reasoning_effort: gateway_protocol::anthropic::messages_request_effort(
+                    payload.body(),
+                )
+                .map(str::to_owned),
+                ..Default::default()
+            };
+        }
         let Ok(encoded) = encode_generate_request(request, "observability", None) else {
             return ProviderRequestObservation::default();
         };
@@ -596,9 +603,16 @@ impl Provider for CodexProvider {
     async fn query_model_capabilities(
         &self,
     ) -> Result<Vec<ProviderModelCapabilities>, ProviderError> {
-        let snapshot = self.catalog.synchronize().await.map_err(|_| {
-            provider_error(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
-        })?;
+        // 请求只消费已发布目录，缺失或失效目录由后台任务重建
+        let snapshot = self
+            .catalog
+            .cached()
+            .map_err(|_| {
+                provider_error(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
+            })?
+            .ok_or_else(|| {
+                provider_error(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
+            })?;
         let mut accounts = snapshot.model_catalog_accounts();
         Ok(snapshot
             .models()
@@ -615,10 +629,10 @@ impl Provider for CodexProvider {
 
     async fn query_client_model_catalog(
         &self,
-        client_api_key_id: &gateway_core::policy::ClientApiKeyId,
+        _client_api_key_id: &gateway_core::policy::ClientApiKeyId,
         scope: &gateway_core::account::scope::FrozenAccountScope,
         protocol: &str,
-        client_version: &str,
+        _client_version: &str,
     ) -> Result<
         Option<Vec<gateway_core::routing::ProviderModelDescriptor>>,
         gateway_core::routing::ProviderCatalogUnavailable,
@@ -627,7 +641,7 @@ impl Provider for CodexProvider {
             return Ok(None);
         }
         self.catalog
-            .client_model_catalog(client_api_key_id, scope, client_version)
+            .client_model_catalog(scope)
             .await
             .map(Some)
             .map_err(|_| gateway_core::routing::ProviderCatalogUnavailable)
@@ -1139,54 +1153,13 @@ impl CodexProvider {
             && session_transport_scope
                 .as_ref()
                 .is_some_and(|scope| self.session_transport_recovery.uses_http(scope));
-        let mut transport = if requirement.requires_websocket() {
+        let transport = if requirement.requires_websocket() {
             CodexProviderTransport::PreferWebSocket
         } else if context.transport() == AttemptTransport::Fallback || session_http_fallback {
             CodexProviderTransport::HttpOnly
         } else {
             requested_transport
         };
-        let mut oversized_http = false;
-        if codex_oauth
-            && transport == CodexProviderTransport::PreferWebSocket
-            && (matches!(
-                requirement,
-                TransportRequirement::NewChain | TransportRequirement::WebSocketNewChain
-            ) || (requirement == TransportRequirement::ExactWebSocketContinuation
-                && upstream_request
-                    .downstream_websocket_connection_id
-                    .is_some()))
-        {
-            let payload_bytes =
-                websocket_response_create_payload_len(&upstream_request).map_err(|_| {
-                    provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
-                })?;
-            if requirement == TransportRequirement::ExactWebSocketContinuation {
-                if payload_bytes >= WS_PAYLOAD_LIMIT {
-                    tracing::info!(
-                        request_id = context.request_id().as_str(),
-                        payload_bytes,
-                        threshold_bytes = WS_PAYLOAD_LIMIT,
-                        continuation_recovery_action = "client_replay_required",
-                        "OpenAI oversized WebSocket continuation requires full client input before send"
-                    );
-                    return Err(continuation_replay_required_error(
-                        "transport_payload_too_large",
-                    ));
-                }
-            } else if self
-                .session_transport_recovery
-                .http_for_full_payload(session_transport_scope.as_ref(), payload_bytes)
-            {
-                transport = CodexProviderTransport::HttpOnly;
-                oversized_http = true;
-                tracing::info!(
-                    request_id = context.request_id().as_str(),
-                    payload_bytes,
-                    "OpenAI full request selected HTTP by WebSocket payload size"
-                );
-            }
-        }
         if transport == CodexProviderTransport::PreferWebSocket
             && middleware_headers.iter().any(|header| {
                 match HeaderValue::from_bytes(header.value()) {
@@ -1245,7 +1218,7 @@ impl CodexProvider {
                     )
                     .reasoning_effort_override,
                 response_store,
-                oversized_http,
+                oversized_http: false,
                 continuation_scope: None,
             });
         let allows_account_state_mutation = lease.allows_account_state_mutation();

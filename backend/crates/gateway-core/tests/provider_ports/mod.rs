@@ -200,6 +200,7 @@ fn scheduling_state_preserves_provider_neutral_signals() {
             in_flight: 2,
             last_started_at: None,
             quota_reset_at: None,
+            quota_reset_windows: None,
             quota_remaining_rank: Some(7),
             cooldown: None,
             failure_rate_basis_points: Some(125),
@@ -250,7 +251,7 @@ fn warmup_cron_matches_calendar_steps_and_lists_at_minute_precision() {
 
     let policy = ProviderWarmupPolicy::try_new(
         true,
-        "*/15 8,13 * NOV MON-FRI".to_owned(),
+        "*/15 8,13 * NOV MON-FRI",
         Some("test-model".to_owned()),
     )
     .unwrap();
@@ -273,14 +274,63 @@ fn warmup_cron_matches_calendar_steps_and_lists_at_minute_precision() {
 fn warmup_policy_requires_a_schedule_and_model_only_when_enabled() {
     use gateway_core::provider_ports::ProviderWarmupPolicy;
 
-    let disabled = ProviderWarmupPolicy::try_new(false, String::new(), None).unwrap();
-    assert!(ProviderWarmupPolicy::try_new(true, String::new(), Some("model".to_owned())).is_err());
-    assert!(ProviderWarmupPolicy::try_new(false, "08:00".to_owned(), None).is_err());
-    assert!(ProviderWarmupPolicy::try_new(true, "0 8 * * *".to_owned(), None).is_err());
-    assert!(
-        ProviderWarmupPolicy::try_new(true, "0 8 * * *".to_owned(), Some(" ".to_owned())).is_err()
-    );
+    let disabled = ProviderWarmupPolicy::try_new(false, "", None).unwrap();
+    assert!(ProviderWarmupPolicy::try_new(true, "", Some("model".to_owned())).is_err());
+    assert!(ProviderWarmupPolicy::try_new(false, "08:00", None).is_err());
+    assert!(ProviderWarmupPolicy::try_new(true, "0 8 * * *", None).is_err());
+    assert!(ProviderWarmupPolicy::try_new(true, "0 8 * * *", Some(" ".to_owned())).is_err());
     assert!(!disabled.matches_slot(
         chrono::NaiveDateTime::parse_from_str("2026-11-11 08:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
     ));
+}
+
+#[test]
+fn warmup_multiple_rules_preserve_pairs_and_collapse_overlapping_matches() {
+    use chrono::NaiveDate;
+    use gateway_core::provider_ports::ProviderWarmupPolicy;
+
+    let policy = ProviderWarmupPolicy::try_new(
+        true,
+        "58 5 * * *;59 10 * * *;0 16 * * *;1 21 * * *;0 16 * * MON-FRI",
+        Some("test-model".to_owned()),
+    )
+    .unwrap();
+    let date = NaiveDate::from_ymd_opt(2026, 11, 13).unwrap();
+    let matched = (0..1440)
+        .filter(|minute| {
+            let slot = date.and_hms_opt(minute / 60, minute % 60, 0).unwrap();
+            policy.matches_slot(slot)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(matched, [358, 659, 960, 1261]);
+}
+
+#[test]
+fn warmup_multiple_rules_validate_the_whole_saved_value() {
+    use gateway_core::provider_ports::ProviderWarmupPolicy;
+
+    let exact = format!(
+        "{}0{}8 * * *",
+        ["* * * * *"; 24].join(";") + ";",
+        " ".repeat(7)
+    );
+    assert_eq!(exact.len(), 255);
+    assert!(ProviderWarmupPolicy::validate_values(false, &exact, None).is_ok());
+    for cron in [
+        format!("{exact} "),
+        ["* * * * *"; 26].join(";"),
+        "0 8 * * *;60 13 * * *".to_owned(),
+        "0 8 * * *;".to_owned(),
+        ";0 8 * * *".to_owned(),
+        "0 8 * * *;;30 13 * * *".to_owned(),
+        "0 8 * * *; 30 13 * * *".to_owned(),
+        "0 8 * * *；30 13 * * *".to_owned(),
+        "0 8 * * *\n30 13 * * *".to_owned(),
+    ] {
+        assert_eq!(
+            ProviderWarmupPolicy::validate_values(false, &cron, None),
+            Err("account_warmup_cron"),
+            "{cron:?}"
+        );
+    }
 }

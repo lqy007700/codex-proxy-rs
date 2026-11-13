@@ -32,6 +32,10 @@
 缓存等待和统计事务的 SQL 时限沿用该配置。修改后重启应用；连接排队仍受
 `store.pool.acquire_timeout_seconds` 约束，模型请求时限由 `api.request_timeout_seconds` 单独控制
 
+统计重算产生较多临时文件且数据库有内存余量时，可在 `store.pool` 下设置 `analytics_projection_work_mem_mb: 8`（单位 MB）。
+默认省略，沿用 PostgreSQL 的 `work_mem`；显式设置仅作用于增量投影、历史回填及桶重建事务，
+队列确认和普通在线查询保持数据库原值。该值是每个排序或哈希操作的预算，不是整个 Worker 的内存总上限
+
 后端从当前目录向上查找 `deploy/config.yaml`，相对数据、日志和静态资源路径以该文件所在目录解析
 
 Compose 通过环境变量将监听和数据库地址设为容器内地址，并指定镜像中的静态资源目录
@@ -339,7 +343,7 @@ SSE 注释保活用于防止传输链路空闲断开，不会重置 Codex 等待
 
 管理端生成的 CC Switch 一键导入包含连接信息和当前 Key 的日／周额度查询，默认每 30 分钟刷新。
 查询地址和凭据随导入生成，在 CC Switch 中修改 Provider 的地址或 Key 后，需重新导入以同步用量查询。
-导入不包含下方模板的远程压缩、原生生图和 WebSocket 设置。需要这些设置时，使用下方配置直连 CPR，
+导入不包含下方模板的远程压缩、异步压缩、原生生图和 WebSocket 设置。需要这些设置时，使用下方配置直连 CPR，
 避免 CC Switch 切换或接管后重写 Provider 配置
 
 Linux/macOS 默认目录为 `~/.codex/`，Windows 为 `%USERPROFILE%\.codex\`；
@@ -379,6 +383,8 @@ X-OpenAI-Actor-Authorization = "proxy-managed"
 [features]
 image_generation = true
 goals = true
+# Codex 0.163.0+ 实验功能，需启用 V2 远程压缩，按需取消注释
+# async_compaction = true
 ```
 
 `OpenAI` 是自定义 Provider ID，大小写要与 `model_provider` 一致。合并配置时修改已有表，
@@ -386,6 +392,10 @@ goals = true
 密钥以明文保存，文件仅供本人读取，不要提交到 Git。接入代理不需要扩大命令沙箱的联网或文件权限
 
 V2 远程压缩通过 Responses 接口发送 `compaction_trigger`，网关和上游需支持该协议。
+异步压缩需客户端支持 `async_compaction` 并启用 V2 远程压缩。官方 Codex 0.163.0 和 0.168.0 源码中该功能均为实验状态且默认关闭，
+模板保留注释；确认客户端版本后可取消注释启用。Codex 0.153.4 不提供此功能，启用 Token Budget 时异步压缩不生效。
+网关的出站客户端画像版本与本地 Codex 配置版本相互独立，不能用画像版本判断客户端是否支持该功能
+
 若 Provider ID 改为 `custom`，相应能力配置也要改到 `[model_providers.custom.capabilities]`
 
 需要指定完整模型目录时，在账号的模型列表中导出所选 Codex 模型，并在 `config.toml` 顶层设置
@@ -519,7 +529,7 @@ Compose 使用以下绑定目录：
 
 PostgreSQL 是账号、Client Key、运行设置、请求记录与审计的权威存储；账号 credential 按
 Provider schema 以明文 JSON 保存于 PostgreSQL。Redis 只保存可重建、可过期的协调状态，例如
-会话亲和、lease、cooldown、OAuth pending flow 与套餐模型目录 cache
+会话亲和、lease、cooldown、OAuth pending flow 与账号模型 ID 短期缓存
 
 备份应覆盖哪些目录、如何生成一致性数据库归档，见 [备份与恢复](#备份与恢复)
 

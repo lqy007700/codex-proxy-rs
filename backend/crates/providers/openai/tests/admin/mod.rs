@@ -209,6 +209,116 @@ async fn account_runtime_state_reports_and_recovers_websocket_degradation() {
 }
 
 #[tokio::test]
+async fn recovered_websocket_state_ignores_late_failure_from_previous_generation() {
+    use futures::SinkExt as _;
+    use tokio::io::AsyncWriteExt as _;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut opening, _) = listener.accept().await.unwrap();
+        let request = crate::transport::read_http_request_with_body(&mut opening).await;
+        assert!(request.starts_with(b"GET /codex/responses"));
+        opening
+            .write_all(
+                b"HTTP/1.1 426 Upgrade Required\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        drop(opening);
+
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut websocket = crate::transport::accept_codex_test_websocket(socket).await;
+        assert!(websocket.next().await.unwrap().unwrap().is_text());
+        websocket
+            .send(Message::Text(
+                crate::transport::completed_websocket_response("resp_recovered_generation", 1, 1)
+                    .into(),
+            ))
+            .await
+            .unwrap();
+    });
+    let store = Arc::new(MemoryAccountStore::default());
+    store
+        .seed_oauth_credential(ImportCodexOAuthCredential {
+            account_id: "acct_late_runtime_failure".to_owned(),
+            name: "late runtime failure".to_owned(),
+            secret: secret("late-runtime-access"),
+            verified_account: profile("chatgpt-late-runtime"),
+            next_refresh_at: Some(Utc::now() + chrono::Duration::minutes(30)),
+            enabled: true,
+        })
+        .await;
+    let mut config = valid_config();
+    config.config.api.base_url = base_url;
+    let bundle = provider_openai::initialize(
+        config.config,
+        provider_ports_with(store, Arc::new(TestOAuthPending::default())),
+    )
+    .await
+    .unwrap();
+    let account_id = ProviderAccountId::new("acct_late_runtime_failure").unwrap();
+    let request = || {
+        initialized_provider_request(
+            initialized_session_operation("late-runtime-session"),
+            account_id.as_str(),
+        )
+    };
+    let mut stale = bundle
+        .core_provider()
+        .execute(
+            request(),
+            initialized_attempt_context("req_stale_runtime", account_id.as_str()),
+        )
+        .await
+        .unwrap();
+
+    // 旧请求已冻结恢复代次，管理恢复后的迟到失败不能重新写入降级状态
+    bundle
+        .admin_provider()
+        .recover_account_runtime_state(&account_id);
+    let failure = loop {
+        if let Err(error) = stale.next().await.expect("old opening rejection") {
+            break error;
+        }
+    };
+    assert_eq!(failure.upstream_status(), Some(426));
+    drop(stale);
+    assert!(
+        !bundle
+            .admin_provider()
+            .account_runtime_state(&account_id)
+            .websocket_degraded
+    );
+
+    let mut current = bundle
+        .core_provider()
+        .execute(
+            request(),
+            initialized_attempt_context("req_current_runtime", account_id.as_str()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(current.metadata().transport().as_str(), "websocket");
+    let mut completed = false;
+    while let Some(event) = current.next().await {
+        completed |= event
+            .unwrap()
+            .wire_event()
+            .is_some_and(|wire| wire.event_type() == Some("response.completed"));
+    }
+    assert!(completed);
+    assert!(
+        !bundle
+            .admin_provider()
+            .account_runtime_state(&account_id)
+            .websocket_degraded
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn websocket_degradation_is_isolated_by_account_when_session_is_shared() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1156,7 +1266,10 @@ async fn openai_admin_provider_projects_cached_quota_models_and_canonical_export
     let record = account_record(&account);
     let config = valid_config();
     let catalog_cache = Arc::new(TestCatalogCache::default());
-    catalog_cache.seed("plan:pro", ["gpt-5.4"]);
+    let catalog_scope = provider_openai::credential::CodexCatalogScope::for_account(&account)
+        .cache_scope()
+        .expect("account catalog scope");
+    catalog_cache.seed(catalog_scope.as_str(), ["gpt-5.4"]);
     let bundle = provider_openai::initialize(
         config.config.clone(),
         provider_ports_with_catalog(

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ZCard, ZForm, ZFormItem, ZInput, ZSwitch } from '@codex-proxy/ui'
+import { ZCard, ZForm, ZFormItem, ZInput, ZInputTag, ZSwitch } from '@codex-proxy/ui'
 import { Clock, Sparkles } from '@lucide/vue'
 
 const enabled = defineModel<boolean>('enabled', { required: true })
-const cron = defineModel<string>('cron', { required: true })
+const cron = defineModel<string[]>('cron', { required: true })
 const model = defineModel<string>('model', { required: true })
 </script>
 
@@ -21,21 +21,22 @@ const model = defineModel<string>('model', { required: true })
 
       <ZFormItem
         label="Cron 表达式"
-        description="五段表达式：分 时 日 月 星期"
+        description="每条为五段 Cron，输入后按回车添加"
         :required="enabled"
       >
-        <ZInput
+        <ZInputTag
           v-model="cron"
+          collapse-tags
+          collapse-tags-tooltip
           :disabled="!enabled"
           aria-label="Cron 表达式"
           placeholder="0 8 * * *"
-          maxlength="255"
           :spellcheck="false"
         >
           <template #prefix>
             <Clock class="size-4" />
           </template>
-        </ZInput>
+        </ZInputTag>
       </ZFormItem>
 
       <ZFormItem

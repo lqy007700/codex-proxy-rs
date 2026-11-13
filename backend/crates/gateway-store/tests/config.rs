@@ -28,6 +28,7 @@ fn store_pool_config_defaults_reserve_capacity_for_observability() {
     assert_eq!(pool.max_connections, 20);
     assert_eq!(pool.acquire_timeout_seconds, 5);
     assert_eq!(pool.observability_timeout_seconds, 120);
+    assert_eq!(pool.analytics_projection_work_mem_mb, None);
     assert_eq!(pool.observability_max_connections(), 16);
     assert_eq!(
         StorePoolConfig {
@@ -100,5 +101,41 @@ fn store_config_accepts_custom_observability_timeout_and_rejects_invalid_values(
         config["pool"] = serde_json::json!({"observability_timeout_seconds": seconds});
         let mut config: StoreConfig = serde_json::from_value(config).unwrap();
         assert!(config.resolve_and_validate(root.path()).is_err());
+    }
+}
+
+#[test]
+fn analytics_projection_work_mem_validates_whole_mb_and_preserves_default() {
+    let root = tempfile::tempdir().unwrap();
+    for mb in [None, Some(1_u32), Some(8), Some(2_097_151)] {
+        let mut config: serde_json::Value = serde_json::json!({
+            "database": { "url": "postgres://codex_proxy@127.0.0.1:5432/codex_proxy", "password": PASSWORD },
+            "redis": { "url": "redis://127.0.0.1:6379/", "password": PASSWORD },
+            "pool": { "analytics_projection_work_mem_mb": mb },
+        });
+        if mb.is_none() {
+            config["pool"]
+                .as_object_mut()
+                .unwrap()
+                .remove("analytics_projection_work_mem_mb");
+        }
+        serde_json::from_value::<StoreConfig>(config)
+            .unwrap()
+            .resolve_and_validate(root.path())
+            .unwrap();
+    }
+    for mb in [0_u32, 2_097_152] {
+        let config = serde_json::json!({
+            "database": { "url": "postgres://codex_proxy@127.0.0.1:5432/codex_proxy", "password": PASSWORD },
+            "redis": { "url": "redis://127.0.0.1:6379/", "password": PASSWORD },
+            "pool": { "analytics_projection_work_mem_mb": mb },
+        });
+        let error = serde_json::from_value::<StoreConfig>(config)
+            .unwrap()
+            .resolve_and_validate(root.path())
+            .unwrap_err();
+        assert!(
+            matches!(error, StoreError::InvalidData { message, .. } if message.contains("analytics_projection_work_mem_mb"))
+        );
     }
 }

@@ -29,6 +29,7 @@ async fn seed(store: &Arc<MemoryAccountStore>, server: &MockServer, protocol: Ap
 fn messages_operation(stream: bool) -> Operation {
     let body = json!({
         "model":"gpt-5.4", "max_tokens":128, "stream":stream,
+        "thinking":{"type":"adaptive"}, "output_config":{"effort":"xhigh"},
         "messages":[
             {"role":"assistant","content":[{"type":"thinking","thinking":"prior thought","signature":"real-native-signature"},{"type":"text","text":"before"}]},
             {"role":"user","content":"hello"},
@@ -49,6 +50,51 @@ fn messages_operation(stream: bool) -> Operation {
                 ]),
             )])),
     ))
+}
+
+#[test]
+fn messages_request_observation_preserves_explicit_effort_without_inventing_defaults() {
+    let store = Arc::new(MemoryAccountStore::default());
+    let provider = provider(&store);
+    let client = ClientApiKeyId::new("key_messages_observation").unwrap();
+    for (options, expected) in [
+        (json!({"output_config":{"effort":"xhigh"}}), Some("xhigh")),
+        (
+            json!({"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}}),
+            Some("low"),
+        ),
+        (
+            json!({"thinking":{"type":"disabled"},"output_config":{"effort":"high"}}),
+            Some("high"),
+        ),
+        (
+            json!({"output_config":{"effort":" Future-Level "}}),
+            Some("Future-Level"),
+        ),
+        (json!({"output_config":{"effort":" "}}), None),
+        (json!({"output_config":{"effort":null}}), None),
+        (json!({"output_config":{"effort":42}}), None),
+        (json!({"thinking":{"type":"adaptive"}}), None),
+        (
+            json!({"thinking":{"type":"enabled","budget_tokens":32768}}),
+            None,
+        ),
+        (json!({}), None),
+    ] {
+        let mut body = json!({"model":"gpt-5.4","max_tokens":128,"messages":[{"role":"user","content":"hello"}]});
+        body.as_object_mut()
+            .unwrap()
+            .extend(options.as_object().unwrap().clone());
+        let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+            ProtocolPayload::json_object("anthropic", body.as_object().unwrap().clone()).unwrap(),
+        ));
+        let observation = provider.request_observation(&operation, &client);
+        assert_eq!(
+            observation.reasoning_effort.as_deref(),
+            expected,
+            "{options}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -174,7 +220,18 @@ async fn native_messages_preserve_json_sse_headers_and_real_signatures() {
             .await;
         let operation = messages_operation(streaming);
         let original = operation.middleware_body().unwrap();
-        let mut stream = provider(&store)
+        let provider = provider(&store);
+        assert_eq!(
+            provider
+                .request_observation(
+                    &operation,
+                    &ClientApiKeyId::new("key_messages_native").unwrap()
+                )
+                .reasoning_effort
+                .as_deref(),
+            Some("xhigh")
+        );
+        let mut stream = provider
             .execute(
                 planned_request("openai", operation),
                 context("req_messages_native", CancellationToken::new()),
@@ -290,6 +347,8 @@ async fn messages_and_responses_translate_with_target_header_boundaries() {
                 assert!(!headers.contains_key(name));
             }
         } else {
+            let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+            assert_eq!(body["reasoning"]["effort"], "xhigh");
             for name in [
                 "anthropic-version",
                 "anthropic-beta",
@@ -299,6 +358,71 @@ async fn messages_and_responses_translate_with_target_header_boundaries() {
             }
         }
         server.verify().await;
+    }
+}
+
+#[tokio::test]
+async fn translated_messages_service_tiers_follow_the_selected_responses_upstream() {
+    for api_key in [false, true] {
+        for (options, oauth_tier, api_tier) in [
+            (json!({"service_tier":"auto"}), None, Some("auto")),
+            (
+                json!({"service_tier":"standard_only"}),
+                None,
+                Some("default"),
+            ),
+            (json!({"speed":"fast"}), Some("priority"), Some("priority")),
+        ] {
+            let server = MockServer::start().await;
+            let store = Arc::new(MemoryAccountStore::default());
+            if api_key {
+                seed(&store, &server, ApiKeyProtocol::Responses).await;
+            } else {
+                create_account(&store, "acct_provider_contract").await;
+            }
+            Mock::given(method("POST"))
+                .and(path(if api_key {
+                    "/responses"
+                } else {
+                    "/codex/responses"
+                }))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_raw(CAPTURE_COMPLETED_SSE, "text/event-stream"),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+            let mut body = json!({"model":"gpt-5.4","max_tokens":128,"stream":true,"messages":[{"role":"user","content":"hello"}]});
+            body.as_object_mut()
+                .unwrap()
+                .extend(options.as_object().unwrap().clone());
+            let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+                ProtocolPayload::json_object("anthropic", body.as_object().unwrap().clone())
+                    .unwrap()
+                    .with_context(Map::from_iter([("use_websocket".to_owned(), json!(false))])),
+            ));
+            let mut stream = provider_with_base_url(&store, server.uri())
+                .execute(
+                    planned_request("openai", operation),
+                    context("req_translated_tier", CancellationToken::new()),
+                )
+                .await
+                .unwrap();
+            while let Some(event) = stream.next().await {
+                event.unwrap();
+            }
+            let requests = server.received_requests().await.unwrap();
+            let sent = captured_request_body(&requests[0]);
+            let expected = if api_key { api_tier } else { oauth_tier };
+            assert_eq!(sent.get("service_tier").and_then(Value::as_str), expected);
+            let hint = expected.map_or_else(
+                || "model=gpt-5.4".to_owned(),
+                |tier| format!("model=gpt-5.4;tier={tier}"),
+            );
+            assert_eq!(requests[0].headers["x-codex-routing-hint"], hint);
+            server.verify().await;
+        }
     }
 }
 
@@ -500,7 +624,7 @@ async fn translated_thinking_uses_selected_account_catalog_and_preserves_fast_be
             .mount(server)
             .await;
     }
-    let provider = provider(&store);
+    let provider = provider_with_catalog_and_base_url(&store, adaptive.uri()).await;
     for _ in 0..2 {
         for account in ["acct_provider_contract", "acct_manual"] {
             let body = json!({"model":"unrelated-client-alias","input":"hello","max_output_tokens":4096,"reasoning":{"effort":"xhigh"},"tools":[{"type":"function","name":"echo"}],"parallel_tool_calls":false,"service_tier":"priority"});
@@ -558,50 +682,20 @@ async fn translated_thinking_uses_selected_account_catalog_and_preserves_fast_be
 }
 
 #[tokio::test]
-async fn cancelled_capability_lookup_never_sends_generation() {
+async fn cancelled_messages_request_never_sends_generation_or_catalog_lookup() {
     let server = MockServer::start().await;
     let store = Arc::new(MemoryAccountStore::default());
     seed(&store, &server, ApiKeyProtocol::Messages).await;
-    Mock::given(method("GET"))
-        .and(path("/models"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_delay(Duration::from_secs(10))
-                .set_body_json(json!({"data":[]})),
-        )
-        .mount(&server)
-        .await;
     let cancellation = CancellationToken::new();
-    let cancelled = cancellation.clone();
-    let task = tokio::spawn(async move {
-        provider(&store)
-            .execute(
-                planned_request("openai", generate_operation()),
-                context("req_cancel_catalog", cancelled),
-            )
-            .await
-    });
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while server.received_requests().await.unwrap().is_empty() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
     cancellation.cancel();
-    let result = tokio::time::timeout(Duration::from_secs(1), task)
-        .await
-        .unwrap()
-        .unwrap();
+    let result = provider(&store)
+        .execute(
+            planned_request("openai", generate_operation()),
+            context("req_cancel_catalog", cancellation),
+        )
+        .await;
     assert!(matches!(result,Err(error) if error.kind()==ProviderErrorKind::Cancelled));
-    assert!(
-        server
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .all(|request| request.method == "GET")
-    );
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -759,7 +853,7 @@ async fn oversized_messages_json_is_rejected_before_wire_delivery() {
 }
 
 #[tokio::test]
-async fn slow_catalog_does_not_block_generation_and_populates_next_turn() {
+async fn cold_directory_never_queries_models_during_generation() {
     let server = MockServer::start().await;
     let store = Arc::new(MemoryAccountStore::default());
     seed(&store, &server, ApiKeyProtocol::Messages).await;
@@ -772,7 +866,7 @@ async fn slow_catalog_does_not_block_generation_and_populates_next_turn() {
                     json!({"data":[{"id":"gpt-5.4","max_tokens":2048}],"has_more":false}),
                 ),
         )
-        .expect(1)
+        .expect(0)
         .mount(&server)
         .await;
     Mock::given(method("POST"))
@@ -782,7 +876,7 @@ async fn slow_catalog_does_not_block_generation_and_populates_next_turn() {
         .mount(&server)
         .await;
     let provider = provider(&store);
-    for i in 0..2 {
+    for _ in 0..2 {
         let mut stream = provider
             .clone()
             .execute(
@@ -793,9 +887,6 @@ async fn slow_catalog_does_not_block_generation_and_populates_next_turn() {
             .unwrap();
         while let Some(event) = stream.next().await {
             event.unwrap();
-        }
-        if i == 0 {
-            tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }
     let limits = server
@@ -810,7 +901,7 @@ async fn slow_catalog_does_not_block_generation_and_populates_next_turn() {
                 .unwrap()
         })
         .collect::<Vec<_>>();
-    assert_eq!(limits, [32000, 2048]);
+    assert_eq!(limits, [32000, 32000]);
     server.verify().await;
 }
 
@@ -1049,7 +1140,15 @@ async fn rotated_messages_credentials_do_not_reuse_old_model_capabilities() {
             .mount(server)
             .await;
     }
-    let provider = provider(&store);
+    let (provider, _, _, catalog) = provider_and_quota_with_runtime_ports(
+        &store,
+        Arc::new(MemorySessionAffinity::default()),
+        first.uri(),
+        Arc::new(TestLeaseCoordinator::default()),
+        u32::try_from(DEFAULT_STREAM_MAX_RETRIES).unwrap(),
+        Arc::new(MemoryCooldownPort::new()),
+        crate::support::runtime_policy(),
+    );
     for (index, server, limit) in [(0, &first, 2048), (1, &next, 4096)] {
         if index == 1 {
             let id = ProviderAccountId::new("acct_provider_contract").unwrap();
@@ -1076,7 +1175,11 @@ async fn rotated_messages_credentials_do_not_reuse_old_model_capabilities() {
             .unwrap()
             .preserving_profile();
             store.compare_and_swap_credential(update).await.unwrap();
+            let current = store.account("acct_provider_contract").unwrap();
+            assert!(catalog.cached_account_models(&current).unwrap().is_none());
         }
+        // 生产由目录 worker 刷新；请求转换只读取当前账号版本的能力证据
+        catalog.refresh_catalogs().await.unwrap();
         let body = json!({
             "model":"gpt-5.4","input":"hello","max_output_tokens":8192,
             "reasoning":{"effort":"high"}

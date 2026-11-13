@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ZButton, ZConfirmDialog, ZIconButton, ZPageHeader, ZSegmented, ZSelect } from '@codex-proxy/ui'
+import { ZButton, ZConfirmDialog, ZEmpty, ZIconButton, ZPageHeader, ZSegmented, ZSelect } from '@codex-proxy/ui'
 
 import { Save, Undo2 } from '@lucide/vue'
 import { computed, nextTick, reactive, shallowRef, useTemplateRef, watch } from 'vue'

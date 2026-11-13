@@ -410,6 +410,11 @@ fn settings_request_validates_cron_and_allows_disabled_empty_schedule() {
         (false, "0 8 * * MON-FRI", true),
         (true, "0 8 * * MON-FRI", true),
         (true, "60 8 * * *", false),
+        (true, "0 8 * * *;30 13 * * *", true),
+        (true, "0 8 * * *;60 13 * * *", false),
+        (false, "0 8 * * *;", false),
+        (true, "0 8 * * *;;30 13 * * *", false),
+        (true, "0 8 * * *\r\n30 13 * * *", false),
         (true, "0 8 * * *\n30 13 * * *", false),
     ] {
         let mut body = update_body();
@@ -1794,4 +1799,47 @@ async fn recovery_rotation_attempts_round_trip_preserve_omissions_and_validate_c
             .unwrap();
         assert_eq!(response.status(), status);
     }
+}
+
+#[tokio::test]
+async fn window_smart_settings_round_trip_and_reject_incomplete_windows() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let mut body = update_body();
+    let mut custom =
+        serde_json::to_value(gateway_core::account::SmartSchedulingConfig::default()).unwrap();
+    custom["resetWeight"] = json!(2.0);
+    custom["resetWindowWeights"] = json!({"fiveHour":1.0,"weekly":2.0,"monthly":0.0});
+    body["smartScheduling"] = custom.clone();
+    let response = app(fixture.state())
+        .oneshot(request(
+            Method::POST,
+            "/api/admin/settings/update",
+            Some(body.clone()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await["data"]["smartScheduling"],
+        custom
+    );
+    body["smartScheduling"]["resetWindowWeights"] = json!({"weekly":1});
+    let response = app(fixture.state())
+        .oneshot(request(
+            Method::POST,
+            "/api/admin/settings/update",
+            Some(body),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let response = app(fixture.state())
+        .oneshot(request(Method::GET, "/api/admin/settings", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        response_json(response).await["data"]["smartScheduling"],
+        custom
+    );
 }

@@ -1873,6 +1873,7 @@ async fn preferred_primary_migration_distinguishes_temporary_and_persistent_unav
                         in_flight: 2,
                         last_started_at: None,
                         quota_reset_at: None,
+                        quota_reset_windows: None,
                         quota_remaining_rank: None,
                         cooldown: None,
                         failure_rate_basis_points: None,

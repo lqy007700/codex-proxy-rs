@@ -72,7 +72,7 @@ export function useSettingsForm() {
       probeModel: '',
     } as ProtectionDraft,
     accountWarmupEnabled: false,
-    accountWarmupCron: '',
+    accountWarmupCron: [] as string[],
     accountWarmupModel: '',
     resetCreditLeadMinutes: 10 as number | null,
     resetCreditMaxWeeklyRemainingPercent: null as number | null,
@@ -173,7 +173,9 @@ export function useSettingsForm() {
       probeModel: data.accountErrorProtection.probeModel ?? '',
     }
     form.accountWarmupEnabled = data.accountWarmupEnabled
-    form.accountWarmupCron = data.accountWarmupCron ?? ''
+    form.accountWarmupCron = data.accountWarmupCron
+      ? data.accountWarmupCron.split(';')
+      : []
     form.accountWarmupModel = data.accountWarmupModel ?? ''
     form.resetCreditLeadMinutes = data.resetCreditLeadMinutes
     form.resetCreditMaxWeeklyRemainingPercent = data.resetCreditMaxWeeklyRemainingPercent
@@ -349,9 +351,14 @@ export function useSettingsForm() {
       ZNotification.warning({ message: protectionError })
       return
     }
-    const cron = form.accountWarmupCron.trim()
-    if ((form.accountWarmupEnabled && !cron) || (cron && (cron.length > 255 || cron.split(/\s+/).length !== 5))) {
-      ZNotification.warning({ message: '请输入有效的五段 Cron 表达式，例如 0 8 * * *（最多 255 个字符）' })
+    const cron = form.accountWarmupCron.join(';')
+    if ((form.accountWarmupEnabled && form.accountWarmupCron.length === 0)
+      || !form.accountWarmupCron.every(expression => /^[^\s;]+(?: +[^\s;]+){4}$/u.test(expression))) {
+      ZNotification.warning({ message: '每条规则请输入五段 Cron 表达式，例如 0 8 * * *' })
+      return
+    }
+    if (new TextEncoder().encode(cron).length > 255) {
+      ZNotification.warning({ message: '预激活规则总长度不能超过 255 字节' })
       return
     }
     const warmupModel = form.accountWarmupModel.trim()
