@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use gateway_core::account::ProviderAccountId;
+use gateway_core::policy::ClientApiKeyId;
 use gateway_core::provider_ports::{
     ProviderSessionAffinityKey, ProviderSessionAffinityPort, ProviderSessionBinding,
     ProviderStoreError, ProviderStoreErrorKind,
@@ -26,6 +27,21 @@ if (not current and ARGV[1] == '') or current == ARGV[1] then
   return 1
 end
 return 0
+"#;
+
+const CURSOR_TTL_MILLIS: u64 = 24 * 60 * 60 * 1000;
+
+// 先校验全部绑定及游标，再共同写入，Token 与会话首绑不能部分成功
+const ADMIT_ROUND_ROBIN_SCRIPT: &str = r#"
+if (redis.call('GET', KEYS[#KEYS]) or '0') ~= ARGV[1] then return 0 end
+for i = 1, #KEYS - 1 do
+  if (redis.call('GET', KEYS[i]) or '') ~= ARGV[3 * i + 1] then return 0 end
+end
+for i = 1, #KEYS - 1 do
+  redis.call('PSETEX', KEYS[i], ARGV[3 * i + 3], ARGV[3 * i + 2])
+end
+redis.call('PSETEX', KEYS[#KEYS], ARGV[3], ARGV[2])
+return 1
 "#;
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -78,6 +94,15 @@ impl RedisProviderSessionAffinityRepository {
             connection,
             namespace: namespace(key_namespace)?,
         })
+    }
+
+    fn cursor_key(
+        &self,
+        provider: &ProviderKind,
+        client_key: &gateway_core::policy::ClientApiKeyId,
+    ) -> Result<String, ProviderStoreError> {
+        super::scheduling_cursor_key(&self.namespace, client_key, provider, "session-cursor")
+            .map_err(|_| provider_invalid("encode provider round robin cursor key"))
     }
 
     fn key(
@@ -182,16 +207,7 @@ impl ProviderSessionAffinityPort for RedisProviderSessionAffinityRepository {
                 .map(BindingRecord::encode)
                 .transpose()?
                 .unwrap_or_default();
-            // 同账号命中仅续期；初次认领及换号生成新版本
-            let binding = match expected.filter(|binding| {
-                binding.account_id() == account_id && binding.directive().is_none()
-            }) {
-                Some(binding) => binding.clone(),
-                None => ProviderSessionBinding::new(
-                    account_id.clone(),
-                    uuid::Uuid::new_v4().simple().to_string(),
-                )?,
-            };
+            let binding = next_binding(expected, account_id)?;
             let applied = redis::Script::new(COMPARE_AND_BIND_SCRIPT)
                 .key(self.key(provider_kind, key)?)
                 .arg(expected_raw)
@@ -205,6 +221,56 @@ impl ProviderSessionAffinityPort for RedisProviderSessionAffinityRepository {
             Ok(applied.then_some(binding))
         })
     }
+    fn round_robin_cursor<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        client_key: &'a ClientApiKeyId,
+    ) -> futures::future::BoxFuture<'a, Result<u64, ProviderStoreError>> {
+        Box::pin(async move {
+            let key = self.cursor_key(provider, client_key)?;
+            redis::cmd("GET")
+                .arg(key)
+                .query_async::<Option<u64>>(&mut self.connection.clone())
+                .await
+                .map(Option::unwrap_or_default)
+                .map_err(|source| crate::provider_unavailable("read round robin cursor", source))
+        })
+    }
+
+    fn admit_round_robin<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        admission: gateway_core::provider_ports::ProviderRoundRobinAdmission<'a>,
+    ) -> futures::future::BoxFuture<'a, Result<bool, ProviderStoreError>> {
+        Box::pin(async move {
+            let script = redis::Script::new(ADMIT_ROUND_ROBIN_SCRIPT);
+            let mut invocation = script.prepare_invoke();
+            invocation
+                .arg(admission.cursor)
+                .arg(admission.cursor.wrapping_add(1))
+                .arg(CURSOR_TTL_MILLIS);
+            for claim in admission.claims {
+                let binding = next_binding(claim.expected, claim.account)?;
+                invocation
+                    .key(self.key(provider, claim.key)?)
+                    .arg(
+                        claim
+                            .expected
+                            .map(BindingRecord::encode)
+                            .transpose()?
+                            .unwrap_or_default(),
+                    )
+                    .arg(BindingRecord::encode(&binding)?)
+                    .arg(session_affinity_ttl_millis(claim.ttl)?);
+            }
+            invocation.key(self.cursor_key(provider, admission.client_key)?);
+            invocation
+                .invoke_async(&mut self.connection.clone())
+                .await
+                .map_err(|source| crate::provider_unavailable("admit round robin account", source))
+        })
+    }
+
     fn load_alias<'a>(
         &'a self,
         provider: &'a ProviderKind,
@@ -545,5 +611,20 @@ impl RedisProviderSessionAffinityRepository {
             plan.operation_id,
             item.key()
         )
+    }
+}
+
+/// 同账号无指令时只续期；首次认领、换号和消费指令共同生成新版本
+fn next_binding(
+    expected: Option<&ProviderSessionBinding>,
+    account: &ProviderAccountId,
+) -> Result<ProviderSessionBinding, ProviderStoreError> {
+    match expected
+        .filter(|binding| binding.account_id() == account && binding.directive().is_none())
+    {
+        Some(binding) => Ok(binding.clone()),
+        None => {
+            ProviderSessionBinding::new(account.clone(), uuid::Uuid::new_v4().simple().to_string())
+        }
     }
 }

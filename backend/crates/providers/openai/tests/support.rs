@@ -931,6 +931,7 @@ pub(crate) struct MemorySessionAffinity {
     operation_delay: Duration,
     initial_claim_barrier: Option<Arc<tokio::sync::Barrier>>,
     aliases: Mutex<BTreeMap<(String, String), gateway_core::provider_ports::ProviderSessionAlias>>,
+    assignment_cursors: Mutex<BTreeMap<(String, String), u64>>,
     bindings:
         Mutex<BTreeMap<(String, String), gateway_core::provider_ports::ProviderSessionBinding>>,
     lookups: Mutex<Vec<String>>,
@@ -1156,6 +1157,82 @@ impl ProviderSessionAffinityPort for MemorySessionAffinity {
             Ok(Some(binding))
         })
     }
+    fn round_robin_cursor<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        client_key: &'a ClientApiKeyId,
+    ) -> BoxFuture<'a, Result<u64, ProviderStoreError>> {
+        Box::pin(async move {
+            self.delay_operation().await;
+            Ok(*self
+                .assignment_cursors
+                .lock()
+                .unwrap()
+                .get(&(provider.as_str().to_owned(), client_key.as_str().to_owned()))
+                .unwrap_or(&0))
+        })
+    }
+
+    fn admit_round_robin<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        admission: gateway_core::provider_ports::ProviderRoundRobinAdmission<'a>,
+    ) -> BoxFuture<'a, Result<bool, ProviderStoreError>> {
+        Box::pin(async move {
+            self.delay_operation().await;
+            if !admission.claims.is_empty()
+                && admission
+                    .claims
+                    .iter()
+                    .all(|claim| claim.expected.is_none())
+                && let Some(barrier) = &self.initial_claim_barrier
+            {
+                barrier.wait().await;
+            }
+            let mut bindings = self.bindings.lock().unwrap();
+            let mut cursors = self.assignment_cursors.lock().unwrap();
+            let cursor_key = (
+                provider.as_str().to_owned(),
+                admission.client_key.as_str().to_owned(),
+            );
+            if *cursors.get(&cursor_key).unwrap_or(&0) != admission.cursor
+                || admission.claims.iter().any(|claim| {
+                    bindings.get(&(
+                        provider.as_str().to_owned(),
+                        claim.key.expose_to_store().to_owned(),
+                    )) != claim.expected
+                })
+            {
+                return Ok(false);
+            }
+            for claim in admission.claims {
+                let binding = claim
+                    .expected
+                    .filter(|binding| {
+                        binding.account_id() == claim.account && binding.directive().is_none()
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        gateway_core::provider_ports::ProviderSessionBinding::new(
+                            claim.account.clone(),
+                            uuid::Uuid::new_v4().simple().to_string(),
+                        )
+                        .unwrap()
+                    });
+                bindings.insert(
+                    (
+                        provider.as_str().to_owned(),
+                        claim.key.expose_to_store().to_owned(),
+                    ),
+                    binding,
+                );
+                self.renewal_ttls.lock().unwrap().push(claim.ttl);
+            }
+            cursors.insert(cursor_key, admission.cursor.wrapping_add(1));
+            Ok(true)
+        })
+    }
+
     fn load_alias<'a>(
         &'a self,
         provider: &'a ProviderKind,

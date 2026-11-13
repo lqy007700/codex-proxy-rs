@@ -129,6 +129,23 @@ pub struct ProviderSessionAlias {
     pub follow_only: bool,
 }
 
+/// 发送前需要核对完整版本的绑定；首次认领的 expected 为空
+#[derive(Clone, Copy)]
+pub struct ProviderSessionClaim<'a> {
+    pub key: &'a ProviderSessionAffinityKey,
+    pub expected: Option<&'a ProviderSessionBinding>,
+    pub account: &'a ProviderAccountId,
+    pub ttl: Duration,
+}
+
+/// 新请求的轮询位置与全部首绑定共同提交，不能留下部分认领
+#[derive(Clone, Copy)]
+pub struct ProviderRoundRobinAdmission<'a> {
+    pub client_key: &'a crate::policy::ClientApiKeyId,
+    pub cursor: u64,
+    pub claims: &'a [ProviderSessionClaim<'a>],
+}
+
 /// 客户端作用域内的会话账号绑定，原始会话身份由 Provider 哈希后传入
 pub trait ProviderSessionAffinityPort: Send + Sync {
     fn observe<'a>(
@@ -157,6 +174,20 @@ pub trait ProviderSessionAffinityPort: Send + Sync {
         account_id: &'a ProviderAccountId,
         ttl: Duration,
     ) -> BoxFuture<'a, Result<Option<ProviderSessionBinding>, ProviderStoreError>>;
+
+    /// 读取下一次成功分配的位置，不因亲和命中、等待或失败读取而推进
+    fn round_robin_cursor<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        client_key: &'a crate::policy::ClientApiKeyId,
+    ) -> BoxFuture<'a, Result<u64, ProviderStoreError>>;
+
+    /// 同时比较轮询位置与全部绑定版本；冲突不写入、不续期
+    fn admit_round_robin<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        admission: ProviderRoundRobinAdmission<'a>,
+    ) -> BoxFuture<'a, Result<bool, ProviderStoreError>>;
 
     /// 显式观测到的请求关联只指向会话键，不缓存账号，迁移后仍读取当前绑定
     fn load_alias<'a>(

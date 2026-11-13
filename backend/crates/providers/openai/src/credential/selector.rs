@@ -19,9 +19,10 @@ use gateway_core::engine::{AttemptContext, ContinuationAttempt, policy::AccountP
 use gateway_core::provider_ports::{
     ProviderAffinityScope, ProviderConcurrencyPool, ProviderCooldownPort, ProviderCooldownScope,
     ProviderLeaseAcquisition, ProviderLeaseGuard, ProviderLeasePort, ProviderLeaseRequest,
-    ProviderSchedulingLeaseRequest, ProviderScopedCooldown, ProviderSessionAffinityKey,
-    ProviderSessionAffinityPort, ProviderSessionBinding, ProviderSessionExclusionPort,
-    ProviderSessionExclusions, ProviderStoreError,
+    ProviderRoundRobinAdmission, ProviderSchedulingLeaseRequest, ProviderScopedCooldown,
+    ProviderSessionAffinityKey, ProviderSessionAffinityPort, ProviderSessionBinding,
+    ProviderSessionClaim, ProviderSessionExclusionPort, ProviderSessionExclusions,
+    ProviderStoreError,
 };
 use gateway_core::routing::ProviderKind;
 use secrecy::ExposeSecret;
@@ -1037,6 +1038,23 @@ impl CodexCredentialSelector {
                     }
                 }
             }
+            let policy = request.attempt.account_selection_policy();
+            // 成功分配游标只服务安全新链；已有主绑定、等待与恢复继续使用原策略
+            let use_assignment_cursor = policy.strategy()
+                == gateway_core::account::RotationStrategy::RoundRobin
+                && !diagnostic
+                && !follow_only
+                && !request.guardian
+                && request.attempt.attempt_index().get() == 1
+                && request.attempt.continuation_attempt() == ContinuationAttempt::None
+                && matches!(
+                    request.attempt.recovery_stage(),
+                    gateway_core::engine::recovery::AccountRecoveryStage::Initial
+                )
+                && pinned_account.is_none()
+                && queued_account.is_none()
+                && binding_snapshot.is_none()
+                && token_snapshot.is_none();
             let scheduling = self
                 .leases
                 .load_state(
@@ -1046,7 +1064,29 @@ impl CodexCredentialSelector {
                     concurrency_pool,
                 )
                 .await?;
-            let round_robin_cursor = scheduling.round_robin_cursor();
+            let assignment_cursor = if use_assignment_cursor {
+                Some(
+                    tokio::time::timeout(
+                        SESSION_AFFINITY_TIMEOUT,
+                        self.session_affinity.round_robin_cursor(
+                            &self.provider_kind,
+                            request.attempt.client_api_key_ref(),
+                        ),
+                    )
+                    .await
+                    .map_err(|source| {
+                        ProviderStoreError::caused_by(
+                            gateway_core::provider_ports::ProviderStoreErrorKind::Unavailable,
+                            "read round robin cursor",
+                            source,
+                        )
+                    })??,
+                )
+            } else {
+                None
+            };
+            let round_robin_cursor =
+                assignment_cursor.unwrap_or_else(|| scheduling.round_robin_cursor());
             let mut candidates = accounts
                 .into_iter()
                 .map(|account| {
@@ -1181,7 +1221,6 @@ impl CodexCredentialSelector {
             }
             let mut shortest_retry = None;
             let mut busy_accounts = std::collections::BTreeSet::new();
-            let policy = request.attempt.account_selection_policy();
 
             loop {
                 let preferred = pinned_account
@@ -1487,10 +1526,65 @@ impl CodexCredentialSelector {
                             .and_then(|scope| scope.scheduling_role(account.id()))
                             .unwrap_or_else(|| account.scheduling_role())
                             == gateway_core::account::AccountSchedulingRole::Regular;
+                        let round_robin_admitted = if let Some(cursor) =
+                            assignment_cursor.filter(|_| {
+                                !selection.is_policy_choice()
+                                    && selection.preferred() != PreferredAccountSelection::Hit
+                                    && regular_account
+                            }) {
+                            let mut claims = Vec::with_capacity(2);
+                            if let Some(key) = token_key.as_ref().filter(|_| token_selection) {
+                                claims.push(ProviderSessionClaim {
+                                    key,
+                                    expected: token_snapshot.as_ref(),
+                                    account: account.id(),
+                                    ttl: policy.openai_session_affinity_ttl(),
+                                });
+                            }
+                            if let Some(key) = binding_key.filter(|_| normal_admission) {
+                                claims.push(ProviderSessionClaim {
+                                    key,
+                                    expected: binding_snapshot.as_ref(),
+                                    account: account.id(),
+                                    ttl: policy.openai_session_affinity_ttl(),
+                                });
+                            }
+                            let admitted = tokio::time::timeout(
+                                SESSION_AFFINITY_TIMEOUT,
+                                self.session_affinity.admit_round_robin(
+                                    &self.provider_kind,
+                                    ProviderRoundRobinAdmission {
+                                        client_key: request.attempt.client_api_key_ref(),
+                                        cursor,
+                                        claims: &claims,
+                                    },
+                                ),
+                            )
+                            .await
+                            .map_err(|source| {
+                                ProviderStoreError::caused_by(
+                                    gateway_core::provider_ports::ProviderStoreErrorKind::Unavailable,
+                                    "admit round robin account",
+                                    source,
+                                )
+                            })??;
+                            if !admitted {
+                                // CAS 失败必须确认租约释放，再重读绑定和游标
+                                guard.release().await?;
+                                if request.attempt.deadline().is_elapsed() {
+                                    return Err(CredentialSelectionError::AccountSnapshotChanged);
+                                }
+                                continue 'capacity;
+                            }
+                            true
+                        } else {
+                            false
+                        };
                         // Token 主绑定先认领，冲突者释放租约重读，不能让不同窗口各发各的
                         // 分流和恢复只续期已有偏好；缺失绑定不能由增量或保底认领
                         if let Some(key) = token_key.as_ref().filter(|_| {
-                            regular_account
+                            !round_robin_admitted
+                                && regular_account
                                 && (token_selection
                                     || token_snapshot
                                         .as_ref()
@@ -1577,7 +1671,8 @@ impl CodexCredentialSelector {
                             None
                         };
                         if let Some(key) = binding_key.filter(|_| {
-                            regular_account
+                            !round_robin_admitted
+                                && regular_account
                                 && (normal_admission
                                     || binding_snapshot
                                         .as_ref()

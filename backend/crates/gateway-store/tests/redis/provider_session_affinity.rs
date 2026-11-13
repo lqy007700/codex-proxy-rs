@@ -876,3 +876,162 @@ async fn token_name_sidecar_preserves_names_and_binding_contract_while_ignoring_
     );
     assert_eq!(repo.load(&provider, &key).await.unwrap(), Some(binding));
 }
+
+#[tokio::test]
+async fn round_robin_cursor_and_both_primary_claims_commit_atomically() {
+    use gateway_core::policy::ClientApiKeyId;
+    use gateway_core::provider_ports::{ProviderRoundRobinAdmission, ProviderSessionClaim};
+    let Some((repo, _, _)) = affinity_repository().await else {
+        return;
+    };
+    let provider = ProviderKind::new("openai").unwrap();
+    let client = ClientApiKeyId::new("round-robin-key").unwrap();
+    let other = ClientApiKeyId::new("other-round-robin-key").unwrap();
+    let account = ProviderAccountId::new("acct_first").unwrap();
+    let session = ProviderSessionAffinityKey::try_new("new-session").unwrap();
+    let token = ProviderSessionAffinityKey::try_new("trusted-token").unwrap();
+    let ttl = Duration::from_secs(60);
+    assert_eq!(
+        repo.round_robin_cursor(&provider, &client).await.unwrap(),
+        0
+    );
+    let claims = [
+        ProviderSessionClaim {
+            key: &session,
+            expected: None,
+            account: &account,
+            ttl,
+        },
+        ProviderSessionClaim {
+            key: &token,
+            expected: None,
+            account: &account,
+            ttl,
+        },
+    ];
+    assert!(
+        repo.admit_round_robin(
+            &provider,
+            ProviderRoundRobinAdmission {
+                client_key: &client,
+                cursor: 0,
+                claims: &claims,
+            }
+        )
+        .await
+        .unwrap()
+    );
+    let bound = repo.load(&provider, &session).await.unwrap().unwrap();
+    assert_eq!(
+        repo.load(&provider, &token)
+            .await
+            .unwrap()
+            .unwrap()
+            .account_id(),
+        &account
+    );
+    assert_eq!(
+        repo.round_robin_cursor(&provider, &client).await.unwrap(),
+        1
+    );
+    assert_eq!(repo.round_robin_cursor(&provider, &other).await.unwrap(), 0);
+    let lost = ProviderSessionAffinityKey::try_new("losing-session").unwrap();
+    let lost_claims = [ProviderSessionClaim {
+        key: &lost,
+        expected: None,
+        account: &account,
+        ttl,
+    }];
+    assert!(
+        !repo
+            .admit_round_robin(
+                &provider,
+                ProviderRoundRobinAdmission {
+                    client_key: &client,
+                    cursor: 0,
+                    claims: &lost_claims,
+                }
+            )
+            .await
+            .unwrap()
+    );
+    assert!(repo.load(&provider, &lost).await.unwrap().is_none());
+    assert!(
+        !repo
+            .admit_round_robin(
+                &provider,
+                ProviderRoundRobinAdmission {
+                    client_key: &client,
+                    cursor: 1,
+                    claims: &claims,
+                }
+            )
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        repo.round_robin_cursor(&provider, &client).await.unwrap(),
+        1
+    );
+    assert_eq!(
+        repo.load(&provider, &session).await.unwrap().unwrap(),
+        bound
+    );
+    // 普通亲和续期不能推进独立的新会话分配位置
+    repo.compare_and_bind(&provider, &session, Some(&bound), &account, ttl)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        repo.round_robin_cursor(&provider, &client).await.unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn concurrent_round_robin_claims_do_not_leave_losing_session_bindings() {
+    use gateway_core::policy::ClientApiKeyId;
+    use gateway_core::provider_ports::{ProviderRoundRobinAdmission, ProviderSessionClaim};
+    let Some((repo, _, _)) = affinity_repository().await else {
+        return;
+    };
+    let provider = ProviderKind::new("openai").unwrap();
+    let client = ClientApiKeyId::new("shared-round-robin-key").unwrap();
+    let account = ProviderAccountId::new("acct_first").unwrap();
+    let keys = (0..8)
+        .map(|index| ProviderSessionAffinityKey::try_new(format!("session-{index}")).unwrap())
+        .collect::<Vec<_>>();
+    let outcomes = futures::future::join_all(keys.iter().map(|key| {
+        let repo = &repo;
+        let provider = &provider;
+        let client = &client;
+        let account = &account;
+        async move {
+            let claims = [ProviderSessionClaim {
+                key,
+                expected: None,
+                account,
+                ttl: Duration::from_secs(60),
+            }];
+            repo.admit_round_robin(
+                provider,
+                ProviderRoundRobinAdmission {
+                    client_key: client,
+                    cursor: 0,
+                    claims: &claims,
+                },
+            )
+            .await
+            .unwrap()
+        }
+    }))
+    .await;
+    assert_eq!(outcomes.iter().filter(|&&won| won).count(), 1);
+    for (key, won) in keys.iter().zip(outcomes) {
+        assert_eq!(repo.load(&provider, key).await.unwrap().is_some(), won);
+    }
+    assert_eq!(
+        repo.round_robin_cursor(&provider, &client).await.unwrap(),
+        1
+    );
+}

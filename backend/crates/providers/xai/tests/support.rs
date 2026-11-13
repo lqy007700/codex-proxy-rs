@@ -838,6 +838,22 @@ impl ProviderSessionAffinityPort for TestSessionAffinity {
             .map(Some)
         })
     }
+    fn round_robin_cursor<'a>(
+        &'a self,
+        _: &'a ProviderKind,
+        _: &'a gateway_core::policy::ClientApiKeyId,
+    ) -> BoxFuture<'a, Result<u64, ProviderStoreError>> {
+        Box::pin(async { unreachable!("xAI does not use OpenAI assignment cursors") })
+    }
+
+    fn admit_round_robin<'a>(
+        &'a self,
+        _: &'a ProviderKind,
+        _: gateway_core::provider_ports::ProviderRoundRobinAdmission<'a>,
+    ) -> BoxFuture<'a, Result<bool, ProviderStoreError>> {
+        Box::pin(async { unreachable!("xAI does not use OpenAI assignment cursors") })
+    }
+
     fn load_alias<'a>(
         &'a self,
         _: &'a ProviderKind,

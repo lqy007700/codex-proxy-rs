@@ -10,9 +10,10 @@ pub use lease::{
 };
 mod affinity;
 pub use affinity::{
-    ProviderAffinityScope, ProviderSessionAffinityKey, ProviderSessionAffinityPort,
-    ProviderSessionAlias, ProviderSessionBinding, ProviderSessionExclusionPort,
-    ProviderSessionExclusions, ProviderSessionObservation, SessionBindingDirective,
+    ProviderAffinityScope, ProviderRoundRobinAdmission, ProviderSessionAffinityKey,
+    ProviderSessionAffinityPort, ProviderSessionAlias, ProviderSessionBinding,
+    ProviderSessionClaim, ProviderSessionExclusionPort, ProviderSessionExclusions,
+    ProviderSessionObservation, SessionBindingDirective,
 };
 mod catalog;
 pub use catalog::{
