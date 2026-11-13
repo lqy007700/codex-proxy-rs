@@ -888,6 +888,7 @@ pub(crate) fn health_timeline_view(
                 status: health_status_name(point.status).to_owned(),
                 reliability_display: reliability_display(point.reliability_percent),
                 success_requests: point.success_requests,
+                retry_count: point.retry_count,
                 failed_requests: point.failed_requests,
                 cancelled_requests: point.cancelled_requests,
                 incomplete_requests: point.incomplete_requests,

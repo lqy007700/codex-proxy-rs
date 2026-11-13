@@ -93,6 +93,7 @@ export interface DashboardHealthTimelinePoint {
   status: DashboardHealthStatus
   reliabilityDisplay: string
   successRequests: number
+  retryCount: number
   failedRequests: number
   cancelledRequests: number
   incompleteRequests: number

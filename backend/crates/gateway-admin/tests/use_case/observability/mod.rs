@@ -53,6 +53,90 @@ fn external_observability_range_rejects_over_366_days_and_reversed_range() {
 }
 
 #[tokio::test]
+async fn health_timeline_should_sum_retries_per_slot_without_changing_health() {
+    let now: DateTime<Utc> = "2026-11-13T07:10:00Z".parse().unwrap();
+    let slot = quarter_hour_start(now);
+    let day_start = gateway_core::time::DeploymentTimeZone::default()
+        .day_start(now)
+        .unwrap();
+    let store = Arc::new(FixtureObservabilityStore::new(observation_range(now)));
+    store.replace_trend(vec![
+        health_metric_point(
+            day_start - Duration::minutes(15),
+            RequestMetrics {
+                success_count: 100,
+                retry_count: 100,
+                ..Default::default()
+            },
+        ),
+        health_metric_point(
+            slot - Duration::minutes(15),
+            RequestMetrics {
+                success_count: 10,
+                retry_count: 4,
+                ..Default::default()
+            },
+        ),
+        health_metric_point(
+            slot,
+            RequestMetrics {
+                success_count: 10,
+                retry_count: 3,
+                ..Default::default()
+            },
+        ),
+        health_metric_point(
+            slot + Duration::minutes(1),
+            RequestMetrics {
+                failure_count: 1,
+                cancelled_count: 1,
+                retry_count: 5,
+                ..Default::default()
+            },
+        ),
+        health_metric_point(
+            slot + Duration::minutes(15),
+            RequestMetrics {
+                success_count: 100,
+                retry_count: 100,
+                ..Default::default()
+            },
+        ),
+    ]);
+    let services = observability_services(store).await;
+    let timeline = services
+        .observability()
+        .dashboard_summary(observation_range(now), TrendKind::Usage)
+        .await
+        .unwrap()
+        .health_timeline;
+    let current = timeline
+        .points
+        .iter()
+        .find(|point| point.bucket_start == slot)
+        .unwrap();
+
+    assert_eq!(current.retry_count, 8);
+    assert_eq!(current.success_requests, 10);
+    assert_eq!(current.failed_requests, 1);
+    assert_eq!(current.cancelled_requests, 1);
+    assert_eq!(current.reliability_percent, Some(1000.0 / 11.0));
+    assert_eq!(timeline.success_requests, 20);
+    assert_eq!(
+        timeline
+            .points
+            .iter()
+            .map(|point| point.retry_count)
+            .sum::<u64>(),
+        12
+    );
+    assert!(timeline.points.iter().all(|point| {
+        point.bucket_start <= slot
+            || (point.status == HealthStatus::Future && point.retry_count == 0)
+    }));
+}
+
+#[tokio::test]
 async fn health_timeline_should_keep_exactly_china_day_quarter_hour_slots() {
     let now = Utc::now();
     let day_start = gateway_core::time::DeploymentTimeZone::default()

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ZButton, ZCard, ZInput, ZPageHeader, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
+import { ZButton, ZCard, ZInput, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
 import { Check, RotateCcw, Save, Search, Undo2 } from '@lucide/vue'
-
 import { defineAsyncComponent } from 'vue'
+
+import AppPageHeader from '@/components/AppPageHeader.vue'
 
 import { notification as ZNotification } from '@/utils/notification'
 
@@ -68,7 +69,7 @@ function saveTheme(event: MouseEvent) {
 
 <template>
   <div class="flex min-h-0 w-full flex-col">
-    <ZPageHeader class="xl:h-17" title="主题设置">
+    <AppPageHeader title="主题设置">
       <template #description>
         <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>自定义当前浏览器中的管理端配色与界面风格</span>
@@ -112,7 +113,7 @@ function saveTheme(event: MouseEvent) {
           </ZButton>
         </div>
       </template>
-    </ZPageHeader>
+    </AppPageHeader>
 
     <section
       class="theme-workbench isolate mt-5 overflow-hidden xl:flex xl:min-h-0 xl:flex-1 xl:flex-col"

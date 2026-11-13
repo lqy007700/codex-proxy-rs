@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { ApiKey } from '@/api'
-import { ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable } from '@codex-proxy/ui'
-
+import { ZCard, ZCheckbox, ZConfirmDialog, ZPagination, ZTable } from '@codex-proxy/ui'
 import { ref, shallowRef, watch } from 'vue'
+
 import ApiKeyConfigModal from '@/components/ApiKeyConfigModal.vue'
+import AppPageHeader from '@/components/AppPageHeader.vue'
 import LastUsedAtCell from '@/components/LastUsedAtCell.vue'
 import { useAccountGroupCatalog } from '@/composables/useAccountGroupCatalog'
 import { usePageSelection } from '@/composables/usePageSelection'
@@ -105,8 +106,7 @@ watch(
 
 <template>
   <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
-    <ZPageHeader
-      class="h-17"
+    <AppPageHeader
       title="API 密钥"
       description="创建和管理 API 密钥，并设置每个密钥可以使用的账号"
     />

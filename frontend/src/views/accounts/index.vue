@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
+import { useTableColumns, ZCard, ZCheckbox, ZConfirmDialog, ZPagination, ZTable, ZTableColumnSettings } from '@codex-proxy/ui'
 
-import { useTableColumns, ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable, ZTableColumnSettings } from '@codex-proxy/ui'
 import { ChevronDown } from '@lucide/vue'
 import { ref, shallowRef } from 'vue'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import AccountGroupMarks from '@/components/AccountGroupMarks.vue'
+import AppPageHeader from '@/components/AppPageHeader.vue'
 import LastUsedAtCell from '@/components/LastUsedAtCell.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { useAccountGroupCatalog } from '@/composables/useAccountGroupCatalog'
@@ -213,8 +214,7 @@ const {
 
 <template>
   <div class="flex min-h-0 w-full flex-col xl:h-[calc(100dvh-3rem)] xl:flex-none xl:overflow-hidden">
-    <ZPageHeader
-      class="h-17"
+    <AppPageHeader
       title="账号管理"
       description="维护账号池，查看可用性、配额与使用状态"
     />

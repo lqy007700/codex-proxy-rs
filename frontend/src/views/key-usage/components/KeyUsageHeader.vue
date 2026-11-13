@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ZButton, ZIconButton, ZPageHeader, ZSelect } from '@codex-proxy/ui'
+import { ZButton, ZIconButton, ZSelect } from '@codex-proxy/ui'
 import { Info, KeyRound, LogOut, Moon, RefreshCw, Sun, Terminal } from '@lucide/vue'
 import { shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
+import AppPageHeader from '@/components/AppPageHeader.vue'
 import { useAuthStore } from '@/stores/modules/auth'
 import { useThemeStore } from '@/stores/modules/theme'
 
@@ -32,7 +33,7 @@ async function logout() {
 </script>
 
 <template>
-  <ZPageHeader title="使用统计">
+  <AppPageHeader title="使用统计">
     <template #description>
       <span class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
         <span class="min-w-0 truncate text-z font-semibold text-z-text" :title="name">
@@ -70,7 +71,7 @@ async function logout() {
         </ZIconButton>
       </div>
     </template>
-  </ZPageHeader>
+  </AppPageHeader>
 </template>
 
 <style scoped>

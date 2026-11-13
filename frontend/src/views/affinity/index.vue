@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
 import type { AffinityFilters, AffinityOperation, AffinitySession, BindingDirective, IdentitySource } from '@/api/modules/affinity'
-import { defineTableColumns, ZButton, ZCard, ZCheckbox, ZDialog, ZFormItem, ZInput, ZPageHeader, ZSegmented, ZSelect, ZSwitch, ZTable, ZTag } from '@codex-proxy/ui'
+import { defineTableColumns, ZButton, ZCard, ZCheckbox, ZDialog, ZFormItem, ZInput, ZSegmented, ZSelect, ZSwitch, ZTable, ZTag } from '@codex-proxy/ui'
 import { ChevronDown } from '@lucide/vue'
 import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAccounts } from '@/api'
 import { applyAffinity, getAffinityOperations, getAffinitySessions, getIdentitySources, previewAffinity, saveIdentitySource } from '@/api/modules/affinity'
+import AppPageHeader from '@/components/AppPageHeader.vue'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
 import { accountIdentityLabel } from '@/utils/accountIdentity'
+import { affinityTargetDisabled } from '@/utils/affinity'
 import { generateRequestId } from '@/utils/operation'
 import AffinityBindingActions from './components/AffinityBindingActions.vue'
 
@@ -29,10 +31,6 @@ const views = [
   ...tabs,
   ...managementViews,
 ]
-const viewLabel = computed(() => [
-  ...tabs,
-  ...managementViews,
-].find(item => item.value === view.value)?.label ?? '按 K 查看')
 const filters = reactive<AffinityFilters>({})
 const sessions = shallowRef<AffinitySession[]>([])
 const sessionWindows = shallowRef<AffinitySession[]>([])
@@ -647,17 +645,16 @@ function openTokenView(session: AffinitySession) {
 
 <template>
   <div class="w-full">
-    <ZPageHeader title="账号亲和" description="管理 New API Key 与 CPR 主账号的绑定">
+    <AppPageHeader title="账号亲和" description="管理 New API Key 与 CPR 主账号的绑定">
       <template #actions>
         <ZButton :loading="loading" :disabled="saving" @click="refresh">
           刷新
         </ZButton>
       </template>
-    </ZPageHeader>
+    </AppPageHeader>
     <ZCard class="mt-5">
       <template #header>
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <span class="text-z-sm font-medium">{{ viewLabel }}</span>
+        <div class="flex flex-wrap items-center justify-start gap-3">
           <ZSegmented v-model="view" aria-label="账号亲和视图" :options="views" :disabled="saving || loading" @update:model-value="selectView" />
         </div>
       </template>
@@ -884,7 +881,7 @@ function openTokenView(session: AffinitySession) {
           本次调整 {{ operationSelection.length }} 个{{ tokenOperation ? ' New API Key' : '会话绑定' }}
         </p>
         <ZFormItem v-if="action === 'target'" :label="tokenOperation ? '目标主账号' : '目标账号'" required>
-          <ZSelect v-model="targetAccount" class="w-full" aria-label="目标账号" :title="targetAccount" placeholder="搜索账号名称、邮箱或 ID" filterable remote :loading="accountsLoading" :disabled="saving" :options="targetAccounts.map(account => ({ label: accountLabel(account.id), value: account.id, disabled: !account.enabled || account.schedulingRole === 'fallback' || ['credential_invalid', 'account_banned'].includes(account.errorReason ?? '') }))" @query-change="loadTargetAccounts">
+          <ZSelect v-model="targetAccount" class="w-full" aria-label="目标账号" :title="targetAccount" placeholder="搜索账号名称、邮箱或 ID" filterable remote :loading="accountsLoading" :disabled="saving" :options="targetAccounts.map(account => ({ label: accountLabel(account.id), value: account.id, disabled: affinityTargetDisabled(account) }))" @query-change="loadTargetAccounts">
             <template #option="{ option }">
               <span :title="String(option.value)">{{ option.label }}</span>
             </template>

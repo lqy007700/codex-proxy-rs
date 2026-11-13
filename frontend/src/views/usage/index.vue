@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import type { TableColumn } from '@codex-proxy/ui'
 import type { UsageListRecord } from '@/api'
-import { defineTableColumns, useTableColumns, ZButton, ZCard, ZDatePicker, ZIconButton, ZPageHeader, ZPagination, ZSegmented, ZTableColumnSettings } from '@codex-proxy/ui'
-
+import { defineTableColumns, useTableColumns, ZButton, ZCard, ZDatePicker, ZIconButton, ZPagination, ZSegmented, ZTableColumnSettings } from '@codex-proxy/ui'
 import { ChevronDown, CloudRain, Eye, List, Sun } from '@lucide/vue'
+
 import { computed, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import AppPageHeader from '@/components/AppPageHeader.vue'
 import ProviderFilter from '@/components/ProviderFilter.vue'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
 import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
 import UsageAccountAttemptsCell from './components/UsageAccountAttemptsCell.vue'
+import UsageAffinityModal from './components/UsageAffinityModal.vue'
 import UsageErrorDetailModal from './components/UsageErrorDetailModal.vue'
 import UsageFilters from './components/UsageFilters.vue'
 import UsageInsightsGrid from './components/UsageInsightsGrid.vue'
@@ -34,6 +36,12 @@ const scopedLabels = computed(() => [
   ? [`${label} ${route.query[name!]}`]
   : []))
 const statsExpanded = shallowRef(true)
+const affinityRecord = shallowRef<UsageListRecord | null>(null)
+const showAffinityModal = shallowRef(false)
+function editAffinity(record: UsageListRecord) {
+  affinityRecord.value = record
+  showAffinityModal.value = true
+}
 const requestColumns = defineTableColumns<UsageListRecord>([
   {
     key: 'logicalOutcome',
@@ -103,7 +111,7 @@ watch(timeRange, () => {
 
 <template>
   <div class="@container w-full">
-    <ZPageHeader class="justify-end" title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
+    <AppPageHeader class="justify-end" title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
       <template #actions>
         <div class="flex w-[100cqw] max-w-[100cqw] flex-wrap items-center justify-end gap-2 @min-[21rem]:flex-nowrap @min-[28rem]:w-auto">
           <ZDatePicker
@@ -123,7 +131,7 @@ watch(timeRange, () => {
           />
         </div>
       </template>
-    </ZPageHeader>
+    </AppPageHeader>
 
     <div v-if="scopedLabels.length" class="mt-4 flex flex-wrap items-center gap-3 text-z-sm text-z-text-secondary">
       <span class="break-all">当前限定：{{ scopedLabels.join(' · ') }}</span>
@@ -184,6 +192,21 @@ watch(timeRange, () => {
               <template #accountEmail="{ row }">
                 <UsageAccountAttemptsCell :record="row" />
               </template>
+              <template #callerTokenName="{ row, displayValue }">
+                <button
+                  v-if="row.callerIdentity?.mode === 'newApi' && row.provider"
+                  type="button"
+                  class="block max-w-full cursor-pointer truncate rounded-z-sm border-0 bg-transparent p-0 text-left font-mono text-z-sm leading-none font-bold text-z-primary-text outline-none hover:underline focus-visible:ring-2 focus-visible:ring-z-control-outline"
+                  :title="row.callerTokenName || row.callerIdentity.tokenId"
+                  :aria-label="`调整 ${row.callerTokenName || row.callerIdentity.tokenId} 的会话亲和`"
+                  @click="editAffinity(row)"
+                >
+                  {{ row.callerTokenName || row.callerIdentity.tokenId }}
+                </button>
+                <span v-else class="block max-w-full truncate font-mono text-z-sm leading-none font-bold text-z-text" :title="String(displayValue || '')">
+                  {{ displayValue || '—' }}
+                </span>
+              </template>
               <template #actions="{ row }">
                 <div class="flex items-center justify-start">
                   <ZIconButton
@@ -206,6 +229,8 @@ watch(timeRange, () => {
         </div>
       </template>
     </ZCard>
+
+    <UsageAffinityModal v-model="showAffinityModal" :record="affinityRecord" />
 
     <details :open="statsExpanded" class="group mt-5" @toggle="statsExpanded = ($event.target as HTMLDetailsElement).open">
       <ZCard

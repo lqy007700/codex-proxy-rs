@@ -10,7 +10,7 @@ import { accountColumns } from '../constants'
 export function useAccountsQuery() {
   const searchQuery = shallowRef('')
   const providerQuery = shallowRef('')
-  const statusQuery = shallowRef('')
+  const statusQuery = shallowRef('normal')
   const groupQuery = shallowRef('')
   const sort = useTableSort(accountColumns, 'accounts')
 

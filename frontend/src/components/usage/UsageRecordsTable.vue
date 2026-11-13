@@ -56,13 +56,15 @@ withDefaults(
       </span>
     </template>
 
-    <template #callerTokenName="{ displayValue }">
-      <span
-        class="block max-w-full truncate font-mono text-z-sm leading-none font-bold text-z-text"
-        :title="String(displayValue || '')"
-      >
-        {{ displayValue || '—' }}
-      </span>
+    <template #callerTokenName="{ row, displayValue }">
+      <slot name="callerTokenName" :row="row" :display-value="displayValue">
+        <span
+          class="block max-w-full truncate font-mono text-z-sm leading-none font-bold text-z-text"
+          :title="String(displayValue || '')"
+        >
+          {{ displayValue || '—' }}
+        </span>
+      </slot>
     </template>
 
     <template #provider="{ row }">

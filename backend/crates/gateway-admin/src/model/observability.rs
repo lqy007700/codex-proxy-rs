@@ -567,6 +567,8 @@ impl RequestHealth {
 pub struct RequestMetrics {
     pub request_count: u64,
     pub success_count: u64,
+    /// 所有请求的累计重试次数，不含每个请求的首次尝试
+    pub retry_count: u64,
     pub failure_count: u64,
     pub cancelled_count: u64,
     pub incomplete_count: u64,
@@ -1232,6 +1234,7 @@ pub struct HealthTimelinePoint {
     pub status: HealthStatus,
     pub reliability_percent: Option<f64>,
     pub success_requests: u64,
+    pub retry_count: u64,
     pub failed_requests: u64,
     pub cancelled_requests: u64,
     pub incomplete_requests: u64,

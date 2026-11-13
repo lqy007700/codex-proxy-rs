@@ -337,6 +337,7 @@ impl MetricState {
         Ok(RequestMetrics {
             request_count: self.count("request_count"),
             success_count: self.count("success_count"),
+            retry_count: self.count("retry_count"),
             failure_count: self.count("failure_count"),
             cancelled_count: self.count("cancelled_count"),
             incomplete_count: self.count("incomplete_count"),

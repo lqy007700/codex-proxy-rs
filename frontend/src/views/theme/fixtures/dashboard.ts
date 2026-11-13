@@ -291,6 +291,7 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
             ? '98.2%'
             : '99.8%',
         successRequests: 820 + index * 9,
+        retryCount: index * 3,
         failedRequests,
         cancelledRequests: index % 9 === 0
           ? 2

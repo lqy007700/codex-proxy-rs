@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ZButton, ZConfirmDialog, ZEmpty, ZIconButton, ZPageHeader, ZSegmented, ZSelect } from '@codex-proxy/ui'
-
+import { ZButton, ZConfirmDialog, ZEmpty, ZIconButton, ZSegmented, ZSelect } from '@codex-proxy/ui'
 import { Save, Undo2 } from '@lucide/vue'
+
 import { computed, nextTick, reactive, shallowRef, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import AppPageHeader from '@/components/AppPageHeader.vue'
 
 import AccountAffinityCard from './components/AccountAffinityCard.vue'
 import AccountWarmupCard from './components/AccountWarmupCard.vue'
@@ -125,7 +126,7 @@ watch(section, (value) => {
 
 <template>
   <div class="w-full" :class="section === 'pricing' ? 'flex h-[calc(100dvh-2rem)] flex-none! flex-col min-[961px]:h-[calc(100dvh-3rem)]' : undefined">
-    <ZPageHeader title="系统设置" description="配置网关调度、上游与定价，管理访问安全、历史保留与备份" />
+    <AppPageHeader title="系统设置" description="配置网关调度、上游与定价，管理访问安全、历史保留与备份" />
 
     <div class="mt-4 flex min-h-z-control shrink-0 flex-wrap items-center justify-between gap-3">
       <ZSegmented

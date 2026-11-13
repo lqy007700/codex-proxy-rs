@@ -934,6 +934,7 @@ pub(super) fn health_timeline_at(
             (
                 start + Duration::minutes(HEALTH_TIMELINE_SLOT_MINUTES * index),
                 RequestHealth::default(),
+                0_u64,
             )
         })
         .collect::<Vec<_>>();
@@ -948,18 +949,19 @@ pub(super) fn health_timeline_at(
                     .div_euclid(HEALTH_TIMELINE_SLOT_MINUTES)
                     * HEALTH_TIMELINE_SLOT_MINUTES,
             );
-        if let Some((_, bucket)) = buckets
+        if let Some((_, bucket, retry_count)) = buckets
             .iter_mut()
-            .find(|(bucket_start, _)| *bucket_start == record_slot)
+            .find(|(bucket_start, _, _)| *bucket_start == record_slot)
         {
             bucket.add_metrics(&record.metrics);
+            *retry_count = retry_count.saturating_add(record.metrics.retry_count);
         }
     }
 
     let totals = buckets
         .iter()
-        .filter(|(bucket_start, _)| *bucket_start <= current_slot)
-        .fold(RequestHealth::default(), |mut totals, (_, bucket)| {
+        .filter(|(bucket_start, _, _)| *bucket_start <= current_slot)
+        .fold(RequestHealth::default(), |mut totals, (_, bucket, _)| {
             totals.add_window(*bucket);
             totals
         });
@@ -973,11 +975,12 @@ pub(super) fn health_timeline_at(
         caller_error_requests: totals.caller_error_requests,
         points: buckets
             .into_iter()
-            .map(|(bucket_start, bucket)| HealthTimelinePoint {
+            .map(|(bucket_start, bucket, retry_count)| HealthTimelinePoint {
                 bucket_start,
                 status: health_status(bucket, bucket_start > current_slot),
                 reliability_percent: health_reliability(bucket),
                 success_requests: bucket.success_requests,
+                retry_count,
                 failed_requests: bucket.failed_requests,
                 cancelled_requests: bucket.cancelled_requests,
                 incomplete_requests: bucket.incomplete_requests,
@@ -1119,6 +1122,7 @@ fn dashboard_period_metrics<'a>(
 fn add_request_metrics(total: &mut RequestMetrics, value: &RequestMetrics) {
     total.request_count = total.request_count.saturating_add(value.request_count);
     total.success_count = total.success_count.saturating_add(value.success_count);
+    total.retry_count = total.retry_count.saturating_add(value.retry_count);
     total.failure_count = total.failure_count.saturating_add(value.failure_count);
     total.cancelled_count = total.cancelled_count.saturating_add(value.cancelled_count);
     total.incomplete_count = total

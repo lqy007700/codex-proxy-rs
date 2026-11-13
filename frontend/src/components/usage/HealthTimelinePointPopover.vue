@@ -16,6 +16,7 @@ const outcomeMeta = computed(() => [
   {
     label: '成功',
     value: props.point.successRequests,
+    displayValue: `${formatHealthCount(props.point.successRequests)}/${formatHealthCount(props.point.retryCount)}`,
     dotClass: 'bg-z-success',
     valueClass: 'text-z-success-text',
   },
@@ -118,7 +119,7 @@ const metricItems = outcomeMeta
             {{ item.label }}
           </span>
           <strong class="font-mono text-z-sm leading-none font-heavy tabular-nums" :class="item.valueClass">
-            {{ formatHealthCount(item.value) }}
+            {{ item.displayValue ?? formatHealthCount(item.value) }}
           </strong>
         </div>
       </div>

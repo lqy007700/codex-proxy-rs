@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { OutboundProxyRecord } from '@/api'
-import { ZButton, ZCard, ZCheckbox, ZConfirmDialog, ZInput, ZPageHeader, ZPagination, ZTable, ZTag } from '@codex-proxy/ui'
+import { ZButton, ZCard, ZCheckbox, ZConfirmDialog, ZInput, ZPagination, ZTable, ZTag } from '@codex-proxy/ui'
 import { LockKeyhole, Plus, Search, Users, Wifi } from '@lucide/vue'
 import { shallowRef, watch } from 'vue'
+import AppPageHeader from '@/components/AppPageHeader.vue'
 import { usePageSelection } from '@/composables/usePageSelection'
 import ProxyAccountsModal from './components/ProxyAccountsModal.vue'
 import ProxyActions from './components/ProxyActions.vue'
@@ -63,8 +64,7 @@ watch(search, () => {
 
 <template>
   <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
-    <ZPageHeader
-      class="h-17"
+    <AppPageHeader
       title="代理管理"
       description="管理账号使用的代理，测试连接并查看出口 IP"
     />

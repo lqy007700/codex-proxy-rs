@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { dashboardSnapshotView, dashboardTrendView } from '../presenter'
 import type { DashboardTrendKind } from '@/api/modules/dashboard'
-import { ZIconButton, ZPageHeader } from '@codex-proxy/ui'
-
+import { ZIconButton } from '@codex-proxy/ui'
 import { RefreshCw } from '@lucide/vue'
+
+import AppPageHeader from '@/components/AppPageHeader.vue'
 
 import RequestHealthTimelineCard from '@/components/usage/RequestHealthTimelineCard.vue'
 import AccountOverviewCard from './AccountOverviewCard.vue'
@@ -56,7 +57,7 @@ const trendKind = defineModel<DashboardTrendKind>('trendKind', { required: true 
 
 <template>
   <div class="w-full">
-    <ZPageHeader title="系统概览">
+    <AppPageHeader title="系统概览">
       <template #description>
         <span>当日统计</span>
         <DashboardHeartbeat :updated-at="lastRefreshedAt" />
@@ -76,7 +77,7 @@ const trendKind = defineModel<DashboardTrendKind>('trendKind', { required: true 
           <RefreshCw :size="19" />
         </ZIconButton>
       </template>
-    </ZPageHeader>
+    </AppPageHeader>
 
     <p v-if="analyticsError" class="mt-4 text-z-sm text-z-warning-text" role="alert">
       {{ analytics ? '刷新失败，显示上次统计' : '统计暂不可用，请稍后重试' }}

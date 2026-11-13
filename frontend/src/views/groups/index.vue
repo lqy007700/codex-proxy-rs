@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable } from '@codex-proxy/ui'
+import { ZCard, ZCheckbox, ZConfirmDialog, ZPagination, ZTable } from '@codex-proxy/ui'
 import { ImageOff, Zap, ZapOff } from '@lucide/vue'
+import AppPageHeader from '@/components/AppPageHeader.vue'
 import { usePageSelection } from '@/composables/usePageSelection'
 import AccountGroupActions from './components/AccountGroupActions.vue'
 import AccountGroupFilters from './components/AccountGroupFilters.vue'
@@ -48,8 +49,7 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
 
 <template>
   <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
-    <ZPageHeader
-      class="h-17"
+    <AppPageHeader
       title="分组管理"
       description="将账号归类管理，并为每个 API 密钥指定可使用的账号"
     />

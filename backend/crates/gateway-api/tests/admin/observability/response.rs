@@ -1270,6 +1270,7 @@ async fn calendar_queries_and_display_follow_deployment_timezone_with_one_anchor
             .as_array()
             .unwrap();
         assert_eq!(points.len(), slots);
+        assert!(points.iter().all(|point| point["retryCount"] == 0));
         let labels = points
             .iter()
             .map(|p| p["time"].as_str().unwrap())

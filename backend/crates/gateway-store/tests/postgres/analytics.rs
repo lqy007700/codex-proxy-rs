@@ -60,6 +60,7 @@ async fn provider_counts_match_for_rollups_boundaries_and_filtered_facts() {
     ] {
         let summary = repo.usage_summary(range, filter.clone()).await.unwrap();
         assert_eq!(summary.requests.request_count, 3);
+        assert_eq!(summary.requests.retry_count, 1);
         let providers = summary
             .providers
             .into_iter()
@@ -153,6 +154,8 @@ async fn health_counters_match_for_rollups_and_facts_without_counting_recovery_o
             .await
             .unwrap();
     }
+    sqlx::query("update model_requests set provider_kind='openai',provider_account_ref='account_health',upstream_transport='http_sse',upstream_send_state='sent',attempt_count=case when id='health_success' then 3 when id='health_failed' then 4 else 2 end where id in ('health_success','health_failed','health_cancelled')")
+        .execute(&database.pool).await.unwrap();
     sqlx::query("update model_requests set recovered_at=completed_at,recovery_request_id='health_success',recovery_attempt_count=1,request_observation_json=request_observation_json||jsonb_build_object('recovery',jsonb_build_object('retryDelayMs',0,'totalLatencyMs',1)) where id='health_recovered'")
         .execute(&database.pool).await.unwrap();
     drain_analytics(&database.pool).await;
@@ -190,6 +193,15 @@ async fn health_counters_match_for_rollups_and_facts_without_counting_recovery_o
             .await
             .unwrap();
         let counts = snapshot.overview.requests;
+        assert_eq!(counts.retry_count, 6);
+        assert_eq!(
+            snapshot
+                .trend
+                .iter()
+                .map(|point| point.metrics.retry_count)
+                .sum::<u64>(),
+            6
+        );
         assert_eq!(
             (
                 counts.request_count,

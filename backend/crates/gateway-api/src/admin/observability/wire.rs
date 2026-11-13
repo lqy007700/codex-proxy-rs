@@ -514,6 +514,7 @@ pub struct HealthTimelinePointView {
     pub status: String,
     pub reliability_display: String,
     pub success_requests: u64,
+    pub retry_count: u64,
     pub failed_requests: u64,
     pub cancelled_requests: u64,
     pub incomplete_requests: u64,
