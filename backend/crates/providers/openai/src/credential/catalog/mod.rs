@@ -306,12 +306,18 @@ impl CodexCredentialCatalogService {
         let snapshot = self
             .cached()?
             .ok_or(CodexCredentialCatalogError::NoEligibleCredential)?;
-        if scope.allowed_account_ids().any(|id| {
-            scope
-                .directory()
-                .account(id)
-                .is_some_and(|facts| facts.model_mappings().iter().next().is_some())
-        }) {
+        // 冻结目录已有映射索引，无映射时不为每次目录读取扫描整个账号池
+        if scope
+            .provider_kinds()
+            .iter()
+            .any(|provider| scope.directory().model_aliases(provider).is_some())
+            && scope.allowed_account_ids().any(|id| {
+                scope
+                    .directory()
+                    .account(id)
+                    .is_some_and(|facts| facts.model_mappings().iter().next().is_some())
+            })
+        {
             // 账号映射可能把同名条目投影为不同公开模型，先保留各来源再由 Core 统一授权
             let ids = snapshot
                 .entries
