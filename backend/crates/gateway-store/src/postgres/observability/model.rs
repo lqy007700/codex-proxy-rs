@@ -327,7 +327,7 @@ pub struct DashboardObservation {
     pub totals: DashboardTotals,
     pub yesterday: RequestMetrics,
     pub provider_accounts: ProviderAccountMetrics,
-    pub runtime_slots: admin_observability::DashboardRuntimeSlots,
+    pub runtime_slots: Option<admin_observability::DashboardRuntimeSlots>,
     pub trend: Vec<RequestMetricPoint>,
     pub account_usage: Vec<ProviderAccountUsageObservation>,
     pub recent_requests: Vec<UsageListRecord>,

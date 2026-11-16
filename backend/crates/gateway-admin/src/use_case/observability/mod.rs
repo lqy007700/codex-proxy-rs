@@ -15,7 +15,7 @@ use crate::{
         AdminError,
         observability::{
             CostCoverage, CurrencyCost, DashboardAccountUsage, DashboardCapacity,
-            DashboardPeriodMetrics, DashboardQuery, DashboardResult, DecimalAmount,
+            DashboardPeriodMetrics, DashboardQuery, DashboardResult, DashboardScope, DecimalAmount,
             DiagnosticDimension, DiagnosticsItem, DiagnosticsResult, Granularity, HealthStatus,
             HealthTimeline, HealthTimelinePoint, OpsErrorPage, OpsErrorQuery, ProviderBillingInput,
             RequestHealth, RequestMetricPoint, RequestMetrics, TimeRange, Trend, TrendKind,
@@ -51,6 +51,7 @@ pub trait ObservabilityService: Send + Sync {
         &self,
         range: TimeRange,
         kind: TrendKind,
+        scope: DashboardScope,
     ) -> Result<DashboardResult, AdminError>;
     async fn dashboard_trend(&self, range: TimeRange, kind: TrendKind)
     -> Result<Trend, AdminError>;
@@ -111,16 +112,23 @@ impl DefaultObservabilityService {
     async fn load_dashboard_summary(
         &self,
         range: TimeRange,
+        kind: TrendKind,
+        scope: DashboardScope,
     ) -> Result<DashboardResult, AdminError> {
         let observed_at = Utc::now();
-        let query = DashboardQuery::new(range, self.timezone)
+        let mut query = DashboardQuery::new(range, self.timezone)
             .map_err(|_| AdminError::internal("时间超出支持范围"))?;
+        query.scope = scope;
         let today_start = query.yesterday_range.end;
-        let (mut observation, settings) = futures::try_join!(
-            self.store.dashboard_summary(query, observed_at),
-            self.settings.load_runtime_settings(),
-        )
-        .map_err(|error| map_store_error(error, "dashboard"))?;
+        let (mut observation, settings) =
+            futures::try_join!(self.store.dashboard_summary(query, observed_at), async {
+                if scope.includes_statistics() {
+                    self.settings.load_runtime_settings().await.map(Some)
+                } else {
+                    Ok(None)
+                }
+            },)
+            .map_err(|error| map_store_error(error, "dashboard"))?;
         let runtime_slots = observation.runtime_slots;
         self.enrich_list_records(&mut observation.recent_requests);
         self.enrich_dashboard_quotas(&mut observation.account_usage)
@@ -157,37 +165,42 @@ impl DefaultObservabilityService {
         let average_first_token_latency_ms =
             average(first_token_latency_sum_ms, first_token_latency_count);
         let trend = trend(
-            TrendKind::Usage,
+            kind,
             observation.trend.clone(),
             observation.analytics.clone(),
         )?;
         let health_timeline =
             health_timeline_at(&observation.trend, observation.range.end, self.timezone)?;
-        let wire_profiles = self
-            .providers
-            .dashboard_wire_profiles(&settings.request_profiles);
-        let max_concurrent_per_account = u64::from(settings.values.max_concurrent_per_account);
-        let (inherited_accounts, overridden_slots) = runtime_slots
-            .as_ref()
-            .map_or((observation.provider_accounts.normal, 0), |slots| {
-                (slots.inherited_accounts, slots.overridden_slots)
-            });
-        let total_slots = (max_concurrent_per_account > 0 || inherited_accounts == 0).then(|| {
-            inherited_accounts
-                .saturating_mul(max_concurrent_per_account)
-                .saturating_add(overridden_slots)
+        let wire_profiles = settings.as_ref().map_or_else(Vec::new, |settings| {
+            self.providers
+                .dashboard_wire_profiles(&settings.request_profiles)
         });
-        let used_slots = runtime_slots.and_then(|slots| slots.used_slots);
-        Ok(DashboardResult {
-            capacity: DashboardCapacity {
+        let capacity = settings.as_ref().map(|settings| {
+            let max_concurrent_per_account = u64::from(settings.values.max_concurrent_per_account);
+            let (inherited_accounts, overridden_slots) = runtime_slots
+                .as_ref()
+                .map_or((observation.provider_accounts.normal, 0), |slots| {
+                    (slots.inherited_accounts, slots.overridden_slots)
+                });
+            let total_slots =
+                (max_concurrent_per_account > 0 || inherited_accounts == 0).then(|| {
+                    inherited_accounts
+                        .saturating_mul(max_concurrent_per_account)
+                        .saturating_add(overridden_slots)
+                });
+            let used_slots = runtime_slots.and_then(|slots| slots.used_slots);
+            DashboardCapacity {
                 max_concurrent_per_account,
                 total_slots,
                 used_slots,
                 available_slots: used_slots
                     .zip(total_slots)
                     .map(|(used, total)| total.saturating_sub(used)),
-            },
-            rotation_strategy: settings.rotation_strategy,
+            }
+        });
+        Ok(DashboardResult {
+            capacity,
+            rotation_strategy: settings.map(|settings| settings.rotation_strategy),
             observation,
             today,
             yesterday,
@@ -214,14 +227,9 @@ impl ObservabilityService for DefaultObservabilityService {
         &self,
         range: TimeRange,
         kind: TrendKind,
+        scope: DashboardScope,
     ) -> Result<DashboardResult, AdminError> {
-        let mut result = self.load_dashboard_summary(range).await?;
-        result.trend = trend(
-            kind,
-            result.observation.trend.clone(),
-            result.observation.analytics.clone(),
-        )?;
-        Ok(result)
+        self.load_dashboard_summary(range, kind, scope).await
     }
 
     async fn dashboard_trend(

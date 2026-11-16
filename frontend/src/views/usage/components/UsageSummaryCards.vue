@@ -7,6 +7,7 @@ import { computed } from 'vue'
 
 const props = defineProps<{
   summary: Omit<Awaited<ReturnType<typeof getUsageRecordSummary>>, 'analytics'>
+  loading?: boolean
 }>()
 
 function averageLatencyDisplay(value: string) {
@@ -52,7 +53,7 @@ const items = computed(() => [
 </script>
 
 <template>
-  <section class="mt-5 grid shrink-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" aria-label="使用概览">
+  <section class="mt-5 grid shrink-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" aria-label="使用概览" :aria-busy="loading">
     <ZCard
       v-for="item in items"
       :key="item.key"
@@ -68,10 +69,10 @@ const items = computed(() => [
           {{ item.label }}
         </span>
         <strong class="block truncate text-[22px] leading-none font-extrabold text-z-text">
-          {{ item.value }}
+          {{ loading ? '—' : item.value }}
         </strong>
         <span class="block truncate text-z-sm leading-none font-emphasis text-z-text-secondary">
-          {{ item.detail }}
+          {{ loading ? '—' : item.detail }}
         </span>
       </div>
     </ZCard>

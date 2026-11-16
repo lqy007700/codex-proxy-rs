@@ -2569,7 +2569,7 @@ errorCode, errorMessage, startedAt, completedAt, expiresAt, createdAt, updatedAt
 
 | 方法 | 路由 | 说明 |
 | --- | --- | --- |
-| `GET` | `/api/admin/dashboard/summary` | Dashboard 汇总；支持 `kind` 与统一时间范围参数 |
+| `GET` | `/api/admin/dashboard/summary` | Dashboard 汇总；支持 `scope`、`kind` 与统一时间范围参数 |
 | `GET` | `/api/admin/dashboard/trend` | Dashboard 趋势；`kind=usage\|latency\|errors` |
 | `GET` | `/api/admin/usage/records` | 请求记录分页列表 |
 | `GET` | `/api/admin/usage/records/detail` | 按 `id` 查询请求详情 |
@@ -2580,6 +2580,16 @@ errorCode, errorMessage, startedAt, completedAt, expiresAt, createdAt, updatedAt
 | `GET` | `/api/admin/diagnostics/export` | 按 `requestId` 或 `errorId` 下载诊断 ZIP 附件 |
 
 ### Dashboard 容量与账号用量
+
+`/api/admin/dashboard/summary` 的 `scope` 决定查询与返回的模块，`analytics`、`asOf`、`asOfDisplay` 始终返回
+
+| scope | 返回模块 |
+| --- | --- |
+| 省略或 `full` | 全部模块，含 `usageRecords` 最近请求 |
+| `overview` | `healthTimeline` |
+| `usage` | `cards`、`trend`、`accountUsage`、`poolSummary`、`capacityInfo`、`rotationStrategy`、`wireProfiles` |
+
+只加载所选模块需要的事实，未选择的字段不返回；`usageRecords` 仅供完整范围使用，请求明细分页通过 `/api/admin/usage/records` 独立查询
 
 Dashboard 的 `capacityInfo` 统计普通容量，不含独立审批池；`maxConcurrentPerAccount` 为默认账号并发上限，`0` 表示不限制。
 `capacityInfo.totalSlots` 为 `number | null`；可用账号池含无限并发账号时为 `null`，此时 `availableSlots` 也为 `null`。

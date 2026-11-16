@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import type { DashboardSummaryResponse, DashboardTrendKind, DashboardTrendPoint, DashboardTrendResponse } from '@/api'
+import type { DashboardSnapshotResponse, DashboardSummaryResponse, DashboardTrendKind, DashboardTrendPoint, DashboardTrendResponse } from '@/api'
 import { Activity, FileText, Timer, Users } from '@lucide/vue'
 import { formatCompactNumber, formatInteger } from '@/utils/format'
 
@@ -81,8 +81,8 @@ const emptyCapacityInfo = {
   availableSlots: null,
 }
 
-export function dashboardSnapshotView(summary: DashboardSummaryResponse | null) {
-  const trendPoints = summary?.trend.points ?? []
+export function dashboardSnapshotView(summary: DashboardSnapshotResponse | null) {
+  const trendPoints = summary?.trend?.points ?? []
   return {
     analytics: summary?.analytics ?? null,
     metrics: metricCards(summary?.cards ?? emptyCards, trendPoints),

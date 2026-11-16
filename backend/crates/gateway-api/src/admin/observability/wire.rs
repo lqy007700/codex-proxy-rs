@@ -616,15 +616,24 @@ pub struct DashboardDataView {
     pub analytics: AnalyticsView,
     pub as_of: DateTime<Utc>,
     pub as_of_display: String,
-    pub cards: DashboardCardsView,
-    pub trend: TrendData,
-    pub health_timeline: HealthTimelineView,
-    pub wire_profiles: Vec<DashboardWireProfileView>,
-    pub account_usage: Vec<DashboardAccountUsageView>,
-    pub usage_records: Vec<UsageListRecordView>,
-    pub pool_summary: DashboardPoolSummaryView,
-    pub capacity_info: DashboardCapacityInfoView,
-    pub rotation_strategy: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cards: Option<DashboardCardsView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trend: Option<TrendData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_timeline: Option<HealthTimelineView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wire_profiles: Option<Vec<DashboardWireProfileView>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_usage: Option<Vec<DashboardAccountUsageView>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_records: Option<Vec<UsageListRecordView>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_summary: Option<DashboardPoolSummaryView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capacity_info: Option<DashboardCapacityInfoView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotation_strategy: Option<String>,
 }
 
 /// 用量汇总响应数据

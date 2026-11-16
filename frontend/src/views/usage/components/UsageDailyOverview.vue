@@ -3,8 +3,10 @@ import { ZIconButton } from '@codex-proxy/ui'
 import { RefreshCw } from '@lucide/vue'
 import SummaryHeartbeat from '@/components/usage/SummaryHeartbeat.vue'
 import { useDashboardSummary } from '@/composables/useDashboardSummary'
+import AccountOverviewCard from './AccountOverviewCard.vue'
 import MetricCard from './MetricCard.vue'
 import RequestTrendCard from './RequestTrendCard.vue'
+import WireProfileCard from './WireProfileCard.vue'
 
 const {
   loading,
@@ -13,6 +15,11 @@ const {
   metrics,
   analytics,
   analyticsError,
+  accountUsage,
+  wireProfiles,
+  poolSummary,
+  capacityInfo,
+  rotationStrategy,
   trendPoints,
   trendSummary,
   trendLoading,
@@ -20,7 +27,7 @@ const {
   lastRefreshedAt,
   refresh,
   loadTrend,
-} = useDashboardSummary()
+} = useDashboardSummary('usage')
 </script>
 
 <template>
@@ -62,6 +69,14 @@ const {
         class="mt-6"
         @trend-change="loadTrend"
       />
+      <AccountOverviewCard
+        :accounts="accountUsage"
+        :pool="poolSummary"
+        :capacity="capacityInfo"
+        :rotation-strategy="rotationStrategy"
+        class="mt-6"
+      />
+      <WireProfileCard :profiles="wireProfiles" class="mt-6" />
     </template>
   </section>
 </template>

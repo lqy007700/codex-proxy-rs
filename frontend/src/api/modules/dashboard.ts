@@ -194,14 +194,18 @@ export interface DashboardSummaryResponse {
   rotationStrategy: string
 }
 
+export type DashboardSummaryScope = 'overview' | 'usage'
+export type DashboardSnapshotResponse = Pick<DashboardSummaryResponse, 'analytics' | 'asOf' | 'asOfDisplay'>
+  & Partial<Omit<DashboardSummaryResponse, 'analytics' | 'asOf' | 'asOfDisplay'>>
+
 interface DashboardQuery {
   period: 'today'
   asOf: number
   kind: string
 }
 
-export function getDashboardSummary(data: DashboardQuery, options: RequestOptions = {}) {
-  return request<DashboardSummaryResponse>({
+export function getDashboardSummary(data: DashboardQuery & { scope: DashboardSummaryScope }, options: RequestOptions = {}) {
+  return request<DashboardSnapshotResponse>({
     url: '/api/admin/dashboard/summary',
     method: 'GET',
     params: data,

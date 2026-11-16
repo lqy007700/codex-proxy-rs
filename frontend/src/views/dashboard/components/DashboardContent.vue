@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import type { dashboardSnapshotView } from '@/components/usage/shared/dashboard'
 import RequestHealthTimelineCard from '@/components/usage/RequestHealthTimelineCard.vue'
-import AccountOverviewCard from './AccountOverviewCard.vue'
-import WireProfileCard from './WireProfileCard.vue'
 
 type DashboardSnapshotView = ReturnType<typeof dashboardSnapshotView>
 
@@ -11,11 +9,6 @@ withDefaults(
     analytics: DashboardSnapshotView['analytics']
     analyticsError?: string
     healthTimeline: DashboardSnapshotView['healthTimeline']
-    accountUsage: DashboardSnapshotView['accountUsage']
-    wireProfiles: DashboardSnapshotView['wireProfiles']
-    poolSummary: DashboardSnapshotView['poolSummary']
-    capacityInfo: DashboardSnapshotView['capacityInfo']
-    rotationStrategy: DashboardSnapshotView['rotationStrategy']
   }>(),
   {
     analyticsError: '',
@@ -32,17 +25,5 @@ withDefaults(
     <RequestHealthTimelineCard v-if="!analyticsError || analytics" :timeline="healthTimeline" />
 
     <slot name="requests" />
-
-    <template v-if="!analyticsError || analytics">
-      <AccountOverviewCard
-        :accounts="accountUsage"
-        :pool="poolSummary"
-        :capacity="capacityInfo"
-        :rotation-strategy="rotationStrategy"
-        class="mt-6"
-      />
-
-      <WireProfileCard :profiles="wireProfiles" class="mt-6" />
-    </template>
   </div>
 </template>

@@ -14,6 +14,7 @@ pub const MAX_PAGE_SIZE: u16 = DomainPageSize::MAX;
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DashboardQuery {
+    pub scope: Option<String>,
     pub kind: Option<String>,
     pub period: Option<String>,
     pub as_of: Option<i64>,
@@ -22,6 +23,16 @@ pub struct DashboardQuery {
 }
 
 impl DashboardQuery {
+    /// 省略范围时保留完整响应，页面显式选择实际展示的模块
+    pub fn dashboard_scope(&self) -> Result<domain::DashboardScope, WireValidationError> {
+        match trimmed(self.scope.as_deref()) {
+            None | Some("full") => Ok(domain::DashboardScope::Full),
+            Some("overview") => Ok(domain::DashboardScope::Overview),
+            Some("usage") => Ok(domain::DashboardScope::Usage),
+            Some(_) => Err(WireValidationError::new("scope")),
+        }
+    }
+
     /// 解析 dashboard 趋势类型
     pub fn trend_kind(&self) -> Result<TrendKind, WireValidationError> {
         TrendKind::parse(self.kind.as_deref())

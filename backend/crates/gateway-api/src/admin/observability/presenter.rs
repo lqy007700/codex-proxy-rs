@@ -938,6 +938,7 @@ pub(crate) fn wire_profile_view(
 pub(crate) fn dashboard_view(
     result: domain::DashboardResult,
     kind: TrendKind,
+    scope: domain::DashboardScope,
     time: crate::time::TimePresenter,
 ) -> DashboardDataView {
     let domain::DashboardResult {
@@ -1028,7 +1029,7 @@ pub(crate) fn dashboard_view(
         analytics: analytics_view(analytics, time),
         as_of: range.end,
         as_of_display: time.datetime(&range.end),
-        cards: DashboardCardsView {
+        cards: scope.includes_statistics().then(|| DashboardCardsView {
             credentials: DashboardCredentialsCardView {
                 total: provider_accounts.total.to_string(),
                 total_value: provider_accounts.total,
@@ -1060,34 +1061,43 @@ pub(crate) fn dashboard_view(
                 total_cached_input_tokens: format_compact_number(totals.cached_input_tokens),
                 average_first_token_latency_ms: display_duration(average_first_token_latency_ms),
             },
-        },
-        trend: trend_view(trend, kind, time),
-        health_timeline: health_timeline_view(health_timeline, time),
-        wire_profiles: wire_profiles
-            .into_iter()
-            .map(|value| wire_profile_view(value, time))
-            .collect(),
-        account_usage: account_usage_views,
-        usage_records: recent_requests
-            .into_iter()
-            .map(|value| usage_list_record_view(value, time))
-            .collect(),
-        pool_summary: DashboardPoolSummaryView {
-            total: provider_accounts.total,
-            normal: provider_accounts.normal,
-            quota_paused: provider_accounts.quota_paused,
-            quota_exhausted: provider_accounts.quota_exhausted,
-            rate_limited: provider_accounts.rate_limited,
-            disabled: provider_accounts.disabled,
-            error: provider_accounts.error,
-        },
-        capacity_info: DashboardCapacityInfoView {
+        }),
+        trend: scope
+            .includes_statistics()
+            .then(|| trend_view(trend, kind, time)),
+        health_timeline: (scope != domain::DashboardScope::Usage)
+            .then(|| health_timeline_view(health_timeline, time)),
+        wire_profiles: scope.includes_statistics().then(|| {
+            wire_profiles
+                .into_iter()
+                .map(|value| wire_profile_view(value, time))
+                .collect()
+        }),
+        account_usage: scope.includes_statistics().then_some(account_usage_views),
+        usage_records: (scope == domain::DashboardScope::Full).then(|| {
+            recent_requests
+                .into_iter()
+                .map(|value| usage_list_record_view(value, time))
+                .collect()
+        }),
+        pool_summary: scope
+            .includes_statistics()
+            .then_some(DashboardPoolSummaryView {
+                total: provider_accounts.total,
+                normal: provider_accounts.normal,
+                quota_paused: provider_accounts.quota_paused,
+                quota_exhausted: provider_accounts.quota_exhausted,
+                rate_limited: provider_accounts.rate_limited,
+                disabled: provider_accounts.disabled,
+                error: provider_accounts.error,
+            }),
+        capacity_info: capacity.map(|capacity| DashboardCapacityInfoView {
             max_concurrent_per_account: capacity.max_concurrent_per_account,
             total_slots: capacity.total_slots,
             used_slots: capacity.used_slots,
             available_slots: capacity.available_slots,
-        },
-        rotation_strategy: rotation_strategy.as_str().to_owned(),
+        }),
+        rotation_strategy: rotation_strategy.map(|strategy| strategy.as_str().to_owned()),
     }
 }
 

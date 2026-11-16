@@ -85,7 +85,7 @@ pub(crate) fn admin_dashboard_observation(
         totals,
         yesterday,
         provider_accounts,
-        runtime_slots: Some(runtime_slots),
+        runtime_slots,
         trend: trend.into_iter().map(admin_request_metric_point).collect(),
         account_usage: account_usage
             .into_iter()

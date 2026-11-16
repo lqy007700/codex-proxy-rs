@@ -7,12 +7,7 @@ const {
   analytics,
   analyticsError,
   healthTimeline,
-  accountUsage,
-  wireProfiles,
-  poolSummary,
-  capacityInfo,
-  rotationStrategy,
-} = useDashboardSummary()
+} = useDashboardSummary('overview')
 </script>
 
 <template>
@@ -20,11 +15,6 @@ const {
     :analytics="analytics"
     :analytics-error="analyticsError"
     :health-timeline="healthTimeline"
-    :account-usage="accountUsage"
-    :wire-profiles="wireProfiles"
-    :pool-summary="poolSummary"
-    :capacity-info="capacityInfo"
-    :rotation-strategy="rotationStrategy"
   >
     <template #requests>
       <RequestRecordsCard class="mt-6" />

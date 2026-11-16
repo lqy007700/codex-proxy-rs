@@ -13,10 +13,12 @@ withDefaults(
   defineProps<{
     overview: Omit<Awaited<ReturnType<typeof getUsageRecordInsightsOverview>>, 'analytics'>
     diagnostics: Omit<Awaited<ReturnType<typeof getUsageRecordInsightsDiagnostics>>, 'analytics'>
-    loading?: boolean
+    overviewLoading?: boolean
+    diagnosticsLoading?: boolean
   }>(),
   {
-    loading: false,
+    overviewLoading: false,
+    diagnosticsLoading: false,
   },
 )
 
@@ -34,25 +36,25 @@ const diagnosticDimension = defineModel('diagnosticDimension', {
     <UsageHealthCard
       :health="overview.health"
       :granularity="overview.granularity"
-      :loading="loading"
+      :loading="overviewLoading"
     />
 
     <UsageDiagnosticCard
       v-model:dimension="diagnosticDimension"
       :diagnostics="diagnostics"
-      :loading="loading"
+      :loading="diagnosticsLoading"
     />
 
     <UsagePerformanceCard
       :performance="overview.performance"
       :activity="overview.health.points"
-      :loading="loading"
+      :loading="overviewLoading"
     />
 
     <UsageCostCard
       :cost="overview.cost"
       :activity="overview.health.points"
-      :loading="loading"
+      :loading="overviewLoading"
     />
   </section>
 </template>

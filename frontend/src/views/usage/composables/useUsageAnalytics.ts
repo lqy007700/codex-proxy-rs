@@ -2,7 +2,7 @@ import type { Ref } from 'vue'
 import type { AnalyticsMetadata } from '@/api/modules/analytics'
 import type { CallerUsageFilters } from '@/api/modules/usage'
 import type { UsageTimeRangeParams } from '@/composables/useUsageTimeRange'
-import { onMounted, onScopeDispose, shallowRef, watch } from 'vue'
+import { computed, onMounted, onScopeDispose, shallowRef, watch } from 'vue'
 import { getUsageRecordInsightsDiagnostics, getUsageRecordInsightsOverview, getUsageRecordSummary } from '@/api'
 import { withMinimumDuration } from '@/utils/operation'
 
@@ -15,7 +15,10 @@ interface UseUsageAnalyticsOptions {
 type LoadingAnalytics<T> = Omit<T, 'analytics'> & { analytics: AnalyticsMetadata | null }
 
 export function useUsageAnalytics(options: UseUsageAnalyticsOptions) {
-  const analyticsLoading = shallowRef(true)
+  const summaryLoading = shallowRef(true)
+  const overviewLoading = shallowRef(true)
+  const diagnosticsLoading = shallowRef(true)
+  const analyticsLoading = computed(() => summaryLoading.value || overviewLoading.value || diagnosticsLoading.value)
   const summary = shallowRef(emptySummary())
   const insights = shallowRef(emptyInsights())
   const providerQuery = shallowRef('')
@@ -52,55 +55,48 @@ export function useUsageAnalytics(options: UseUsageAnalyticsOptions) {
 
   async function loadAnalytics(globalParams: ReturnType<typeof scopedParams>) {
     const requestId = ++analyticsRequestId
-    const diagnosticsId = ++diagnosticRequestId
     analyticsController?.abort()
-    diagnosticController?.abort()
     analyticsController = new AbortController()
     const requestOptions = { signal: analyticsController.signal }
-    const dimension = diagnosticDimension.value
-    analyticsLoading.value = true
+    summaryLoading.value = true
+    overviewLoading.value = true
     summary.value = emptySummary()
     insights.value = emptyInsights()
-    try {
-      const [nextSummary, overview, diagnostics] = await Promise.all([
-        getUsageRecordSummary(globalParams, requestOptions),
-        getUsageRecordInsightsOverview(globalParams, requestOptions),
-        getUsageRecordInsightsDiagnostics({
-          ...globalParams,
-          dimension,
-        }, requestOptions),
-      ])
-      if (requestId !== analyticsRequestId)
-        return
 
-      summary.value = nextSummary
-      insights.value = {
-        overview,
-        diagnostics:
-          diagnosticsId === diagnosticRequestId && dimension === diagnosticDimension.value
-            ? diagnostics
-            : insights.value.diagnostics,
-      }
-    }
-    catch {
-      if (requestId === analyticsRequestId) {
-        summary.value = emptySummary()
-        insights.value = emptyInsights()
-      }
-    }
-    finally {
-      if (requestId === analyticsRequestId) {
-        analyticsLoading.value = false
-      }
-    }
+    // 各模块完成即更新，慢查询或单项失败不阻塞其余结果
+    await Promise.allSettled([
+      getUsageRecordSummary(globalParams, requestOptions)
+        .then((result) => {
+          if (requestId === analyticsRequestId)
+            summary.value = result
+        })
+        .finally(() => {
+          if (requestId === analyticsRequestId)
+            summaryLoading.value = false
+        }),
+      getUsageRecordInsightsOverview(globalParams, requestOptions)
+        .then((overview) => {
+          if (requestId === analyticsRequestId)
+            insights.value = { ...insights.value, overview }
+        })
+        .finally(() => {
+          if (requestId === analyticsRequestId)
+            overviewLoading.value = false
+        }),
+      loadDiagnostics(globalParams),
+    ])
   }
 
-  async function loadDiagnostics() {
+  async function loadDiagnostics(params = scopedParams()) {
     const requestId = ++diagnosticRequestId
     diagnosticController?.abort()
     diagnosticController = new AbortController()
     const dimension = diagnosticDimension.value
-    const params = scopedParams()
+    diagnosticsLoading.value = true
+    insights.value = {
+      ...insights.value,
+      diagnostics: emptyDiagnostics(dimension),
+    }
     try {
       const diagnostics = await getUsageRecordInsightsDiagnostics({
         ...params,
@@ -113,7 +109,13 @@ export function useUsageAnalytics(options: UseUsageAnalyticsOptions) {
         diagnostics,
       }
     }
-    catch {}
+    catch {
+      // 请求层统一提示错误，保留其余模块已完成的结果
+    }
+    finally {
+      if (requestId === diagnosticRequestId)
+        diagnosticsLoading.value = false
+    }
   }
 
   onMounted(() => {
@@ -135,6 +137,9 @@ export function useUsageAnalytics(options: UseUsageAnalyticsOptions) {
 
   return {
     analyticsLoading,
+    summaryLoading,
+    overviewLoading,
+    diagnosticsLoading,
     summary,
     insights,
     providerQuery,
@@ -239,10 +244,10 @@ function emptyOverview() {
   return overview
 }
 
-function emptyDiagnostics() {
+function emptyDiagnostics(dimension = 'model') {
   const diagnostics: LoadingAnalytics<Awaited<ReturnType<typeof getUsageRecordInsightsDiagnostics>>> = {
     analytics: null,
-    dimension: 'model',
+    dimension,
     items: [],
   }
   return diagnostics

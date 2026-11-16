@@ -174,16 +174,6 @@ impl PgObservabilityRepository {
     ) -> StoreResult<DashboardObservation> {
         let range = store_range(query.range)?;
         let yesterday_range = store_range(query.yesterday_range)?;
-        let account_usage_query = ProviderAccountUsageQuery::recent(range, query.account_limit)?
-            .with_hourly_request_buckets()?;
-        let recent_query = UsageRecordQuery {
-            scope: Default::default(),
-            range,
-            filter: store_usage_filter(query.recent_request_filter),
-            current_page: 1,
-            page_size: ObservabilityPageSize::new(query.recent_request_limit)
-                .map_err(|_| invalid("invalid dashboard page size"))?,
-        };
         let (totals, yesterday, trend, analytics, account_usage) = self
             .query_budget
             .run(
@@ -191,8 +181,14 @@ impl PgObservabilityRepository {
                 "load dashboard analytics",
                 |mut connection| async move {
                     let mut snapshot = analytics::AnalyticsSnapshot::new(&mut connection).await?;
-                    let totals = snapshot.totals().await?;
-                    let yesterday = snapshot.dashboard_card_metrics(yesterday_range).await?;
+                    let (totals, yesterday) = if query.scope.includes_statistics() {
+                        (
+                            snapshot.totals().await?,
+                            snapshot.dashboard_card_metrics(yesterday_range).await?,
+                        )
+                    } else {
+                        (DashboardTotals::default(), RequestMetrics::default())
+                    };
                     let trend = snapshot
                         .trend(
                             range,
@@ -202,27 +198,51 @@ impl PgObservabilityRepository {
                             false,
                         )
                         .await?;
-                    let account_usage =
-                        provider_account_usage(&mut snapshot, account_usage_query).await?;
+                    let account_usage = if query.scope.includes_statistics() {
+                        let account_usage_query =
+                            ProviderAccountUsageQuery::recent(range, query.account_limit)?
+                                .with_hourly_request_buckets()?;
+                        provider_account_usage(&mut snapshot, account_usage_query).await?
+                    } else {
+                        Vec::new()
+                    };
                     let metadata = snapshot.metadata();
                     snapshot.finish().await?;
                     Ok((totals, yesterday, trend, metadata, account_usage))
                 },
             )
             .await?;
-        let (provider_accounts, normal_accounts) =
-            self.account_status_snapshot(observed_at).await?;
-        let recent_requests = self
-            .query_budget
-            .run(
-                &self.pool,
-                "load dashboard recent requests",
-                |mut connection| async move {
-                    list_usage_record_items(&mut *connection, &recent_query, None).await
-                },
-            )
-            .await?;
-        let runtime_slots = self.dashboard_runtime_slots(&normal_accounts).await?;
+        let (provider_accounts, normal_accounts) = if query.scope.includes_statistics() {
+            self.account_status_snapshot(observed_at).await?
+        } else {
+            (ProviderAccountMetrics::default(), Vec::new())
+        };
+        let recent_requests = if query.scope == admin_observability::DashboardScope::Full {
+            let recent_query = UsageRecordQuery {
+                scope: Default::default(),
+                range,
+                filter: store_usage_filter(query.recent_request_filter),
+                current_page: 1,
+                page_size: ObservabilityPageSize::new(query.recent_request_limit)
+                    .map_err(|_| invalid("invalid dashboard page size"))?,
+            };
+            self.query_budget
+                .run(
+                    &self.pool,
+                    "load dashboard recent requests",
+                    |mut connection| async move {
+                        list_usage_record_items(&mut *connection, &recent_query, None).await
+                    },
+                )
+                .await?
+        } else {
+            Vec::new()
+        };
+        let runtime_slots = if query.scope.includes_statistics() {
+            Some(self.dashboard_runtime_slots(&normal_accounts).await?)
+        } else {
+            None
+        };
         Ok(DashboardObservation {
             analytics,
             range,

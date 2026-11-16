@@ -16,11 +16,6 @@ const previewColumns = usageRecordColumns.filter(column => column.key !== 'actio
   <DashboardContent
     :analytics="snapshot.analytics"
     :health-timeline="snapshot.healthTimeline"
-    :account-usage="snapshot.accountUsage"
-    :wire-profiles="snapshot.wireProfiles"
-    :pool-summary="snapshot.poolSummary"
-    :capacity-info="snapshot.capacityInfo"
-    :rotation-strategy="snapshot.rotationStrategy"
   >
     <template #requests>
       <ZCard title="请求明细" description="查看请求结果、用量与错误详情" class="mt-6">

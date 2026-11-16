@@ -1,4 +1,4 @@
-import type { DashboardTrendResponse } from '@/api'
+import type { DashboardSummaryScope, DashboardTrendResponse } from '@/api'
 import { useIntervalFn } from '@vueuse/core'
 import { computed, onMounted, onScopeDispose, shallowRef } from 'vue'
 
@@ -6,7 +6,7 @@ import { getDashboardSummary, getDashboardTrend } from '@/api'
 import { dashboardSnapshotView, dashboardTrendView, normalizeDashboardTrendKind } from '@/components/usage/shared/dashboard'
 import { errorMessage, withMinimumDuration } from '@/utils/operation'
 
-export function useDashboardSummary() {
+export function useDashboardSummary(scope: DashboardSummaryScope) {
   const activeTrendKind = shallowRef(normalizeDashboardTrendKind('usage'))
   const snapshot = shallowRef(dashboardSnapshotView(null))
   const trend = shallowRef<DashboardTrendResponse | null>(null)
@@ -111,20 +111,27 @@ export function useDashboardSummary() {
       trendError.value = ''
     }
     try {
-      const summary = await getDashboardSummary({ kind: trendKind, period: 'today', asOf }, { silent, signal: summaryController.signal })
+      const summary = await getDashboardSummary({
+        scope,
+        kind: trendKind,
+        period: 'today',
+        asOf,
+      }, { silent, signal: summaryController.signal })
       if (disposed)
         return
       rangeAsOf = asOf
       snapshot.value = dashboardSnapshotView(summary)
       analyticsError.value = ''
       lastRefreshedAt.value = summary.asOfDisplay
-      if (isCurrentTrendRequest(requestId, trendKind)) {
-        trend.value = summary.trend
-        trendError.value = ''
-      }
-      else {
-        // 快照加载期间切换指标时，用已提交快照的同一锚点重新查询趋势。
-        void loadTrend(activeTrendKind.value)
+      if (scope === 'usage') {
+        if (isCurrentTrendRequest(requestId, trendKind)) {
+          trend.value = summary.trend ?? null
+          trendError.value = ''
+        }
+        else {
+          // 快照加载期间切换指标时，用已提交快照的同一锚点重新查询趋势
+          void loadTrend(activeTrendKind.value)
+        }
       }
     }
     catch (error: unknown) {

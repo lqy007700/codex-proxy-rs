@@ -18,6 +18,9 @@ const { callerFilters, scopedLabels } = useUsageCallerScope()
 const { timeRange, timeRangeParams, disabledDate, refreshTimeRangeEnd } = useUsageTimeRange()
 const {
   analyticsLoading,
+  summaryLoading,
+  overviewLoading,
+  diagnosticsLoading,
   summary,
   insights,
   providerQuery,
@@ -83,12 +86,13 @@ watch(timeRange, () => {
         </span>
       </ZCard>
       <template v-if="statsExpanded">
-        <UsageSummaryCards :summary="summary" />
+        <UsageSummaryCards :summary="summary" :loading="summaryLoading" />
         <UsageInsightsGrid
           v-model:diagnostic-dimension="diagnosticDimension"
           :overview="insights.overview"
           :diagnostics="insights.diagnostics"
-          :loading="analyticsLoading"
+          :overview-loading="overviewLoading"
+          :diagnostics-loading="diagnosticsLoading"
         />
       </template>
     </details>

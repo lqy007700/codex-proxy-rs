@@ -45,6 +45,7 @@ where
 {
     let time = crate::time::TimePresenter::new(state.admin_services().timezone());
     let kind = query.trend_kind().map_err(map_wire_error)?;
+    let scope = query.dashboard_scope().map_err(map_wire_error)?;
     // 概览与独立趋势使用同一部署日界
     let range = dashboard_today_range(
         query.start_time.as_deref(),
@@ -57,12 +58,12 @@ where
     let result = state
         .admin_services()
         .observability()
-        .dashboard_summary(range, domain_trend_kind(kind))
+        .dashboard_summary(range, domain_trend_kind(kind), scope)
         .await
         .map_err(map_service_error)?;
     Ok(AdminResponse::new(
         StatusCode::OK,
-        AdminEnvelope::ok(dashboard_view(result, kind, time)),
+        AdminEnvelope::ok(dashboard_view(result, kind, scope, time)),
     ))
 }
 

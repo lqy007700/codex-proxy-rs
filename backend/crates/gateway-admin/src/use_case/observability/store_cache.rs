@@ -207,7 +207,7 @@ impl ObservabilityStore for CachedObservabilityStore {
         query: DashboardQuery,
         observed_at: DateTime<Utc>,
     ) -> AdminStoreResult<DashboardObservation> {
-        // 复合概览还包含账号容量和最近请求，保持原有两秒实时刷新上限
+        // 查询范围参与缓存键，账号容量与完整范围的最近请求保持两秒实时刷新上限
         self.dashboard
             .get(
                 query.clone(),

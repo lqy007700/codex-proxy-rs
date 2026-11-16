@@ -21,10 +21,10 @@ use gateway_admin::{
         observability::{
             AccountPoolMetrics, AnalyticsState, AttemptMetrics, CostCoverage, CurrencyCost,
             DashboardAccountUsage, DashboardObservation, DashboardQuery, DashboardRuntimeSlots,
-            DiagnosticDimension, DiagnosticObservation, DiagnosticsObservation, Granularity,
-            HealthStatus, LatencyPercentiles, ObservabilityPageSize, OpsErrorPage, OpsErrorQuery,
-            PercentileMilliseconds, RequestMetricPoint, RequestMetrics, TimeRange, TrendKind,
-            UsageBilling, UsageConcurrencyPoint, UsageDetail, UsageFilter,
+            DashboardScope, DiagnosticDimension, DiagnosticObservation, DiagnosticsObservation,
+            Granularity, HealthStatus, LatencyPercentiles, ObservabilityPageSize, OpsErrorPage,
+            OpsErrorQuery, PercentileMilliseconds, RequestMetricPoint, RequestMetrics, TimeRange,
+            TrendKind, UsageBilling, UsageConcurrencyPoint, UsageDetail, UsageFilter,
             UsageInsightsObservation, UsageListRecord, UsageOverview, UsagePage,
             UsageProjectedCostPoint, UsageQuery,
         },
@@ -106,7 +106,11 @@ async fn health_timeline_should_sum_retries_per_slot_without_changing_health() {
     let services = observability_services(store).await;
     let timeline = services
         .observability()
-        .dashboard_summary(observation_range(now), TrendKind::Usage)
+        .dashboard_summary(
+            observation_range(now),
+            TrendKind::Usage,
+            DashboardScope::Full,
+        )
         .await
         .unwrap()
         .health_timeline;
@@ -171,7 +175,11 @@ async fn health_timeline_should_keep_exactly_china_day_quarter_hour_slots() {
 
     let timeline = services
         .observability()
-        .dashboard_summary(observation_range(now), TrendKind::Usage)
+        .dashboard_summary(
+            observation_range(now),
+            TrendKind::Usage,
+            DashboardScope::Full,
+        )
         .await
         .expect("dashboard summary")
         .health_timeline;
@@ -227,7 +235,11 @@ async fn dashboard_summary_should_derive_first_token_average_from_trend() {
 
     let summary = services
         .observability()
-        .dashboard_summary(observation_range(now), TrendKind::Usage)
+        .dashboard_summary(
+            observation_range(now),
+            TrendKind::Usage,
+            DashboardScope::Full,
+        )
         .await
         .expect("dashboard summary");
 
@@ -311,7 +323,7 @@ async fn dashboard_summary_should_compare_separate_yesterday_metrics_with_today_
     let result = observability_services(store.clone())
         .await
         .observability()
-        .dashboard_summary(range, TrendKind::Usage)
+        .dashboard_summary(range, TrendKind::Usage, DashboardScope::Full)
         .await
         .unwrap();
     assert_eq!(result.today.request_count, 2);
@@ -343,7 +355,7 @@ async fn dashboard_summary_should_keep_missing_yesterday_cache_rate_unknown() {
     let result = observability_services(store)
         .await
         .observability()
-        .dashboard_summary(range, TrendKind::Usage)
+        .dashboard_summary(range, TrendKind::Usage, DashboardScope::Full)
         .await
         .unwrap();
     assert_eq!(result.yesterday.request_count, 0);
@@ -429,7 +441,11 @@ async fn health_timeline_should_apply_status_precedence_and_thresholds() {
             now + Duration::seconds(i64::try_from(index).expect("fixture index fits i64") * 2);
         let timeline = services
             .observability()
-            .dashboard_summary(observation_range(range_end), TrendKind::Usage)
+            .dashboard_summary(
+                observation_range(range_end),
+                TrendKind::Usage,
+                DashboardScope::Full,
+            )
             .await
             .expect("dashboard summary")
             .health_timeline;
@@ -513,7 +529,7 @@ async fn health_views_should_include_incomplete_and_keep_final_outcomes_separate
 
         let dashboard = services
             .observability()
-            .dashboard_summary(range, TrendKind::Usage)
+            .dashboard_summary(range, TrendKind::Usage, DashboardScope::Full)
             .await
             .expect("dashboard summary");
         let timeline = dashboard.health_timeline;
@@ -577,10 +593,15 @@ async fn dashboard_summary_should_project_rebuildable_runtime_slots() {
 
     let capacity = services
         .observability()
-        .dashboard_summary(observation_range(now), TrendKind::Usage)
+        .dashboard_summary(
+            observation_range(now),
+            TrendKind::Usage,
+            DashboardScope::Full,
+        )
         .await
         .expect("dashboard summary")
-        .capacity;
+        .capacity
+        .expect("full dashboard capacity");
 
     assert_eq!(capacity.total_slots, Some(7));
     assert_eq!(capacity.used_slots, Some(2));
@@ -611,10 +632,15 @@ async fn dashboard_capacity_distinguishes_unlimited_inheritance_finite_overrides
             .await;
         let capacity = services
             .observability()
-            .dashboard_summary(observation_range(now), TrendKind::Usage)
+            .dashboard_summary(
+                observation_range(now),
+                TrendKind::Usage,
+                DashboardScope::Full,
+            )
             .await
             .expect("dashboard")
-            .capacity;
+            .capacity
+            .expect("full dashboard capacity");
         assert_eq!(capacity.total_slots, expected_total);
         assert_eq!(capacity.available_slots, expected_available);
         assert_eq!(capacity.used_slots, Some(2));
@@ -631,7 +657,11 @@ async fn dashboard_summary_should_observe_current_accounts_for_a_historical_rang
 
     services
         .observability()
-        .dashboard_summary(observation_range(historical_end), TrendKind::Usage)
+        .dashboard_summary(
+            observation_range(historical_end),
+            TrendKind::Usage,
+            DashboardScope::Full,
+        )
         .await
         .expect("dashboard summary");
 
@@ -664,8 +694,8 @@ async fn dashboard_summary_should_keep_distinct_exact_ranges_in_one_short_window
     let observability = services.observability();
 
     let (first, second) = tokio::join!(
-        observability.dashboard_summary(first_range, TrendKind::Usage),
-        observability.dashboard_summary(second_range, TrendKind::Errors),
+        observability.dashboard_summary(first_range, TrendKind::Usage, DashboardScope::Full),
+        observability.dashboard_summary(second_range, TrendKind::Errors, DashboardScope::Full),
     );
 
     first.expect("first dashboard summary");
@@ -697,11 +727,11 @@ async fn dashboard_summary_should_reload_after_the_short_window_changes() {
     let observability = services.observability();
 
     observability
-        .dashboard_summary(first_range, TrendKind::Usage)
+        .dashboard_summary(first_range, TrendKind::Usage, DashboardScope::Full)
         .await
         .expect("first dashboard summary");
     observability
-        .dashboard_summary(second_range, TrendKind::Usage)
+        .dashboard_summary(second_range, TrendKind::Usage, DashboardScope::Full)
         .await
         .expect("second dashboard summary");
 
@@ -1157,7 +1187,7 @@ async fn dashboard_should_preserve_provider_plan_names() {
         .await;
     let result = services
         .observability()
-        .dashboard_summary(range, TrendKind::Usage)
+        .dashboard_summary(range, TrendKind::Usage, DashboardScope::Full)
         .await
         .unwrap();
     assert_eq!(result.observation.account_usage.len(), plans.len());
@@ -1658,7 +1688,7 @@ async fn admin_selects_dashboard_defaults_and_matching_usage_buckets_at_range_bo
         let services = observability_services(store.clone()).await;
         services
             .observability()
-            .dashboard_summary(range, TrendKind::Usage)
+            .dashboard_summary(range, TrendKind::Usage, DashboardScope::Full)
             .await
             .unwrap();
         let query = store.summary_query.lock().unwrap().clone().unwrap();

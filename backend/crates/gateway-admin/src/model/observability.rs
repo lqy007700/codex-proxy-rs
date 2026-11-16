@@ -200,9 +200,26 @@ pub struct UsageQuery {
     pub page_size: ObservabilityPageSize,
 }
 
-/// Admin 确定概览的数量、趋势粒度及最近请求筛选，Store 只执行该选择
+/// 页面所需的汇总范围，完整范围保留独立 API 调用的既有合同
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum DashboardScope {
+    #[default]
+    Full,
+    Overview,
+    Usage,
+}
+
+impl DashboardScope {
+    #[must_use]
+    pub const fn includes_statistics(self) -> bool {
+        matches!(self, Self::Full | Self::Usage)
+    }
+}
+
+/// Admin 确定概览范围、数量、趋势粒度及最近请求筛选，Store 只执行该选择
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DashboardQuery {
+    pub scope: DashboardScope,
     pub range: TimeRange,
     pub yesterday_range: TimeRange,
     pub granularity: Granularity,
@@ -225,6 +242,7 @@ impl DashboardQuery {
                 .ok_or(AdminModelError::InvalidTimeRange)?,
         )?;
         Ok(Self {
+            scope: DashboardScope::Full,
             range,
             yesterday_range,
             granularity: Granularity::for_range(range),
@@ -1345,8 +1363,8 @@ pub struct DashboardResult {
     pub trend: Trend,
     pub health_timeline: HealthTimeline,
     pub wire_profiles: Vec<DashboardWireProfile>,
-    pub capacity: DashboardCapacity,
-    pub rotation_strategy: super::settings::RotationStrategy,
+    pub capacity: Option<DashboardCapacity>,
+    pub rotation_strategy: Option<super::settings::RotationStrategy>,
 }
 
 /// 洞察健康时间点的语义结果
