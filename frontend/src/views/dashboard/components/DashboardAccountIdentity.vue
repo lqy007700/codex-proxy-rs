@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { dashboardSnapshotView } from '../presenter'
+import type { dashboardSnapshotView } from '@/components/usage/shared/dashboard'
 import { computed } from 'vue'
 
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'

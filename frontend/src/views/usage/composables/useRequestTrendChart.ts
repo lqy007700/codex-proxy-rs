@@ -1,6 +1,6 @@
 import type { BarSeriesOption, EChartsOption, LineSeriesOption } from 'echarts'
 import type { Ref } from 'vue'
-import type { dashboardTrendView, normalizeDashboardTrendKind } from '../presenter'
+import type { dashboardTrendView, normalizeDashboardTrendKind } from '@/components/usage/shared/dashboard'
 import { getThemeVarName } from '@codex-proxy/ui/theme'
 import { usePreferredReducedMotion } from '@vueuse/core'
 import { computed, shallowRef, watch } from 'vue'

@@ -1,124 +1,56 @@
 import type { Ref } from 'vue'
-import type { UsageTimeRangeParams } from './useUsageTimeRange'
-import type { UsageRecordScope } from '@/api'
 import type { AnalyticsMetadata } from '@/api/modules/analytics'
-
 import type { CallerUsageFilters } from '@/api/modules/usage'
-import { computed, onMounted, onScopeDispose, shallowRef, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import {
-  getUsageRecordInsightsDiagnostics,
-  getUsageRecordInsightsOverview,
-  getUsageRecords,
-  getUsageRecordSummary,
-} from '@/api'
-import { useStablePagedQuery } from '@/composables/useStablePagedQuery'
+import type { UsageTimeRangeParams } from '@/composables/useUsageTimeRange'
+import { onMounted, onScopeDispose, shallowRef, watch } from 'vue'
+import { getUsageRecordInsightsDiagnostics, getUsageRecordInsightsOverview, getUsageRecordSummary } from '@/api'
 import { withMinimumDuration } from '@/utils/operation'
 
-interface UseUsageRecordsTableOptions {
+interface UseUsageAnalyticsOptions {
   timeRangeParams: Readonly<Ref<UsageTimeRangeParams>>
-  latestTimeRangeParams: () => UsageTimeRangeParams
+  callerFilters: Readonly<Ref<CallerUsageFilters>>
+  refreshTimeRangeEnd: () => void
 }
 
-type UsageLoadScope = 'all' | 'table'
 type LoadingAnalytics<T> = Omit<T, 'analytics'> & { analytics: AnalyticsMetadata | null }
 
-interface UsageLoadOptions {
-  scope?: UsageLoadScope
-}
-
-export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
-  const route = useRoute()
-  const callerFilters = computed(() => {
-    const result: CallerUsageFilters = {}
-    for (const name of [
-      'callerMode',
-      'callerSourceId',
-      'callerUserId',
-      'callerTokenId',
-      'requestId',
-      'clientApiKeyId',
-      'accountId',
-    ] as const) {
-      if (typeof route.query[name] === 'string')
-        result[name] = route.query[name]
-    }
-    return result
-  })
+export function useUsageAnalytics(options: UseUsageAnalyticsOptions) {
   const analyticsLoading = shallowRef(true)
   const summary = shallowRef(emptySummary())
   const insights = shallowRef(emptyInsights())
-  const searchQuery = shallowRef('')
-  const search = computed(() => searchQuery.value.trim() || undefined)
   const providerQuery = shallowRef('')
-  const recordScope = shallowRef<UsageRecordScope>('all')
-  let tableParams = snapshot()
-  const table = useStablePagedQuery({
-    initialPageSize: 10,
-    load: (pagination, requestOptions) => getUsageRecords({
-      ...pagination,
-      ...tableParams,
-    }, requestOptions),
-  })
-  const { currentPage, pageSize, loading, error, items: records, total: totalRecords } = table
-  const refreshingList = shallowRef(false)
   const diagnosticDimension = shallowRef('model')
+  const refreshing = shallowRef(false)
   let analyticsRequestId = 0
   let diagnosticRequestId = 0
   let analyticsController: AbortController | undefined
   let diagnosticController: AbortController | undefined
   const scopedParams = () => ({
     ...options.timeRangeParams.value,
-    ...callerFilters.value,
+    ...options.callerFilters.value,
     ...(providerQuery.value
       ? { provider: providerQuery.value }
       : {}),
   })
-  const usagePagination = computed(() => ({
-    currentPage: currentPage.value,
-    pageSize: pageSize.value,
-    total: totalRecords.value,
-  }))
 
-  function snapshot() {
-    return {
-      ...options.latestTimeRangeParams(),
-      ...callerFilters.value,
-      provider: providerQuery.value || undefined,
-      search: search.value,
-      scope: recordScope.value,
+  function loadUsageAnalytics() {
+    options.refreshTimeRangeEnd()
+    return loadAnalytics(scopedParams())
+  }
+
+  async function refreshUsageAnalytics() {
+    if (refreshing.value || analyticsLoading.value)
+      return
+    refreshing.value = true
+    try {
+      await withMinimumDuration(loadUsageAnalytics)
+    }
+    finally {
+      refreshing.value = false
     }
   }
 
-  watch(callerFilters, () => {
-    void loadUsageRecords()
-  })
-
-  function resetTable() {
-    tableParams = snapshot()
-    // 筛选范围变化后不能继续展示上一范围的数据，即使新查询失败。
-    records.value = []
-    currentPage.value = 1
-    totalRecords.value = 0
-  }
-
-  async function loadUsageRecords(loadOptions: UsageLoadOptions = {}) {
-    const { scope = 'all' } = loadOptions
-    const globalParams = scopedParams()
-    if (scope === 'all')
-      resetTable()
-
-    await Promise.all([
-      table.execute(),
-      ...(scope === 'all'
-        ? [
-            loadUsageAnalytics(globalParams),
-          ]
-        : []),
-    ])
-  }
-
-  async function loadUsageAnalytics(globalParams: ReturnType<typeof scopedParams>) {
+  async function loadAnalytics(globalParams: ReturnType<typeof scopedParams>) {
     const requestId = ++analyticsRequestId
     const diagnosticsId = ++diagnosticRequestId
     analyticsController?.abort()
@@ -184,62 +116,14 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     catch {}
   }
 
-  async function refreshUsageRecords() {
-    if (refreshingList.value || loading.value)
-      return
-    refreshingList.value = true
-    try {
-      await withMinimumDuration(reloadLatestTable)
-    }
-    finally {
-      refreshingList.value = false
-    }
-  }
-
-  function reloadLatestTable() {
-    resetTable()
-    return loadUsageRecords({ scope: 'table' })
-  }
-
-  function handlePageChange(nextPage: number) {
-    if (tableParams.search !== search.value) {
-      void reloadLatestTable()
-      return
-    }
-    void table.execute(nextPage)
-  }
-
-  function handlePageSizeChange(nextPageSize: number) {
-    pageSize.value = nextPageSize
-    if (tableParams.search !== search.value) {
-      void reloadLatestTable()
-      return
-    }
-    void table.reloadFromStart()
-  }
-
   onMounted(() => {
-    loadUsageRecords()
+    void loadUsageAnalytics()
   })
-
+  watch([options.callerFilters, providerQuery], () => {
+    void loadUsageAnalytics()
+  })
   watch(diagnosticDimension, () => {
     void loadDiagnostics()
-  })
-
-  watch(providerQuery, () => {
-    void loadUsageRecords()
-  })
-
-  watch(recordScope, () => {
-    void reloadLatestTable()
-  })
-
-  watch(search, (_value, _previous, onCleanup) => {
-    const timer = setTimeout(() => {
-      if (tableParams.search !== search.value)
-        void reloadLatestTable()
-    }, 250)
-    onCleanup(() => clearTimeout(timer))
   })
 
   onScopeDispose(() => {
@@ -250,24 +134,14 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   })
 
   return {
-    currentPage,
-    pageSize,
-    searchQuery,
-    providerQuery,
-    recordScope,
-    usagePagination,
-    loading,
-    error,
     analyticsLoading,
-    records,
     summary,
     insights,
-    refreshingList,
+    providerQuery,
     diagnosticDimension,
-    loadUsageRecords,
-    refreshUsageRecords,
-    handlePageChange,
-    handlePageSizeChange,
+    refreshing,
+    loadUsageAnalytics,
+    refreshUsageAnalytics,
   }
 }
 

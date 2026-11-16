@@ -89,7 +89,6 @@ export function dashboardSnapshotView(summary: DashboardSummaryResponse | null) 
     healthTimeline: summary?.healthTimeline ?? emptyHealthTimeline,
     accountUsage: (summary?.accountUsage ?? []),
     wireProfiles: summary?.wireProfiles ?? [],
-    usageRecords: summary?.usageRecords ?? [],
     poolSummary: summary?.poolSummary ?? null,
     capacityInfo: summary?.capacityInfo ?? emptyCapacityInfo,
     rotationStrategy: summary?.rotationStrategy ?? null,

@@ -1,52 +1,33 @@
 <script setup lang="ts">
+import { useDashboardSummary } from '@/composables/useDashboardSummary'
 import DashboardContent from './components/DashboardContent.vue'
-import { useDashboard } from './composables/useDashboard'
+import RequestRecordsCard from './components/RequestRecordsCard.vue'
 
 const {
-  loading,
-  refreshing,
-  activeTrendKind,
-  metrics,
   analytics,
   analyticsError,
-  trendPoints,
-  trendSummary,
-  trendLoading,
-  trendError,
   healthTimeline,
   accountUsage,
   wireProfiles,
-  usageRecords,
   poolSummary,
   capacityInfo,
   rotationStrategy,
-  lastRefreshedAt,
-  refresh,
-  loadTrend,
-} = useDashboard()
+} = useDashboardSummary()
 </script>
 
 <template>
   <DashboardContent
-    v-model:trend-kind="activeTrendKind"
-    :loading="loading"
-    :refreshing="refreshing"
-    :last-refreshed-at="lastRefreshedAt"
-    :metrics="metrics"
     :analytics="analytics"
     :analytics-error="analyticsError"
-    :trend-points="trendPoints"
-    :trend-summary="trendSummary"
-    :trend-loading="trendLoading"
-    :trend-error="trendError"
     :health-timeline="healthTimeline"
     :account-usage="accountUsage"
     :wire-profiles="wireProfiles"
-    :usage-records="usageRecords"
     :pool-summary="poolSummary"
     :capacity-info="capacityInfo"
     :rotation-strategy="rotationStrategy"
-    @refresh="refresh"
-    @trend-change="loadTrend"
-  />
+  >
+    <template #requests>
+      <RequestRecordsCard class="mt-6" />
+    </template>
+  </DashboardContent>
 </template>

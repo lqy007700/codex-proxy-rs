@@ -3,10 +3,10 @@ import { useIntervalFn } from '@vueuse/core'
 import { computed, onMounted, onScopeDispose, shallowRef } from 'vue'
 
 import { getDashboardSummary, getDashboardTrend } from '@/api'
+import { dashboardSnapshotView, dashboardTrendView, normalizeDashboardTrendKind } from '@/components/usage/shared/dashboard'
 import { errorMessage, withMinimumDuration } from '@/utils/operation'
-import { dashboardSnapshotView, dashboardTrendView, normalizeDashboardTrendKind } from '../presenter'
 
-export function useDashboard() {
+export function useDashboardSummary() {
   const activeTrendKind = shallowRef(normalizeDashboardTrendKind('usage'))
   const snapshot = shallowRef(dashboardSnapshotView(null))
   const trend = shallowRef<DashboardTrendResponse | null>(null)
@@ -27,7 +27,6 @@ export function useDashboard() {
   const healthTimeline = computed(() => snapshot.value.healthTimeline)
   const accountUsage = computed(() => snapshot.value.accountUsage)
   const wireProfiles = computed(() => snapshot.value.wireProfiles)
-  const usageRecords = computed(() => snapshot.value.usageRecords)
   const poolSummary = computed(() => snapshot.value.poolSummary)
   const capacityInfo = computed(() => snapshot.value.capacityInfo)
   const rotationStrategy = computed(() => snapshot.value.rotationStrategy)
@@ -70,7 +69,7 @@ export function useDashboard() {
       await withMinimumDuration(loadDashboardSnapshot)
     }
     catch {
-      // 手动刷新失败时保留当前数据，不打断概览操作。
+      // 手动刷新失败时保留当前数据，不打断页面操作
     }
     finally {
       refreshing.value = false
@@ -176,7 +175,6 @@ export function useDashboard() {
     healthTimeline,
     accountUsage,
     wireProfiles,
-    usageRecords,
     poolSummary,
     capacityInfo,
     rotationStrategy,

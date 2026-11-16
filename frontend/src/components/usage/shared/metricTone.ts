@@ -1,6 +1,6 @@
-import type { MetricTone } from './presenter'
+import type { MetricTone } from './dashboard'
 
-// tone 到 Tailwind 类的唯一映射；仪表盘各卡片共用。
+// 概览与使用统计卡片共用的语义颜色映射
 export const metricToneIconClasses: Record<MetricTone, string> = {
   normal: 'bg-z-cyan-container text-z-cyan-on-container',
   info: 'bg-z-blue-container text-z-blue-on-container',

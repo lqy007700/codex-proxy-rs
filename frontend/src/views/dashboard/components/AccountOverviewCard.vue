@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type { dashboardSnapshotView, MetricTone } from '../presenter'
+import type { dashboardSnapshotView, MetricTone } from '@/components/usage/shared/dashboard'
 import { ZCard, ZEmpty } from '@codex-proxy/ui'
 
 import { CircleCheck, RefreshCw, ShieldAlert, TriangleAlert } from '@lucide/vue'
 import { computed } from 'vue'
 import AccountUsageWindow from '@/components/account/account-usage-window/index.vue'
+import { metricToneIconClasses, metricToneValueClasses } from '@/components/usage/shared/metricTone'
 import { formatCompactNumber } from '@/utils/format'
-import { metricToneIconClasses, metricToneValueClasses } from '../constants'
 import DashboardAccountIdentity from './DashboardAccountIdentity.vue'
 
 type DashboardSnapshot = ReturnType<typeof dashboardSnapshotView>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
 import type { AffinityFilters, AffinityOperation, AffinitySession, BindingDirective, IdentitySource } from '@/api/modules/affinity'
-import { defineTableColumns, ZButton, ZCard, ZCheckbox, ZDialog, ZFormItem, ZInput, ZSegmented, ZSelect, ZSwitch, ZTable, ZTag } from '@codex-proxy/ui'
+import { defineTableColumns, ZButton, ZCard, ZDialog, ZFormItem, ZInput, ZSegmented, ZSelect, ZSwitch, ZTable, ZTag } from '@codex-proxy/ui'
 import { ChevronDown } from '@lucide/vue'
 import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -13,7 +13,6 @@ import { useRequestState } from '@/composables/useRequestState'
 import { accountIdentityLabel } from '@/utils/accountIdentity'
 import { affinityTargetDisabled } from '@/utils/affinity'
 import { generateRequestId } from '@/utils/operation'
-import AffinityBindingActions from './components/AffinityBindingActions.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,7 +22,6 @@ const tabs = [
   { label: '按账号查看', value: 'accounts' },
 ]
 const managementViews = [
-  { label: '直连会话管理', value: 'sessions' },
   { label: '操作记录', value: 'operations' },
   { label: '身份来源', value: 'sources' },
 ]
@@ -39,7 +37,6 @@ const operations = shallowRef<AffinityOperation[]>([])
 const nextCursor = shallowRef<string | null>(null)
 const cursor = shallowRef<string | undefined>()
 const previousCursors = ref<(string | undefined)[]>([])
-const selected = ref(new Set<string>())
 const query = useRequestState()
 const { loading, error } = query
 const mutation = useAsyncAction()
@@ -74,9 +71,7 @@ function callerGroupKey(session: AffinitySession) {
   const caller = session.observation.caller
   return caller.mode === 'newApi'
     ? `newApi:${caller.sourceId}:${caller.userId}:${caller.tokenId}`
-    : caller.mode === 'direct'
-      ? `direct:${session.observation.clientKeyId}`
-      : ''
+    : ''
 }
 const sessionStats = computed(() => {
   const stats = new Map<string, { total: number, active: number }>()
@@ -103,9 +98,6 @@ function statsForBindings(bindings: AffinitySession[]) {
     return summary
   }, { total: 0, active: 0 })
 }
-const selectableSessions = computed(() => sessions.value.filter(canManage))
-const selectedSessions = computed(() => selectableSessions.value.filter(session => selected.value.has(key(session))))
-const allSelected = computed(() => selectableSessions.value.length > 0 && selectedSessions.value.length === selectableSessions.value.length)
 const tokenOperation = computed(() => operation.value
   ? operation.value.plan.items.every(item => item.session.observation.bindingScope === 'token')
   : operationSelection.value.every(session => session.observation.bindingScope === 'token'))
@@ -129,31 +121,16 @@ const operationTitle = computed(() => hasResults.value
       : action.value === 'reassign'
         ? tokenOperation.value ? '自动换一个账号' : '排除原账号重选'
         : tokenOperation.value ? '重置账号偏好' : '清除后重新选号')
-const columns = computed(() => defineTableColumns<AffinitySession>([
-  ...(view.value === 'sessions'
-    ? [
-        { key: 'selection', kind: 'selection' as const },
-      ]
-    : []),
+const columns = defineTableColumns<AffinitySession>([
   {
     key: 'caller',
-    label: view.value === 'sessions'
-      ? '调用方'
-      : 'New API Key',
-    kind: 'identity',
-    size: 'xl',
-  },
-  {
-    key: 'session',
-    label: '会话标识',
+    label: 'New API Key',
     kind: 'identity',
     size: 'xl',
   },
   {
     key: 'account',
-    label: view.value === 'sessions'
-      ? '会话账号 / 最近请求账号'
-      : '主账号 / 最近请求账号',
+    label: '主账号 / 最近请求账号',
     kind: 'custom',
     size: 'xl',
   },
@@ -162,12 +139,6 @@ const columns = computed(() => defineTableColumns<AffinitySession>([
     label: '会话窗口',
     kind: 'custom',
     size: 'md',
-  },
-  {
-    key: 'status',
-    label: '状态 / 待执行操作',
-    kind: 'custom',
-    size: 'xl',
   },
   {
     key: 'time',
@@ -181,7 +152,7 @@ const columns = computed(() => defineTableColumns<AffinitySession>([
     kind: 'actions',
     size: 'xl',
   },
-]).filter(column => view.value === 'sessions' || !['session', 'status'].includes(column.key)))
+])
 const sourceColumns = defineTableColumns<IdentitySource>([
   {
     key: 'name',
@@ -249,7 +220,7 @@ const accountColumns = defineTableColumns<AccountAffinityRow>([
   },
 ])
 function canManage(session: AffinitySession) {
-  return session.observation.bindingScope === 'token' || session.observation.caller.mode === 'direct'
+  return session.observation.bindingScope === 'token'
 }
 function key(session: AffinitySession) {
   return `${session.provider}:${session.reference}`
@@ -303,7 +274,7 @@ function statusLabel(session: AffinitySession) {
 function openOperation(items: AffinitySession[], nextAction: BindingDirective['action']) {
   if (saving.value || loading.value)
     return
-  // 固定本次操作对象，行内设置不改变列表的批量选择
+  // 固定本次操作对象，只允许调整 Token 主绑定
   operationSelection.value = items.filter(canManage)
   if (!operationSelection.value.length)
     return
@@ -354,15 +325,6 @@ function toggleAccount(accountId: string) {
     next.add(accountId)
   expandedAccountIds.value = next
 }
-function toggle(items: AffinitySession[], checked: boolean) {
-  const next = new Set(selected.value)
-  for (const item of items.filter(canManage)) {
-    checked
-      ? next.add(key(item))
-      : next.delete(key(item))
-  }
-  selected.value = next
-}
 async function loadTargetAccounts(search = '') {
   const requestId = accountQuery.start()
   try {
@@ -399,7 +361,6 @@ watch([operation, saving], async ([, busy]) => {
 })
 async function load() {
   const requestId = query.start()
-  selected.value = new Set()
   sessions.value = []
   try {
     const [page, sourceList, history, windows] = await Promise.all([
@@ -409,12 +370,8 @@ async function load() {
           ? loadAllTokenAffinity()
           : getAffinitySessions({
               ...Object.fromEntries(Object.entries(filters).map(([name, value]) => [name, value?.trim() || undefined])),
-              bindingScope: view.value === 'sessions'
-                ? 'session'
-                : 'token',
-              mode: view.value === 'sessions'
-                ? filters.mode ?? 'direct'
-                : 'newApi',
+              bindingScope: 'token',
+              mode: 'newApi',
               cursor: cursor.value,
             }, { signal: query.signal }),
       view.value === 'operations'
@@ -488,7 +445,7 @@ function previousPage() {
 function viewRequests(session: AffinitySession) {
   const caller = session.observation.caller
   void router.push({
-    path: '/usage',
+    path: '/',
     query: caller.mode === 'newApi'
       ? {
           callerMode: caller.mode,
@@ -507,11 +464,9 @@ function selectView(value: string) {
     path: '/affinity',
     query: value === 'accounts'
       ? { view: 'accounts' }
-      : value === 'sessions'
-        ? { mode: 'direct' }
-        : value === 'tokens'
-          ? {}
-          : { management: value },
+      : value === 'tokens'
+        ? {}
+        : { management: value },
   })
 }
 function clearFilters() {
@@ -519,13 +474,11 @@ function clearFilters() {
     path: '/affinity',
     query: view.value === 'accounts'
       ? { view: 'accounts' }
-      : view.value === 'sessions'
-        ? { mode: 'direct' }
-        : {},
+      : {},
   })
 }
 const filterContext = computed(() => Object.entries(filters)
-  .filter(([name, value]) => value && name !== 'mode')
+  .filter(([, value]) => value)
   .map(([name, value]) => `${({
     sourceId: '来源',
     clientKeyId: 'CPR Key',
@@ -586,14 +539,8 @@ async function saveSource() {
   })
 }
 function applyRoute() {
-  filters.mode = route.query.mode === 'direct' || route.query.mode === 'newApi'
-    ? route.query.mode
-    : undefined
   if (route.query.view === 'accounts') {
     view.value = 'accounts'
-  }
-  else if (route.query.bindingScope === 'session' || route.query.mode === 'direct') {
-    view.value = 'sessions'
   }
   else {
     view.value = route.query.management === 'sources' || route.query.management === 'operations'
@@ -662,7 +609,7 @@ function openTokenView(session: AffinitySession) {
         <div v-if="filterContext && view !== 'sources' && view !== 'operations' && view !== 'accounts'" class="mb-4 flex flex-wrap items-center gap-2 text-z-xs text-z-text-secondary">
           <span class="break-all">当前范围：{{ filterContext }}</span>
           <ZButton size="small" :disabled="saving || loading" @click="clearFilters">
-            {{ view === 'sessions' ? '查看全部直连绑定' : '查看全部 Key' }}
+            查看全部 Key
           </ZButton>
         </div>
         <div v-if="error" class="my-4 flex items-center gap-3 text-z-error" role="alert">
@@ -789,21 +736,7 @@ function openTokenView(session: AffinitySession) {
           </ZTable>
         </template>
         <template v-else>
-          <div v-if="view === 'sessions' && selectedSessions.length" class="my-4 flex flex-wrap items-center gap-2">
-            <span class="mr-2 text-z-sm text-z-text-secondary">已选 {{ selectedSessions.length }} 个{{ view === 'sessions' ? '会话绑定' : ' New API Key' }}</span>
-            <AffinityBindingActions batch :token="view !== 'sessions'" :disabled="saving || loading" @action="openOperation(selectedSessions, $event)" />
-            <ZButton :disabled="saving" @click="selected = new Set()">
-              取消选择
-            </ZButton>
-          </div>
-          <ZTable :columns="columns" :data="sessions" :row-key="key" :selected-row-keys="[...selected]" :loading="loading" empty-text="当前页没有已观测且未过期的绑定">
-            <template #header-selection>
-              <ZCheckbox :model-value="allSelected" :indeterminate="selectedSessions.length > 0 && !allSelected" :disabled="saving || !selectableSessions.length" aria-label="选择本页可管理的绑定" @update:model-value="toggle(sessions, $event)" />
-            </template>
-            <template #selection="{ row }">
-              <ZCheckbox v-if="canManage(row)" :model-value="selected.has(key(row))" :disabled="saving" :aria-label="`选择绑定 ${row.reference}`" @update:model-value="toggle([row], $event)" />
-              <span v-else class="text-z-xs text-z-text-tertiary">只读</span>
-            </template>
+          <ZTable :columns="columns" :data="sessions" :row-key="key" :loading="loading" empty-text="当前页没有已观测且未过期的绑定">
             <template #caller="{ row }">
               <div class="truncate" :title="callerLabel(row)">
                 {{ row.observation.caller.mode === 'newApi' ? tokenLabel(row) : callerLabel(row) }}
@@ -814,7 +747,7 @@ function openTokenView(session: AffinitySession) {
                 {{ sourceNames.get(row.observation.caller.sourceId) ?? row.observation.caller.sourceId }}
               </div>
               <div class="mt-2 grid gap-1 whitespace-normal text-z-xs sm:hidden">
-                <span>{{ view === 'sessions' ? '会话' : '主账号' }}：{{ accountLabel(row.accountId) }}</span>
+                <span>主账号：{{ accountLabel(row.accountId) }}</span>
                 <span>最近请求：{{ accountLabel(row.observation.actualAccountId) }}</span>
                 <span>{{ statusLabel(row) }}</span>
                 <span v-if="row.directive">{{ pendingLabel(row.directive, row.observation.bindingScope === 'token') }}</span>
@@ -822,13 +755,10 @@ function openTokenView(session: AffinitySession) {
                 <span class="min-w-0 break-words">绑定到期：{{ row.expiresAtDisplay }}</span>
               </div>
             </template>
-            <template #session="{ row }">
-              <span class="block truncate font-mono text-z-xs" :title="row.reference">{{ row.reference }}</span><span class="text-z-xs text-z-text-tertiary">{{ row.provider }}</span>
-            </template>
             <template #account="{ row }">
-              <span class="block truncate" :title="row.accountId">{{ view === 'sessions' ? '会话' : '主账号' }}：{{ accountLabel(row.accountId) }}</span>
+              <span class="block truncate" :title="row.accountId">主账号：{{ accountLabel(row.accountId) }}</span>
               <span class="mt-1 block truncate text-z-xs text-z-text-tertiary" :title="row.observation.actualAccountId">最近请求：{{ accountLabel(row.observation.actualAccountId) }}</span>
-              <div v-if="view === 'tokens' && (row.directive || row.accountId !== row.observation.actualAccountId)" class="mt-2 text-z-xs">
+              <div v-if="row.directive || row.accountId !== row.observation.actualAccountId" class="mt-2 text-z-xs">
                 <ZTag type="warning">
                   {{ row.directive ? pendingLabel(row.directive, true) : '最近使用其他账号' }}
                 </ZTag>
@@ -838,24 +768,15 @@ function openTokenView(session: AffinitySession) {
               <span>{{ statsFor(row).total }} 个窗口</span>
               <span class="mt-1 block text-z-xs text-z-text-tertiary">进行中 {{ statsFor(row).active }}</span>
             </template>
-            <template #status="{ row }">
-              <ZTag :type="row.directive || (row.observation.bindingScope === 'token' && row.observation.actualAccountId !== row.accountId) ? 'warning' : 'success'">
-                {{ statusLabel(row) }}
-              </ZTag>
-              <span v-if="row.directive" class="mt-1 block whitespace-normal text-z-xs text-z-text-secondary">
-                {{ pendingLabel(row.directive, row.observation.bindingScope === 'token') }}
-              </span>
-            </template>
             <template #time="{ row }">
               <span class="block whitespace-nowrap font-mono text-z-xs" :title="`最近准入 ${row.lastAdmissionAtDisplay}`">{{ row.lastAdmissionAtDisplay }}</span>
               <span class="mt-1 block whitespace-nowrap text-z-xs text-z-text-tertiary">到期 {{ row.expiresAtDisplay }}</span>
             </template>
             <template #actions="{ row }">
               <div class="flex flex-wrap gap-1">
-                <ZButton v-if="view === 'tokens'" size="small" :disabled="saving || loading" :aria-label="`更换 ${callerLabel(row)} 的主账号`" @click="openOperation([row], 'target')">
+                <ZButton size="small" :disabled="saving || loading" :aria-label="`更换 ${callerLabel(row)} 的主账号`" @click="openOperation([row], 'target')">
                   更换主账号
                 </ZButton>
-                <AffinityBindingActions v-else-if="canManage(row)" :token="false" :caller="callerLabel(row)" :disabled="saving || loading" @action="openOperation([row], $event)" />
                 <ZButton size="small" @click="viewRequests(row)">
                   查看请求
                 </ZButton>

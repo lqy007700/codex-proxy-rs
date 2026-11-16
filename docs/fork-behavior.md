@@ -225,7 +225,7 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 | --- | --- |
 | 查询范围与时间关键词 | [observability/query.rs](../backend/crates/gateway-api/src/admin/observability/query.rs)、[Store 查询](../backend/crates/gateway-store/src/postgres/observability/queries/usage.rs)、[API 测试](../backend/crates/gateway-api/tests/admin/observability/response.rs)、[分页测试](../backend/crates/gateway-store/tests/postgres/usage_paging.rs) |
 | Key 侧范围隔离 | [key_usage.rs](../backend/crates/gateway-admin/src/use_case/key_usage.rs)、[Key API 测试](../backend/crates/gateway-api/tests/key_usage/mod.rs) |
-| 导出与页面证据 | [export/mod.rs](../backend/crates/gateway-api/src/admin/observability/export/mod.rs)、[RequestDiagnosticsPanel.vue](../frontend/src/views/usage/components/RequestDiagnosticsPanel.vue)、[RequestTransportFailure.vue](../frontend/src/views/usage/components/RequestTransportFailure.vue) |
+| 导出与页面证据 | [export/mod.rs](../backend/crates/gateway-api/src/admin/observability/export/mod.rs)、[RequestDiagnosticsPanel.vue](../frontend/src/views/dashboard/components/RequestDiagnosticsPanel.vue)、[RequestTransportFailure.vue](../frontend/src/views/dashboard/components/RequestTransportFailure.vue) |
 
 ## 管理端交互
 

@@ -53,7 +53,7 @@ const router = useRouter()
       </template>
       <template #default="{ close }">
         <div class="w-44 p-1.5">
-          <ZMenuItem @click.stop="(close(), router.push({ path: '/affinity', query: { clientKeyId: apiKey.id, mode: apiKey.identityPolicy.mode } }))">
+          <ZMenuItem v-if="apiKey.identityPolicy.mode === 'newApi'" @click.stop="(close(), router.push({ path: '/affinity', query: { clientKeyId: apiKey.id } }))">
             <template #icon>
               <Network class="size-3.5 text-z-text-quaternary" />
             </template>

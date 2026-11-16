@@ -199,7 +199,10 @@ Client Key 费用账本独立累计各次 attempt 的实际费用，不能因请
 | `composables/` | 请求取消与过期结果隔离、分页、选择、异步动作、目录加载等共享机制 |
 | `utils/` | 按用途分开的数据解析、数字与时长格式化、位置校验、客户端配置及颜色工具 |
 
-概览的数据请求和刷新由 `useDashboard` 持有，`views/dashboard/presenter.ts` 生成展示模型。
+概览与使用统计的当日快照复用 `useDashboardSummary` 管理请求和刷新，
+`components/usage/shared/dashboard.ts` 生成展示模型，使用统计页持有核心指标与使用趋势交互。
+概览请求明细由独立的 `useUsageRecordsTable` 管理查询快照和分页，统计自动刷新不重置明细筛选与页码。
+使用统计页由 `useUsageAnalytics` 加载汇总、洞察和诊断，不加载请求明细。
 Key 创建与编辑共用 `useApiKeyEditor` 和 `ApiKeyFormModal`，创建结果与密钥使用弹窗各自管理明文生命周期。
 用量表格的列、展示投影及健康时间线规则集中在 `components/usage/shared/`，管理页面与 Key 用量页共用展示，
 各自的查询仍使用对应身份允许的 API

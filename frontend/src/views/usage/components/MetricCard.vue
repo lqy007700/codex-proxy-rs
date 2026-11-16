@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import type { EChartsOption } from 'echarts'
-import type { MetricCardView, MetricTone } from '../presenter'
+import type { MetricCardView, MetricTone } from '@/components/usage/shared/dashboard'
 
 import { ZCard, ZMotionIcon } from '@codex-proxy/ui'
 import { computed } from 'vue'
 
 import AnimatedMetricValue from '@/components/AnimatedMetricValue.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
+import { metricToneIconClasses, metricToneValueClasses } from '@/components/usage/shared/metricTone'
 import { useThemeColor } from '@/composables/useThemeColor'
-import { metricToneIconClasses, metricToneValueClasses } from '../constants'
 
 const props = defineProps<{
   metric: MetricCardView

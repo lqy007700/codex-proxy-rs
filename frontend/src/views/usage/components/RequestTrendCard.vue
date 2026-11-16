@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { dashboardTrendView, normalizeDashboardTrendKind } from '../presenter'
+import type { dashboardTrendView, normalizeDashboardTrendKind } from '@/components/usage/shared/dashboard'
 
 import { ZCard, ZEmpty, ZSegmented } from '@codex-proxy/ui'
 import { toRef } from 'vue'

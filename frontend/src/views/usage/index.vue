@@ -1,137 +1,67 @@
 <script setup lang="ts">
-import type { TableColumn } from '@codex-proxy/ui'
-import type { UsageListRecord } from '@/api'
-import { defineTableColumns, useTableColumns, ZButton, ZCard, ZDatePicker, ZIconButton, ZPagination, ZSegmented, ZTableColumnSettings } from '@codex-proxy/ui'
-import { ChevronDown, CloudRain, Eye, List, Sun } from '@lucide/vue'
-
-import { computed, shallowRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ZButton, ZCard, ZDatePicker, ZIconButton } from '@codex-proxy/ui'
+import { ChevronDown, RefreshCw } from '@lucide/vue'
+import { shallowRef, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import AppPageHeader from '@/components/AppPageHeader.vue'
 import ProviderFilter from '@/components/ProviderFilter.vue'
-import { usageRecordColumns } from '@/components/usage/shared/columns'
-import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
-import UsageAccountAttemptsCell from './components/UsageAccountAttemptsCell.vue'
-import UsageAffinityModal from './components/UsageAffinityModal.vue'
-import UsageErrorDetailModal from './components/UsageErrorDetailModal.vue'
-import UsageFilters from './components/UsageFilters.vue'
+import { useUsageCallerScope } from '@/composables/useUsageCallerScope'
+import { useUsageTimeRange } from '@/composables/useUsageTimeRange'
+import UsageDailyOverview from './components/UsageDailyOverview.vue'
 import UsageInsightsGrid from './components/UsageInsightsGrid.vue'
-import UsageOutcomeCell from './components/UsageOutcomeCell.vue'
-import UsageRecordDetailModal from './components/UsageRecordDetailModal.vue'
 import UsageSummaryCards from './components/UsageSummaryCards.vue'
-import { useUsageRecordDetail } from './composables/useUsageRecordDetail'
-import { useUsageRecordsTable } from './composables/useUsageRecordsTable'
-import { useUsageTimeRange } from './composables/useUsageTimeRange'
-import { isErrorUsageRecord } from './utils/detail'
+import { useUsageAnalytics } from './composables/useUsageAnalytics'
 
-const route = useRoute()
 const router = useRouter()
-const scopedLabels = computed(() => [
-  ['requestId', '请求'],
-  ['callerSourceId', '来源'],
-  ['callerUserId', '用户'],
-  ['callerTokenId', 'Token'],
-  ['clientApiKeyId', 'Key'],
-  ['accountId', '账号'],
-].flatMap(([name, label]) => typeof route.query[name!] === 'string'
-  ? [`${label} ${route.query[name!]}`]
-  : []))
 const statsExpanded = shallowRef(true)
-const affinityRecord = shallowRef<UsageListRecord | null>(null)
-const showAffinityModal = shallowRef(false)
-function editAffinity(record: UsageListRecord) {
-  affinityRecord.value = record
-  showAffinityModal.value = true
-}
-const requestColumns = defineTableColumns<UsageListRecord>([
-  {
-    key: 'logicalOutcome',
-    label: '请求结果',
-    kind: 'custom',
-    size: 'lg',
-    hideable: false,
-  },
-  ...usageRecordColumns,
-])
-const recordViewOptions = [
-  { label: '所有请求', value: 'all', icon: List },
-  { label: '成功', value: 'success', icon: Sun },
-  { label: '错误', value: 'error', icon: CloudRain },
-]
-const { timeRange, timeRangeParams, disabledDate, refreshTimeRangeEnd, latestTimeRangeParams }
-  = useUsageTimeRange()
-
+const { callerFilters, scopedLabels } = useUsageCallerScope()
+const { timeRange, timeRangeParams, disabledDate, refreshTimeRangeEnd } = useUsageTimeRange()
 const {
-  searchQuery,
-  recordScope,
-  providerQuery,
-  usagePagination,
-  loading,
-  error,
   analyticsLoading,
-  records,
   summary,
   insights,
-  refreshingList,
+  providerQuery,
   diagnosticDimension,
-  loadUsageRecords,
-  refreshUsageRecords,
-  handlePageChange,
-  handlePageSizeChange,
-} = useUsageRecordsTable({
-  timeRangeParams,
-  latestTimeRangeParams,
-})
-
-const recordColumns = computed<TableColumn<UsageListRecord>[]>(() => recordScope.value === 'error'
-  ? requestColumns.flatMap(column => column.key === 'route'
-      ? [
-          column,
-          {
-            key: 'errorMessage',
-            label: '错误',
-            kind: 'custom',
-            size: '4xl',
-            hideable: false,
-          },
-        ]
-      : [column])
-  : requestColumns)
-const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(recordColumns, 'usage-requests')
-
-const { showDetailModal, selectedUsageRecord, handleViewDetail, detailIsError, detailLoading, detailError, reloadDetail } = useUsageRecordDetail()
-const detailComponent = computed(() => detailIsError.value
-  ? UsageErrorDetailModal
-  : UsageRecordDetailModal)
+  refreshing,
+  loadUsageAnalytics,
+  refreshUsageAnalytics,
+} = useUsageAnalytics({ timeRangeParams, callerFilters, refreshTimeRangeEnd })
 
 watch(timeRange, () => {
-  refreshTimeRangeEnd()
-  void loadUsageRecords()
+  void loadUsageAnalytics()
 })
 </script>
 
 <template>
   <div class="@container w-full">
-    <AppPageHeader class="justify-end" title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
-      <template #actions>
-        <div class="flex w-[100cqw] max-w-[100cqw] flex-wrap items-center justify-end gap-2 @min-[21rem]:flex-nowrap @min-[28rem]:w-auto">
-          <ZDatePicker
-            v-model="timeRange"
-            type="daterange"
-            :clearable="false"
-            :editable="false"
-            :disabled-date="disabledDate"
-            single-panel
-            aria-label="统计日期范围，仅可选择最近 31 天"
-            class="min-w-0 flex-1 basis-full @min-[21rem]:basis-auto @min-[28rem]:w-60 @min-[28rem]:flex-none @max-[28rem]:[&>div]:gap-1.5 @max-[28rem]:[&>div]:px-2"
-          />
-          <ProviderFilter
-            v-model="providerQuery"
-            :disabled="refreshingList"
-            class="shrink-0"
-          />
-        </div>
-      </template>
-    </AppPageHeader>
+    <AppPageHeader title="使用统计" description="查看当日概况、请求用量与性能趋势" />
+
+    <UsageDailyOverview />
+
+    <div class="mt-6 flex flex-wrap items-center justify-end gap-2" role="group" aria-label="统计分析筛选">
+      <ZDatePicker
+        v-model="timeRange"
+        type="daterange"
+        :clearable="false"
+        :editable="false"
+        :disabled-date="disabledDate"
+        single-panel
+        aria-label="统计日期范围，仅可选择最近 31 天"
+        class="w-60 max-w-full"
+      />
+      <ProviderFilter v-model="providerQuery" :disabled="refreshing" class="shrink-0" />
+      <ZIconButton
+        aria-label="刷新使用统计"
+        :loading="refreshing"
+        :disabled="analyticsLoading || refreshing"
+        @click="refreshUsageAnalytics"
+      >
+        <template #loading>
+          <RefreshCw class="size-4.5 animate-spin motion-reduce:animate-none" />
+        </template>
+        <RefreshCw class="size-4.5" />
+      </ZIconButton>
+    </div>
 
     <div v-if="scopedLabels.length" class="mt-4 flex flex-wrap items-center gap-3 text-z-sm text-z-text-secondary">
       <span class="break-all">当前限定：{{ scopedLabels.join(' · ') }}</span>
@@ -139,98 +69,6 @@ watch(timeRange, () => {
         清除限定
       </ZButton>
     </div>
-    <ZCard
-      class="mt-5 flex flex-col"
-    >
-      <template #header>
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 class="m-0 text-xl leading-[1.15] font-heavy text-z-text">
-              请求明细
-            </h2>
-            <p
-              class="mt-1.75 mb-0 text-z leading-[1.15] font-emphasis text-z-text-secondary"
-            >
-              查看请求结果、用量与错误详情
-            </p>
-          </div>
-          <ZSegmented v-model="recordScope" aria-label="请求结果筛选" :options="recordViewOptions" display="icon" class="w-30 shrink-0" />
-        </div>
-      </template>
-
-      <template #body>
-        <div
-          class="grid min-h-130 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3"
-        >
-          <UsageFilters
-            v-model:search="searchQuery"
-            :loading="loading"
-            :refreshing="refreshingList"
-            @refresh="refreshUsageRecords"
-          >
-            <template #actions>
-              <ZTableColumnSettings
-                :options="columnOptions"
-                @change="setColumnVisible"
-                @reorder="setColumnOrder"
-                @reset="resetColumns"
-              />
-            </template>
-          </UsageFilters>
-
-          <div class="flex min-h-0 min-w-0 flex-col">
-            <UsageRecordsTable
-              class="min-h-0 flex-1"
-              :columns="visibleColumns"
-              :rows="records"
-              :loading="loading"
-              :empty-text="error ? `加载失败：${error}` : '当前筛选下暂无请求'"
-            >
-              <template #logicalOutcome="{ row }">
-                <UsageOutcomeCell :record="row" :show-message="recordScope !== 'error'" />
-              </template>
-              <template #accountEmail="{ row }">
-                <UsageAccountAttemptsCell :record="row" />
-              </template>
-              <template #callerTokenName="{ row, displayValue }">
-                <button
-                  v-if="row.callerIdentity?.mode === 'newApi' && row.provider"
-                  type="button"
-                  class="block max-w-full cursor-pointer truncate rounded-z-sm border-0 bg-transparent p-0 text-left font-mono text-z-sm leading-none font-bold text-z-primary-text outline-none hover:underline focus-visible:ring-2 focus-visible:ring-z-control-outline"
-                  :title="row.callerTokenName || row.callerIdentity.tokenId"
-                  :aria-label="`调整 ${row.callerTokenName || row.callerIdentity.tokenId} 的会话亲和`"
-                  @click="editAffinity(row)"
-                >
-                  {{ row.callerTokenName || row.callerIdentity.tokenId }}
-                </button>
-                <span v-else class="block max-w-full truncate font-mono text-z-sm leading-none font-bold text-z-text" :title="String(displayValue || '')">
-                  {{ displayValue || '—' }}
-                </span>
-              </template>
-              <template #actions="{ row }">
-                <div class="flex items-center justify-start">
-                  <ZIconButton
-                    size="small"
-                    :aria-label="isErrorUsageRecord(row) ? '查看错误详情' : '查看使用记录详情'"
-                    @click="handleViewDetail(row)"
-                  >
-                    <Eye class="size-3.5" />
-                  </ZIconButton>
-                </div>
-              </template>
-            </UsageRecordsTable>
-            <ZPagination
-              v-bind="usagePagination"
-              :disabled="loading"
-              @current-change="handlePageChange"
-              @size-change="handlePageSizeChange"
-            />
-          </div>
-        </div>
-      </template>
-    </ZCard>
-
-    <UsageAffinityModal v-model="showAffinityModal" :record="affinityRecord" />
 
     <details :open="statsExpanded" class="group mt-5" @toggle="statsExpanded = ($event.target as HTMLDetailsElement).open">
       <ZCard
@@ -254,7 +92,5 @@ watch(timeRange, () => {
         />
       </template>
     </details>
-
-    <component :is="detailComponent" v-model="showDetailModal" :record="selectedUsageRecord" :loading="detailLoading" :error="detailError" @retry="reloadDetail" />
   </div>
 </template>
