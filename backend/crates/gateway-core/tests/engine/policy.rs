@@ -406,6 +406,85 @@ fn empty_filter_preserves_native_affinity_and_busy_candidates_cannot_be_picked()
 }
 
 #[test]
+fn quota_window_selection_preserves_role_and_trusted_affinity() {
+    use gateway_core::{
+        account::{
+            AccountQuotaResetWindow, AccountSchedulingRole, AccountSelector, QuotaResetPeriod,
+            ResetWindowWeights,
+        },
+        engine::recovery::AccountRecoveryStage,
+    };
+    let mut regular = candidate("acct_regular");
+    let mut fallback = candidate("acct_fallback");
+    fallback.account = fallback
+        .account
+        .clone()
+        .with_scheduling_role(AccountSchedulingRole::Fallback);
+    let mut selection = context();
+    selection.policy = AccountSelectionPolicy::new(
+        RotationStrategy::QuotaResetPriority,
+        NonZeroU32::new(2).unwrap(),
+    )
+    .with_quota_reset_window_weights(ResetWindowWeights::new([0.0, 1.0, 0.0]).unwrap());
+    regular.signals.quota_reset_windows = Some(
+        vec![AccountQuotaResetWindow {
+            period: QuotaResetPeriod::Weekly,
+            reset_at: selection.now + std::time::Duration::from_secs(100),
+        }]
+        .into(),
+    );
+    fallback.signals.quota_reset_windows = Some(
+        vec![AccountQuotaResetWindow {
+            period: QuotaResetPeriod::Weekly,
+            reset_at: selection.now + std::time::Duration::from_secs(1),
+        }]
+        .into(),
+    );
+    let candidates = [regular, fallback];
+    selection.preferred_account = None;
+    AccountRecoveryStage::Initial.prepare_selection(&candidates, &mut selection, None);
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &selection)
+            .unwrap()
+            .candidate()
+            .account
+            .id(),
+        &account_id("acct_regular")
+    );
+    let mut recovery = context();
+    recovery.policy = selection.policy;
+    recovery.preferred_account = None;
+    AccountRecoveryStage::Fallback.prepare_selection(&candidates, &mut recovery, None);
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &recovery)
+            .unwrap()
+            .candidate()
+            .account
+            .id(),
+        &account_id("acct_fallback")
+    );
+    let mut native = context();
+    native.policy = selection.policy;
+    native.preferred_account = Some(account_id("acct_fallback"));
+    AccountRecoveryStage::Initial.prepare_selection(
+        &candidates,
+        &mut native,
+        Some(&account_id("acct_fallback")),
+    );
+    assert_eq!(
+        AccountSelector
+            .select(&candidates, &native)
+            .unwrap()
+            .candidate()
+            .account
+            .id(),
+        &account_id("acct_fallback")
+    );
+}
+
+#[test]
 fn recovery_selection_isolates_roles_and_round_robins_without_moving_daily_preferences() {
     use gateway_core::{
         account::{AccountSchedulingRole, AccountSelector},

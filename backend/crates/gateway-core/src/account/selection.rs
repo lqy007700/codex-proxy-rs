@@ -10,7 +10,8 @@ use crate::concurrency::{CapacityWait, ConcurrencyQueuePolicy, QueueRejection};
 use crate::identity::ProviderKind;
 
 use super::{
-    AccountConcurrency, AccountStatus, ProviderAccount, ProviderAccountId, SmartSchedulingConfig,
+    AccountConcurrency, AccountStatus, ProviderAccount, ProviderAccountId, ResetWindowWeights,
+    SmartSchedulingConfig,
 };
 
 /// `runtime_settings.rotation_strategy` 的稳定值
@@ -103,6 +104,7 @@ impl AccountAffinity {
 pub struct AccountSelectionPolicy {
     strategy: RotationStrategy,
     smart_scheduling: SmartSchedulingConfig,
+    quota_reset_window_weights: ResetWindowWeights,
     max_concurrent_per_account: AccountConcurrency,
     queue_policy: ConcurrencyQueuePolicy,
     openai_guardian_reserved_concurrency: u32,
@@ -122,6 +124,7 @@ impl AccountSelectionPolicy {
         Self {
             strategy,
             smart_scheduling: SmartSchedulingConfig::default(),
+            quota_reset_window_weights: ResetWindowWeights::default(),
             max_concurrent_per_account: max_concurrent_per_account.into(),
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: AccountAffinity::default(),
@@ -223,6 +226,17 @@ impl AccountSelectionPolicy {
     #[must_use]
     pub const fn strategy(self) -> RotationStrategy {
         self.strategy
+    }
+
+    #[must_use]
+    pub const fn with_quota_reset_window_weights(mut self, weights: ResetWindowWeights) -> Self {
+        self.quota_reset_window_weights = weights;
+        self
+    }
+
+    #[must_use]
+    pub const fn quota_reset_window_weights(self) -> ResetWindowWeights {
+        self.quota_reset_window_weights
     }
 
     #[must_use]
@@ -797,24 +811,31 @@ impl AccountSelector {
         let candidate = match context.policy.strategy() {
             RotationStrategy::QuotaResetPriority => {
                 eligible.sort_by(|left, right| {
-                    (
-                        left.signals.quota_reset_at.is_none(),
-                        left.signals.quota_reset_at,
-                    )
-                        .cmp(&(
-                            right.signals.quota_reset_at.is_none(),
-                            right.signals.quota_reset_at,
-                        ))
-                        .then_with(|| {
-                            capacity_utilization(left, context)
-                                .total_cmp(&capacity_utilization(right, context))
-                        })
-                        .then_with(|| {
-                            left.signals
-                                .last_started_at
-                                .cmp(&right.signals.last_started_at)
-                        })
-                        .then_with(|| left.account.id().cmp(right.account.id()))
+                    let windows = context.policy.quota_reset_window_weights();
+                    (if windows.enabled() {
+                        windows
+                            .score(&right.signals, context.now)
+                            .total_cmp(&windows.score(&left.signals, context.now))
+                    } else {
+                        (
+                            left.signals.quota_reset_at.is_none(),
+                            left.signals.quota_reset_at,
+                        )
+                            .cmp(&(
+                                right.signals.quota_reset_at.is_none(),
+                                right.signals.quota_reset_at,
+                            ))
+                    })
+                    .then_with(|| {
+                        capacity_utilization(left, context)
+                            .total_cmp(&capacity_utilization(right, context))
+                    })
+                    .then_with(|| {
+                        left.signals
+                            .last_started_at
+                            .cmp(&right.signals.last_started_at)
+                    })
+                    .then_with(|| left.account.id().cmp(right.account.id()))
                 });
                 eligible.first().copied()?
             }

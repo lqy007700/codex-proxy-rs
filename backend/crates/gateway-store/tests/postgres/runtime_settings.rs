@@ -42,6 +42,7 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
+            quota_reset_window_weights: Some(gateway_core::account::ResetWindowWeights::default()),
             min_codex_desktop_version: None,
             min_codex_cli_version: None,
             usage_retention_days: 31,
@@ -61,6 +62,42 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
 fn runtime_settings_keep_account_rotation_global() {
     let settings = settings_with_margin(3_600);
     assert!(settings.validate().is_ok());
+}
+
+#[tokio::test]
+async fn quota_reset_weights_persist_in_snapshot_and_omission_keeps_current_value() {
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create("quota_reset_weights").await else {
+        return;
+    };
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    let weights = gateway_core::account::ResetWindowWeights::new([0.5, 2.0, 0.0]).unwrap();
+    let mut update = settings_with_margin(300);
+    update.values.quota_reset_window_weights = Some(weights);
+    repository
+        .update_runtime_settings(update.clone())
+        .await
+        .unwrap();
+    update.values.quota_reset_window_weights = None;
+    repository.update_runtime_settings(update).await.unwrap();
+    assert_eq!(
+        repository
+            .load_runtime_settings()
+            .await
+            .unwrap()
+            .values
+            .quota_reset_window_weights,
+        Some(weights)
+    );
+    let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+        .load_runtime_snapshot()
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&snapshot.settings).unwrap()["quota_reset_window_weights"],
+        serde_json::json!(weights)
+    );
+    database.close().await;
 }
 
 #[tokio::test]
@@ -1043,6 +1080,13 @@ async fn request_profile_projection_is_revision_consistent_and_includes_key_over
     };
     let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
     let provider = ProviderKind::new("xai").unwrap();
+    assert!(
+        repository
+            .load_request_profile(&provider)
+            .await
+            .unwrap()
+            .is_none()
+    );
     let document = |marker: &str| {
         OpaqueProviderData::new(
             serde_json::json!({"marker":marker})
@@ -1084,6 +1128,10 @@ async fn request_profile_projection_is_revision_consistent_and_includes_key_over
     assert_eq!(profiles.len(), 2);
     assert!(profiles.contains(&document("global")));
     assert!(profiles.contains(&document("key")));
+    assert_eq!(
+        repository.load_request_profile(&provider).await.unwrap(),
+        Some(document("global"))
+    );
 
     repository
         .update_runtime_settings(settings_with_margin(7200))

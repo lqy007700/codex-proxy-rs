@@ -1471,10 +1471,16 @@ impl RuntimeSnapshot {
         operation: &Operation,
         context: &RoutingContext,
     ) -> Result<RoutingPlan, RoutingError> {
+        // 探测没有 Client Key，使用同一发布快照中的全局画像
+        let scope = self
+            .all_account_scope()
+            .as_ref()
+            .clone()
+            .with_request_profiles(self.settings().request_profiles().clone());
         self.plan_inner(
             public_model,
             operation,
-            self.all_account_scope(),
+            Arc::new(scope),
             context,
             false,
             true,

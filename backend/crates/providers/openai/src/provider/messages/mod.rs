@@ -30,6 +30,27 @@ impl CodexProvider {
         if !matches!(source, PROVIDER_NAME | ANTHROPIC_PROTOCOL) {
             return Err(invalid_request());
         }
+        if !context.is_diagnostic_required_account()
+            && (source == ANTHROPIC_PROTOCOL
+                || selected.lease.authentication().api_protocol() == ApiKeyProtocol::Messages)
+        {
+            // 中间件改写后的会话必须在协议转换前复验，沿用选号器的租约和恢复规则
+            let affinity = crate::credential::derive_messages_session_affinity(
+                generate.protocol_payload(),
+                &headers,
+                &context.session_namespace(),
+            );
+            self.selector
+                .validate_translated_selection(
+                    &mut selected.lease,
+                    affinity.as_ref(),
+                    None,
+                    context.account_selection_policy(),
+                    &context,
+                )
+                .await
+                .map_err(map_selection_error)?;
+        }
         if selected.lease.authentication().api_protocol() == ApiKeyProtocol::Messages {
             if context.continuation_attempt() == ContinuationAttempt::Native
                 || generate.provider_session_state(PROVIDER_NAME).is_some()
@@ -128,22 +149,10 @@ impl CodexProvider {
         selected: SelectedGenerate,
     ) -> Result<ProviderStream, ProviderError> {
         let SelectedGenerate {
-            mut lease,
+            lease,
             account_selection_wait_ms,
             ..
         } = selected;
-        if !context.is_diagnostic_required_account() {
-            self.selector
-                .validate_translated_selection(
-                    &mut lease,
-                    None,
-                    None,
-                    context.account_selection_policy(),
-                    &context,
-                )
-                .await
-                .map_err(map_selection_error)?;
-        }
         self.messages_stream(
             body,
             source_context,

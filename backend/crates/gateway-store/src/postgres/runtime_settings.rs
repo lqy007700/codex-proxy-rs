@@ -152,7 +152,7 @@ pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResul
     let row = sqlx::query_as::<_, RuntimeSettingsRow>(
             "select provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled, codex_privacy_policy_json,
                     refresh_concurrency, max_concurrent_per_account,
-                    rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
+                    rotation_strategy, smart_scheduling_json, quota_reset_window_weights_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                     audit_retention_days, min_codex_desktop_version,
                     min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
                     account_error_protection_json, account_error_protection_revision,
@@ -194,6 +194,30 @@ impl ProviderRuntimePolicyPort for PgRuntimeSettingsRepository {
             Ok(claimed)
         })
     }
+    fn load_request_profile<'a>(
+        &'a self,
+        provider: &'a gateway_core::routing::ProviderKind,
+    ) -> futures::future::BoxFuture<
+        'a,
+        Result<Option<gateway_core::account::OpaqueProviderData>, ProviderStoreError>,
+    > {
+        Box::pin(async move {
+            let document = sqlx::query_scalar::<
+                _,
+                Option<sqlx::types::Json<serde_json::Map<String, serde_json::Value>>>,
+            >(
+                "select provider_request_profiles_json -> $1 from runtime_settings where id = 1",
+            )
+            .bind(provider.as_str())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|source| {
+                crate::provider_unavailable("load Provider request profile", source)
+            })?;
+            Ok(document.map(|document| gateway_core::account::OpaqueProviderData::new(document.0)))
+        })
+    }
+
     fn initialize_request_profile<'a>(
         &'a self,
         provider: &'a gateway_core::routing::ProviderKind,
@@ -308,7 +332,7 @@ pub(crate) async fn load_runtime_settings_in_transaction(
     let row = sqlx::query_as::<_, RuntimeSettingsRow>(
         "select provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled, codex_privacy_policy_json,
                 refresh_concurrency, max_concurrent_per_account,
-                rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
+                rotation_strategy, smart_scheduling_json, quota_reset_window_weights_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                 audit_retention_days, min_codex_desktop_version,
                 min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
                 account_error_protection_json, account_error_protection_revision,
@@ -393,6 +417,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
                      recovery_attempts = $31,
                      max_retry_after_seconds = $32,
                      recovery_rotation_attempts = coalesce($33, recovery_rotation_attempts),
+                     quota_reset_window_weights_json = coalesce($34, quota_reset_window_weights_json),
 	                 updated_at = now()
 	             where id = 1
 	             returning config_revision",
@@ -438,6 +463,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     .bind(i64::from(update.values.recovery_attempts))
     .bind(i64::from(update.values.max_retry_after_seconds))
     .bind(update.values.recovery_rotation_attempts.map(i64::from))
+    .bind(update.values.quota_reset_window_weights.map(sqlx::types::Json))
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("update runtime settings in transaction", source))?
@@ -510,6 +536,7 @@ struct RuntimeSettingsRow {
     refresh_concurrency: i64,
     max_concurrent_per_account: i64,
     smart_scheduling_json: sqlx::types::Json<gateway_core::account::SmartSchedulingConfig>,
+    quota_reset_window_weights_json: sqlx::types::Json<gateway_core::account::ResetWindowWeights>,
     rotation_strategy: String,
     codex_privacy_policy_json:
         sqlx::types::Json<gateway_core::settings::privacy::CodexPrivacyPolicy>,
@@ -571,6 +598,7 @@ fn runtime_settings_from_row(row: RuntimeSettingsRow) -> StoreResult<RuntimeSett
             refresh_concurrency: to_u32(row.refresh_concurrency)?,
             max_concurrent_per_account: to_u32(row.max_concurrent_per_account)?,
             smart_scheduling: row.smart_scheduling_json.0,
+            quota_reset_window_weights: Some(row.quota_reset_window_weights_json.0),
             codex_privacy_policy: row.codex_privacy_policy_json.0,
             request_location_enabled: row.request_location_enabled,
             request_location: row

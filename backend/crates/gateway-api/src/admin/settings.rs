@@ -60,6 +60,12 @@ pub struct RuntimeSettingsFields {
     pub openai_session_affinity_ttl_hours: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_quota_reset_weights"
+    )]
+    pub quota_reset_window_weights: Option<gateway_core::account::ResetWindowWeights>,
     pub min_codex_desktop_version: Option<String>,
     pub min_codex_cli_version: Option<String>,
     pub usage_retention_days: u64,
@@ -80,6 +86,12 @@ fn deserialize_rotation_attempts<'de, D: serde::Deserializer<'de>>(
     u32::deserialize(deserializer).map(Some)
 }
 
+fn deserialize_quota_reset_weights<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<gateway_core::account::ResetWindowWeights>, D::Error> {
+    gateway_core::account::ResetWindowWeights::deserialize(deserializer).map(Some)
+}
+
 /// 运行配置投影与设置页字段的聚合响应
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +100,7 @@ pub struct RuntimeSettingsView {
     pub values: RuntimeSettingsFields,
     pub config_revision: u64,
     pub smart_scheduling_defaults: gateway_core::account::SmartSchedulingConfig,
+    pub quota_reset_window_weights_defaults: gateway_core::account::ResetWindowWeights,
     pub provider_request_profiles: ProviderRequestProfiles,
     /// 固定兼容字段；值始终从 provider_request_profiles 派生
     pub openai_client_profile: Option<serde_json::Map<String, serde_json::Value>>,
@@ -161,6 +174,8 @@ impl From<(RuntimeSettings, crate::time::TimePresenter)> for RuntimeSettingsView
             provider_request_profiles,
             model_mappings: wire_model_mappings(settings.model_mappings),
             smart_scheduling_defaults: gateway_core::account::SmartSchedulingConfig::default(),
+            quota_reset_window_weights_defaults: gateway_core::account::ResetWindowWeights::default(
+            ),
             rotation_strategy: settings.rotation_strategy.as_str().to_owned(),
             updated_at_display: time.datetime(&settings.updated_at),
             updated_at: settings.updated_at,
@@ -776,6 +791,7 @@ impl RuntimeSettingsFields {
             openai_session_affinity_ttl_hours: self.openai_session_affinity_ttl_hours,
             responses_max_decompressed_body_bytes: self.responses_max_decompressed_body_bytes,
             smart_scheduling: self.smart_scheduling,
+            quota_reset_window_weights: self.quota_reset_window_weights,
             min_codex_desktop_version: self.min_codex_desktop_version,
             min_codex_cli_version: self.min_codex_cli_version,
             usage_retention_days: u32::try_from(self.usage_retention_days)
@@ -818,6 +834,7 @@ impl From<gateway_admin::model::settings::RuntimeSettingsValues> for RuntimeSett
             openai_session_affinity_ttl_hours: settings.openai_session_affinity_ttl_hours,
             responses_max_decompressed_body_bytes: settings.responses_max_decompressed_body_bytes,
             smart_scheduling: settings.smart_scheduling,
+            quota_reset_window_weights: settings.quota_reset_window_weights,
             min_codex_desktop_version: settings.min_codex_desktop_version,
             min_codex_cli_version: settings.min_codex_cli_version,
             usage_retention_days: u64::from(settings.usage_retention_days),

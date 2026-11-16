@@ -30,5 +30,7 @@ pub use error::CredentialError;
 pub use model::*;
 pub(crate) use selection::smart_score;
 pub use selection::*;
-pub use smart_scheduling::{QuotaResetPeriod, SmartSchedulingConfig, SmartSchedulingConfigError};
+pub use smart_scheduling::{
+    QuotaResetPeriod, ResetWindowWeights, SmartSchedulingConfig, SmartSchedulingConfigError,
+};
 pub use store::{AccountCatalogObservation, ProviderAccountStore, StoredAccountCatalog};

@@ -377,14 +377,21 @@ impl SettingsService for DefaultSettingsService {
         mut command: ReplaceRuntimeSettings,
     ) -> Result<RuntimeSettings, AdminError> {
         // 省略可选字段时保留持久值，最终写入仍由 revision 防止并发覆盖
-        if command.values.recovery_rotation_attempts.is_none() {
-            command.values.recovery_rotation_attempts = self
+        if command.values.recovery_rotation_attempts.is_none()
+            || command.values.quota_reset_window_weights.is_none()
+        {
+            let current = self
                 .store
                 .load_runtime_settings()
                 .await
                 .map_err(|error| map_store_error(error, "runtime settings"))?
-                .values
-                .recovery_rotation_attempts;
+                .values;
+            if command.values.recovery_rotation_attempts.is_none() {
+                command.values.recovery_rotation_attempts = current.recovery_rotation_attempts;
+            }
+            if command.values.quota_reset_window_weights.is_none() {
+                command.values.quota_reset_window_weights = current.quota_reset_window_weights;
+            }
         }
         validate_settings(&command)?;
         if command.values.codex_privacy_policy != Default::default() {

@@ -91,6 +91,22 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
     for (backup_id, expected_requests, expected_tokens) in
         [("first", 9, 1140), ("second", 10, 1260)]
     {
+        if backup_id == "first" {
+            // 模拟 0055 生成的备份，恢复后由正常迁移入口补齐新列
+            sqlx::query("update runtime_settings set smart_scheduling_json = $1")
+                .bind(sqlx::types::Json(serde_json::json!({"loadWeight":1,"quotaWeight":0.8,"healthWeight":1,"latencyWeight":0.5,"resetWeight":1,"queueWeight":0})))
+                .execute(&database.pool).await.unwrap();
+            sqlx::raw_sql("alter table runtime_settings drop column quota_reset_window_weights_json; delete from _sqlx_migrations where version = 56")
+                .execute(&database.pool).await.unwrap();
+        } else {
+            sqlx::query("update runtime_settings set quota_reset_window_weights_json = $1")
+                .bind(sqlx::types::Json(
+                    serde_json::json!({"fiveHour":0.5,"weekly":2.0,"monthly":0}),
+                ))
+                .execute(&database.pool)
+                .await
+                .unwrap();
+        }
         let artifact = adapter
             .dump(DumpRequest {
                 backup_id: backup_id.to_owned(),
@@ -136,6 +152,29 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        if backup_id == "first" {
+            super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+        }
+        let weights: serde_json::Value =
+            sqlx::query_scalar("select quota_reset_window_weights_json from runtime_settings")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            weights,
+            if backup_id == "first" {
+                serde_json::json!({"fiveHour":0,"weekly":0,"monthly":0})
+            } else {
+                serde_json::json!({"fiveHour":0.5,"weekly":2.0,"monthly":0})
+            }
+        );
+        let smart: serde_json::Value =
+            sqlx::query_scalar("select smart_scheduling_json from runtime_settings")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+        assert_eq!(smart["resetWeight"], serde_json::json!(1));
+        assert!(smart.get("resetWindowWeights").is_none());
         let retained: (i64,i64,i64) = sqlx::query_as("select (select count(*) from model_requests),(select count(*) from request_analytics_facts),(select count(*) from client_api_key_charge_events)")
             .fetch_one(&database.pool).await.unwrap();
         assert_eq!(retained, (0, 0, 0));

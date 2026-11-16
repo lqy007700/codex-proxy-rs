@@ -1,6 +1,6 @@
 import type { ProtectionDraft } from '../components/error-protection/form'
 import type { rotationOptions } from '../constants'
-import type { AccountAffinity, CodexPrivacyPolicy, SmartSchedulingConfig } from '@/api'
+import type { AccountAffinity, CodexPrivacyPolicy, ResetWindowWeights, SmartSchedulingConfig } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
 import { cloneDeep, isEqual } from 'es-toolkit'
 import { computed, onScopeDispose, reactive, ref, shallowRef } from 'vue'
@@ -28,9 +28,11 @@ export function useSettingsForm() {
   const error = shallowRef('')
   const mappings = ref<Array<{ requestedModel: string, upstreamModel: string }>>([])
   const smartSchedulingDefaults = shallowRef<SmartSchedulingConfig>()
+  const quotaResetWindowWeightsDefaults = shallowRef<ResetWindowWeights>()
   const form = reactive({
     configRevision: 0,
     smartScheduling: undefined as SmartSchedulingConfig | undefined,
+    quotaResetWindowWeights: undefined as ResetWindowWeights | undefined,
     providerRequestProfiles: {} as ProviderRequestProfiles,
     codexPrivacyPolicy: { enabled: false, onError: 'skip_rule', rules: [] } as CodexPrivacyPolicy,
     requestLocationEnabled: false,
@@ -161,6 +163,8 @@ export function useSettingsForm() {
 
     form.smartScheduling = { ...data.smartScheduling }
     smartSchedulingDefaults.value = { ...data.smartSchedulingDefaults }
+    form.quotaResetWindowWeights = { ...data.quotaResetWindowWeights }
+    quotaResetWindowWeightsDefaults.value = { ...data.quotaResetWindowWeightsDefaults }
     form.rotationStrategy = data.rotationStrategy
     form.minCodexDesktopVersion = data.minCodexDesktopVersion ?? ''
     form.providerRequestProfiles = cloneDeep(data.providerRequestProfiles)
@@ -266,7 +270,8 @@ export function useSettingsForm() {
 
   async function saveSettings() {
     const smartScheduling = form.smartScheduling
-    if (!smartScheduling)
+    const quotaResetWindowWeights = form.quotaResetWindowWeights
+    if (!smartScheduling || !quotaResetWindowWeights)
       return
     const savedSettings = saved.value
     if (saving.value || loading.value || detectingLocation.value || !savedSettings)
@@ -324,8 +329,8 @@ export function useSettingsForm() {
       return
     }
     const usageRetentionDays = form.usageRetentionDays
-    if (usageRetentionDays === null || !Number.isInteger(usageRetentionDays) || usageRetentionDays < 1 || usageRetentionDays > 31) {
-      ZNotification.warning({ message: '历史保留天数应为 1–31 的整数' })
+    if (usageRetentionDays === null || !Number.isInteger(usageRetentionDays) || usageRetentionDays < 1 || usageRetentionDays > 4294967295) {
+      ZNotification.warning({ message: '历史保留天数应为 1～4294967295 的整数' })
       return
     }
     if (![maxWaitingPerKey, maxWaitingPerAccount].every(value => Number.isInteger(value) && value >= 0 && value <= 1000)
@@ -397,6 +402,7 @@ export function useSettingsForm() {
         responsesMaxDecompressedBodyBytes: responsesMaxDecompressedBodyMiB * MIB,
         rotationStrategy,
         smartScheduling: { ...smartScheduling },
+        quotaResetWindowWeights: { ...quotaResetWindowWeights },
         minCodexDesktopVersion: form.minCodexDesktopVersion.trim() || null,
         minCodexCliVersion: form.minCodexCliVersion.trim() || null,
         usageRetentionDays,
@@ -438,6 +444,7 @@ export function useSettingsForm() {
     error,
     form,
     smartSchedulingDefaults,
+    quotaResetWindowWeightsDefaults,
     mappings,
     addMapping,
     updateMapping,

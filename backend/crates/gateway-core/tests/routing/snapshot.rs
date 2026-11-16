@@ -923,6 +923,10 @@ fn compiled_plans_keep_their_scheduling_config_after_a_new_snapshot_is_built() {
             revision(index as u64 + 1),
             SettingsValues::new(3, "smart", BTreeMap::new(), None, None)
                 .with_smart_scheduling(config)
+                .with_quota_reset_window_weights(
+                    gateway_core::account::ResetWindowWeights::new([0.0, index as f64, 0.0])
+                        .unwrap(),
+                )
                 .with_openai_guardian_reserved_concurrency(index as u32),
             vec![],
             vec![],
@@ -955,6 +959,10 @@ fn compiled_plans_keep_their_scheduling_config_after_a_new_snapshot_is_built() {
             index as u32
         );
         assert_eq!(plan.account_selection_policy().smart_scheduling(), config);
+        assert_eq!(
+            plan.account_selection_policy().quota_reset_window_weights(),
+            gateway_core::account::ResetWindowWeights::new([0.0, index as f64, 0.0]).unwrap()
+        );
     }
 }
 

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { rotationOptions } from '../constants'
-import type { SmartSchedulingConfig } from '@/api'
+import type { ResetWindowWeights, SmartSchedulingConfig } from '@/api'
 import { ZCard, ZIconButton } from '@codex-proxy/ui'
 import { Settings2 } from '@lucide/vue'
 import { isEqual } from 'es-toolkit'
 import { computed, shallowRef } from 'vue'
+import QuotaResetPriorityModal from './QuotaResetPriorityModal.vue'
 import SmartSchedulingModal from './SmartSchedulingModal.vue'
 
 type RotationOption = (typeof rotationOptions)[number]
@@ -13,12 +14,16 @@ type RotationStrategy = RotationOption['value']
 const props = defineProps<{
   options: readonly RotationOption[]
   smartDefaults?: SmartSchedulingConfig
+  quotaResetDefaults?: ResetWindowWeights
   disabled: boolean
 }>()
 
 const model = defineModel<RotationStrategy | ''>({ required: true })
 const smartScheduling = defineModel<SmartSchedulingConfig | undefined>('smartScheduling', { required: true })
+const quotaResetWindowWeights = defineModel<ResetWindowWeights | undefined>('quotaResetWindowWeights', { required: true })
 const settingsOpen = shallowRef(false)
+const quotaSettingsOpen = shallowRef(false)
+const quotaCustomized = computed(() => quotaResetWindowWeights.value && props.quotaResetDefaults && !isEqual(quotaResetWindowWeights.value, props.quotaResetDefaults))
 const customized = computed(() => smartScheduling.value && props.smartDefaults && !isEqual(smartScheduling.value, props.smartDefaults))
 </script>
 
@@ -42,7 +47,7 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
           :disabled="disabled"
           @click="model = option.value"
         >
-          <span class="flex items-center gap-2" :class="option.value === 'smart' ? 'pr-7' : undefined">
+          <span class="flex items-center gap-2" :class="['smart', 'quota_reset_priority'].includes(option.value) ? 'pr-7' : undefined">
             <span
               class="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-z-bg-container shadow-[inset_0_0_0_1px_var(--z-color-border)]"
             >
@@ -53,6 +58,7 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
             </span>
             <span class="inline-flex items-baseline gap-1 text-z leading-snug font-emphasis">
               {{ option.label }}
+              <span v-if="option.value === 'quota_reset_priority' && quotaCustomized" class="shrink-0 text-z-xs font-normal text-z-text-secondary">自定义</span>
               <span v-if="option.value === 'smart' && customized" class="shrink-0 text-z-xs font-normal text-z-text-secondary">自定义</span>
             </span>
           </span>
@@ -70,9 +76,26 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
         >
           <Settings2 class="size-3.5" />
         </ZIconButton>
+        <ZIconButton
+          v-if="option.value === 'quota_reset_priority'"
+          class="absolute top-3 right-3 size-6! rounded-z-sm p-0"
+          aria-label="额度重置优先设置"
+          size="small"
+          :disabled="disabled || !quotaResetWindowWeights || !quotaResetDefaults"
+          @click="quotaSettingsOpen = true"
+        >
+          <Settings2 class="size-3.5" />
+        </ZIconButton>
       </div>
     </div>
   </ZCard>
+  <QuotaResetPriorityModal
+    v-if="quotaResetWindowWeights && quotaResetDefaults"
+    v-model="quotaSettingsOpen"
+    :config="quotaResetWindowWeights"
+    :defaults="quotaResetDefaults"
+    @confirm="quotaResetWindowWeights = $event"
+  />
   <SmartSchedulingModal
     v-if="smartScheduling && smartDefaults"
     v-model="settingsOpen"

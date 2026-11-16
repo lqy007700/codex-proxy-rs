@@ -5,6 +5,7 @@ mod model_access;
 mod model_mappings;
 mod proxy;
 mod quota_limits;
+mod quota_reset_priority;
 mod selection;
 mod selection_diagnostics;
 mod smart_scheduling;

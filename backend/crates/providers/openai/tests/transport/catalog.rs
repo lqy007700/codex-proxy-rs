@@ -470,6 +470,7 @@ async fn api_catalog_fixture(
         reqwest::Client::builder().no_proxy().build().unwrap(),
         "http://unused-oauth.invalid".to_owned(),
         catalog_cache(),
+        crate::support::runtime_policy(),
     );
     (store, service)
 }

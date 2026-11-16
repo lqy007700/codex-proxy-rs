@@ -12,6 +12,7 @@ fn cookie_provider(store: &Arc<MemoryAccountStore>, base_url: String) -> Arc<Cod
         http.clone(),
         base_url.clone(),
         catalog_cache(),
+        crate::support::runtime_policy(),
     ));
     let cooldowns = Arc::new(MemoryCooldownPort::new());
     let quota = Arc::new(CodexCredentialQuotaService::new(

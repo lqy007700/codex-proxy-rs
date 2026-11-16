@@ -32,6 +32,8 @@ pub struct SettingsValues {
     pub(crate) openai_session_affinity_ttl_hours: u32,
     pub(crate) responses_max_decompressed_body_bytes: u64,
     pub(crate) smart_scheduling: crate::account::SmartSchedulingConfig,
+    #[serde(default)]
+    pub(crate) quota_reset_window_weights: crate::account::ResetWindowWeights,
     pub(crate) rotation_strategy: String,
     pub(crate) model_mappings: Arc<BTreeMap<String, String>>,
     pub(crate) min_codex_desktop_version: Option<String>,
@@ -126,6 +128,15 @@ impl SettingsValues {
     }
 
     #[must_use]
+    pub const fn with_quota_reset_window_weights(
+        mut self,
+        weights: crate::account::ResetWindowWeights,
+    ) -> Self {
+        self.quota_reset_window_weights = weights;
+        self
+    }
+
+    #[must_use]
     pub const fn with_smart_scheduling(
         mut self,
         config: crate::account::SmartSchedulingConfig,
@@ -211,6 +222,7 @@ impl SettingsValues {
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: crate::account::SmartSchedulingConfig::default(),
+            quota_reset_window_weights: crate::account::ResetWindowWeights::default(),
             rotation_strategy: rotation_strategy.into(),
             model_mappings: Arc::new(model_mappings),
             min_codex_desktop_version,

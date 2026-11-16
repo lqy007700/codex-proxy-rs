@@ -260,10 +260,12 @@ async fn native_json_preserves_extensions_and_uses_client_key_authentication() {
     )]);
     let trace = session.trace.clone();
     let (router, execution) = fixture(session).await;
-    let response = router
-        .oneshot(request("/v1/messages", false))
-        .await
-        .unwrap();
+    let mut incoming = request("/v1/messages", false);
+    incoming.headers_mut().insert(
+        "x-claude-code-session-id",
+        "claude-session".parse().unwrap(),
+    );
+    let response = router.oneshot(incoming).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
@@ -275,6 +277,12 @@ async fn native_json_preserves_extensions_and_uses_client_key_authentication() {
         panic!("generate")
     };
     assert_eq!(generation.protocol_payload().protocol(), "anthropic");
+    assert!(
+        generation.protocol_payload().context()["opaque_request_headers"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(["x-claude-code-session-id", "Y2xhdWRlLXNlc3Npb24="]))
+    );
     assert_eq!(
         generation.protocol_payload().body()["future_extension"]["preserved"],
         true

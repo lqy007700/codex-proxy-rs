@@ -343,11 +343,11 @@ fn settings_request_should_reject_unknown_rotation_strategy() {
 }
 
 #[tokio::test]
-async fn short_request_retention_round_trips_and_invalid_days_do_not_replace_it() {
+async fn request_retention_round_trips_and_invalid_days_do_not_replace_it() {
     let fixture = AdminTestFixture::new().await;
     fixture.auth.insert_session("valid-session");
     let mut body = update_body();
-    for days in [1, 3, 7, 15, 30, 31] {
+    for days in [1, 31, 32, 365, 3650, u32::MAX] {
         body["usageRetentionDays"] = json!(days);
         let response = app(fixture.state())
             .oneshot(request(
@@ -364,8 +364,7 @@ async fn short_request_retention_round_trips_and_invalid_days_do_not_replace_it(
     }
     for (days, expected_status) in [
         (json!(0), StatusCode::BAD_REQUEST),
-        (json!(32), StatusCode::BAD_REQUEST),
-        (json!(u32::MAX), StatusCode::BAD_REQUEST),
+        (json!(u64::from(u32::MAX) + 1), StatusCode::BAD_REQUEST),
         (json!(-1), StatusCode::UNPROCESSABLE_ENTITY),
         (json!(1.5), StatusCode::UNPROCESSABLE_ENTITY),
         (json!(null), StatusCode::UNPROCESSABLE_ENTITY),
@@ -388,7 +387,7 @@ async fn short_request_retention_round_trips_and_invalid_days_do_not_replace_it(
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response_json(response).await["data"]["usageRetentionDays"],
-        31
+        u32::MAX
     );
 }
 
@@ -507,6 +506,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
+            quota_reset_window_weights: Some(gateway_core::account::ResetWindowWeights::default()),
             min_codex_desktop_version: Some("26.825.6671".to_owned()),
             min_codex_cli_version: Some("0.40.0".to_owned()),
             usage_retention_days: 31,
@@ -552,6 +552,8 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             "rotationStrategy": "round_robin",
             "smartScheduling": gateway_core::account::SmartSchedulingConfig::default(),
             "smartSchedulingDefaults": gateway_core::account::SmartSchedulingConfig::default(),
+            "quotaResetWindowWeights": gateway_core::account::ResetWindowWeights::default(),
+            "quotaResetWindowWeightsDefaults": gateway_core::account::ResetWindowWeights::default(),
             "minCodexDesktopVersion": "26.825.6671",
             "minCodexCliVersion": "0.40.0",
             "usageRetentionDays": 31,
@@ -1434,6 +1436,87 @@ async fn pricing_endpoints_require_administrator_authentication() {
             StatusCode::UNAUTHORIZED
         );
     }
+}
+
+#[tokio::test]
+async fn quota_reset_weights_omission_preserves_value_and_stale_updates_conflict() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let router = app(fixture.state());
+    let weights = json!({"fiveHour": 0.5, "weekly": 2.0, "monthly": 0.0});
+    let mut body = update_body();
+    body["quotaResetWindowWeights"] = weights.clone();
+    let response = router
+        .clone()
+        .oneshot(request(
+            Method::POST,
+            "/api/admin/settings/update",
+            Some(body.clone()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved = response_json(response).await["data"].clone();
+    assert_eq!(saved["quotaResetWindowWeights"], weights);
+    let stale = {
+        let mut value = body.clone();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("quotaResetWindowWeights");
+        value
+    };
+    let response = router
+        .clone()
+        .oneshot(request(
+            Method::POST,
+            "/api/admin/settings/update",
+            Some(stale.clone()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let mut current = stale;
+    current["configRevision"] = saved["configRevision"].clone();
+    let response = router
+        .clone()
+        .oneshot(request(
+            Method::POST,
+            "/api/admin/settings/update",
+            Some(current.clone()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved = response_json(response).await["data"].clone();
+    assert_eq!(saved["quotaResetWindowWeights"], weights);
+    current["configRevision"] = saved["configRevision"].clone();
+    for invalid in [
+        json!(null),
+        json!({}),
+        json!({"fiveHour":0,"weekly":10.1,"monthly":0}),
+        json!({"fiveHour":0,"weekly":1,"monthly":0,"daily":1}),
+    ] {
+        current["quotaResetWindowWeights"] = invalid;
+        let response = router
+            .clone()
+            .oneshot(request(
+                Method::POST,
+                "/api/admin/settings/update",
+                Some(current.clone()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    let response = router
+        .oneshot(request(Method::GET, "/api/admin/settings", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        response_json(response).await["data"]["quotaResetWindowWeights"],
+        weights
+    );
 }
 
 #[tokio::test]

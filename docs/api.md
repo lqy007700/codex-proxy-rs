@@ -354,6 +354,8 @@ Chat 沿用 [Client Key 鉴权](#openai-数据面客户端接口)、[请求期�
 `content` 可以是字符串或内容块数组，支持顶层 `system`；模型支持的消息角色与参数范围由上游校验。
 `stream` 缺省或 `false` 返回 JSON，`true` 返回 SSE。客户端每轮发送完整上下文，不提供 Messages WebSocket 或服务端历史续接
 
+明确的 `x-claude-code-session-id` 或 `metadata.user_id` 中的会话标识参与账号亲和；普通用户标识与消息内容不用于推断会话。亲和仍受当前调用方范围、账号策略及恢复规则约束
+
 ```bash
 curl https://gateway.example.com/v1/messages \
   -H "x-api-key: ${CPR_CLIENT_KEY}" \
@@ -524,9 +526,10 @@ Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和
 `traceparent`、`tracestate`、`sentry-trace`、`baggage` 及 WS metadata 中对应的
 `ws_request_header_*` 副本在未确认换号时保持原值；明确换号时清除这些追踪字段与 `x-openai-fedramp` 的各 wire 副本
 
-会话、线程、窗口及父子线程引用在出站时按本次安装身份稳定映射为 UUID；
+会话、线程、窗口及父子线程引用在出站时按本次安装身份稳定映射；
 默认使用账号安装身份，同账号保留引用关系，换账号使用不同标识。HTTP 请求头、正文 metadata、WS 副本及
 已识别的 Desktop 自动 Git 上下文使用一致映射。
+UUIDv7 保留原始创建时间，复合窗口标识保留窗口序号；这些信息对上游可见。
 轮次及父子轮次引用保留客户端原值，包括输入项的 `internal_chat_message_metadata_passthrough.turn_id`、
 请求 metadata 中的 `turn_id`、`parent_turn_id`、`root_turn_id`，以及 `x-client-turn-id`、
 Images 的 `x-codex-image-turn-id` 和 Desktop 自动 Git 上下文的 `clientUserMessageId`。
@@ -698,7 +701,7 @@ ChatGPT OAuth 账号不接受 Grok 模型
 原生目录读取后台已发布的账号快照，不在请求中查询上游。启动恢复最后一次成功目录，后台刷新缺失、
 超过 30 分钟或收到新 ETag 的账号；失败保留原有结果，凭据或套餐变化后旧目录不再作为新身份的证据。
 每次查询都检查当前账号资格与 Client Key 冻结范围；账号模型映射先保留来源对象，再由 Core 投影公开模型名。
-后台及管理端查询 Responses 上游目录时携带服务端画像版本 `client_version`，仅在上游明确以
+后台及管理端查询 Responses 上游目录时携带全局画像版本 `client_version`，仅在上游明确以
 `unknown_parameter/unsupported_parameter` 拒绝该参数时无参重试一次；Messages 分页规则不变。
 成功目录响应带 `Cache-Control: private, no-store`，不借用上游 ETag 标识经过选择/别名/聚合后的正文
 
@@ -2012,7 +2015,7 @@ Redis 操作回执保留 30 天；预览日志在到期 30 天后随新预览按
 | [并发与排队](#并发与排队) | `maxConcurrentPerAccount`、`maxWaitingPerKey`、`maxWaitingPerAccount`、`openaiGuardianReservedConcurrency`、`concurrencyWaitTimeoutSeconds` |
 | [上游重试等待](#容量拒绝与重试) | `maxRetryAfterSeconds` |
 | [亲和与换号](#账号亲和与换号) | `openaiAccountAffinity`、`openaiSessionAffinityTtlHours`、`maxAccountRotations`、`recoveryAttempts`、`recoveryRotationAttempts` |
-| [调度策略](#智能调度) | `rotationStrategy`、`smartScheduling` |
+| [调度策略](#智能调度) | `rotationStrategy`、`smartScheduling`、`quotaResetWindowWeights` |
 | [请求解压](#请求解压上限) | `responsesMaxDecompressedBodyBytes` |
 | [客户端门禁](#1-鉴权与公共约定) | `minCodexDesktopVersion`、`minCodexCliVersion` |
 | [历史保留](#历史保留) | `usageRetentionDays`、`opsEventRetentionDays`、`auditRetentionDays` |
@@ -2022,7 +2025,7 @@ Redis 操作回执保留 30 天；预览日志在到期 30 天后随新预览按
 
 ### 历史保留
 
-`usageRetentionDays` 控制请求明细及其用量统计的保留天数，默认 31，支持 1～31 的整数天数。
+`usageRetentionDays` 控制请求明细及其用量统计的保留天数，默认 31，支持 1～4294967295 的整数天数。
 `opsEventRetentionDays` 与 `auditRetentionDays` 分别控制独立运维事件和管理审计，默认 30、90，均须为正整数
 
 设置保存后由每小时运行的清理任务读取，按完成时间分批删除过期请求及关联事件，不删除运行中的请求。
@@ -2221,6 +2224,8 @@ New API 已识别 Token 在 `preferred` 与 `strict` 下额外保留一个主账
 设为 `0` 时沿用最短队列规则；启用后结合其余五项评分选择队列。队列人数限于当前进程，只有开启账号排队才会生效，
 不影响已入队请求的位置、队内 FIFO、容量上限或等待超时。两项默认均为 `0`
 
+`quota_reset_priority` 使用独立的 `quotaResetWindowWeights` 对象，包含 `fiveHour`、`weekly`、`monthly`，每项范围为 `0～10` 且最多一位小数。默认全为 `0`，按最早重置时间排序；任一项非零时按选中窗口的加权重置分严格排序，缺失或过期窗口不加分，同分依次比较并发占用、上次使用时间和账号 ID。读取响应提供只读的 `quotaResetWindowWeightsDefaults`。更新请求省略 `quotaResetWindowWeights` 时保留当前值；显式 `null`、缺项、未知字段或非法数值返回 `422`
+
 没有可用亲和时，在最高可用权重层内按配置评分。原生续写账号绑定仍是硬约束。
 配置随运行设置原子保存和发布，新请求使用新值，已开始请求及其重试沿用原快照，无需重启
 
@@ -2287,6 +2292,7 @@ models.dev 同步只导入可表示为当前文本 Token 计价的 OpenAI/xAI �
 `openaiClientProfile` 保存通用选择，首次默认 `MacOS · Desktop · 自动最新`。
 兼容字段的更新语义见上节。初始化不读取 YAML 身份字段。
 该配置作用于 Client Key 的 OpenAI 模型请求与原生模型目录，适用于 HTTP/SSE、WebSocket、Images 和 Search。
+没有 Client Key 的后台模型发现、目录导出、账号预热和管理端请求诊断使用全局选择，不读取单个 Key 的覆盖。
 不改变 xAI、入站客户端版本门禁、账号认证或后台 Desktop 专属操作
 
 自定义配置使用 `{ "mode": "custom", "userAgent": "完整 UA" }`。
@@ -2322,13 +2328,13 @@ TUI 默认标识为 `codex-tui`，Exec 为 `codex_exec`，入口后缀使用同�
 因此 Desktop 预设保持默认即可；CLI 预设建议配置真实值，多 Key 可通过各自的画像覆盖差异化
 
 `versionLag` 让 `latest` 模式跟随官方发布但滞后 N 个已观察版本采用，省略时采用最新版本。
-档位基于网关观察到的发布序列解析：启动种子与历次 24 小时检查的核验版本按时间倒序构成历史，
+档位基于网关观察到的发布序列解析：启动种子与历次检查的核验版本按时间倒序构成历史，
 取第 N 项；序列不足时回退最旧已核验版本，不会因此解析失败。历史仅保留在进程内，
 重启后从启动种子与制品缓存重新积累
 
 六套预设均支持自动更新：macOS Desktop 支持 arm64，Windows/Linux Desktop 及三套 CLI 支持 arm64、x86_64。
 预设接口的 `automaticAvailable`、`reason` 表示当前组合的可用性；自定义架构可能使自动解析不可用。
-每 24 小时后台检查官方稳定发布，失败保留同组合上次有效版本；固定值不受后台更新影响。
+启动时及每轮检查完成后一小时检查官方稳定发布，失败保留同组合上次有效版本；固定值不受后台更新影响。
 Desktop 的应用版本、Core 和构建号来自同一平台、架构的官方制品：macOS ZIP、Windows MSIX、Linux DEB。
 Windows/Linux 通过 ETag 检查更新，未变化时复用已核验版本；CLI 依据官方 npm 稳定标签和对应平台依赖
 

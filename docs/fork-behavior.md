@@ -7,11 +7,11 @@
 
 | 项目 | 核对范围 |
 | --- | --- |
-| 核对日期 | 2026-11-13 |
+| 核对日期 | 2026-11-16 |
 | 本仓库源码 | 当前 `main` 源码，发行版本以 [`release/version.yaml`](../release/version.yaml) 为准 |
 | 最近完整合并的上游基线 | `v3.29.7`，`78bc57c5cf24b01a38e985cdd739bb4ae89ce11f` |
 | 差异依据 | 上述上游基线到当前源码的最终文件差异，结合调用链和现有测试 |
-| 上游主题移植 | 已采用能力与暂缓项分别记录于[上游同步清单](upstream-sync.md)，核对目标为 `v3.47.0` |
+| 上游主题移植 | 已采用能力与暂缓项分别记录于[上游同步清单](upstream-sync.md)，核对目标为 `v3.49.0` |
 
 源码版本、发布完成和运行实例升级是不同事实，本文不代表某个实例已部署该版本。
 这里的“二开”包含主动定制和为保留本发行线而存在的兼容适配，不表示相关基础能力都由本仓库原创
@@ -150,8 +150,15 @@ API Key 在原 OpenAI Provider 中选择 Responses 或 Messages 上游；同协�
 亲和主绑定、恢复预算和发送安全边界。缺失用量保持未知，不能通过补 0 形成完整费用事实
 
 入口、转换和计数的字段与边界见 [Messages 请求](api.md#messages-请求)；原生续接和账号身份隔离仍遵循本节既有约束。
+Claude 会话标识沿用调用方隔离范围，可信 Token 主绑定、恢复和保底不因接入协议变化而重建
+
 回归入口为 [Messages API](../backend/crates/gateway-api/tests/openai/messages.rs)、
-[协议转换](../backend/crates/gateway-protocol/tests/anthropic/mod.rs)和[上游合同](../backend/crates/providers/openai/tests/provider/contract/messages.rs)
+[协议转换](../backend/crates/gateway-protocol/tests/anthropic/mod.rs)和[上游合同](../backend/crates/providers/openai/tests/provider/contract/messages/mod.rs)
+
+### 出站安装身份
+
+保留 `x-codex-installation-id` 请求头，与正文使用同一生效身份；账号持久身份、Key 安装种子与固定覆盖继续参与解析。
+关联 ID 的映射边界见 [OpenAI 透传](api.md#openai-透传)，回归入口为[关联身份合同](../backend/crates/providers/openai/tests/provider/contract/correlation.rs)
 
 ### 三方模型目录格式
 

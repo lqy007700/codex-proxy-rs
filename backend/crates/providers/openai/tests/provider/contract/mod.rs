@@ -1440,6 +1440,7 @@ fn provider_and_quota_with_runtime_ports(
         http.clone(),
         base_url.clone(),
         catalog_cache(),
+        policy.clone(),
     ));
     let quota = Arc::new(CodexCredentialQuotaService::new(
         store.repository(),
