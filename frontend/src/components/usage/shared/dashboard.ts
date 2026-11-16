@@ -1,7 +1,7 @@
 import type { Component } from 'vue'
 import type { DashboardSnapshotResponse, DashboardSummaryResponse, DashboardTrendKind, DashboardTrendPoint, DashboardTrendResponse } from '@/api'
-import { Activity, FileText, Timer, Users } from '@lucide/vue'
-import { formatCompactNumber, formatInteger } from '@/utils/format'
+import { Activity, FileText, Timer } from '@lucide/vue'
+import { formatCompactNumber } from '@/utils/format'
 
 export type MetricTone = 'normal' | 'info' | 'success' | 'warning' | 'danger'
 
@@ -134,30 +134,10 @@ function metricCards(
   cards: DashboardSummaryResponse['cards'],
   points: DashboardTrendPoint[],
 ): MetricCardView[] {
-  const { credentials, traffic, tokens, cache } = cards
+  const { traffic, tokens, cache } = cards
   const recentPoints = recentTrendWindow(points)
   const hasTodayRequests = traffic.todayRequestsValue > 0
   return [
-    {
-      title: '账号',
-      value: credentials.total,
-      valueRaw: credentials.totalValue,
-      valueFormatter: formatAccountCount,
-      icon: Users,
-      tone: 'normal',
-      details: [
-        {
-          label: '可用',
-          value: credentials.available,
-          tone: 'success',
-        },
-        {
-          label: '不可用',
-          value: credentials.unavailable,
-          tone: 'danger',
-        },
-      ],
-    },
     {
       title: '请求次数',
       value: traffic.todayRequests,
@@ -222,10 +202,6 @@ function metricCards(
       ],
     },
   ]
-}
-
-function formatAccountCount(value: number) {
-  return formatInteger(Math.max(0, Math.round(value)))
 }
 
 function sparkline(values: number[], tone: MetricTone) {

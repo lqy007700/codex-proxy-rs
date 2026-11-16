@@ -329,7 +329,7 @@ const statusBars = computed(() => {
               账号状态
             </h2>
             <p class="mt-1 mb-0 text-z leading-[1.15] font-emphasis text-z-text-secondary">
-              账号池健康结构
+              全部账号 {{ pool ? formatCompactNumber(pool.total) : '—' }}
             </p>
           </div>
           <div class="grid justify-items-end">

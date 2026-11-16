@@ -233,11 +233,11 @@ Key 用量页的错误范围仅包含失败与未完成，不能将两类页面�
 
 | 页面 | 当前选择 | 维护入口 |
 | --- | --- | --- |
-| 使用统计 | 请求明细在前，统计概览在下且默认展开、可折叠；结果筛选显示图标并保留无障碍标签 | [usage/index.vue](../frontend/src/views/usage/index.vue) |
+| 使用统计 | 当日指标与账号运行状态在前，请求健康、热点诊断、响应性能与成本效率直接展开，使用趋势和通用上游身份在底部 | [usage/index.vue](../frontend/src/views/usage/index.vue) |
 | 请求表格 | 请求时间靠前，收紧列宽；客户端列显示原始 User-Agent，最多两行，悬浮查看完整值 | [columns.ts](../frontend/src/components/usage/shared/columns.ts)、[UsageRecordsTable.vue](../frontend/src/components/usage/UsageRecordsTable.vue) |
 | 账号 | 桌面账号列表占据页面剩余高度，批量编辑、导出和删除收纳到更多操作，启停调度开关紧邻状态，保留 WS 降级提示和保底标识 | [accounts/index.vue](../frontend/src/views/accounts/index.vue)、[AccountSchedulingSwitch.vue](../frontend/src/views/accounts/components/AccountSchedulingSwitch.vue)、[AccountIdentityCell.vue](../frontend/src/views/accounts/components/AccountIdentityCell.vue) |
 | 并发明细 | 显示当前占用与并发上限，提供手动刷新并保留每 5 秒自动刷新 | [AccountConcurrencyModal.vue](../frontend/src/views/accounts/components/AccountConcurrencyModal.vue)、[useAccountConcurrency.ts](../frontend/src/views/accounts/composables/useAccountConcurrency.ts) |
-| Dashboard | 请求健康时间线与账号概览优先于汇总统计卡 | [DashboardContent.vue](../frontend/src/views/dashboard/components/DashboardContent.vue) |
+| Dashboard | 请求健康时间线下方直接展示请求明细，明细筛选与分页独立于统计刷新 | [DashboardContent.vue](../frontend/src/views/dashboard/components/DashboardContent.vue) |
 | 列表与表单 | 账号及 API Key 排序偏好保存在当前浏览器；密钥表单按字段校验，校验失败时滚动并聚焦错误字段 | [useTableSort.ts](../frontend/src/composables/useTableSort.ts)、[ApiKeyFormModal.vue](../frontend/src/views/keys/components/ApiKeyFormModal.vue) |
 | 设置草稿 | 基础设置与备份草稿有未保存改动时，离开设置区域需要确认，取消离开保留输入，关闭或刷新页面使用浏览器原生提醒 | [useSettingsLeaveGuard.ts](../frontend/src/views/settings/composables/useSettingsLeaveGuard.ts)、[useBackupSettings.ts](../frontend/src/views/settings/composables/useBackupSettings.ts) |
 | 导航 | 侧边栏隐藏主题设置入口，保留主题页面和路由；移动端侧栏支持 Tab 焦点循环、Esc 关闭及关闭后恢复焦点 | [布局](../frontend/src/layout/index.vue)、[AppSidebar.vue](../frontend/src/layout/components/AppSidebar.vue) |

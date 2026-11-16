@@ -143,7 +143,7 @@ function formatTooltip(params: unknown) {
   >
     <template #body>
       <div class="grid min-h-66" :class="hasData ? 'gap-3' : 'h-full'">
-        <div v-if="hasData" class="grid grid-cols-2 gap-2 rounded-xl bg-z-fill-quaternary/45 p-2 sm:grid-cols-4">
+        <div v-if="hasData" class="grid grid-cols-2 gap-2 rounded-xl bg-z-fill-quaternary/45 p-2 sm:grid-cols-3">
           <div class="grid gap-1 px-2">
             <span class="text-[10px] font-bold text-z-text-quaternary">服务成功率</span>
             <strong class="font-mono text-z-base font-heavy tabular-nums text-z-green-text">
@@ -154,6 +154,18 @@ function formatTooltip(params: unknown) {
             <span class="text-[10px] font-bold text-z-text-quaternary">完成率</span>
             <strong class="font-mono text-z-base font-heavy tabular-nums text-z-text">
               {{ formatPercent(health.completionRate) }}
+            </strong>
+          </div>
+          <div class="grid gap-1 px-2">
+            <span class="text-[10px] font-bold text-z-text-quaternary">全部请求</span>
+            <strong class="font-mono text-z-base font-heavy tabular-nums text-z-blue-text">
+              {{ formatCompactNumber(health.totalRequests) }}
+            </strong>
+          </div>
+          <div class="grid gap-1 px-2">
+            <span class="text-[10px] font-bold text-z-text-quaternary">成功请求</span>
+            <strong class="font-mono text-z-base font-heavy tabular-nums text-z-green-text">
+              {{ formatCompactNumber(health.successRequests) }}
             </strong>
           </div>
           <div class="grid gap-1 px-2">

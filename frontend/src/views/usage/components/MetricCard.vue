@@ -12,6 +12,7 @@ import { useThemeColor } from '@/composables/useThemeColor'
 
 const props = defineProps<{
   metric: MetricCardView
+  loading?: boolean
 }>()
 
 const trendToneClasses: Record<MetricTone, string> = {
@@ -80,7 +81,7 @@ const sparklineOption = computed<EChartsOption | null>(() => {
 </script>
 
 <template>
-  <ZCard as="article" padding="compact" class="relative h-38.5 w-full">
+  <ZCard as="article" padding="compact" class="relative h-38.5 w-full" :aria-busy="loading">
     <div class="flex items-start gap-3">
       <ZMotionIcon
         class="inline-flex size-8.5 shrink-0 items-center justify-center rounded-z-lg"
@@ -93,10 +94,11 @@ const sparklineOption = computed<EChartsOption | null>(() => {
 
     <div class="mt-3.25 flex h-7.75 items-end gap-2">
       <strong class="font-mono text-[28px] leading-[1.05] font-heavy tabular-nums text-z-text">
-        <AnimatedMetricValue :value="metric.value" :raw-value="metric.valueRaw" :formatter="metric.valueFormatter" />
+        <span v-if="loading">—</span>
+        <AnimatedMetricValue v-else :value="metric.value" :raw-value="metric.valueRaw" :formatter="metric.valueFormatter" />
       </strong>
       <i
-        v-if="metric.trend && metric.trend.direction !== 'flat'"
+        v-if="!loading && metric.trend && metric.trend.direction !== 'flat'"
         title="较昨日"
         class="mb-1.25 block size-3"
         :class="[
@@ -108,7 +110,7 @@ const sparklineOption = computed<EChartsOption | null>(() => {
       />
     </div>
 
-    <div v-if="sparklineOption" class="pointer-events-none absolute top-7 right-6 h-16 w-[42%]">
+    <div v-if="!loading && sparklineOption" class="pointer-events-none absolute top-7 right-6 h-16 w-[42%]">
       <BaseChart :option="sparklineOption" :height="64" />
     </div>
 
@@ -123,7 +125,7 @@ const sparklineOption = computed<EChartsOption | null>(() => {
           class="min-w-0 truncate font-mono text-xs leading-none font-bold tabular-nums"
           :class="metric.details[0]?.tone ? metricToneValueClasses[metric.details[0].tone] : undefined"
         >
-          {{ metric.details[0]?.value }}
+          {{ loading ? '—' : metric.details[0]?.value }}
         </b>
       </span>
       <span class="inline-grid min-w-0 w-full grid-cols-[auto_minmax(0,auto)] items-baseline justify-end gap-2.5">
@@ -134,7 +136,7 @@ const sparklineOption = computed<EChartsOption | null>(() => {
           class="min-w-0 truncate font-mono text-xs leading-none font-bold tabular-nums"
           :class="metric.details[1]?.tone ? metricToneValueClasses[metric.details[1].tone] : undefined"
         >
-          {{ metric.details[1]?.value }}
+          {{ loading ? '—' : metric.details[1]?.value }}
         </b>
       </span>
     </div>

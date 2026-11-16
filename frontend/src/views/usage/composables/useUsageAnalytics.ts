@@ -3,7 +3,7 @@ import type { AnalyticsMetadata } from '@/api/modules/analytics'
 import type { CallerUsageFilters } from '@/api/modules/usage'
 import type { UsageTimeRangeParams } from '@/composables/useUsageTimeRange'
 import { computed, onMounted, onScopeDispose, shallowRef, watch } from 'vue'
-import { getUsageRecordInsightsDiagnostics, getUsageRecordInsightsOverview, getUsageRecordSummary } from '@/api'
+import { getUsageRecordInsightsDiagnostics, getUsageRecordInsightsOverview } from '@/api'
 import { withMinimumDuration } from '@/utils/operation'
 
 interface UseUsageAnalyticsOptions {
@@ -15,11 +15,9 @@ interface UseUsageAnalyticsOptions {
 type LoadingAnalytics<T> = Omit<T, 'analytics'> & { analytics: AnalyticsMetadata | null }
 
 export function useUsageAnalytics(options: UseUsageAnalyticsOptions) {
-  const summaryLoading = shallowRef(true)
   const overviewLoading = shallowRef(true)
   const diagnosticsLoading = shallowRef(true)
-  const analyticsLoading = computed(() => summaryLoading.value || overviewLoading.value || diagnosticsLoading.value)
-  const summary = shallowRef(emptySummary())
+  const analyticsLoading = computed(() => overviewLoading.value || diagnosticsLoading.value)
   const insights = shallowRef(emptyInsights())
   const providerQuery = shallowRef('')
   const diagnosticDimension = shallowRef('model')
@@ -58,22 +56,11 @@ export function useUsageAnalytics(options: UseUsageAnalyticsOptions) {
     analyticsController?.abort()
     analyticsController = new AbortController()
     const requestOptions = { signal: analyticsController.signal }
-    summaryLoading.value = true
     overviewLoading.value = true
-    summary.value = emptySummary()
     insights.value = emptyInsights()
 
     // 各模块完成即更新，慢查询或单项失败不阻塞其余结果
     await Promise.allSettled([
-      getUsageRecordSummary(globalParams, requestOptions)
-        .then((result) => {
-          if (requestId === analyticsRequestId)
-            summary.value = result
-        })
-        .finally(() => {
-          if (requestId === analyticsRequestId)
-            summaryLoading.value = false
-        }),
       getUsageRecordInsightsOverview(globalParams, requestOptions)
         .then((overview) => {
           if (requestId === analyticsRequestId)
@@ -137,10 +124,8 @@ export function useUsageAnalytics(options: UseUsageAnalyticsOptions) {
 
   return {
     analyticsLoading,
-    summaryLoading,
     overviewLoading,
     diagnosticsLoading,
-    summary,
     insights,
     providerQuery,
     diagnosticDimension,
@@ -148,20 +133,6 @@ export function useUsageAnalytics(options: UseUsageAnalyticsOptions) {
     loadUsageAnalytics,
     refreshUsageAnalytics,
   }
-}
-
-function emptySummary() {
-  const summary: LoadingAnalytics<Awaited<ReturnType<typeof getUsageRecordSummary>>> = {
-    analytics: null,
-    totalRequests: '0',
-    inputTokens: '0',
-    outputTokens: '0',
-    cachedInputTokens: '0',
-    cacheWriteInputTokens: '0',
-    totalTokens: '0',
-    averageLatencyMs: '0 ms',
-  }
-  return summary
 }
 
 function emptyInsights() {

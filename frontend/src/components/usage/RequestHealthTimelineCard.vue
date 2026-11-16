@@ -10,6 +10,7 @@ import { formatHealthCount, healthEligibleRequestCount, healthLegend, healthObse
 
 const props = defineProps<{
   timeline: DashboardHealthTimeline
+  compact?: boolean
 }>()
 
 const healthPopoverArrowSurfaceClasses = {
@@ -227,8 +228,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <ZCard as="article" :title="timeline.title" :description="timeline.description" class="w-full">
-    <template #actions>
+  <ZCard
+    as="article"
+    :title="compact ? undefined : timeline.title"
+    :description="compact ? undefined : timeline.description"
+    :aria-label="compact ? timeline.title : undefined"
+    class="w-full"
+  >
+    <template v-if="!compact" #actions>
       <div class="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div
           class="flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-z-xs leading-none font-emphasis text-z-text-quaternary"
@@ -254,63 +261,72 @@ onBeforeUnmount(() => {
     </template>
 
     <template #body>
-      <ZPopover
-        ref="pointPopover"
-        v-model="popoverOpen"
-        trigger="hover"
-        :show-after="0"
-        :disabled="!activePoint"
-        class="w-full! min-w-0"
-        placement="top"
-        :offset="12"
-        :reference-element="popoverAnchor"
-        :arrow-surface-class="healthPopoverArrowSurfaceClasses"
-        @closed="activePoint = undefined"
-      >
-        <template #reference>
-          <div class="relative flex w-full flex-col">
-            <!-- 同一锚点连续追向各时间格，避免切换原生锚点时的位置跳变 -->
-            <span ref="popoverAnchor" aria-hidden="true" class="pointer-events-none absolute left-0 top-0 h-5 w-px opacity-0" />
-            <div
-              ref="timelineGrid" class="grid w-full grid-cols-[repeat(var(--timeline-columns),minmax(0,1fr))] items-end gap-x-0.5 gap-y-1 sm:grid-cols-[repeat(var(--timeline-columns-wide),minmax(0,1fr))]"
-              :style="{ '--timeline-columns': Math.max(1, Math.ceil(points.length / 2)), '--timeline-columns-wide': Math.max(1, points.length) }"
-            >
-              <ZButton
-                v-for="(point, pointIndex) in points"
-                :key="point.bucketStart"
-                data-health-timeline-point
-                variant="text"
-                :aria-disabled="!isInteractivePoint(point)"
-                :tabindex="isInteractivePoint(point) ? 0 : -1"
-                :aria-expanded="isActivePoint(point)"
-                aria-haspopup="dialog"
-                :aria-label="pointAccessibilityLabel(point)"
-                class="group relative h-5! w-full min-w-0.5 bg-transparent! p-0! [&>span]:w-full"
-                :class="isInteractivePoint(point) ? 'cursor-pointer' : 'cursor-default'"
-                @mouseenter="activatePoint(point, pointIndex, $event)"
-                @focus="activatePoint(point, pointIndex, $event)"
-                @click="activatePoint(point, pointIndex, $event)"
+      <div class="flex items-center gap-3">
+        <ZPopover
+          ref="pointPopover"
+          v-model="popoverOpen"
+          trigger="hover"
+          :show-after="0"
+          :disabled="!activePoint"
+          class="w-full! min-w-0"
+          placement="top"
+          :offset="12"
+          :reference-element="popoverAnchor"
+          :arrow-surface-class="healthPopoverArrowSurfaceClasses"
+          @closed="activePoint = undefined"
+        >
+          <template #reference>
+            <div class="relative flex w-full flex-col">
+              <!-- 同一锚点连续追向各时间格，避免切换原生锚点时的位置跳变 -->
+              <span ref="popoverAnchor" aria-hidden="true" class="pointer-events-none absolute left-0 top-0 h-5 w-px opacity-0" />
+              <div
+                ref="timelineGrid" class="grid w-full grid-cols-[repeat(var(--timeline-columns),minmax(0,1fr))] items-end gap-x-0.5 gap-y-1 sm:grid-cols-[repeat(var(--timeline-columns-wide),minmax(0,1fr))]"
+                :style="{ '--timeline-columns': Math.max(1, Math.ceil(points.length / 2)), '--timeline-columns-wide': Math.max(1, points.length) }"
               >
-                <span
-                  data-health-timeline-cell
-                  class="block h-3.5 w-full origin-bottom rounded-xs transition-[filter,box-shadow] duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                  :class="[
-                    healthStatusMeta[point.status].cellClass,
-                    isActivePoint(point)
-                      ? 'brightness-105 shadow-[0_5px_10px_-5px_var(--z-color-shadow)]'
-                      : isInteractivePoint(point)
-                        ? 'group-hover:brightness-95'
-                        : undefined,
-                  ]"
-                />
-              </ZButton>
+                <ZButton
+                  v-for="(point, pointIndex) in points"
+                  :key="point.bucketStart"
+                  data-health-timeline-point
+                  variant="text"
+                  :aria-disabled="!isInteractivePoint(point)"
+                  :tabindex="isInteractivePoint(point) ? 0 : -1"
+                  :aria-expanded="isActivePoint(point)"
+                  aria-haspopup="dialog"
+                  :aria-label="pointAccessibilityLabel(point)"
+                  class="group relative h-5! w-full min-w-0.5 bg-transparent! p-0! [&>span]:w-full"
+                  :class="isInteractivePoint(point) ? 'cursor-pointer' : 'cursor-default'"
+                  @mouseenter="activatePoint(point, pointIndex, $event)"
+                  @focus="activatePoint(point, pointIndex, $event)"
+                  @click="activatePoint(point, pointIndex, $event)"
+                >
+                  <span
+                    data-health-timeline-cell
+                    class="block h-3.5 w-full origin-bottom rounded-xs transition-[filter,box-shadow] duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                    :class="[
+                      healthStatusMeta[point.status].cellClass,
+                      isActivePoint(point)
+                        ? 'brightness-105 shadow-[0_5px_10px_-5px_var(--z-color-shadow)]'
+                        : isInteractivePoint(point)
+                          ? 'group-hover:brightness-95'
+                          : undefined,
+                    ]"
+                  />
+                </ZButton>
+              </div>
             </div>
+          </template>
+          <div data-health-timeline-popover class="w-72 overflow-hidden rounded-z-lg">
+            <HealthTimelinePointPopover v-if="activePoint" :point="activePoint" />
           </div>
-        </template>
-        <div data-health-timeline-popover class="w-72 overflow-hidden rounded-z-lg">
-          <HealthTimelinePointPopover v-if="activePoint" :point="activePoint" />
-        </div>
-      </ZPopover>
+        </ZPopover>
+        <span
+          v-if="compact"
+          class="shrink-0 text-z-sm font-emphasis"
+          :class="healthStatusMeta[timeline.status].valueClass"
+        >
+          {{ healthStatusMeta[timeline.status].label }}
+        </span>
+      </div>
     </template>
   </ZCard>
 </template>

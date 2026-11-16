@@ -42,7 +42,7 @@ const {
 </script>
 
 <template>
-  <ZCard as="article" title="使用趋势" class="min-h-95 w-full">
+  <ZCard as="article" title="使用趋势" description="今日 · 全部平台" class="min-h-95 w-full">
     <template #actions>
       <ZSegmented
         v-model="activeKind"

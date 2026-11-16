@@ -203,7 +203,8 @@ Client Key 费用账本独立累计各次 attempt 的实际费用，不能因请
 `components/usage/shared/dashboard.ts` 生成展示模型，查询范围参与缓存键。
 概览只加载健康时间线，使用统计加载核心指标、趋势、账号调度与用量、账号状态和通用上游身份。
 概览请求明细由独立的 `useUsageRecordsTable` 管理查询快照和分页，统计自动刷新不重置明细筛选与页码。
-使用统计页由 `useUsageAnalytics` 并行加载汇总、洞察和诊断，各模块独立更新展示与加载状态，不加载请求明细。
+使用统计页由 `useUsageAnalytics` 并行加载洞察和诊断，各模块独立更新展示与加载状态。
+日期、平台与调用方筛选作用于分析模块，当日指标、账号运行状态和底部使用趋势保持全局口径，不加载请求明细。
 Key 创建与编辑共用 `useApiKeyEditor` 和 `ApiKeyFormModal`，创建结果与密钥使用弹窗各自管理明文生命周期。
 用量表格的列、展示投影及健康时间线规则集中在 `components/usage/shared/`，管理页面与 Key 用量页共用展示，
 各自的查询仍使用对应身份允许的 API

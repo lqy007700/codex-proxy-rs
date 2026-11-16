@@ -57,6 +57,54 @@ const coverageRate = computed(() => {
     : null
 })
 
+const summaryMetrics = computed<Array<{ label: string, value: string, tone?: string }>>(() => activeView.value === 'cache'
+  ? [
+      {
+        label: '总 Token',
+        value: formatCompactNumber(props.cost.totalTokens),
+      },
+      {
+        label: '输入 Token',
+        value: formatCompactNumber(props.cost.inputTokens),
+      },
+      {
+        label: '输出 Token',
+        value: formatCompactNumber(props.cost.outputTokens),
+      },
+      {
+        label: '缓存 Token',
+        value: formatCompactNumber(props.cost.cachedInputTokens),
+      },
+      {
+        label: '缓存占比',
+        value: formatPercent(props.cost.cachedTokenRate),
+      },
+    ]
+  : [
+      {
+        label: '实际费用',
+        value: formatUsd(props.cost.estimatedCost),
+      },
+      {
+        label: '缓存节省',
+        value: formatUsd(props.cost.cacheSavings),
+        tone: 'text-z-green-text',
+      },
+      {
+        label: '层级溢价',
+        value: formatUsd(props.cost.tierPremium),
+        tone: 'text-z-orange-text',
+      },
+      {
+        label: '每成功请求',
+        value: formatUsd(props.cost.costPerSuccessfulRequest, true),
+      },
+      {
+        label: '费用覆盖',
+        value: formatPercent(coverageRate.value),
+      },
+    ])
+
 const viewOptions = [
   { label: '费用', value: 'cost' },
   { label: '节省', value: 'savings' },
@@ -247,34 +295,10 @@ function costAmount(value: string | null, pointIndex: number) {
     <template #body>
       <div class="grid min-h-66 gap-3">
         <div v-if="hasData" class="grid grid-cols-5 gap-1 rounded-xl bg-z-fill-quaternary/45 p-2">
-          <div class="grid min-w-0 gap-1 px-1.5">
-            <span class="truncate text-[10px] font-bold text-z-text-quaternary">实际费用</span>
-            <strong class="truncate font-mono text-z-sm font-heavy tabular-nums text-z-text" :title="formatUsd(cost.estimatedCost)">
-              {{ formatUsd(cost.estimatedCost) }}
-            </strong>
-          </div>
-          <div class="grid min-w-0 gap-1 px-1.5">
-            <span class="truncate text-[10px] font-bold text-z-text-quaternary">缓存节省</span>
-            <strong class="truncate font-mono text-z-sm font-heavy tabular-nums text-z-green-text" :title="formatUsd(cost.cacheSavings)">
-              {{ formatUsd(cost.cacheSavings) }}
-            </strong>
-          </div>
-          <div class="grid min-w-0 gap-1 px-1.5">
-            <span class="truncate text-[10px] font-bold text-z-text-quaternary">层级溢价</span>
-            <strong class="truncate font-mono text-z-sm font-heavy tabular-nums text-z-orange-text" :title="formatUsd(cost.tierPremium)">
-              {{ formatUsd(cost.tierPremium) }}
-            </strong>
-          </div>
-          <div class="grid min-w-0 gap-1 px-1.5">
-            <span class="truncate text-[10px] font-bold text-z-text-quaternary">每成功请求</span>
-            <strong class="truncate font-mono text-z-sm font-heavy tabular-nums text-z-text" :title="formatUsd(cost.costPerSuccessfulRequest, true)">
-              {{ formatUsd(cost.costPerSuccessfulRequest, true) }}
-            </strong>
-          </div>
-          <div class="grid min-w-0 gap-1 px-1.5">
-            <span class="truncate text-[10px] font-bold text-z-text-quaternary">费用覆盖</span>
-            <strong class="truncate font-mono text-z-sm font-heavy tabular-nums text-z-text">
-              {{ formatPercent(coverageRate) }}
+          <div v-for="metric in summaryMetrics" :key="metric.label" class="grid min-w-0 gap-1 px-1.5">
+            <span class="truncate text-[10px] font-bold text-z-text-quaternary" :title="metric.label">{{ metric.label }}</span>
+            <strong class="truncate font-mono text-z-sm font-heavy tabular-nums" :class="metric.tone ?? 'text-z-text'" :title="metric.value">
+              {{ metric.value }}
             </strong>
           </div>
         </div>

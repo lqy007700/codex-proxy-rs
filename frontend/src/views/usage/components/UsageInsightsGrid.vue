@@ -30,7 +30,7 @@ const diagnosticDimension = defineModel('diagnosticDimension', {
 
 <template>
   <section
-    class="mt-5 grid grid-cols-1 gap-3 xl:auto-rows-97 xl:grid-cols-2"
+    class="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-2"
     aria-label="使用统计观测"
   >
     <UsageHealthCard
