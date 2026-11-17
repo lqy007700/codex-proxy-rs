@@ -596,7 +596,9 @@ impl CodexCredentialSelector {
                 .account_state_owner()
                 .filter(|owner| owner.provider() == &self.provider_kind)
                 .map(|owner| owner.account().clone()),
-            ContinuationAttempt::None | ContinuationAttempt::ReplayAny => None,
+            ContinuationAttempt::None
+            | ContinuationAttempt::ReplayAny
+            | ContinuationAttempt::RotateForClientReplay => None,
         };
         let required_account = request.attempt.required_account().cloned();
         if required_account
@@ -1152,6 +1154,18 @@ impl CodexCredentialSelector {
                 .prepare_cyber_policy_scope(cyber_policy_session_key)
                 .await;
             let mut excluded = request.attempt.excluded_accounts().clone();
+            if !diagnostic {
+                excluded.extend(
+                    candidates
+                        .iter()
+                        .filter(|candidate| {
+                            request
+                                .attempt
+                                .excludes_proxy(candidate.account.outbound_proxy())
+                        })
+                        .map(|candidate| candidate.account.id().clone()),
+                );
+            }
             if let Some(pending) = binding_snapshot.as_ref() {
                 match pending.directive() {
                     Some(gateway_core::provider_ports::SessionBindingDirective::Reassign) => {
@@ -1362,6 +1376,16 @@ impl CodexCredentialSelector {
                         continue 'capacity;
                     }
                     if follow_only && let Some(binding) = binding.as_ref() {
+                        // 如果整个候选池共用本请求已排除的入口，等待根线程迁移也没有可用出口
+                        if !candidates.is_empty()
+                            && candidates.iter().all(|candidate| {
+                                request
+                                    .attempt
+                                    .excludes_proxy(candidate.account.outbound_proxy())
+                            })
+                        {
+                            return Err(CredentialSelectionError::NoEligibleCredential);
+                        }
                         // 冷却、排除、停用或当前账号不在本次范围时也只等待根线程恢复或迁移
                         waiting
                             .wait(std::slice::from_ref(binding.account_id()))

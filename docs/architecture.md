@@ -123,7 +123,7 @@ API 的时间 presenter 负责页面及事件展示文本，前端消费投影�
 | `account` | Provider 账号/credential/quota 值对象、持久化端口与请求级账号选择；`scope` 持有分组、账号目录和冻结账号范围 |
 | `policy` | Client API Key 准入、原始 Key 设置与客户端版本策略；只使用账号范围、Provider 身份和基础校验 |
 | `metering` | 标准化 Usage、金额、费用估算与费用明细；不表示账号或开票系统 |
-| `upstream` | 跨 Engine、Event、Error 与 Provider 共用的 transport 名称、尝试传输档位、发送状态和不透明上游值 |
+| `upstream` | 跨账号、Engine、Event、Error 与 Provider 共用的代理拨号端点、transport 名称、尝试传输档位、发送状态和不透明上游值 |
 | `lifecycle` | 取消信号、可选执行截止与租约生命周期、连接注册与 drain 合同 |
 | `middleware` | 与领域无关的类型化组合器及单次续体 |
 | `engine` | attempt、发送/提交屏障、执行编排、具体中间件与上游适配计划、持久化调用时序 |
@@ -259,11 +259,13 @@ Client Key 鉴权完成后，API adapter 从有界请求头识别客户端，Cor
   其他上游拒绝保留响应与重试提示，交由客户端决策。WS opening 尚未发送业务 payload 也不扩大该恢复范围，明确的 `426` 仍允许 HTTP 回退
   通用 HTTP `400` 的形态由 transport 首次解析时识别，Provider 选择既有有界恢复策略，Core 不解释错误正文；适用边界见[容量拒绝与重试](api.md#容量拒绝与重试)
 - `not_sent`、`sent`、`ambiguous` 是单调的上游发送边界；结果不明确时不能假定上游未收到请求
-- HTTP 明确未发送的瞬时建连失败（含 TLS 握手 EOF）共享最多 4 次 opening、30 秒的请求内预算；
-  先在原账号、HTTP 传输上退避恢复，允许换号且至少剩余两次 opening 时，本次恢复最多使用一半剩余时间，
-  留下时间和一次 opening；再次建连失败才排除原账号并以 HTTP 重选，选号不可用时回原账号使用剩余预算；
+- OpenAI HTTP 和无续接依赖的 WS 新请求遇到明确未发送的瞬时建连失败时，先在原账号恢复；
+  Core 按请求级建连与换号预算为重选保留时间和连接次数，再次建连失败才排除原账号。
+  若 Provider 确认账号绑定的代理入口不可达，Core 仅在决定换号后记录其主机与端口；后续选号排除相同入口，不写入账号健康或共享调度缓存。
+  没有替代账号时交回原错误；未确认入口不可达时仍可回原账号使用剩余预算。
+  Provider 决定恢复传输：HTTP 继续使用 HTTP，WS 按协议重试或回退；
   外部指定账号或换号预算不足时保留同账号恢复，账号与容量拒绝仍按各自的安全重放规则判断换号；
-  证书、TLS 协议及配置错误不进入同账号建连恢复，取消和执行 deadline 优先终止等待
+  证书、TLS 协议及配置错误不触发这项建连换号策略，取消和执行 deadline 优先终止等待
 - downstream commit 记录不可撤回的首次交付；不可重放事件交付后禁止换号、重试和 fallback
   HTTP 保活可先提交响应头，Core 记录该首字节时间与实际状态，但首个业务批次仍独立提交；
   SSE 注释不构成业务输出或上游已发送的证明，也不改变重放资格
@@ -636,6 +638,9 @@ Continuation 受原请求的调用方、当前 Key 账号范围、Provider 和�
 - OpenAI 按 native → replay owner → replay any 推进，并保留官方 `previous_response_id` 语义；
   已知为 connection-local 的原生续接进入重放阶段时，在选号前返回 `ClientReplayRequired`，不认领或迁移会话绑定。
   正常 native 续接仍由连接池核对原连接及 response ID 是否可用
+- 原生续接的安全容量拒绝超过建议等待上限时，Core 在换号预算内发起 `RotateForClientReplay`。
+  OpenAI 通过既有选号器迁移会话绑定并释放租约，不发送当前增量输入；客户端收到完整历史重放指令后开启新链。
+  无替代账号时保留原失败；API 移除容量等待提示，诊断仍保留原始错误和建议等待
 - xAI 使用客户端提交的完整历史作为重放输入
 - scope 外账号与跨调用方复用均拒绝；可信来源内更换 CPR Key 可保留同一用户和 Token 的续接，直连保持跨 Key 拒绝；发送结果不明时，仅接受 Provider 明确给出的有界传输恢复意图
 

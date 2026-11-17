@@ -9,7 +9,9 @@ use std::time::{Duration, Instant, SystemTime};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{StreamExt, future::BoxFuture};
-use gateway_core::account::{AccountFeedbackStats, ProviderAccount, ProviderAccountId};
+use gateway_core::account::{
+    AccountAffinity, AccountFeedbackStats, ProviderAccount, ProviderAccountId,
+};
 use gateway_core::engine::continuation::{ContinuationBinding, NativeContinuationScope};
 use gateway_core::engine::middleware::MiddlewareHeader;
 use gateway_core::engine::provider::{
@@ -773,6 +775,17 @@ impl Provider for CodexProvider {
             &context.session_namespace(),
         );
         let selection_session_affinity = selection_session_affinity.or(messages_affinity);
+        if context.continuation_attempt() == ContinuationAttempt::RotateForClientReplay
+            && (selection_session_affinity.is_none()
+                || context.account_selection_policy().openai_account_affinity()
+                    == AccountAffinity::Relaxed)
+        {
+            // 没有可持续的会话绑定就无法保证完整历史使用替代账号，交回原始容量错误
+            return Err(provider_error(
+                ProviderErrorKind::NoEligibleAccount,
+                UpstreamSendState::NotSent,
+            ));
+        }
         let selection_started_at = Instant::now();
         let selection = async {
             self.selector
@@ -805,6 +818,11 @@ impl Provider for CodexProvider {
         };
         let account_selection_wait_ms =
             u64::try_from(selection_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        if context.continuation_attempt() == ContinuationAttempt::RotateForClientReplay {
+            // Core 已确认允许换号；选号器迁移共享绑定后，完整历史仍须由客户端提供
+            // 不将旧账号的 previous_response_id 或增量输入发送给替代账号
+            return Err(continuation_replay_required_error("account_rotated"));
+        }
         let selected_candidate = candidate.for_account(lease.account_id());
         let operation = if selected_candidate.upstream_model() != candidate.upstream_model() {
             let Operation::Generate(original) = request.operation() else {
@@ -1017,7 +1035,9 @@ impl CodexProvider {
                         ContinuationAttempt::ReplayOwner | ContinuationAttempt::ReplayAny => {
                             PreviousResponseScope::ExternalUnknown
                         }
-                        ContinuationAttempt::None => PreviousResponseScope::ExternalUnknown,
+                        ContinuationAttempt::None | ContinuationAttempt::RotateForClientReplay => {
+                            PreviousResponseScope::ExternalUnknown
+                        }
                     };
                     upstream_request.set_previous_response_id(Some(
                         continuation.upstream_response_id().as_str().to_owned(),

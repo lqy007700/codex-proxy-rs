@@ -924,8 +924,9 @@ async fn terminal_admin_list_filters_and_sorts_before_pagination_with_retained_u
         .await
         .expect("filter error accounts");
     assert_eq!(error_accounts.items.len(), 2);
-    assert_eq!(error_accounts.items[0].account.id, "acct_beta");
-    assert_eq!(error_accounts.items[1].account.id, "acct_invalid");
+    // 默认先展示 OpenAI OAuth，再展示其他 Provider 的普通账号
+    assert_eq!(error_accounts.items[0].account.id, "acct_invalid");
+    assert_eq!(error_accounts.items[1].account.id, "acct_beta");
     // 上游耗尽优先显示，本地暂停不重复计数
     sqlx::query("update provider_accounts set quota_paused = true where id in ('acct_alpha', 'acct_charlie')")
         .execute(&database.pool)

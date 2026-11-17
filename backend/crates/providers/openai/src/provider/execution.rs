@@ -912,7 +912,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 }
                 apply_failure(&failure_context, &active_account, &failure)
                 .await;
-                Err(quota_continuation_replay_error(
+                Err(continuation_recovery_error(
                     failure.error,
                     &request,
                     ReplayBoundary::BeforeSemanticOutput,
@@ -1120,7 +1120,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                     }
                     apply_failure(&failure_context, &active_account, &failure)
                     .await;
-                    Err(quota_continuation_replay_error(
+                    Err(continuation_recovery_error(
                         failure.error,
                         &request,
                         ReplayBoundary::from_semantic_output(client_events.replay_closed()),
@@ -1279,7 +1279,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                         .error
                         .with_atomic_client_events(events);
                 }
-                Err(quota_continuation_replay_error(
+                Err(continuation_recovery_error(
                     failure.error,
                     &request,
                     ReplayBoundary::from_semantic_output(failure_after_commit),
@@ -1412,7 +1412,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                     .error
                     .with_atomic_client_events(events);
             }
-            Err(quota_continuation_replay_error(
+            Err(continuation_recovery_error(
                 failure.error,
                 &request,
                 ReplayBoundary::from_semantic_output(failure_after_commit),

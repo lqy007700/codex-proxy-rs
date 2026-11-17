@@ -147,6 +147,9 @@ impl GrokAccountSessionSelector {
                 .into_iter()
                 .filter(|account| {
                     request.upstream_context.as_ref().is_none_or(|context| {
+                        if context.excludes_proxy(account.outbound_proxy()) {
+                            return false;
+                        }
                         let override_model = context
                             .account_model_override(account.id())
                             .map(UpstreamModelId::new)

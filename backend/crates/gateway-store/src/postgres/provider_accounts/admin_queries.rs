@@ -252,7 +252,14 @@ async fn validate_group_filter(
 
 fn admin_account_order(sort: Option<AdminAccountSort>) -> String {
     let Some(sort) = sort else {
-        return "a.id asc".to_owned();
+        // 默认先展示 OpenAI OAuth、API Key 和其他普通账号，保底账号统一置后
+        return "case
+                  when a.scheduling_role = 'fallback' then 3
+                  when a.provider_kind = 'openai' and a.authentication_kind = 'oauth' then 0
+                  when a.provider_kind = 'openai' and a.authentication_kind = 'api_key' then 1
+                  else 2
+                end asc, a.id asc"
+            .to_owned();
     };
     let expression = match sort.field {
         AdminAccountSortField::Email => "a.email",
