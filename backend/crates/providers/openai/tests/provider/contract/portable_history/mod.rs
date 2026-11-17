@@ -159,6 +159,7 @@ async fn portable_history_large_recovery_records_bounded_private_structure() {
         cache.clone(),
     );
     let mut body = extended_history();
+    body["future_field"]["api_key"] = json!("fixture-recovery-key");
     let input = body["input"].as_array_mut().unwrap();
     for index in 0..32 {
         input.push(
@@ -191,7 +192,21 @@ async fn portable_history_large_recovery_records_bounded_private_structure() {
         captured_request_body(&requests[1])["input"],
         json!(expected)
     );
-    let snapshot = trace.snapshot().unwrap();
+    let mut snapshot = trace.snapshot().unwrap();
+    assert!(snapshot.to_string().len() <= gateway_core::diagnostics::MAX_TRACE_SNAPSHOT_BYTES);
+    let retry_body = snapshot
+        .as_object_mut()
+        .unwrap()
+        .remove("retryRequestBody")
+        .unwrap();
+    assert_eq!(retry_body["attemptIndex"], 2);
+    assert_eq!(retry_body["truncated"], false);
+    let mut expected_outbound = captured_request_body(&requests[1]);
+    expected_outbound["future_field"]["api_key"] = json!("<redacted>");
+    assert_eq!(retry_body["json"], expected_outbound);
+    assert!(!retry_body.to_string().contains("fixture-recovery-key"));
+    // 正文仅属于独立的第二次请求证据，事件摘要继续遵守原有隐私和预算合同
+    assert!(snapshot.to_string().len() <= 128 * 1024);
     let evidence = snapshot["events"]
         .as_array()
         .unwrap()
