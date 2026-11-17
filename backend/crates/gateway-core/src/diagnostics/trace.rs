@@ -13,18 +13,21 @@ use serde_json::{Value, json};
 use crate::error::ProviderError;
 
 use super::capture::{bounded, diagnostic_event_json, diagnostic_event_type};
-use super::{body_fingerprint, diagnostic_headers};
+use super::{MAX_RETRY_REQUEST_BODY_BYTES, body_fingerprint, diagnostic_headers, retry};
 
 /// 完整诊断快照的编码上限，生产者与持久化适配器共用
-pub const MAX_TRACE_SNAPSHOT_BYTES: usize = 128 * 1024;
+pub const MAX_TRACE_SNAPSHOT_BYTES: usize =
+    MAX_TRACE_EVENTS_BYTES + MAX_RETRY_REQUEST_BODY_BYTES + 1024;
+
+const MAX_TRACE_EVENTS_BYTES: usize = 128 * 1024;
 
 const MAX_EVENTS: usize = 128;
 const HEAD_EVENTS: usize = 8;
 const MAX_DATA_BYTES: usize = 4096;
-const MAX_BUFFER_BYTES: usize = MAX_TRACE_SNAPSHOT_BYTES / 2;
+const MAX_BUFFER_BYTES: usize = MAX_TRACE_EVENTS_BYTES / 2;
 const MAX_EVIDENCE_EVENTS: usize = 64;
 const MAX_EVIDENCE_DATA_BYTES: usize = 16 * 1024;
-const MAX_EVIDENCE_BUFFER_BYTES: usize = MAX_TRACE_SNAPSHOT_BYTES / 2;
+const MAX_EVIDENCE_BUFFER_BYTES: usize = MAX_TRACE_EVENTS_BYTES / 2;
 
 /// 显式传给异步任务的关联上下文；默认值禁用捕获，避免全局请求映射
 #[derive(Clone, Default)]
@@ -59,6 +62,8 @@ struct TraceState {
     stage_counts: BTreeMap<&'static str, u64>,
     stage_count_overflow: u64,
     events: VecDeque<TraceEvent>,
+    first_attempt_failed: bool,
+    retry_request_body: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -109,6 +114,8 @@ impl TraceContext {
                 stage_counts: BTreeMap::new(),
                 stage_count_overflow: 0,
                 events: VecDeque::new(),
+                first_attempt_failed: false,
+                retry_request_body: None,
             }))),
             ..Self::default()
         }
@@ -208,10 +215,56 @@ impl TraceContext {
     }
 
     /// 入站 JSON 先记录再解析业务语义，包括未知事件和 metadata
-    /// 原文仅在现有 request_dump 开关打开时写入其独立文件
+    /// 原文转储由 request_dump 控制，第二次失败重试正文另按独立预算脱敏保留
     pub fn capture(&self, stage: &'static str, bytes: &[u8]) {
         self.dump(stage, bytes);
+        if stage == "upstream.request.body" {
+            self.capture_retry_request_body(bytes);
+        }
         self.capture_event(stage, bytes);
+    }
+
+    /// 只允许第一次失败后的第二次尝试保留一份正文，不随 exchange 重试反复覆盖
+    #[must_use]
+    pub fn needs_retry_request_body(&self) -> bool {
+        self.attempt_index == 2
+            && self.state.as_ref().is_some_and(|state| {
+                let state = state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                state.first_attempt_failed && state.retry_request_body.is_none()
+            })
+    }
+
+    /// transport 在压缩或封装存在时传入还原的实际出站 JSON，普通日志不输出正文
+    pub fn capture_retry_request_body(&self, bytes: &[u8]) {
+        if !self.needs_retry_request_body() {
+            return;
+        }
+        let body = retry::capture(bytes, self.exchange_id);
+        self.store_retry_request_body(body);
+    }
+
+    /// 解压失败或解压后超限时只保存实际报文指纹，不把残缺正文冒充完整 JSON
+    pub fn omit_retry_request_body(&self, bytes: &[u8], reason: &'static str) {
+        if !self.needs_retry_request_body() {
+            return;
+        }
+        self.store_retry_request_body(json!({
+            "attemptIndex": 2, "exchangeId": self.exchange_id,
+            "body": body_fingerprint(bytes), "omitted": reason,
+        }));
+    }
+
+    fn store_retry_request_body(&self, body: Value) {
+        if let Some(state) = &self.state {
+            let mut state = state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state.retry_request_body.is_none() {
+                state.retry_request_body = Some(body);
+            }
+        }
     }
 
     /// StreamCapture 已转储原始 chunk 时，只提取完整事件的安全摘要
@@ -294,8 +347,11 @@ impl TraceContext {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
-            let snapshot = state.snapshot();
-            if snapshot.to_string().len() <= MAX_TRACE_SNAPSHOT_BYTES {
+            let mut snapshot = state.snapshot();
+            if snapshot.to_string().len() <= MAX_TRACE_EVENTS_BYTES {
+                if let Some(body) = &state.retry_request_body {
+                    snapshot["retryRequestBody"] = body.clone();
+                }
                 return Some(snapshot);
             }
             // 完整编码还包含计数与外层字段，超限时先淘汰普通事件并保留丢弃计数
@@ -383,6 +439,9 @@ impl TraceContext {
         let mut state = state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if stage == "attempt.failed" && self.attempt_index == 1 {
+            state.first_attempt_failed = true;
+        }
         state.sequence += 1;
         if state.stage_counts.contains_key(stage) || state.stage_counts.len() < 64 {
             *state.stage_counts.entry(stage).or_default() += 1;
@@ -458,7 +517,7 @@ impl TraceContext {
 impl TraceState {
     fn snapshot(&self) -> Value {
         json!({
-            "schemaVersion": 3, "requestId": self.request_id,
+            "schemaVersion": 4, "requestId": self.request_id,
             "startedAtUnixMs": self.started_at_ms, "totalEvents": self.sequence,
             "droppedEvents": self.dropped_events, "maxEvents": MAX_EVENTS,
             "captureMode": "sanitized", "events": self.events,

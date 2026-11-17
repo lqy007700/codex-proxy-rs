@@ -2781,11 +2781,20 @@ WebSocket 握手不主动添加专项计时请求头，客户端显式提供的�
 `provider.precommit.released` 保存已有记录的释放原因、预取字节数和等待时间，不等同于下游已提交。
 允许重试不代表已经执行，实际重试与换号需结合后续 `attempt.started`、`attemptCount` 和账号核对
 
-Trace v3 为路由、账号选择、失败、重试、响应边界及终态事实预留独立的 64 KiB 预算，
-普通事件另有 64 KiB 预算，总事件数最多 128。包含元数据的完整 JSON 快照最多 128 KiB，
-生成与持久化共用同一上限；完整编码超限时先淘汰普通事件，再淘汰关键证据。
+Trace v4 为路由、账号选择、失败、重试、响应边界及终态事实预留独立的 64 KiB 预算，
+普通事件另有 64 KiB 预算，总事件数最多 128。事件及元数据最多 128 KiB，
+完整编码超限时先淘汰普通事件，再淘汰关键证据。第二次请求正文另有 2 MiB 预算，
+生成与持久化共用 2 MiB + 129 KiB 的完整快照上限。
 `stageCounts` 记录至多 64 类已采集阶段的次数，
 事件淘汰不抹除阶段计数；`droppedEvidenceEvents` 与 `stageCountOverflow` 分别报告关键证据淘汰和阶段统计超限
+
+只有第一次尝试已失败时，第二次尝试的第一份实际出站正文会保存在 `trace.retryRequestBody`，
+第一次及第三次以后的尝试不自动保存正文，后续 exchange 不覆盖已采集的正文。
+`attemptIndex / exchangeId` 标记采集边界，`body` 为指纹，`json` 为保留内容；
+正文在写入前和下载时共用凭据脱敏规则，嵌套 JSON 文本保持字符串类型，普通日志不输出该正文。
+HTTP zstd 请求有界解压后采集；超过 2 MiB、解压或 JSON 解析失败时只保留指纹与 `omitted` 原因，
+内容遍历超限时带有 `truncated` 标记。正文含用户输入、历史及工具输出，沿用请求记录的保留周期，
+仅管理员详情与诊断下载可读；业务内容本身不属于自动凭据识别范围
 
 OpenAI Responses 的 `provider.request.input` 与 `provider.request.outbound` 分别记录 Provider 收到的
 已解析正文和最终准备发送的正文指纹，包括指令、工具、缓存键、模型设置与有序输入。
@@ -2799,7 +2808,7 @@ OpenAI Responses 的 `provider.request.input` 与 `provider.request.outbound` �
 `provider.response.parse_gap` 标记 JSON 或 canonical 投影失败，原始 wire 仍按原有规则透传。
 上述关键事实复用现有 trace JSON 随请求终态保存，不新增诊断表或列；旧记录不能补生成未采集的事实
 
-采集阶段仍按有界 trace 合同处理未知 JSON 键和值，未知事件名称保留摘要；导出不会补造被省略的原文。
+除上述第二次请求正文外，采集阶段按有界 trace 合同处理未知 JSON 键和值，未知事件名称保留摘要；导出不会补造被省略的原文。
 下载端按 Provider 凭据、管理认证与传输头合同移除令牌、密钥、认证头、Cookie 和 URL 认证部分，
 移除账号联系信息及客户端 IP，保留关联 ID、错误 code/message、套餐、状态和重试事实。
 OAuth 字段依据 CPR 导出结构及官方 Codex `TokenData`，不按 `token / secret / credential` 等泛称删除业务字段。

@@ -1462,6 +1462,16 @@ async fn diagnostic_trace_pressure_preserves_terminal_outcomes_and_usage() {
         finalization.timings.latency_ms = Some(42_000);
         let trace = TraceContext::new(id);
         trace.record("request.routed", json!({"scope": "all"}));
+        trace
+            .attempt(1)
+            .record("attempt.failed", json!({"kind":"upstream_unavailable"}));
+        trace.attempt(2).capture(
+            "upstream.request.body",
+            &serde_json::to_vec(&json!({
+                "input": "retry request body".repeat(30_000), "api_key": "fixture-persisted-secret"
+            }))
+            .unwrap(),
+        );
         for stage in ["provider.request.input", "provider.request.outbound"] {
             trace.record_evidence(stage, json!({"hashes": "a".repeat(6000)}));
         }
@@ -1491,7 +1501,12 @@ async fn diagnostic_trace_pressure_preserves_terminal_outcomes_and_usage() {
         trace.record("request.finished", json!({"outcome": expected_outcome}));
         let snapshot = trace.snapshot().unwrap();
         let encoded = snapshot.to_string();
-        assert!(encoded.len() > 64 * 1024);
+        assert!(encoded.len() > 128 * 1024);
+        assert_eq!(
+            snapshot["retryRequestBody"]["json"]["input"],
+            "retry request body".repeat(30_000)
+        );
+        assert!(!encoded.contains("fixture-persisted-secret"));
         assert!(encoded.len() <= MAX_TRACE_SNAPSHOT_BYTES);
         assert!(snapshot["droppedEvents"].as_u64().unwrap() > 0);
         finalization.diagnostic_trace_json = Some(encoded);

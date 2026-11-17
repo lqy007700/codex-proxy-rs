@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use gateway_core::diagnostics::{MAX_TRACE_SNAPSHOT_BYTES, TraceContext, body_fingerprint};
+use gateway_core::diagnostics::{TraceContext, body_fingerprint};
 use gateway_core::error::{ProviderDiagnostic, ProviderError, ProviderErrorKind, RawUpstreamError};
 use gateway_core::upstream::UpstreamSendState;
 use serde_json::json;
@@ -47,7 +47,7 @@ fn critical_evidence_survives_stream_pressure_and_preserves_stage_coverage() {
     );
     assert_eq!(snapshot["droppedEvidenceEvents"], 0);
     assert!(snapshot["droppedEvents"].as_u64().unwrap() > 0);
-    assert!(snapshot.to_string().len() <= MAX_TRACE_SNAPSHOT_BYTES);
+    assert!(snapshot.to_string().len() <= 128 * 1024);
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn critical_evidence_has_an_independent_bound_and_reports_its_own_loss() {
         events.len() as u64 + snapshot["droppedEvents"].as_u64().unwrap(),
         100
     );
-    assert!(snapshot.to_string().len() <= MAX_TRACE_SNAPSHOT_BYTES);
+    assert!(snapshot.to_string().len() <= 128 * 1024);
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn snapshot_budget_includes_stage_coverage_and_event_envelopes() {
     trace.record("request.finished", json!({"outcome": "succeeded"}));
     let snapshot = trace.snapshot().unwrap();
     let events = snapshot["events"].as_array().unwrap();
-    assert!(snapshot.to_string().len() <= MAX_TRACE_SNAPSHOT_BYTES);
+    assert!(snapshot.to_string().len() <= 128 * 1024);
     assert_eq!(events.first().unwrap()["stage"], "request.routed");
     assert_eq!(events.last().unwrap()["stage"], "request.finished");
     assert_eq!(snapshot["droppedEvidenceEvents"], 0);
@@ -477,7 +477,16 @@ fn ordinary_trace_logs_and_serialized_snapshots_share_the_sanitized_capture_boun
                 ("set-cookie", b"PRIVATE_COOKIE".as_slice()),
             ],
         );
+        trace.attempt(1).record("attempt.failed", json!({}));
+        exchange.capture(
+            "upstream.request.body",
+            br#"{"input":"RETRY_PROMPT_BODY","api_key":"PRIVATE_RETRY_KEY"}"#,
+        );
         let snapshot = trace.snapshot().unwrap();
+        assert_eq!(
+            snapshot["retryRequestBody"]["json"]["input"],
+            "RETRY_PROMPT_BODY"
+        );
         assert_eq!(snapshot["wireDumpEnabled"], false);
         assert_eq!(snapshot["wireFrames"], 0);
         snapshot
@@ -489,6 +498,7 @@ fn ordinary_trace_logs_and_serialized_snapshots_share_the_sanitized_capture_boun
     let output = logs.join("\n");
     assert!(!logs.is_empty(), "必须真实捕获 tracing 事件，不能空集通过");
     assert!(!output.contains("PRIVATE_"), "{output}");
+    assert!(!output.contains("RETRY_PROMPT_BODY"), "{output}");
     for fact in [
         "req_feedback",
         "upstream-controlled",

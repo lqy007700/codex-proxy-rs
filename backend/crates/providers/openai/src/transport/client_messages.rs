@@ -64,13 +64,7 @@ impl CodexBackendClient {
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.as_bytes())),
         );
-        trace.capture(
-            "upstream.request.body",
-            request
-                .body()
-                .and_then(reqwest::Body::as_bytes)
-                .unwrap_or_default(),
-        );
+        super::diagnostics::request::capture_body(&trace, &request);
         let started = Instant::now();
         let response = self
             .http_opening_client()?

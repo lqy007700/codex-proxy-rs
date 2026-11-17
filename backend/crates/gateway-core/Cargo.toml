@@ -27,6 +27,7 @@ gateway-protocol = { path = "../gateway-protocol" }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = { version = "1.0.150", features = ["arbitrary_precision", "preserve_order"] }
 sha2 = "0.11.0"
+regex = "1.13.1"
 semver = "1.0.27"
 thiserror = "2.0.18"
 tracing = "0.1.44"

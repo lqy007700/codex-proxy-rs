@@ -1,5 +1,7 @@
 //! 验证上游失败分类、重放资格、请求标识与响应事实提取
 
+mod request;
+
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use provider_openai::transport::CodexUpstreamDiagnostics;
 use provider_openai::transport::diagnostics::{
@@ -659,6 +661,24 @@ fn openai_account_failure_matrix_is_preserved() {
 
 #[test]
 fn diagnostic_wire_dump_preserves_binary_bytes_and_numbers_every_fragment() {
+    // tracing callsite 缓存由进程共享，独立 subscriber 的断言需隔离并行测试的注册
+    // 与 Core 普通日志回归测试相同，只隔离测试进程，不放宽真实报文和分片断言
+    const CHILD: &str = "CPR_OPENAI_WIRE_DUMP_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        let thread = std::thread::current();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", thread.name().unwrap()])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success() && String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "isolated wire dump regression failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use gateway_core::diagnostics::TraceContext;
     use std::sync::{Arc, Mutex};

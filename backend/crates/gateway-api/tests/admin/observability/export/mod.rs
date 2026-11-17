@@ -277,6 +277,47 @@ async fn oversized_error_export_reports_truncation_instead_of_silent_loss() {
 }
 
 #[tokio::test]
+async fn retry_request_body_export_keeps_large_prompt_and_redacts_stored_credentials_again() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let trace = gateway_core::diagnostics::TraceContext::new("req_err");
+    trace.attempt(1).record("attempt.failed", json!({}));
+    let prompt = "诊断正文".repeat(50_000);
+    let nested = json!({"task":"查看错误", "access_token":"fixture-refresh"}).to_string();
+    trace.attempt(2).capture(
+        "upstream.request.body",
+        &serde_json::to_vec(&json!({
+            "input":prompt, "tool_output":nested, "api_key":"fixture-key"
+        }))
+        .unwrap(),
+    );
+    let mut snapshot = trace.snapshot().unwrap();
+    // 模拟旧记录或存储中混入认证字段，下载不能信任采集时的脱敏标记
+    snapshot["retryRequestBody"]["json"]["authorization"] = json!("fixture-authorization");
+    fixture.usage_detail.lock().unwrap().replace(UsageDetail {
+        request: usage_record_with_account(
+            "req_err",
+            "acct_err",
+            "QA",
+            "qa@example.invalid",
+            "oauth",
+            Utc::now(),
+        ),
+        attempts: Vec::new(),
+        trace: Some(snapshot),
+        related_requests: Vec::new(),
+    });
+    let (status, _, file) = export(&fixture, "?requestId=req_err", true).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = &file["requests"][0]["evidence"]["trace"]["retryRequestBody"]["json"];
+    assert_eq!(body["input"], prompt);
+    assert!(body["tool_output"].is_string());
+    assert!(body["tool_output"].as_str().unwrap().contains("查看错误"));
+    assert!(!file.to_string().contains("fixture-"));
+    assert_eq!(file["exportTruncated"], false);
+}
+
+#[tokio::test]
 async fn related_read_failures_and_limits_keep_primary_evidence() {
     let fixture = AdminTestFixture::new().await;
     fixture.auth.insert_session("valid-session");

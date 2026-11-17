@@ -8,6 +8,14 @@ use super::gap;
 
 pub(super) fn trace_gaps(bundle: &mut DiagnosticBundle, section: &str, trace: &Value) {
     let trace_section = format!("{section}.trace");
+    let retry_body = &trace["retryRequestBody"];
+    if retry_body["omitted"].is_string() || retry_body["truncated"] == true {
+        gap(
+            bundle,
+            &format!("{trace_section}.retryRequestBody"),
+            "retry_request_body_incomplete",
+        );
+    }
     for (field, reason) in [
         ("droppedEvents", "events_evicted"),
         ("droppedEvidenceEvents", "critical_evidence_evicted"),

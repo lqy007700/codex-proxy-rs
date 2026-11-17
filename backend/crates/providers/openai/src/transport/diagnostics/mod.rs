@@ -1,6 +1,7 @@
 //! 在 transport 边界采集的上游响应诊断信息
 
 pub(crate) mod evidence;
+pub(super) mod request;
 
 use super::client::CodexClientVisibleUpstreamResponse;
 use super::protocol::responses::ResponsesSseFailure;

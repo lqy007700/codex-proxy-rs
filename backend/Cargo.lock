@@ -1616,6 +1616,7 @@ dependencies = [
  "gateway-protocol",
  "http",
  "http-body-util",
+ "regex",
  "semver",
  "serde",
  "serde_json",
