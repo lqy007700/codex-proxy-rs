@@ -20,7 +20,7 @@ gateway-admin = { path = "../gateway-admin" }
 gateway-core = { path = "../gateway-core" }
 hex = "0.4.3"
 http = "1.4.0"
-lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls", "rustls-native-certs", "ring"] }
+lettre = { version = "0.11.24", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls", "rustls-native-certs", "ring"] }
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "socks"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 scraper = "0.29.0"
