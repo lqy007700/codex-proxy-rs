@@ -14,13 +14,14 @@ const CACHE_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[derive(Clone)]
 struct HistoryRecovery {
-    scope: ProviderSessionAffinityKey,
+    target: ProviderSessionAffinityKey,
     account_id: String,
     fingerprints: BTreeSet<String>,
 }
 
 pub(super) struct HistoryAttempt {
     recovery: HistoryRecovery,
+    cache_scope: ProviderSessionAffinityKey,
     candidates: BTreeSet<String>,
     eligibility: Result<(), &'static str>,
     incremental: bool,
@@ -201,20 +202,46 @@ impl HistoryAttempt {
             .responses_api_base_url()
             .unwrap_or(response_origin.as_str());
         let session_namespace = context.session_namespace();
+        let thread = thread.or(request.client_account_session_id.as_deref());
+        let account = lease.account();
         let scope_fields = (
             "codex-history-scope-v1",
             session_namespace.as_str(),
             PROVIDER_NAME,
-            thread.or(request.client_account_session_id.as_deref()),
+            thread,
             lease.account_id().as_str(),
-            lease.account().revision().get(),
+            account.revision().get(),
             endpoint,
         );
-        let scope = ProviderSessionAffinityKey::try_new(
+        let cache_scope = ProviderSessionAffinityKey::try_new(
             digest_json(b"codex-history-scope-v1\0", &scope_fields)
                 .ok_or_else(|| unavailable("history_scope"))?,
         )
         .map_err(|_| unavailable("history_scope"))?;
+        // 同一请求可跨越同身份的凭据版本更新，跨请求缓存仍按版本隔离
+        let target = if lease.authentication().oauth().is_some()
+            && account
+                .upstream_user_id()
+                .is_some_and(|id| !id.trim().is_empty())
+            && account
+                .upstream_account_id()
+                .is_some_and(|id| !id.trim().is_empty())
+        {
+            let target_fields = (
+                session_namespace.as_str(),
+                PROVIDER_NAME,
+                thread,
+                crate::credential::oauth_identity_key(account),
+                endpoint,
+            );
+            ProviderSessionAffinityKey::try_new(
+                digest_json(b"codex-history-oauth-target-v1\0", &target_fields)
+                    .ok_or_else(|| unavailable("history_scope"))?,
+            )
+            .map_err(|_| unavailable("history_scope"))?
+        } else {
+            cache_scope.clone()
+        };
         let eligibility = replay_eligibility(request, context);
         context.trace().record_evidence(
             "provider.history_prepared",
@@ -230,7 +257,7 @@ impl HistoryAttempt {
         let mut excluded = BTreeSet::new();
         let mut pending_commit = false;
         if let Some(approved) = approved {
-            if approved.account_id == lease.account_id().as_str() && approved.scope != scope {
+            if approved.account_id == lease.account_id().as_str() && approved.target != target {
                 return Err(unavailable("history_target_changed"));
             }
             eligibility.map_err(unavailable)?;
@@ -241,7 +268,7 @@ impl HistoryAttempt {
             let result = tokio::select! {
                 biased;
                 () = context.cancellation().cancelled() => return Err(provider_error(ProviderErrorKind::Cancelled, UpstreamSendState::NotSent)),
-                result = tokio::time::timeout(CACHE_TIMEOUT, cache.matching(&scope, &initial_candidates, ttl)) => result,
+                result = tokio::time::timeout(CACHE_TIMEOUT, cache.matching(&cache_scope, &initial_candidates, ttl)) => result,
             };
             match result {
                 Ok(Ok(matching)) => excluded = matching,
@@ -269,10 +296,11 @@ impl HistoryAttempt {
         let candidates = initial_candidates.difference(&excluded).cloned().collect();
         Ok(Some(Self {
             recovery: HistoryRecovery {
-                scope,
+                target,
                 account_id: lease.account_id().as_str().to_owned(),
                 fingerprints: excluded,
             },
+            cache_scope,
             candidates,
             eligibility,
             incremental: request.previous_response_id().is_some()
@@ -375,7 +403,7 @@ impl HistoryAttempt {
                     let result = tokio::select! {
                         biased;
                         () = context.cancellation().cancelled() => None,
-                        result = tokio::time::timeout(CACHE_TIMEOUT, cache.merge(&state.recovery.scope, &state.recovery.fingerprints, state.ttl)) => Some(result),
+                        result = tokio::time::timeout(CACHE_TIMEOUT, cache.merge(&state.cache_scope, &state.recovery.fingerprints, state.ttl)) => Some(result),
                     };
                     let stored = matches!(result, Some(Ok(Ok(true))));
                     context.trace().record_evidence("provider.history_cache", json!({"operation":"merge", "stored":stored, "excludedItems":state.recovery.fingerprints.len()}));

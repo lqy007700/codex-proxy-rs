@@ -359,20 +359,42 @@ async fn portable_history_same_account_recovery_rejects_changed_target_before_se
     };
     let recovery = error.request_recovery().cloned().unwrap();
     drop(events);
-    body["thread_id"] = json!("thread-changed");
-    let error = provider
-        .execute(
-            planned_request("openai", history_operation(body, false, false)),
-            context.with_request_recovery(Some(recovery)),
-        )
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(error.send_state(), UpstreamSendState::NotSent);
-    assert_eq!(
-        error.diagnostic().unwrap().code(),
-        Some("history_target_changed")
+    let changed_accounts = Arc::new(MemoryAccountStore::default());
+    changed_accounts
+        .seed_oauth_credential(ImportCodexOAuthCredential {
+            account_id: "acct_provider_contract".to_owned(),
+            name: "reauthorized account".to_owned(),
+            secret: secret("at-reauthorized-account"),
+            verified_account: profile("chatgpt-changed-identity"),
+            next_refresh_at: Some(Utc::now() + chrono::Duration::minutes(30)),
+            enabled: true,
+        })
+        .await;
+    let changed_identity_provider = with_cache(
+        provider_with_base_url(&changed_accounts, server.uri()),
+        cache.clone(),
     );
+    for (provider, thread) in [
+        (provider, "thread-changed"),
+        (changed_identity_provider, "thread-original"),
+    ] {
+        body["thread_id"] = json!(thread);
+        let error = provider
+            .execute(
+                planned_request("openai", history_operation(body.clone(), false, false)),
+                context
+                    .clone()
+                    .with_request_recovery(Some(recovery.clone())),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.send_state(), UpstreamSendState::NotSent);
+        assert_eq!(
+            error.diagnostic().unwrap().code(),
+            Some("history_target_changed")
+        );
+    }
     assert_eq!(cache.writes.load(Ordering::SeqCst), 0);
     server.verify().await;
 }

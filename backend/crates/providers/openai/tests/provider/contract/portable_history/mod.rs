@@ -613,6 +613,75 @@ async fn portable_history_recovers_once_without_clearing_normal_input() {
 }
 
 #[tokio::test]
+async fn portable_history_retries_after_response_cookie_advances_credential_revision() {
+    let accounts = Arc::new(MemoryAccountStore::default());
+    let account_id = "acct_provider_contract";
+    create_account(&accounts, account_id).await;
+    let original_revision = accounts.account(account_id).unwrap().revision().get();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(|request: &wiremock::Request| {
+            if captured_request_body(request)["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["id"] == "rs_channel_a")
+            {
+                encrypted_failure(400)
+                    .insert_header("set-cookie", "cf_clearance=updated; Path=/; Max-Age=3600")
+            } else {
+                ResponseTemplate::new(200).set_body_raw(CAPTURE_COMPLETED_SSE, "text/event-stream")
+            }
+        })
+        .expect(3)
+        .mount(&server)
+        .await;
+    let cache = Arc::new(HistoryCache::default());
+    let provider = with_cache(
+        super::cookies::cookie_provider(&accounts, server.uri()),
+        cache.clone(),
+    );
+    let mut body = mixed_history();
+    body["thread_id"] = json!("thread-cookie-recovery");
+    run_history(
+        provider.clone(),
+        history_operation(body.clone(), false, false),
+        1,
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    assert_eq!(
+        accounts.account(account_id).unwrap().revision().get(),
+        original_revision + 1
+    );
+
+    run_history(
+        provider,
+        history_operation(body.clone(), false, false),
+        1,
+        true,
+    )
+    .await
+    .unwrap();
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(captured_request_body(&requests[0])["input"], body["input"]);
+    let expected: Vec<_> = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["type"] != "reasoning")
+        .cloned()
+        .collect();
+    for request in &requests[1..] {
+        assert_eq!(captured_request_body(request)["input"], json!(expected));
+    }
+    assert_eq!(cache.writes.load(Ordering::SeqCst), 1);
+    server.verify().await;
+}
+
+#[tokio::test]
 async fn portable_history_keeps_request_local_conversion_after_recoverable_503() {
     let server = MockServer::start().await;
     let calls = AtomicUsize::new(0);

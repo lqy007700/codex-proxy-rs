@@ -2,7 +2,10 @@
 
 use super::*;
 
-fn cookie_provider(store: &Arc<MemoryAccountStore>, base_url: String) -> Arc<CodexProvider> {
+pub(super) fn cookie_provider(
+    store: &Arc<MemoryAccountStore>,
+    base_url: String,
+) -> Arc<CodexProvider> {
     let profile = wire_profile();
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
     let leases = Arc::new(TestLeaseCoordinator::default());
