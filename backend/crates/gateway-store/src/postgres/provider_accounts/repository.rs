@@ -100,7 +100,7 @@ impl PgProviderAccountRepository {
         account_ids: Option<&[&str]>,
     ) -> StoreResult<Vec<ProviderAccountSummary>> {
         let mut query = sqlx::QueryBuilder::<Postgres>::new(
-            "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
+            "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, display_name, notes, email, upstream_user_id,
                     upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
                     access_token_expires_at, next_refresh_at, enabled, quota_limits, quota_paused, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
                     credential_observed_at, quota_access_state, quota_evidence,
@@ -540,14 +540,13 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
                 )
                 .await?;
             }
-            if let Some(notes) = command.notes.as_deref() {
-                update_provider_account_notes_in_transaction(
-                    &mut transaction,
-                    &command.account_ids,
-                    notes,
-                )
-                .await?;
-            }
+            update_provider_account_labels_in_transaction(
+                &mut transaction,
+                &command.account_ids,
+                command.display_name.as_deref(),
+                command.notes.as_deref(),
+            )
+            .await?;
             append_admin_audit_event_in_transaction(&mut transaction, command.audit, revision)
                 .await?;
             Ok(revision)
@@ -632,17 +631,27 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
     }
 }
 
-async fn update_provider_account_notes_in_transaction(
+async fn update_provider_account_labels_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     account_ids: &[String],
-    notes: &str,
+    display_name: Option<&str>,
+    notes: Option<&str>,
 ) -> StoreResult<()> {
-    sqlx::query("update provider_accounts set notes = nullif($2, '') where id = any($1::text[])")
-        .bind(account_ids)
-        .bind(notes.trim())
-        .execute(&mut **transaction)
-        .await
-        .map_err(|source| postgres_unavailable("update provider account notes", source))?;
+    if display_name.is_none() && notes.is_none() {
+        return Ok(());
+    }
+    sqlx::query(
+        "update provider_accounts
+         set display_name = case when $2::text is null then display_name else nullif($2, '') end,
+             notes = case when $3::text is null then notes else nullif($3, '') end
+         where id = any($1::text[])",
+    )
+    .bind(account_ids)
+    .bind(display_name.map(str::trim))
+    .bind(notes.map(str::trim))
+    .execute(&mut **transaction)
+    .await
+    .map_err(|source| postgres_unavailable("update provider account labels", source))?;
     Ok(())
 }
 
@@ -1126,9 +1135,13 @@ pub(super) async fn import_provider_accounts_in_transaction(
             &settings.group_ids,
         )
         .await?;
-        if let Some(notes) = settings.notes.as_deref() {
-            update_provider_account_notes_in_transaction(transaction, &unique_ids, notes).await?;
-        }
+        update_provider_account_labels_in_transaction(
+            transaction,
+            &unique_ids,
+            None,
+            settings.notes.as_deref(),
+        )
+        .await?;
     }
     append_admin_audit_event_in_transaction(transaction, command.audit, revision).await?;
     Ok(ProviderAccountAdminImport {
@@ -1199,9 +1212,13 @@ pub(super) async fn rotate_provider_account_admin_in_transaction(
         .await?;
         replace_account_group_assignments_in_transaction(transaction, ids, &settings.group_ids)
             .await?;
-        if let Some(notes) = settings.notes.as_deref() {
-            update_provider_account_notes_in_transaction(transaction, ids, notes).await?;
-        }
+        update_provider_account_labels_in_transaction(
+            transaction,
+            ids,
+            settings.display_name.as_deref(),
+            settings.notes.as_deref(),
+        )
+        .await?;
     }
     append_admin_audit_event_in_transaction(transaction, command.audit, config_revision).await?;
     Ok(ProviderAccountAdminRotation {

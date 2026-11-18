@@ -287,6 +287,7 @@ fn account_page_item(
             provider_kind: gateway_core::routing::ProviderKind::new("openai").unwrap(),
             groups: Vec::new(),
             name: "synthetic cooldown account".to_owned(),
+            display_name: None,
             notes: None,
             email: None,
             upstream_user_id: None,

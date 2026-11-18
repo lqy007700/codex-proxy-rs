@@ -4,7 +4,7 @@ import type { ApiKeyAccountForm } from '../utils/upstreamApiKey'
 
 import type { Account, AccountGroupRef, AccountModelAccess } from '@/api'
 
-import { ZButton, ZDialog, ZEmpty, ZFormItem, ZSegmented, ZTextarea } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZEmpty, ZFormItem, ZInput, ZSegmented, ZTextarea } from '@codex-proxy/ui'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { isOpenAiApiKeyAccount, isOpenAiOAuthAccount } from '../utils/upstreamApiKey'
@@ -28,6 +28,7 @@ const emit = defineEmits<{
 }>()
 
 const open = defineModel<boolean>({ required: true })
+const displayName = defineModel<string>('displayName', { required: true })
 const apiKey = defineModel<ApiKeyAccountForm>('apiKey', { required: true })
 const oauthTransport = defineModel<ApiKeyAccountForm['transport']>('oauthTransport', { required: true })
 const transportOptions = [
@@ -71,6 +72,10 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
           />
         </div>
       </div>
+
+      <ZFormItem label="显示名称">
+        <ZInput v-model="displayName" aria-label="显示名称" placeholder="留空恢复默认显示" :disabled="saving" />
+      </ZFormItem>
 
       <ZFormItem v-if="isOpenAiOAuthAccount(account)" label="上游传输方式">
         <p v-if="configurationLoading" role="status" class="m-0 text-z-sm text-z-text-secondary">

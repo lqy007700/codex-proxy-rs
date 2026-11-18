@@ -192,6 +192,7 @@ const {
   configurationReady,
   showEditModal,
   editingAccount,
+  displayName: editingDisplayName,
   notes: editingNotes,
   schedulingEnabled,
   schedulingRole: editingSchedulingRole,
@@ -454,6 +455,7 @@ const {
 
     <AccountEditModal
       v-model="showEditModal"
+      v-model:display-name="editingDisplayName"
       v-model:api-key="editingApiKey"
       v-model:oauth-transport="editingOAuthTransport"
       v-model:notes="editingNotes"

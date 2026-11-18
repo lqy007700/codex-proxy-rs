@@ -285,6 +285,7 @@ pub struct AccountView {
     pub outbound_proxy_endpoint: Option<String>,
     pub id: String,
     pub name: String,
+    pub display_name: Option<String>,
     pub notes: Option<String>,
     pub provider: String,
     pub groups: Vec<AccountGroupRefView>,

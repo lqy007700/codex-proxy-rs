@@ -778,6 +778,7 @@ fn account_record(account: &ProviderAccount) -> AccountRecord {
         allow_credits: false,
         outbound_proxy_id: None,
         outbound_proxy_enabled: true,
+        display_name: None,
         notes: None,
         model_access: Default::default(),
         outbound_proxy: None,

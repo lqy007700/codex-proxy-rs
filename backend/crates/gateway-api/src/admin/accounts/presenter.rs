@@ -103,6 +103,7 @@ pub(super) fn account_view(
         capabilities: capabilities.into(),
         id: account.id.clone(),
         name: account.name,
+        display_name: account.display_name,
         notes: account.notes,
         provider: account.provider_kind.to_string(),
         groups: account

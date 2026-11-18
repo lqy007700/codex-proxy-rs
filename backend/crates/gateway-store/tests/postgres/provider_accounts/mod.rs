@@ -1226,6 +1226,7 @@ async fn terminal_admin_mutations_keep_revision_account_and_audit_atomic() {
             UpdateAccount {
                 model_mappings: Default::default(),
                 scheduling_role: None,
+                display_name: None,
                 notes: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
@@ -1308,6 +1309,7 @@ async fn account_proxy_edits_preserve_credentials_and_clear_egress_without_audit
     let command = UpdateAccount {
         model_mappings: Default::default(),
         scheduling_role: None,
+        display_name: None,
         notes: None,
         model_access: Default::default(),
         account_id: "acct_proxy".to_owned(),
@@ -1367,7 +1369,7 @@ async fn account_proxy_edits_preserve_credentials_and_clear_egress_without_audit
 }
 
 #[tokio::test]
-async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
+async fn account_labels_round_trip_and_survive_import_and_scheduling_updates() {
     let Some(database) = TestDatabase::create("account_notes").await else {
         return;
     };
@@ -1385,6 +1387,7 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
         model_mappings: Default::default(),
         scheduling_role: None,
         account_id: "acct_notes".to_owned(),
+        display_name: Some("  备用账号  ".to_owned()),
         notes: Some("  团队备用\n下月续费  ".to_owned()),
         enabled: true,
         concurrency_limit: None,
@@ -1404,17 +1407,36 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
         .unwrap()
         .account;
     assert_eq!(record.notes.as_deref(), Some("团队备用\n下月续费"));
+    assert_eq!(record.display_name.as_deref(), Some("备用账号"));
     assert_eq!(record.credential_revision.get(), 1);
+    let page = store
+        .list_accounts(
+            AccountListQuery {
+                page: 1,
+                page_size: PageSize::new(10).unwrap(),
+                provider_kind: None,
+                group_filter: None,
+                search: Some("备用账号".to_owned()),
+                status: None,
+                sort: None,
+            },
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.total, 1);
     let changed_fields: Vec<String> =
         sqlx::query_scalar("select changed_fields from admin_audit_events")
             .fetch_one(&database.pool)
             .await
             .unwrap();
     assert!(changed_fields.iter().any(|field| field == "notes"));
+    assert!(changed_fields.iter().any(|field| field == "display_name"));
     store
         .update_account(
             UpdateAccount {
                 scheduling_role: None,
+                display_name: None,
                 notes: None,
                 ..command.clone()
             },
@@ -1461,6 +1483,8 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
         .await
         .unwrap();
     assert!(!audits.contains("团队备用"));
+    assert!(!audits.contains("备用账号"));
+    assert_eq!(records[0].display_name.as_deref(), Some("备用账号"));
     repository
         .import_provider_accounts(ImportProviderAccounts {
             scope: ProviderAccountAdminScope {
@@ -1496,6 +1520,7 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
         .update_account(
             UpdateAccount {
                 scheduling_role: None,
+                display_name: Some("  ".to_owned()),
                 notes: Some(" \n\t ".to_owned()),
                 ..command
             },
@@ -1503,16 +1528,15 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        store
-            .load_account("acct_notes", AccountRuntimeSnapshot::default())
-            .await
-            .unwrap()
-            .unwrap()
-            .account
-            .notes,
-        None
-    );
+    let cleared = store
+        .load_account("acct_notes", AccountRuntimeSnapshot::default())
+        .await
+        .unwrap()
+        .unwrap()
+        .account;
+    assert_eq!(cleared.notes, None);
+    assert_eq!(cleared.display_name, None);
+    assert_eq!(cleared.name, record.name);
     database.close().await;
 }
 
@@ -1542,6 +1566,7 @@ async fn invalid_account_notes_roll_back_scheduling_revision_and_audit() {
                 model_mappings: Default::default(),
                 scheduling_role: None,
                 account_id: "acct_notes".to_owned(),
+                display_name: None,
                 notes: Some("备".repeat(501)),
                 enabled: false,
                 concurrency_limit: None,
@@ -2572,6 +2597,7 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
             model_mappings: Default::default(),
             scheduling_role: None,
             allow_credits: None,
+            display_name: None,
             notes: None,
             model_access: Default::default(),
             outbound_proxy: None,
@@ -2641,6 +2667,7 @@ async fn credential_rotation_and_settings_share_one_transaction() {
         model_mappings: Default::default(),
         scheduling_role: None,
         account_id: ACCOUNT_ID.to_owned(),
+        display_name: Some("统一显示".to_owned()),
         notes: Some("统一保存".to_owned()),
         enabled: false,
         concurrency_limit: Some(AccountConcurrencyLimit::new(3).unwrap()),
@@ -2679,6 +2706,7 @@ async fn credential_rotation_and_settings_share_one_transaction() {
     assert_eq!(before["concurrency_limit"], 3);
     assert_eq!(before["weight"], 7);
     assert_eq!(before["notes"], "统一保存");
+    assert_eq!(before["display_name"], "统一显示");
     assert_eq!(
         account_group_ids(&database.pool, ACCOUNT_ID).await,
         [GROUP_ID]
@@ -2712,6 +2740,7 @@ async fn credential_rotation_and_settings_share_one_transaction() {
             UpdateAccount {
                 scheduling_role: None,
                 enabled: true,
+                display_name: Some("must not persist".to_owned()),
                 notes: Some("must not persist".to_owned()),
                 ..settings.clone()
             },
@@ -3376,6 +3405,7 @@ async fn proxy_edit_preserves_an_inflight_token_refresh() {
             UpdateAccount {
                 model_mappings: Default::default(),
                 scheduling_role: None,
+                display_name: None,
                 notes: None,
                 model_access: Default::default(),
                 account_id: id.as_str().to_owned(),

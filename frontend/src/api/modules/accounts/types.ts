@@ -141,6 +141,7 @@ export interface Account {
   outboundProxyEndpoint: string | null
   id: string
   name: string
+  displayName: string | null
   notes: string | null
   provider: string
   resourceRef: string

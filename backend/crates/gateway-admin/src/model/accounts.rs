@@ -120,6 +120,7 @@ pub struct AccountRecord {
     pub provider_kind: ProviderKind,
     pub groups: Vec<AccountGroupRef>,
     pub name: String,
+    pub display_name: Option<String>,
     pub notes: Option<String>,
     pub email: Option<String>,
     pub upstream_user_id: Option<String>,
@@ -238,6 +239,8 @@ pub struct AccountCapacity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateAccount {
     pub account_id: String,
+    /// 缺省保留显示名称；空字符串恢复默认显示
+    pub display_name: Option<String>,
     /// 缺省保留备注；空字符串清空备注
     pub notes: Option<String>,
     pub enabled: bool,

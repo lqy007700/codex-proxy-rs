@@ -1,7 +1,7 @@
 import type { Account } from '@/api'
 
 type AccountIdentity = Pick<Account, 'id' | 'email'>
-  & Partial<Pick<Account, 'accountId' | 'name' | 'authenticationKind'>>
+  & Partial<Pick<Account, 'accountId' | 'name' | 'displayName' | 'authenticationKind'>>
 
 export function accountIdentityLabel(account: AccountIdentity): string {
   if (account.authenticationKind === 'api_key' && account.name)
@@ -15,6 +15,8 @@ export function accountIdentityLabel(account: AccountIdentity): string {
 }
 
 export function accountCompactIdentityLabel(account: AccountIdentity): string {
+  if (account.displayName)
+    return account.displayName
   const label = accountIdentityLabel(account)
   if (account.authenticationKind === 'api_key' || !account.email?.trim())
     return label

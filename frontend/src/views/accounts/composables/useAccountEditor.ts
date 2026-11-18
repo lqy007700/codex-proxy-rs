@@ -18,6 +18,7 @@ export function useAccountEditor(options: {
   const showEditModal = shallowRef(false)
   // 保存后列表可能因筛选移除该账号，编辑窗口的退场仍需保留原账号内容。
   const editingAccount = shallowRef<Account | null>(null)
+  const displayName = shallowRef('')
   const notes = shallowRef('')
   const schedulingEnabled = shallowRef(true)
   const concurrencyLimit = shallowRef('')
@@ -74,6 +75,7 @@ export function useAccountEditor(options: {
   function open(account: Account) {
     configurationRequest.invalidate()
     editingAccount.value = account
+    displayName.value = account.displayName ?? ''
     notes.value = account.notes ?? ''
     proxyMode.value = 'preserve'
     proxyId.value = ''
@@ -98,11 +100,11 @@ export function useAccountEditor(options: {
   }
 
   async function save() {
-    const accountId = editingAccount.value?.id
-    if (!accountId || saving.value)
+    const account = editingAccount.value
+    if (!account || saving.value)
       return
-    const isApiKey = isOpenAiApiKeyAccount(editingAccount.value)
-    const isOAuth = isOpenAiOAuthAccount(editingAccount.value)
+    const isApiKey = isOpenAiApiKeyAccount(account)
+    const isOAuth = isOpenAiOAuthAccount(account)
     if (isApiKey && !configurationReady.value)
       return
     if (isApiKey) {
@@ -128,12 +130,15 @@ export function useAccountEditor(options: {
     }
 
     await saveAction.run(async () => {
+      const name = displayName.value.trim()
+      const nameChanged = name !== (account.displayName ?? '')
       const mappings = Object.fromEntries(modelMappings.value.map(row => [row.requestedModel, row.upstreamModel]))
-      const originalMappings = editingAccount.value?.modelMappings ?? {}
+      const originalMappings = account.modelMappings ?? {}
       const mappingsChanged = Object.keys(mappings).length !== Object.keys(originalMappings).length
         || Object.entries(mappings).some(([source, target]) => originalMappings[source] !== target)
       const settings = {
-        accountId,
+        accountId: account.id,
+        displayName: nameChanged ? name : undefined,
         notes: notes.value,
         outboundProxyId: proxyMode.value === 'preserve'
           ? undefined
@@ -196,6 +201,7 @@ export function useAccountEditor(options: {
     configurationReady,
     showEditModal,
     editingAccount,
+    displayName,
     notes,
     schedulingEnabled,
     schedulingRole,

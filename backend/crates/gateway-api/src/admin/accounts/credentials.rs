@@ -213,6 +213,7 @@ pub struct UpdateAccountRequest {
     pub outbound_proxy_id: Option<String>,
     pub outbound_proxy_url: Option<super::wire::AccountProxyUpdate>,
     pub account_id: String,
+    pub display_name: Option<String>,
     pub notes: Option<String>,
     pub enabled: bool,
     #[serde(deserialize_with = "deserialize_required_nullable")]
@@ -229,6 +230,11 @@ impl UpdateAccountRequest {
         require_account_id(&self.account_id, "accountId")?;
         if let Some(connection) = &self.connection {
             connection.validate()?;
+        }
+        if self.display_name.as_deref().is_some_and(|name| {
+            name.trim().len() > MAX_NAME_BYTES || name.chars().any(char::is_control)
+        }) {
+            return Err(WireValidationError::new("displayName"));
         }
         validate_account_notes(self.notes.as_deref())?;
         parse_concurrency_limit(self.concurrency_limit)?;
@@ -250,6 +256,7 @@ impl UpdateAccountRequest {
                 self.outbound_proxy_url,
             )?,
             account_id: self.account_id,
+            display_name: self.display_name,
             notes: self.notes,
             enabled: self.enabled,
             concurrency_limit: parse_concurrency_limit(self.concurrency_limit)?,

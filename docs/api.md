@@ -1058,7 +1058,7 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 | `POST` | `/api/admin/accounts/import-tasks/stop` | `{ taskId }` | 跳过未开始的条目，已开始的条目继续完成 |
 | `POST` | `/api/admin/accounts/refresh` | `{ accountId }` | 手工刷新 OAuth credential（`idToken` / `accessToken` / `refreshToken`），不刷新额度 |
 | `POST` | `/api/admin/accounts/recover` | `{ accountId }` | 恢复账号启用、本地错误/额度/cooldown 事实及 Provider 临时状态；保留窗口上限与暂停依据，不访问上游 |
-| `POST` | `/api/admin/accounts/update` | `{ accountId, enabled, concurrencyLimit, weight, groupIds, notes?, schedulingRole?, modelAccess?, outboundProxyId?, outboundProxyUrl?, connection? }` | 一次更新账号设置；`connection` 支持 OpenAI OAuth 传输方式及 API Key 连接配置，见下文 |
+| `POST` | `/api/admin/accounts/update` | `{ accountId, enabled, concurrencyLimit, weight, groupIds, displayName?, notes?, schedulingRole?, modelAccess?, outboundProxyId?, outboundProxyUrl?, connection? }` | 一次更新账号设置；`connection` 支持 OpenAI OAuth 传输方式及 API Key 连接配置，见下文 |
 | `POST` | `/api/admin/accounts/batch-update` | `{ accountIds, enabled?, concurrencyLimit?, weight?, groupIds?, schedulingRole?, modelAccess?, allowCredits?, quotaLimits?, outboundProxyId?, outboundProxyUrl? }` | 一次事务更新所选账号；仅修改提供的字段，至少提供一项修改 |
 | `POST` | `/api/admin/accounts/delete` | `{ provider, accountIds }` | 批量删除 1–200 个账号 |
 | `GET` | `/api/admin/accounts/quota` | `accountId` | 读取当前额度，不强制访问上游；Provider 未提供额度能力时返回空额度投影 |
@@ -1092,7 +1092,10 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 `fallback` 不参与日常调度，仅在普通恢复耗尽或没有可用普通账号时尝试一次；保底仍须满足账号范围、模型与可用性限制。
 管理端连接测试可直接探测保底账号，不会改变其用途
 
-账号列表的 `search` 按字面量包含匹配名称、邮箱、内部账号 ID 和上游账号／用户 ID，不区分大小写；`%`、`_` 和 `\` 按普通字符处理
+账号视图的 `displayName` 是管理员设置的显示名称，默认返回 `null`。更新时省略或传 `null` 保留原值，传空字符串恢复默认显示。
+显示名称去除首尾空白后最多 512 个 UTF-8 字节，且不能包含控制字符
+
+账号列表的 `search` 按字面量包含匹配显示名称、原始名称、邮箱、内部账号 ID 和上游账号／用户 ID，不区分大小写；`%`、`_` 和 `\` 按普通字符处理
 
 OpenAI API Key 账号不主动发现或同步远端额度，账号列表展示本机累计用量。
 额度查询与刷新能力由 `capabilities.quota`、`capabilities.quotaRefresh` 声明，未声明刷新能力的账号不提供额度刷新操作

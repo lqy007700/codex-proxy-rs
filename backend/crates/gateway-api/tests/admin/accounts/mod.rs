@@ -507,6 +507,31 @@ mod batch_update {
 }
 
 #[test]
+fn single_update_should_validate_optional_display_name() {
+    use gateway_api::admin::accounts::UpdateAccountRequest;
+    use serde_json::json;
+
+    for (display_name, valid) in [
+        (json!(null), true),
+        (json!(""), true),
+        (json!("  主力账号  "), true),
+        (json!("名".repeat(171)), false),
+        (json!("账号\n名称"), false),
+    ] {
+        let request: UpdateAccountRequest = serde_json::from_value(json!({
+            "accountId": "acct_name", "enabled": true, "concurrencyLimit": null,
+            "weight": 1, "groupIds": [], "displayName": display_name
+        }))
+        .unwrap();
+        if valid {
+            request.validate().unwrap();
+        } else {
+            assert_eq!(request.validate().unwrap_err().field(), "displayName");
+        }
+    }
+}
+
+#[test]
 fn single_update_should_accept_optional_unicode_and_multiline_notes() {
     use gateway_api::admin::accounts::UpdateAccountRequest;
     use serde_json::json;

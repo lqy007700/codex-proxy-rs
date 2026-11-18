@@ -403,6 +403,7 @@ fn update(account_id: &str, selection: AccountProxySelection) -> UpdateAccount {
     UpdateAccount {
         model_mappings: Default::default(),
         scheduling_role: None,
+        display_name: None,
         notes: None,
         model_access: Default::default(),
         account_id: account_id.to_owned(),

@@ -58,6 +58,7 @@ interface AccountUpdateParam {
   outboundProxyUrl?: string
   outboundProxyId?: string
   accountId: string
+  displayName?: string
   notes?: string
   enabled: boolean
   concurrencyLimit: number | null

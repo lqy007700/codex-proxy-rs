@@ -60,6 +60,7 @@ pub struct ProviderAccountSummary {
     pub id: String,
     pub provider_kind: String,
     pub name: String,
+    pub display_name: Option<String>,
     pub notes: Option<String>,
     pub email: Option<String>,
     pub upstream_user_id: Option<String>,
@@ -258,6 +259,7 @@ pub struct BatchUpdateProviderAccountsAdmin {
     pub quota_limits: Option<gateway_core::account::AccountQuotaLimits>,
     pub outbound_proxy: Option<gateway_admin::model::proxies::AccountProxySelection>,
     pub account_ids: Vec<String>,
+    pub display_name: Option<String>,
     pub notes: Option<String>,
     pub enabled: Option<bool>,
     pub allow_credits: Option<bool>,
@@ -329,7 +331,7 @@ impl ProviderAccountStateUpdate {
     }
 }
 
-pub(crate) const ACCOUNT_SELECT: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
+pub(crate) const ACCOUNT_SELECT: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, display_name, notes, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
             has_refresh_token, access_token_expires_at, next_refresh_at, enabled, quota_limits, quota_paused, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
@@ -340,7 +342,7 @@ pub(crate) const ACCOUNT_SELECT: &str = "select coalesce(proxy_enabled, true) as
        on outbound_proxy_id = location_proxy_id
      where id = $1";
 
-pub(crate) const ACCOUNT_SELECT_BY_IDS: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
+pub(crate) const ACCOUNT_SELECT_BY_IDS: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, display_name, notes, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
             has_refresh_token, access_token_expires_at, next_refresh_at, enabled, quota_limits, quota_paused, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
@@ -352,7 +354,7 @@ pub(crate) const ACCOUNT_SELECT_BY_IDS: &str = "select coalesce(proxy_enabled, t
      where id = any($1::text[]) and provider_kind = $2
      order by id";
 
-pub(crate) const REFRESH_CANDIDATES_SELECT: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
+pub(crate) const REFRESH_CANDIDATES_SELECT: &str = "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, display_name, notes, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
             has_refresh_token, access_token_expires_at, next_refresh_at, enabled, quota_limits, quota_paused, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
@@ -492,6 +494,7 @@ pub(crate) fn account_summary_from_row(
         id: get(&row, "id")?,
         provider_kind: get(&row, "provider_kind")?,
         name: get(&row, "name")?,
+        display_name: get(&row, "display_name")?,
         notes: get(&row, "notes")?,
         email: get(&row, "email")?,
         upstream_user_id: get(&row, "upstream_user_id")?,

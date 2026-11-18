@@ -585,6 +585,9 @@ impl AccountStore for PgAdminAccountStore {
         if command.outbound_proxy.is_some() {
             changed_fields.push("outbound_proxy".to_owned());
         }
+        if command.display_name.is_some() {
+            changed_fields.push("display_name".to_owned());
+        }
         if command.notes.is_some() {
             changed_fields.push("notes".to_owned());
         }
@@ -594,6 +597,7 @@ impl AccountStore for PgAdminAccountStore {
                 account_ids: vec![command.account_id.clone()],
                 pauses: Default::default(),
                 quota_limits: None,
+                display_name: command.display_name,
                 notes: command.notes,
                 allow_credits: None,
                 enabled: Some(command.enabled),
@@ -709,6 +713,7 @@ impl AccountStore for PgAdminAccountStore {
                 account_ids: command.account_ids,
                 pauses,
                 quota_limits: command.quota_limits,
+                display_name: None,
                 notes: None,
                 allow_credits: command.allow_credits,
                 enabled: command.enabled,
@@ -941,6 +946,9 @@ pub(super) fn prepare_rotation(
         }
         if settings.outbound_proxy.is_some() {
             changed_fields.push("outbound_proxy".to_owned());
+        }
+        if settings.display_name.is_some() {
+            changed_fields.push("display_name".to_owned());
         }
         if settings.notes.is_some() {
             changed_fields.push("notes".to_owned());

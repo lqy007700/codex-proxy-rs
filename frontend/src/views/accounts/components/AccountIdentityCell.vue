@@ -10,7 +10,7 @@ import AccountFallbackIndicator from './AccountFallbackIndicator.vue'
 import AccountNotesPopover from './AccountNotesPopover.vue'
 
 type AccountIdentity = Pick<Account, 'id' | 'email' | 'planType' | 'planTypeDisplay'>
-  & Partial<Pick<Account, 'accountId' | 'notes' | 'name' | 'authenticationKind' | 'schedulingRole'>>
+  & Partial<Pick<Account, 'accountId' | 'notes' | 'name' | 'displayName' | 'authenticationKind' | 'schedulingRole'>>
 
 const props = withDefaults(
   defineProps<{
@@ -41,7 +41,11 @@ const visibleNotes = computed(() => props.showNotes ? props.account.notes : unde
 const displayTitle = computed(() => {
   if (props.nameOnly)
     return accountCompactIdentityLabel(props.account)
-  if (visibleNotes.value || props.titleMode === 'email' || props.account.authenticationKind === 'api_key')
+  if (props.titleMode === 'email')
+    return emailText.value
+  if (props.account.displayName)
+    return props.account.displayName
+  if (visibleNotes.value || props.account.authenticationKind === 'api_key')
     return emailText.value
   return emailText.value.split('@')[0]
 })
