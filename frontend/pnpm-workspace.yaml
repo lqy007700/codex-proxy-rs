@@ -3,3 +3,8 @@ autoInstallPeers: false
 # Git 依赖通过 prepack 生成产物；信任自有 UI 仓库，实际提交仍由锁文件固定。
 allowBuilds:
   '@codex-proxy/ui@git+https://github.com/zyycn/codex-proxy-ui.git': true
+
+# picomatch 仅用于构建，发版前检查成品不含该包；上游发布修复后移除此例外
+auditConfig:
+  ignoreGhsas:
+    - GHSA-fc5q-39xc-vjpf

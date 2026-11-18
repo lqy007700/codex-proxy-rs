@@ -36,6 +36,16 @@ runs:
       shell: bash
       run: pnpm --dir frontend build
 
+    - name: Check picomatch stays out of frontend assets
+      shell: bash
+      run: |
+        # Vite 的许可证清单列出实际打包的依赖，确保 GHSA-fc5q-39xc-vjpf 的审计例外只涵盖构建工具
+        report=frontend/dist/THIRD_PARTY_LICENSES.md
+        if ! test -s "$report" || grep -q '^## picomatch - ' "$report"; then
+          echo 'Expected a frontend dependency report without bundled picomatch' >&2
+          exit 1
+        fi
+
     - name: Upload frontend artifact
       if: inputs.upload-artifact == 'true'
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
