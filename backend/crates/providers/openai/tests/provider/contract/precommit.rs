@@ -112,7 +112,16 @@ async fn bare_websocket_bad_request_offers_http_error_only_for_native_responses_
         let mut stream = provider_with_base_url(&store, base_url)
             .execute(
                 planned_request("openai", generate_operation()),
-                context_for_request(request, CancellationToken::new()),
+                AttemptContext::new(
+                    request,
+                    NonZeroU32::MIN,
+                    SystemTime::now() + Duration::from_secs(30),
+                    account_policy(),
+                    AccountAttemptContext::new(BTreeSet::new(), None, None)
+                        .with_account_scope(contract_account_scope()),
+                    None,
+                    CancellationToken::new(),
+                ),
             )
             .await
             .unwrap();
