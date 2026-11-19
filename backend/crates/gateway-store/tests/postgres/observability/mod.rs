@@ -2061,6 +2061,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
                 response_id: Some("resp_observe_success".to_owned()),
                 upstream_request_id: Some("upstream_req_success".to_owned()),
                 search: Some("upstream-model".to_owned()),
+                ..Default::default()
             },
             current_page: 1,
             page_size: ObservabilityPageSize::new(10).expect("page size"),
