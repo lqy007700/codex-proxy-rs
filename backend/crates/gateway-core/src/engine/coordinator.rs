@@ -2672,6 +2672,9 @@ where
     }
 
     async fn finish_interruption(&mut self, error: &EngineError) -> Result<(), EngineError> {
+        if let Some(current) = self.current.as_mut() {
+            current.stream.abort();
+        }
         // 结算 I/O 可能继续等待，先冻结交付事实以保持终态与实际 HTTP 状态一致
         self.response_commit.finish();
         let (outcome, gateway_error) = match error {
