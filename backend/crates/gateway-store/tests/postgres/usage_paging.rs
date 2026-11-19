@@ -557,14 +557,19 @@ async fn error_origin_and_literal_account_search_share_pagination() {
         let id = format!("origin_{index}");
         seed(&database.pool, &id, start + TimeDelta::seconds(index), &[]).await;
         sqlx::query(
-            "update model_requests set outcome='failed', error_details=$4,
+            "update model_requests set outcome='failed', error_details=$4, error_kind=$5,
              request_observation_json=request_observation_json || jsonb_build_object(
-                 'account',jsonb_build_object('name',$2::text,'email',$3::text),
-                 'error',jsonb_build_object('kind',$5::text))
+                 'account',jsonb_build_object('name',$2::text,'email',$3::text,'authenticationKind','oauth'))
              where id=$1",
         )
-        .bind(id).bind(name).bind(email).bind(raw).bind(kind)
-        .execute(&database.pool).await.unwrap();
+        .bind(id)
+        .bind(name)
+        .bind(email)
+        .bind(raw)
+        .bind(kind)
+        .execute(&database.pool)
+        .await
+        .unwrap();
     }
 
     let repo = observability_repository(&database.pool);
