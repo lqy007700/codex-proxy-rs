@@ -85,13 +85,17 @@ function itemValueClass(tone?: string, accent?: boolean) {
 
     <div v-if="billing" class="flex items-center gap-1">
       <span
-        v-if="billing.serviceTierDisplay === 'Fast'"
+        v-if="billing.serviceTierDisplay === 'Fast' || billing.serviceTierDisplay === 'Ultrafast'"
         class="inline-flex size-4 items-center justify-center rounded-full bg-z-warning-container text-z-warning-on-container"
-        title="Fast 模式"
+        :title="`${billing.serviceTierDisplay} 模式`"
         role="img"
-        aria-label="Fast 模式"
+        :aria-label="`${billing.serviceTierDisplay} 模式`"
       >
-        <Zap class="size-3" stroke-width="2.2" aria-hidden="true" />
+        <template v-if="billing.serviceTierDisplay === 'Ultrafast'">
+          <Zap class="size-2" stroke-width="2.2" aria-hidden="true" />
+          <Zap class="-ml-0.5 size-2" stroke-width="2.2" aria-hidden="true" />
+        </template>
+        <Zap v-else class="size-3" stroke-width="2.2" aria-hidden="true" />
       </span>
       <UsageDetailPopover
         :title="billing.longContextBillingApplied ? '长上下文计费明细' : '计费明细'"
