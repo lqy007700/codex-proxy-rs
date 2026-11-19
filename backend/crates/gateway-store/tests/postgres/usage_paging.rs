@@ -557,9 +557,10 @@ async fn error_origin_and_literal_account_search_share_pagination() {
         let id = format!("origin_{index}");
         seed(&database.pool, &id, start + TimeDelta::seconds(index), &[]).await;
         sqlx::query(
-            "update model_requests set outcome='failed', provider_account_name_snapshot=$2,
-             provider_account_email_snapshot=$3, error_details=$4,
-             request_observation_json=jsonb_set(request_observation_json,'{error}',jsonb_build_object('kind',$5::text))
+            "update model_requests set outcome='failed', error_details=$4,
+             request_observation_json=request_observation_json || jsonb_build_object(
+                 'account',jsonb_build_object('name',$2::text,'email',$3::text),
+                 'error',jsonb_build_object('kind',$5::text))
              where id=$1",
         )
         .bind(id).bind(name).bind(email).bind(raw).bind(kind)
