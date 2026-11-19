@@ -673,6 +673,16 @@ where
                     error,
                     send_state,
                 } => {
+                    if error.kind() == ProviderErrorKind::InvalidRequest
+                        && error.client_visible_upstream_response().is_some_and(|response| {
+                            response.status() == 400
+                        })
+                        && self.response_commit.finish()
+                    {
+                        self.finish_provider_error_with_send_state(&error, send_state)
+                            .await?;
+                        return Err(provider_engine_error(error));
+                    }
                     self.record_client_retry_failure(&error).await;
                     let requirement = if self.delivery_committed {
                         CommitRequirement::AlreadyCommitted
