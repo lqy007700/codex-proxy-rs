@@ -4978,13 +4978,11 @@ fn bounded_server_error_retries_until_success() {
     block_on(session.collect_uncommitted()).unwrap();
     block_on(session.commit_downstream(Some(200))).unwrap();
     assert_eq!(provider.contexts.lock().unwrap().len(), 2);
-    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 2);
     assert_eq!(
         store.state.lock().unwrap().finalizations[0].outcome,
         ExecutionOutcome::Succeeded
     );
-    drop(session);
-    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 2);
 }
 
 #[test]
@@ -5059,7 +5057,7 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
     let contexts = provider.contexts.lock().unwrap();
     // 无保底时最多四次业务尝试，传输恢复独立占一次 attempt 且不能重置阶段
     assert_eq!(contexts.len(), 5);
-    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 4);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 5);
     assert_eq!(
         contexts[2].required_account().unwrap().as_str(),
         "acct_first"
@@ -5085,8 +5083,6 @@ fn bounded_capacity_and_service_failures_share_budget_after_transport_fallback()
         assert_eq!(decision["retryable"], index < 3);
         assert_eq!(decision["ordinaryRetryBlockers"], serde_json::json!([]));
     }
-    drop(session);
-    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 5);
 }
 
 #[test]
@@ -6866,7 +6862,7 @@ fn interrupted_first_attempt_write_never_restarts_selection_or_creates_a_zero_at
             assert!(futures::poll!(next.as_mut()).is_pending());
             drop(next);
             assert_eq!(store.state.lock().unwrap().created, 1);
-            assert_eq!(provider.released_leases.load(Ordering::SeqCst), 1);
+            assert_eq!(provider.released_leases.load(Ordering::SeqCst), 0);
             // 首写属于可丢弃观测；丢失返回确认后不臆测入库成功，也不能退回零次重新创建
             assert!(release.send(()).is_err());
             if cancel {
