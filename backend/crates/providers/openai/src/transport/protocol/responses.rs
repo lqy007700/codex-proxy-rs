@@ -70,6 +70,8 @@ pub struct CodexResponsesRequest {
     pub turn_state: Option<String>,
     /// turn metadata 透传头
     pub turn_metadata: Option<String>,
+    /// 实际入站为 WS 帧时，观测优先使用当前帧的轮次元数据
+    pub(crate) websocket_frame: bool,
     /// beta features 透传头
     pub beta_features: Option<String>,
     /// 下游 `version` 扩展头；存在时上游值由 Desktop 版本画像统一生成
@@ -623,6 +625,7 @@ impl CodexResponsesRequest {
             force_http_sse: false,
             turn_state: None,
             turn_metadata: None,
+            websocket_frame: false,
             beta_features: None,
             version: None,
             include_timing_metrics: None,
@@ -782,7 +785,11 @@ impl CodexResponsesRequest {
     ) -> CodexRequestSemantics {
         let mut semantics = codex_responses_request_semantics_with_turn_metadata(
             self.body(),
-            self.turn_metadata.as_deref(),
+            gateway_protocol::openai::codex::observed_turn_metadata(
+                self.body(),
+                self.turn_metadata.as_deref(),
+                self.websocket_frame,
+            ),
             previous_reasoning_effort_override,
         );
         // 官方 generate=false 只准备连接与上下文，不是模型推理

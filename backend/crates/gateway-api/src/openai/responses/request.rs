@@ -19,7 +19,6 @@ use crate::openai::generation::{
 
 const OPENAI_PROTOCOL: &str = "openai";
 const OPENAI_SUBAGENT_KEY: &str = "x-openai-subagent";
-const CODEX_TURN_METADATA_KEY: &str = "x-codex-turn-metadata";
 const PASSTHROUGH_HEADERS_CONTEXT_KEY: &str = "opaque_request_headers";
 const DOWNSTREAM_WEBSOCKET_CONNECTION_ID_CONTEXT_KEY: &str = "downstream_websocket_connection_id";
 
@@ -120,15 +119,17 @@ impl OpenAiRequestHeaders {
     fn protocol_context(
         &self,
         use_websocket: Option<bool>,
-        frame_turn_metadata: Option<&String>,
+        source: RequestDecodeSource,
     ) -> Map<String, Value> {
         let mut context = Map::new();
         insert_protocol_context(&mut context, "turn_state", self.turn_state.as_ref());
-        insert_protocol_context(
-            &mut context,
-            "turn_metadata",
-            frame_turn_metadata.or(self.turn_metadata.as_ref()),
-        );
+        insert_protocol_context(&mut context, "turn_metadata", self.turn_metadata.as_ref());
+        if matches!(source, RequestDecodeSource::WebSocketFrame) {
+            context.insert(
+                gateway_protocol::openai::codex::WEBSOCKET_FRAME_CONTEXT_KEY.to_owned(),
+                Value::Bool(true),
+            );
+        }
         insert_protocol_context(&mut context, "beta_features", self.beta_features.as_ref());
         insert_protocol_context(&mut context, "version", self.version.as_ref());
         insert_protocol_context(
@@ -338,11 +339,7 @@ pub(super) fn decode_request_object(
         .unwrap_or(ContinuationIntent::None);
 
     request_headers.apply_subagent(&mut object);
-    let frame_turn_metadata = match source {
-        RequestDecodeSource::Http => None,
-        RequestDecodeSource::WebSocketFrame => frame_turn_metadata(&object),
-    };
-    let protocol_context = request_headers.protocol_context(use_websocket, frame_turn_metadata);
+    let protocol_context = request_headers.protocol_context(use_websocket, source);
 
     let semantics =
         gateway_protocol::openai::codex_responses_request_semantics(&object, &protocol_context);
@@ -379,16 +376,6 @@ pub(super) fn decode_request_object(
             user_agent: None,
         },
     })
-}
-
-fn frame_turn_metadata(body: &Map<String, Value>) -> Option<&String> {
-    body.get("client_metadata")
-        .and_then(Value::as_object)
-        .and_then(|metadata| metadata.get(CODEX_TURN_METADATA_KEY))
-        .and_then(|value| match value {
-            Value::String(value) if !value.trim().is_empty() => Some(value),
-            _ => None,
-        })
 }
 
 fn inject_subagent_metadata(body: &mut Map<String, Value>, subagent: &str) {

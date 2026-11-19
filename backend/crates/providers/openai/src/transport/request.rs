@@ -745,8 +745,16 @@ fn replace_metadata_field(metadata: &mut Map<String, Value>, key: &str, value: O
 // 请求头的场景)
 fn apply_protocol_context(request: &mut CodexResponsesRequest, context: &Map<String, Value>) {
     request.passthrough_headers = decode_passthrough_headers(context);
-    request.turn_state =
-        context_string(context, "turn_state").or_else(|| request.turn_state.take());
+    request.websocket_frame = context
+        .get(gateway_protocol::openai::codex::WEBSOCKET_FRAME_CONTEXT_KEY)
+        .and_then(Value::as_bool)
+        == Some(true);
+    if request.websocket_frame && request.turn_state.is_some() {
+        // 当前帧的路由状态优先于首次握手的值
+        request.passthrough_headers.remove("x-codex-turn-state");
+    } else if let Some(state) = context_string(context, "turn_state") {
+        request.turn_state = Some(state);
+    }
     request.turn_metadata =
         context_string(context, "turn_metadata").or_else(|| request.turn_metadata.take());
     request.beta_features =
@@ -777,11 +785,9 @@ fn apply_protocol_context(request: &mut CodexResponsesRequest, context: &Map<Str
         .or_else(|| request.client_turn_id.take())
         .or_else(|| {
             // 复用 WS 时握手头可能属于上一轮，只从当前帧的元数据补全轮次
-            let metadata = context
-                .get("turn_metadata")
-                .filter(|_| request.downstream_websocket_connection_id.is_none())
-                .or_else(|| request.client_metadata()?.get("x-codex-turn-metadata"))?;
-            gateway_protocol::openai::turn_metadata_turn_id(metadata.as_str()?)
+            let metadata =
+                gateway_protocol::openai::codex::context_turn_metadata(request.body(), context)?;
+            gateway_protocol::openai::turn_metadata_turn_id(metadata)
         });
     request.responses_lite =
         context_string(context, "responses_lite").or_else(|| request.responses_lite.take());
