@@ -637,7 +637,8 @@ OAuth 账号默认 `prefer_websocket`，客户端使用 HTTP/SSE 时仍可能选
 `response.create` 的 UTF-8 字节数，包含 JSON 转义；等于上限仍可发送。未声明或值无效时不做大小预判。
 OAuth 与配置 `prefer_websocket` 的 API Key 账号均适用，HTTP 和 WS 入站的下游交付协议不变。
 超过上限的新链、持久化续接及未知外部 previous ID 在发送前选择 HTTP/SSE，下一请求重新按连接判断；
-显式 `generate=false` 预热返回 `websocket_message_too_large`，不转为 HTTP 或自动重试
+显式 `generate=false` 预热返回 `websocket_message_too_large`，不转为 HTTP 或自动重试。
+允许发送的文本超过 1 MiB 时按 1 MiB 分帧，接收方仍收到一条完整消息
 
 超过当前连接声明上限的 connection-local WS 续接，以及 HTTP `store=false` 成功后标记为 `ReplayRequired`
 的 WS 增量，均在发送前返回 `status: 400 / previous_response_not_found`。客户端应清除旧 ID，
