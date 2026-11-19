@@ -784,10 +784,14 @@ fn apply_protocol_context(request: &mut CodexResponsesRequest, context: &Map<Str
     request.client_turn_id = context_string(context, "turn_id")
         .or_else(|| request.client_turn_id.take())
         .or_else(|| {
-            // 复用 WS 时握手头可能属于上一轮，只从当前帧的元数据补全轮次
-            let metadata =
-                gateway_protocol::openai::codex::context_turn_metadata(request.body(), context)?;
-            gateway_protocol::openai::turn_metadata_turn_id(metadata)
+            // 握手元数据可用于首次请求语义，轮次归属仍由当前帧确定
+            let metadata = context
+                .get("turn_metadata")
+                .filter(|_| {
+                    !request.websocket_frame && request.downstream_websocket_connection_id.is_none()
+                })
+                .or_else(|| request.client_metadata()?.get("x-codex-turn-metadata"))?;
+            gateway_protocol::openai::turn_metadata_turn_id(metadata.as_str()?)
         });
     request.responses_lite =
         context_string(context, "responses_lite").or_else(|| request.responses_lite.take());

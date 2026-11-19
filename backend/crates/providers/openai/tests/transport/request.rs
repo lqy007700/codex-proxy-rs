@@ -566,6 +566,10 @@ fn websocket_turn_id_uses_current_frame_metadata_on_a_reused_connection() {
         .unwrap()
         .with_context(Map::from_iter([
             (
+                gateway_protocol::openai::codex::WEBSOCKET_FRAME_CONTEXT_KEY.to_owned(),
+                json!(true),
+            ),
+            (
                 "downstream_websocket_connection_id".to_owned(),
                 json!("connection"),
             ),
