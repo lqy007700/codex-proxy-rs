@@ -2645,6 +2645,7 @@ request/response/upstream ID、outcome 与搜索文本。`search` 仅供明细�
 `all` 返回全部模型请求审计（含进行中），`success` 返回成功请求，`error` 返回失败、取消和未完成请求
 明细支持 `accountSearch`，按请求发生时保存的账号名称、邮箱及当前自定义显示名称做不区分大小写的字面量包含匹配。
 `scope=error` 可用 `errorOrigin` 筛选上游响应（`upstream`）、代理处理（`proxy`）、上游连接（`connection`）或未知来源（`unknown`）。
+错误来源筛选需要 PostgreSQL 16 或更高版本。
 列表的 `logicalOutcome` 为请求实际结果，`message` 为可空的错误摘要，分页与总数均按所选范围计算
 `attemptCount` 为总尝试次数，包含首次尝试；尚未发起尝试时为 `0`
 非默认 `scope` 的 `search` 还支持模型执行 ID 包含匹配，默认用量范围保持原有搜索规则

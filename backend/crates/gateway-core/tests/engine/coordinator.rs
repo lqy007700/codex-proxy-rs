@@ -546,6 +546,7 @@ struct FakeStore {
     state: Mutex<StoreState>,
     failures: BTreeSet<StoreWriteFailure>,
     create_gate: Mutex<Option<oneshot::Receiver<()>>>,
+    intermediate_gate: Mutex<Option<oneshot::Receiver<()>>>,
     finalize_gate: Mutex<Option<oneshot::Receiver<()>>>,
 }
 
@@ -637,6 +638,10 @@ impl ExecutionStore for FakeStore {
         &self,
         failure: IntermediateFailure,
     ) -> Result<(), StoreError> {
+        let gate = self.intermediate_gate.lock().unwrap().take();
+        if let Some(gate) = gate {
+            gate.await.expect("intermediate failure released");
+        }
         let mut state = self.state.lock().expect("store lock");
         state.intermediate_failures += 1;
         state
@@ -6420,7 +6425,7 @@ fn cancellation_before_pending_delivery_commit_reaches_terminal_state() {
     );
 
     let (release, gate) = oneshot::channel();
-    *store.send_gate.lock().unwrap() = Some(gate);
+    *store.finalize_gate.lock().unwrap() = Some(gate);
     block_on(async {
         let mut cancel = Box::pin(session.cancel_and_finalize());
         assert!(futures::poll!(cancel.as_mut()).is_pending());
