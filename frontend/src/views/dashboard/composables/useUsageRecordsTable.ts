@@ -43,7 +43,9 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
       provider: providerQuery.value || undefined,
       search: search.value,
       accountSearch: accountSearch.value,
-      errorOrigin: recordScope.value === 'error' ? errorOrigin.value || undefined : undefined,
+      errorOrigin: recordScope.value === 'error'
+        ? errorOrigin.value || undefined
+        : undefined,
       scope: recordScope.value,
     }
   }
@@ -86,7 +88,12 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   onMounted(() => {
     void loadUsageRecords()
   })
-  watch([options.callerFilters, providerQuery, recordScope, errorOrigin], () => {
+  watch([
+    options.callerFilters,
+    providerQuery,
+    recordScope,
+    errorOrigin,
+  ], () => {
     void loadUsageRecords()
   })
   watch([search, accountSearch], (_value, _previous, onCleanup) => {
