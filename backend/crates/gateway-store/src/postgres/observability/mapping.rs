@@ -25,6 +25,8 @@ pub(crate) fn store_usage_filter(filter: admin_observability::UsageFilter) -> Us
         client_api_key_ref: filter.client_api_key_ref,
         request_id: filter.request_id,
         provider_account_ref: filter.provider_account_ref,
+        account_search: filter.account_search,
+        error_origin: filter.error_origin,
         operation: filter.operation,
         provider_kind: filter.provider_kind,
         model: filter.model,

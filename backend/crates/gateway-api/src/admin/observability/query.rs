@@ -57,6 +57,8 @@ pub struct UsageQuery {
     pub provider: Option<String>,
     pub request_id: Option<String>,
     pub account_id: Option<String>,
+    pub account_search: Option<String>,
+    pub error_origin: Option<String>,
     pub route: Option<String>,
     pub model: Option<String>,
     pub status_code: Option<i64>,
@@ -315,6 +317,15 @@ pub(crate) fn usage_filter(query: &UsageQuery) -> Result<domain::UsageFilter, Wi
         client_api_key_ref: non_empty(query.client_api_key_id.clone()),
         request_id: non_empty(query.request_id.clone()),
         provider_account_ref: non_empty(query.account_id.clone()),
+        account_search: non_empty(query.account_search.clone()),
+        error_origin: match trimmed(query.error_origin.as_deref()) {
+            None => None,
+            Some("proxy") => Some(domain::UsageErrorOrigin::Proxy),
+            Some("upstream") => Some(domain::UsageErrorOrigin::Upstream),
+            Some("connection") => Some(domain::UsageErrorOrigin::Connection),
+            Some("unknown") => Some(domain::UsageErrorOrigin::Unknown),
+            Some(_) => return Err(WireValidationError::new("errorOrigin")),
+        },
         operation: non_empty(query.route.clone()),
         provider_kind: non_empty(query.provider.clone()),
         model: non_empty(query.model.clone()),
@@ -336,6 +347,12 @@ pub(crate) fn analytics_filter(
     }
     if query.search.is_some() {
         return Err(WireValidationError::new("search"));
+    }
+    if query.account_search.is_some() {
+        return Err(WireValidationError::new("accountSearch"));
+    }
+    if query.error_origin.is_some() {
+        return Err(WireValidationError::new("errorOrigin"));
     }
     usage_filter(query)
 }
@@ -366,6 +383,9 @@ pub(crate) fn usage_command(
         current_page,
         page_size: page_size_value,
     };
+    if command.filter.error_origin.is_some() && command.scope != domain::UsageRecordScope::Error {
+        return Err(WireValidationError::new("errorOrigin"));
+    }
     if let Some(range) = usage_search_range(command.filter.search.as_deref(), timezone)? {
         // 时间关键词取代日期选择范围，不再参与账号或模型的文本匹配
         command.range = range;

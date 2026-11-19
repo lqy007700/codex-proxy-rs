@@ -505,14 +505,13 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
     connectionTestFinishedAt.value = ''
     appendConnectionTestLog('准备发送测试请求', 'info')
     testingConnections.add(account.id)
+    let run: ConnectionTestRun | undefined
     try {
       await withMinimumDuration(
         () =>
           new Promise<void>((resolve) => {
-            connectionTestRun = {
-              accountId: account.id,
-              resolve,
-            }
+            run = { accountId: account.id, resolve }
+            connectionTestRun = run
             const params = new URLSearchParams({
               accountId: account.id,
               modelId: connectionTestSelectedModel.value,
@@ -524,15 +523,17 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
               failConnectionTest('当前浏览器不支持连接测试')
           }),
       )
-      if (connectionTestStatus.value === 'running') {
+      if (connectionTestRun === run && connectionTestStatus.value === 'running') {
         recordConnectionTestFailure('failure', '测试失败', '测试连接未返回完成事件')
       }
     }
     catch (error: unknown) {
-      recordConnectionTestFailure('failure', '测试失败', errorMessage(error, '测试连接失败'))
+      if (connectionTestRun === run)
+        failConnectionTest(errorMessage(error, '测试连接失败'))
     }
     finally {
-      clearConnectionTestRun()
+      if (connectionTestRun === run)
+        clearConnectionTestRun()
     }
   }
 
@@ -547,12 +548,12 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
     catch {
       failConnectionTest('测试响应解析失败')
     }
-  })
+  }, { flush: 'sync' })
 
   watch(connectionTestStreamError, (error) => {
     if (error && connectionTestRun)
       failConnectionTest('测试连接已断开')
-  })
+  }, { flush: 'sync' })
 
   watch([
     showConnectionTestModal,

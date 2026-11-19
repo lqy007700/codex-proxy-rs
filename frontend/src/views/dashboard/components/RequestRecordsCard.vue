@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@codex-proxy/ui'
 import type { UsageListRecord } from '@/api'
-import { defineTableColumns, useTableColumns, ZButton, ZCard, ZDatePicker, ZIconButton, ZInput, ZPagination, ZSegmented, ZTableColumnSettings } from '@codex-proxy/ui'
+import { defineTableColumns, useTableColumns, ZButton, ZCard, ZDatePicker, ZIconButton, ZInput, ZPagination, ZSegmented, ZSelect, ZTableColumnSettings } from '@codex-proxy/ui'
 import { CloudRain, Eye, List, Sun } from '@lucide/vue'
 
 import { computed, shallowRef, watch } from 'vue'
@@ -44,11 +44,20 @@ const recordViewOptions = [
   { label: '成功', value: 'success', icon: Sun },
   { label: '错误', value: 'error', icon: CloudRain },
 ]
+const errorOriginOptions = [
+  { label: '全部来源', value: '' },
+  { label: '上游响应', value: 'upstream' },
+  { label: '代理处理', value: 'proxy' },
+  { label: '上游连接', value: 'connection' },
+  { label: '未知来源', value: 'unknown' },
+]
 const { timeRange, disabledDate, latestTimeRangeParams }
   = useUsageTimeRange()
 
 const {
   searchQuery,
+  accountSearchQuery,
+  errorOrigin,
   recordScope,
   providerQuery,
   usagePagination,
@@ -147,6 +156,14 @@ watch(timeRange, () => {
                 class="w-60 max-w-full"
               />
               <ProviderFilter v-model="providerQuery" :disabled="refreshingList" />
+              <ZInput v-model="accountSearchQuery" class="w-52" placeholder="账号名称或邮箱" aria-label="筛选账号名称或邮箱" />
+              <ZSelect
+                v-if="recordScope === 'error'"
+                v-model="errorOrigin"
+                class="w-36"
+                aria-label="错误来源"
+                :options="errorOriginOptions"
+              />
             </div>
 
             <UsageFilters

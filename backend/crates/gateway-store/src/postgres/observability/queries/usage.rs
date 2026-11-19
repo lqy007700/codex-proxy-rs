@@ -43,6 +43,24 @@ pub(crate) fn push_usage_filter(
         query.push(format!(" and {alias}.provider_account_ref = "));
         query.push_bind(value.clone());
     }
+    if let Some(value) = &filter.account_search {
+        let pattern = literal_contains_pattern(value);
+        query
+            .push(format!(
+                " and ({alias}.provider_account_name_snapshot ilike "
+            ))
+            .push_bind(pattern.clone())
+            .push(format!(
+                " escape '\\' or {alias}.provider_account_email_snapshot ilike "
+            ))
+            .push_bind(pattern.clone())
+            .push(format!(
+                " escape '\\' or exists (select 1 from provider_accounts account
+                    where account.id = {alias}.provider_account_ref and account.display_name ilike "
+            ))
+            .push_bind(pattern)
+            .push(" escape '\\'))");
+    }
     if let Some(value) = &filter.operation {
         query.push(format!(" and {alias}.operation = "));
         query.push_bind(value.clone());
@@ -98,6 +116,9 @@ pub(crate) fn push_usage_filter(
         query.push(format!(" and {alias}.upstream_request_id = "));
         query.push_bind(value.clone());
     }
+    if let Some(origin) = filter.error_origin {
+        push_usage_error_origin(query, alias, origin);
+    }
     if let Some(value) = &filter.search {
         let pattern = literal_contains_pattern(value);
         query.push(format!(" and ({alias}.requested_model_id like "));
@@ -127,6 +148,85 @@ pub(crate) fn push_usage_filter(
             .push(" escape '\\'");
         query.push(")");
     }
+}
+
+// 仅解读持久化的结构化错误和关闭码，与管理端显示来源使用同一组事实
+const SAVED_ERROR_FACTS: &str = "(select exists (
+              select 1 from (values
+                (saved_error.body -> 'code'),
+                (saved_error.body -> 'type'),
+                (saved_error.body -> 'message')
+              ) as field(value)
+              where jsonb_typeof(field.value) = 'string' and field.value <> '\"\"'::jsonb
+            ) as has_upstream_error,
+            case when saved_upstream.body ->> 'type' = 'websocket.close'
+              and jsonb_typeof(saved_upstream.body -> 'code') = 'number'
+              and (saved_upstream.body ->> 'code') ~ '^[0-9]{1,5}$'
+              and (saved_upstream.body -> 'code') <= '65535'::jsonb
+              then saved_upstream.body ->> 'code'
+            end as websocket_close_code
+     from lateral (
+       select case when pg_input_is_valid(mr.error_details, 'jsonb') then
+         case when jsonb_typeof(mr.error_details::jsonb -> 'upstream') = 'string'
+           and pg_input_is_valid(mr.error_details::jsonb ->> 'upstream', 'jsonb')
+           then (mr.error_details::jsonb ->> 'upstream')::jsonb
+         end
+       end as body
+       -- 保留子查询边界，让错误字段和关闭码复用同一行已解码的上游正文
+       offset 0
+     ) saved_upstream
+     cross join lateral (
+       select coalesce(saved_upstream.body -> 'error', saved_upstream.body #> '{response,error}') as body
+     ) saved_error) facts";
+
+fn push_usage_error_origin(
+    statement: &mut QueryBuilder<Postgres>,
+    alias: &str,
+    origin: admin_observability::UsageErrorOrigin,
+) {
+    use admin_observability::{UsageErrorEvidence::*, UsageErrorOrigin};
+    statement.push(" and case");
+    for &(evidence, result) in UsageErrorOrigin::RULES {
+        statement.push(" when ");
+        match evidence {
+            ProviderErrorCode => {
+                statement.push(format!("{alias}.provider_error_code <> ''"));
+            }
+            UpstreamStatusAtLeast(min) => {
+                statement
+                    .push(format!("{alias}.upstream_status_code >= "))
+                    .push_bind(i32::from(min));
+            }
+            SavedUpstreamErrorOrClose => {
+                statement.push(format!("{alias}.error_details is not null and (select facts.has_upstream_error or facts.websocket_close_code is not null from lateral "))
+                    .push(SAVED_ERROR_FACTS.replace("mr.error_details", &format!("{alias}.error_details"))).push(")");
+            }
+            ErrorKind(values) => {
+                statement
+                    .push(format!("{alias}.error_kind = any("))
+                    .push_bind(values)
+                    .push(")");
+            }
+            Continuation(values) => {
+                statement
+                    .push(format!("{alias}.continuation_unavailable_reason = any("))
+                    .push_bind(values)
+                    .push(")");
+            }
+            ConnectionExit(values) => {
+                statement
+                    .push(format!("{alias}.upstream_connection_exit_reason = any("))
+                    .push_bind(values)
+                    .push(")");
+            }
+        }
+        statement.push(" then ").push_bind(result.as_str());
+    }
+    statement
+        .push(" else ")
+        .push_bind(UsageErrorOrigin::Unknown.as_str())
+        .push(" end = ")
+        .push_bind(origin.as_str());
 }
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =

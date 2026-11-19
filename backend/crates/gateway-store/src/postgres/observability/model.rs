@@ -47,6 +47,8 @@ pub struct UsageRecordFilter {
     pub client_api_key_ref: Option<String>,
     pub request_id: Option<String>,
     pub provider_account_ref: Option<String>,
+    pub account_search: Option<String>,
+    pub error_origin: Option<admin_observability::UsageErrorOrigin>,
     pub operation: Option<String>,
     pub provider_kind: Option<String>,
     pub model: Option<String>,
@@ -85,6 +87,11 @@ impl UsageRecordFilter {
             validate_optional_text(value, MAX_FILTER_BYTES, field)?;
         }
         validate_optional_text(self.search.as_deref(), MAX_SEARCH_BYTES, "search filter")?;
+        validate_optional_text(
+            self.account_search.as_deref(),
+            MAX_SEARCH_BYTES,
+            "account search",
+        )?;
         if self
             .status_code
             .is_some_and(|status| !(100..=599).contains(&status))

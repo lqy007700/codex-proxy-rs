@@ -511,3 +511,79 @@ async fn request_status_pages_share_one_request_timeline() {
     assert_eq!(errors.len(), 2);
     database.close().await;
 }
+
+#[tokio::test]
+async fn error_origin_and_literal_account_search_share_pagination() {
+    use gateway_admin::model::observability::{UsageErrorOrigin, UsageRecordScope};
+
+    let Some(database) = TestDatabase::create("usage_error_origin").await else {
+        return;
+    };
+    let start = Utc::now() - TimeDelta::minutes(3);
+    let details = serde_json::json!({
+        "upstream": serde_json::json!({"response": {"error": {"code": "invalid_value"}}}).to_string()
+    })
+    .to_string();
+    for (index, name, email, kind, raw) in [
+        (
+            0,
+            "Primary % East",
+            "first@example.test",
+            "transport",
+            details.as_str(),
+        ),
+        (
+            1,
+            "Primary x East",
+            "second@example.test",
+            "transport",
+            details.as_str(),
+        ),
+        (
+            2,
+            "Backup",
+            "literal%@example.test",
+            "transport",
+            details.as_str(),
+        ),
+        (
+            3,
+            "Primary % East",
+            "fourth@example.test",
+            "transport",
+            "legacy message",
+        ),
+    ] {
+        let id = format!("origin_{index}");
+        seed(&database.pool, &id, start + TimeDelta::seconds(index), &[]).await;
+        sqlx::query(
+            "update model_requests set outcome='failed', provider_account_name_snapshot=$2,
+             provider_account_email_snapshot=$3, error_details=$4,
+             request_observation_json=jsonb_set(request_observation_json,'{error}',jsonb_build_object('kind',$5::text))
+             where id=$1",
+        )
+        .bind(id).bind(name).bind(email).bind(raw).bind(kind)
+        .execute(&database.pool).await.unwrap();
+    }
+
+    let repo = observability_repository(&database.pool);
+    for (current_page, expected) in [(1, Some("origin_2")), (2, Some("origin_0")), (3, None)] {
+        let page = repo
+            .list_usage_records(UsageRecordQuery {
+                scope: UsageRecordScope::Error,
+                range: ObservabilityRange::new(start, start + TimeDelta::minutes(1)).unwrap(),
+                filter: UsageRecordFilter {
+                    account_search: Some("%".to_owned()),
+                    error_origin: Some(UsageErrorOrigin::Upstream),
+                    ..Default::default()
+                },
+                current_page,
+                page_size: ObservabilityPageSize::new(1).unwrap(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.total, 2);
+        assert_eq!(page.items.first().map(|row| row.id.as_str()), expected);
+    }
+    database.close().await;
+}

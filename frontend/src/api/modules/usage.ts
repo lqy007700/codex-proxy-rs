@@ -553,9 +553,14 @@ interface PageQuery {
 
 export type UsageRecordScope = 'all' | 'success' | 'error'
 
-type UsagePageQuery = UsageRangeQuery & PageQuery & { search?: string, scope?: UsageRecordScope }
+type UsagePageQuery = UsageRangeQuery & PageQuery & {
+  search?: string
+  scope?: UsageRecordScope
+  accountSearch?: string
+  errorOrigin?: UsageErrorOrigin
+}
 
-type OpsErrorPageQuery = Omit<UsagePageQuery, 'scope'>
+type OpsErrorPageQuery = Omit<UsagePageQuery, 'scope' | 'accountSearch' | 'errorOrigin'>
 
 interface UsageDetailQuery {
   id: string

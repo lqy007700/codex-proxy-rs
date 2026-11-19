@@ -239,30 +239,31 @@ async fn serve_responses_websocket(socket: Socket, session: ResponsesWebSocketSe
         }
         request_count = request_count.saturating_add(1);
         // 初步解码只保留路由事实，避免整份正文跨越准入等待和响应交付
-        let model_hint = match decode_response_create_with_context(&payload, &OpenAiRequestHeaders::default()) {
-            Ok(decoded) => Some(decoded.metadata().requested_model().to_owned()),
-            Err(error) => {
-                trace_rejected_request(
-                    &correlation_id,
-                    connection.id(),
-                    &payload,
-                    "decode",
-                    &error.to_string(),
-                );
-                if send_protocol_error(
-                    &mut connection,
-                    StatusCode::BAD_REQUEST,
-                    error.protocol_body(),
-                    &correlation_id,
-                )
-                .await
-                    == ForwardOutcome::Disconnect
-                {
-                    break;
+        let model_hint =
+            match decode_response_create_with_context(&payload, &OpenAiRequestHeaders::default()) {
+                Ok(decoded) => Some(decoded.metadata().requested_model().to_owned()),
+                Err(error) => {
+                    trace_rejected_request(
+                        &correlation_id,
+                        connection.id(),
+                        &payload,
+                        "decode",
+                        &error.to_string(),
+                    );
+                    if send_protocol_error(
+                        &mut connection,
+                        StatusCode::BAD_REQUEST,
+                        error.protocol_body(),
+                        &correlation_id,
+                    )
+                    .await
+                        == ForwardOutcome::Disconnect
+                    {
+                        break;
+                    }
+                    continue;
                 }
-                continue;
-            }
-        };
+            };
         // deadline 与 Text 可能同时就绪；在任何上游执行开始前再次封住该竞争窗口
         if connection.is_expired() {
             trace_rejected_request(

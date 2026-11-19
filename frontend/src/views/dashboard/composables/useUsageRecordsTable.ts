@@ -1,5 +1,5 @@
 import type { Ref } from 'vue'
-import type { UsageRecordScope } from '@/api'
+import type { UsageErrorOrigin, UsageRecordScope } from '@/api'
 import type { CallerUsageFilters } from '@/api/modules/usage'
 import type { UsageTimeRangeParams } from '@/composables/useUsageTimeRange'
 import { computed, onMounted, shallowRef, watch } from 'vue'
@@ -15,6 +15,9 @@ interface UseUsageRecordsTableOptions {
 export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   const searchQuery = shallowRef('')
   const search = computed(() => searchQuery.value.trim() || undefined)
+  const accountSearchQuery = shallowRef('')
+  const accountSearch = computed(() => accountSearchQuery.value.trim() || undefined)
+  const errorOrigin = shallowRef<UsageErrorOrigin | ''>('')
   const providerQuery = shallowRef('')
   const recordScope = shallowRef<UsageRecordScope>('all')
   let tableParams = snapshot()
@@ -39,6 +42,8 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
       ...options.callerFilters.value,
       provider: providerQuery.value || undefined,
       search: search.value,
+      accountSearch: accountSearch.value,
+      errorOrigin: recordScope.value === 'error' ? errorOrigin.value || undefined : undefined,
       scope: recordScope.value,
     }
   }
@@ -62,7 +67,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   }
 
   function handlePageChange(nextPage: number) {
-    if (tableParams.search !== search.value) {
+    if (tableParams.search !== search.value || tableParams.accountSearch !== accountSearch.value) {
       void loadUsageRecords()
       return
     }
@@ -71,7 +76,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
 
   function handlePageSizeChange(nextPageSize: number) {
     pageSize.value = nextPageSize
-    if (tableParams.search !== search.value) {
+    if (tableParams.search !== search.value || tableParams.accountSearch !== accountSearch.value) {
       void loadUsageRecords()
       return
     }
@@ -81,12 +86,12 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   onMounted(() => {
     void loadUsageRecords()
   })
-  watch([options.callerFilters, providerQuery, recordScope], () => {
+  watch([options.callerFilters, providerQuery, recordScope, errorOrigin], () => {
     void loadUsageRecords()
   })
-  watch(search, (_value, _previous, onCleanup) => {
+  watch([search, accountSearch], (_value, _previous, onCleanup) => {
     const timer = setTimeout(() => {
-      if (tableParams.search !== search.value)
+      if (tableParams.search !== search.value || tableParams.accountSearch !== accountSearch.value)
         void loadUsageRecords()
     }, 250)
     onCleanup(() => clearTimeout(timer))
@@ -94,6 +99,8 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
 
   return {
     searchQuery,
+    accountSearchQuery,
+    errorOrigin,
     providerQuery,
     recordScope,
     usagePagination,

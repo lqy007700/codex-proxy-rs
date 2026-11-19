@@ -165,6 +165,8 @@ pub struct UsageFilter {
     pub client_api_key_ref: Option<String>,
     pub request_id: Option<String>,
     pub provider_account_ref: Option<String>,
+    pub account_search: Option<String>,
+    pub error_origin: Option<UsageErrorOrigin>,
     pub operation: Option<String>,
     pub provider_kind: Option<String>,
     pub model: Option<String>,
@@ -789,12 +791,23 @@ pub struct DashboardObservation {
 }
 
 /// 根据已记录事实推导的错误位置，不表示责任归属
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UsageErrorOrigin {
     Proxy,
     Upstream,
     Connection,
     Unknown,
+}
+
+/// 来源规则所依赖的已保存事实，供内存投影与持久层分页查询共同解释
+#[derive(Clone, Copy)]
+pub enum UsageErrorEvidence {
+    ProviderErrorCode,
+    UpstreamStatusAtLeast(u16),
+    SavedUpstreamErrorOrClose,
+    ErrorKind(&'static [&'static str]),
+    Continuation(&'static [&'static str]),
+    ConnectionExit(&'static [&'static str]),
 }
 
 impl UsageErrorOrigin {
