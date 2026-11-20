@@ -15,36 +15,38 @@ const props = defineProps<{ account: Account, seed?: AccountModelTestDetail }>()
 const emit = defineEmits<{ history: [account: Account], started: [] }>()
 const open = defineModel<boolean>({ required: true })
 
-const templates: { value: string, label: string, kind: AccountModelTestKind, prompt: string }[] = [
+const templates = [
   {
-    value: 'blank',
-    label: '空白题目',
-    kind: 'text',
-    prompt: '',
+    value: 'ultraman-sled',
+    label: '山姆奥特曼坐雪橇',
+    prompt: '请直接返回完整的单文件HTML代码：使用内联SVG绘制山姆奥特曼坐着雪橇在雪山上的2D动画。SVG必须设置viewBox，并用SVG或CSS实现动画；不要使用canvas、JavaScript、外部资源或Markdown代码块。你不需要任何测试',
   },
   {
-    value: 'logic',
-    label: '逻辑排序',
-    kind: 'text',
-    prompt: 'A、B、C、D 排成一列。A 在 C 前面，B 紧挨在 D 前面，C 不能排最后。列出所有满足条件的排列，并解释为什么没有其他排列。',
+    value: 'elaina-london',
+    label: '伊蕾娜在伦敦',
+    prompt: '创建一个HTML，内容是SVG绘制「伊蕾娜的精致插画，地点位于伦敦」的2D动画，你不需要任何测试',
   },
   {
-    value: 'json',
-    label: '格式约束',
-    kind: 'text',
-    prompt: '返回一个 JSON 数组，包含三个对象。每个对象只有 name 和 score 两个键，score 分别为 8、13、21。第三个名字由前两个名字的首字组成。不要使用 Markdown。',
+    value: 'rukongai-walk',
+    label: '黑崎一护和井上织姬逛流魂街',
+    prompt: '创建一个HTML，内容是SVG绘制「黑崎一护和井上织姬在流魂街手牵手逛街」的2D动画，你不需要任何测试',
   },
   {
-    value: 'poster',
-    label: '图片 · 海报构图',
-    kind: 'image',
-    prompt: '生成一张露营海报。月亮在左上角，帐篷在右下角，标题写「山间一夜」，画面只使用蓝色和橙色。',
+    value: 'underwater-dance',
+    label: '喜羊羊和海绵宝宝在水下跳舞',
+    prompt: '创建一个HTML，内容是SVG绘制「喜羊羊和海绵宝宝在珊迪的水下家园里跳舞」的2D动画，你不需要任何测试',
   },
   {
-    value: 'svg',
-    label: '动画 · 循环球',
-    kind: 'animation',
-    prompt: '输出一个独立的 SVG。画布为 300×160，蓝色小球在黄色平台上方循环跳动，用 SVG 动画实现。不要引用外部资源或脚本，只输出 SVG 源码。',
+    value: 'pixel-whale-crab',
+    label: '像素鲸鱼大战像素螃蟹',
+    prompt: '创建一个HTML，内容是SVG绘制「蓝色像素大鲸鱼大战橙色像素小螃蟹」的2D动画，你不需要任何测试',
+  },
+  {
+    value: 'pelican-bicycle',
+    label: '鹈鹕在海边骑自行车',
+    prompt: `创建一个可直接打开的单文件 HTML，用原生 SVG 绘制鹈鹕在海边骑自行车。风格简约温暖，奶油白、海水绿与橘黄配色，包含沙滩、海浪、太阳和灯塔，不依赖外部素材。
+
+注意：鹈鹕长嘴和喉囊明显，手扶车把、身体坐稳；双脚始终跟随脚蹬，左右相差半圈，膝盖自然弯曲，腿长不变，遮挡正确。车轮、踩踏、海浪与围巾动画协调，支持同步暂停／继续及晴日／落日切换。`,
   },
 ]
 const kinds = [
@@ -53,7 +55,7 @@ const kinds = [
   { value: 'animation', label: 'SVG 动画' },
 ] as const
 
-const templateId = ref('blank')
+const templateId = ref<string>()
 const kind = ref<AccountModelTestKind>('text')
 const prompt = ref('')
 const modelId = ref<string>()
@@ -71,19 +73,18 @@ const result = shallowRef<AccountModelTestDetail>()
 const running = computed(() => Boolean(testId.value) && (!result.value || result.value.status === 'running'))
 const canGenerateImage = computed(() => props.account.provider === 'openai'
   && !(props.account.authenticationKind === 'oauth' && props.account.planType?.trim().toLowerCase() === 'free'))
-const visibleTemplates = computed(() => templates.filter(item => item.kind !== 'image' || canGenerateImage.value))
 const visibleKinds = computed(() => kinds.filter(item => item.value !== 'image' || canGenerateImage.value))
 const promptTooLong = computed(() => new TextEncoder().encode(prompt.value).length > 32768)
 const canSubmit = computed(() => !submitting.value && !running.value && (kind.value === 'image' || !models.loading.value)
   && Boolean(selectedModelId.value && prompt.value.trim())
   && !promptTooLong.value && (kind.value !== 'image' || canGenerateImage.value))
 
-function applyTemplate(value = templateId.value) {
+function applyTemplate(value?: string) {
+  templateId.value = value
   const item = templates.find(item => item.value === value)
   if (!item)
     return
-  templateId.value = item.value
-  kind.value = item.kind
+  kind.value = 'animation'
   prompt.value = item.prompt
 }
 
@@ -188,7 +189,7 @@ void loadModels()
       </div>
       <div class="grid gap-3 sm:grid-cols-2">
         <ZFormItem label="题目模板">
-          <ZSelect :model-value="templateId" :options="visibleTemplates" aria-label="题目模板" :disabled="submitting" @update:model-value="applyTemplate" />
+          <ZSelect :model-value="templateId" :options="templates" aria-label="题目模板" placeholder="选择内置题" clearable :disabled="submitting" @update:model-value="applyTemplate" />
         </ZFormItem>
         <ZFormItem label="请求类型">
           <ZSelect :model-value="kind" :options="visibleKinds" aria-label="请求类型" :disabled="submitting" @update:model-value="value => kind = value || 'text'" />
@@ -211,7 +212,7 @@ void loadModels()
         <p v-if="promptTooLong" class="m-0 text-z-sm text-z-error-text">
           提示词不能超过 32 KiB
         </p>
-        <ZButton v-if="templateId !== 'blank' && !submitting" size="small" class="justify-self-start" @click="applyTemplate()">
+        <ZButton v-if="templateId && !submitting" size="small" class="justify-self-start" @click="applyTemplate(templateId)">
           恢复原题
         </ZButton>
       </ZFormItem>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AccountModelTestPreview as Preview } from '../utils/modelTestPreview'
 import type { Account, AccountModelTestDetail, AccountModelTestSummary } from '@/api'
 import { defineTableColumns, ZButton, ZCard, ZDialog, ZEmpty, ZPagination, ZSelect, ZTable, ZTag } from '@codex-proxy/ui'
 import { useIntervalFn } from '@vueuse/core'
@@ -9,7 +10,9 @@ import { usePagedQuery } from '@/composables/usePagedQuery'
 import { useRequestState } from '@/composables/useRequestState'
 import { accountCompactIdentityLabel } from '@/utils/accountIdentity'
 import { formatDuration } from '@/utils/format'
+import AccountModelTestPreview from './AccountModelTestPreview.vue'
 import AccountModelTestResult from './AccountModelTestResult.vue'
+import AccountModelTestThumbnail from './AccountModelTestThumbnail.vue'
 
 const { accountName, submitted } = defineProps<{ accountName: string, submitted: number }>()
 const emit = defineEmits<{ rerun: [account: Account, record: AccountModelTestDetail] }>()
@@ -21,6 +24,7 @@ const columns = defineTableColumns<AccountModelTestSummary>([
   { key: 'kind', label: '类型', width: 104 },
   { key: 'status', label: '状态', width: 106 },
   { key: 'durationMs', label: '耗时', width: 90 },
+  { key: 'preview', label: '结果预览', width: 152 },
   { key: 'actions', label: '操作', width: 112 },
 ])
 const kinds = { text: '文本', image: '图片', animation: 'SVG 动画' }
@@ -40,6 +44,14 @@ const { page, pageSize, total, items, loading, error, execute, reloadFromStart }
   load: ({ page }, options) => getAccountModelTests({ page, accountId: accountId.value || undefined }, options),
 })
 const showDetail = ref(false)
+const showPreview = ref(false)
+const enlargedPreview = shallowRef<Preview>()
+
+function enlargePreview(preview: Preview) {
+  enlargedPreview.value = preview
+  showPreview.value = true
+}
+
 const selectedId = ref('')
 const detail = shallowRef<AccountModelTestDetail>()
 const detailRequest = useRequestState()
@@ -175,6 +187,9 @@ void loadAccounts()
       <template #durationMs="{ row }">
         {{ formatDuration(row.durationMs) }}
       </template>
+      <template #preview="{ row }">
+        <AccountModelTestThumbnail :key="row.id" :record="row" @enlarge="enlargePreview" />
+      </template>
       <template #actions="{ row }">
         <ZButton size="small" @click="openDetail(row.id)">
           查看详情
@@ -191,6 +206,15 @@ void loadAccounts()
       @current-change="next => execute({ page: next })"
     />
   </ZCard>
+
+  <ZDialog v-model="showPreview" title="结果预览" width="68rem">
+    <AccountModelTestPreview v-if="showPreview && enlargedPreview" :preview="enlargedPreview" />
+    <template #footer>
+      <ZButton @click="showPreview = false">
+        关闭
+      </ZButton>
+    </template>
+  </ZDialog>
 
   <ZDialog v-model="showDetail" title="测试详情" width="46rem">
     <div v-if="detail" class="grid gap-3">

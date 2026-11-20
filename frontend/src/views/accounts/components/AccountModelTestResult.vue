@@ -3,29 +3,14 @@ import type { AccountModelTestDetail } from '@/api'
 import { ZButton, ZTag } from '@codex-proxy/ui'
 import { computed } from 'vue'
 
-import { accountModelTestImageUrl } from '@/api'
 import { useCopyText } from '@/composables/useCopyText'
 import { formatDuration } from '@/utils/format'
+import { accountModelTestPreview } from '../utils/modelTestPreview'
+import AccountModelTestPreview from './AccountModelTestPreview.vue'
 
 const { result } = defineProps<{ result: AccountModelTestDetail }>()
 const copyText = useCopyText()
-const imageUrl = computed(() => result.hasImage
-  ? accountModelTestImageUrl(result.id)
-  : '')
-const animationUrl = computed(() => {
-  if (result.kind !== 'animation' || !result.text)
-    return ''
-  const source = result.text.trim()
-  const lineEnd = source.indexOf('\n')
-  const fence = '```'
-  const svg = lineEnd > 0 && source.slice(0, lineEnd).trimEnd().toLowerCase() === `${fence}svg` && source.endsWith(fence)
-    ? source.slice(lineEnd + 1, -fence.length).trim()
-    : source
-  if (!/^<svg(?:\s|>)/i.test(svg) || !svg.endsWith('</svg>'))
-    return ''
-  // SVG 仅通过图片上下文预览，浏览器禁用其中的脚本和外部资源
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
-})
+const preview = computed(() => accountModelTestPreview(result))
 </script>
 
 <template>
@@ -49,9 +34,9 @@ const animationUrl = computed(() => {
     <p v-if="result.error" class="m-0 wrap-anywhere text-z-sm text-z-error-text" role="alert">
       {{ result.error }}
     </p>
-    <div v-if="imageUrl || animationUrl" class="grid justify-items-start gap-2">
-      <img :src="imageUrl || animationUrl" alt="模型生成结果" class="max-h-80 w-auto max-w-full rounded-z object-contain">
-      <a v-if="imageUrl" :href="imageUrl" download class="text-z-sm text-z-link">下载图片</a>
+    <div v-if="preview" class="grid gap-2">
+      <AccountModelTestPreview :preview="preview" />
+      <a v-if="preview.kind === 'image'" :href="preview.source" download class="justify-self-start text-z-sm text-z-link">下载图片</a>
     </div>
     <div v-if="result.text !== null" class="grid min-w-0 gap-2">
       <div class="flex items-center justify-between gap-2">
