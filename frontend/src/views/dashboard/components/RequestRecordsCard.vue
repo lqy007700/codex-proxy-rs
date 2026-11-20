@@ -6,7 +6,6 @@ import { CloudRain, Eye, List, Sun } from '@lucide/vue'
 
 import { computed, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import ProviderFilter from '@/components/ProviderFilter.vue'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
 import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
 import { useUsageCallerScope } from '@/composables/useUsageCallerScope'
@@ -56,10 +55,8 @@ const { timeRange, disabledDate, latestTimeRangeParams }
 
 const {
   searchQuery,
-  accountSearchQuery,
   errorOrigin,
   recordScope,
-  providerQuery,
   usagePagination,
   loading,
   error,
@@ -144,7 +141,12 @@ watch(timeRange, () => {
                 清除限定
               </ZButton>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
+            <UsageFilters
+              v-model:search="searchQuery"
+              :loading="loading"
+              :refreshing="refreshingList"
+              @refresh="refreshUsageRecords"
+            >
               <ZDatePicker
                 v-model="timeRange"
                 type="daterange"
@@ -155,8 +157,6 @@ watch(timeRange, () => {
                 aria-label="请求日期范围，仅可选择最近 31 天"
                 class="w-60 max-w-full"
               />
-              <ProviderFilter v-model="providerQuery" :disabled="refreshingList" />
-              <ZInput v-model="accountSearchQuery" class="w-52" placeholder="账号名称或邮箱" aria-label="筛选账号名称或邮箱" />
               <ZSelect
                 v-if="recordScope === 'error'"
                 v-model="errorOrigin"
@@ -164,14 +164,7 @@ watch(timeRange, () => {
                 aria-label="错误来源"
                 :options="errorOriginOptions"
               />
-            </div>
 
-            <UsageFilters
-              v-model:search="searchQuery"
-              :loading="loading"
-              :refreshing="refreshingList"
-              @refresh="refreshUsageRecords"
-            >
               <template #actions>
                 <ZTableColumnSettings
                   :options="columnOptions"

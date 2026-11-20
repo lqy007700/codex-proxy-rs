@@ -15,10 +15,7 @@ interface UseUsageRecordsTableOptions {
 export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   const searchQuery = shallowRef('')
   const search = computed(() => searchQuery.value.trim() || undefined)
-  const accountSearchQuery = shallowRef('')
-  const accountSearch = computed(() => accountSearchQuery.value.trim() || undefined)
   const errorOrigin = shallowRef<UsageErrorOrigin | ''>('')
-  const providerQuery = shallowRef('')
   const recordScope = shallowRef<UsageRecordScope>('all')
   let tableParams = snapshot()
   const table = useStablePagedQuery({
@@ -40,9 +37,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     return {
       ...options.latestTimeRangeParams(),
       ...options.callerFilters.value,
-      provider: providerQuery.value || undefined,
       search: search.value,
-      accountSearch: accountSearch.value,
       errorOrigin: recordScope.value === 'error'
         ? errorOrigin.value || undefined
         : undefined,
@@ -69,7 +64,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   }
 
   function handlePageChange(nextPage: number) {
-    if (tableParams.search !== search.value || tableParams.accountSearch !== accountSearch.value) {
+    if (tableParams.search !== search.value) {
       void loadUsageRecords()
       return
     }
@@ -78,7 +73,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
 
   function handlePageSizeChange(nextPageSize: number) {
     pageSize.value = nextPageSize
-    if (tableParams.search !== search.value || tableParams.accountSearch !== accountSearch.value) {
+    if (tableParams.search !== search.value) {
       void loadUsageRecords()
       return
     }
@@ -90,15 +85,14 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   })
   watch([
     options.callerFilters,
-    providerQuery,
     recordScope,
     errorOrigin,
   ], () => {
     void loadUsageRecords()
   })
-  watch([search, accountSearch], (_value, _previous, onCleanup) => {
+  watch(search, (_value, _previous, onCleanup) => {
     const timer = setTimeout(() => {
-      if (tableParams.search !== search.value || tableParams.accountSearch !== accountSearch.value)
+      if (tableParams.search !== search.value)
         void loadUsageRecords()
     }, 250)
     onCleanup(() => clearTimeout(timer))
@@ -106,9 +100,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
 
   return {
     searchQuery,
-    accountSearchQuery,
     errorOrigin,
-    providerQuery,
     recordScope,
     usagePagination,
     loading,
