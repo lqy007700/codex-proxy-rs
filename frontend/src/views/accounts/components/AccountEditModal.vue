@@ -29,6 +29,7 @@ const emit = defineEmits<{
 
 const open = defineModel<boolean>({ required: true })
 const displayName = defineModel<string>('displayName', { required: true })
+const fastMode = defineModel<Account['fastMode']>('fastMode', { required: true })
 const apiKey = defineModel<ApiKeyAccountForm>('apiKey', { required: true })
 const oauthTransport = defineModel<ApiKeyAccountForm['transport']>('oauthTransport', { required: true })
 const transportOptions = [
@@ -95,6 +96,20 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         <ZEmpty v-else-if="!configurationReady" title="上游设置读取失败" description="请关闭后重试" size="small" surface="none" role="alert" />
         <AccountApiKeyFields v-else v-model="apiKey" editing :disabled="saving" />
       </section>
+
+      <ZFormItem v-if="account.provider === 'openai'" label="快速模式">
+        <ZSegmented
+          v-model="fastMode"
+          class="w-64 max-w-full"
+          aria-label="快速模式"
+          :options="[
+            { label: '跟随客户端', value: 'default' },
+            { label: '开启', value: 'enabled' },
+            { label: '关闭', value: 'disabled' },
+          ]"
+          :disabled="saving"
+        />
+      </ZFormItem>
 
       <AccountSettingsFields
         v-model:enabled="enabled"

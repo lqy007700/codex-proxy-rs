@@ -1,5 +1,5 @@
 import type { RequestOptions } from '../../request'
-import type { Account, AccountIdParam, AccountModelAccess, AccountRefreshResponse, AccountSchedulingRole } from './types'
+import type { Account, AccountIdParam, AccountModelAccess, AccountRefreshResponse, AccountSchedulingRole, FastMode } from './types'
 import request from '../../request'
 
 export interface AccountPageMeta {
@@ -59,6 +59,7 @@ interface AccountUpdateParam {
   outboundProxyId?: string
   accountId: string
   displayName?: string
+  fastMode?: FastMode
   notes?: string
   enabled: boolean
   concurrencyLimit: number | null

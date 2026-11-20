@@ -8314,7 +8314,30 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 Some("default"),
                 Some(3_437_500),
             ),
-            (FastMode::Disabled, false, None, None, None, Some(3_437_500)),
+            (
+                FastMode::Disabled,
+                false,
+                None,
+                None,
+                Some("default"),
+                Some(3_437_500),
+            ),
+            (
+                FastMode::Disabled,
+                false,
+                Some(Value::Null),
+                None,
+                Some("default"),
+                Some(3_437_500),
+            ),
+            (
+                FastMode::Disabled,
+                false,
+                Some(json!("auto")),
+                None,
+                Some("default"),
+                Some(3_437_500),
+            ),
             (
                 FastMode::Disabled,
                 false,
@@ -8480,6 +8503,14 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 )]));
             let operation = Operation::Generate(GenerateRequest::from_protocol_payload(payload));
             let original = operation.clone();
+            let scope = Arc::new(FrozenAccountScope::new(
+                Arc::new(RuntimeAccountDirectory::new(BTreeMap::from([(
+                    ProviderAccountId::new("acct_provider_contract").unwrap(),
+                    RuntimeAccount::new(ProviderKind::new("openai").unwrap(), BTreeSet::new())
+                        .with_fast_mode(fast_mode),
+                )]))),
+                ClientRoutingScope::all_accounts(),
+            ));
             let mut stream = provider_with_base_url(&store, base_url)
                 .execute(
                     planned_request_with_presentation(
@@ -8495,10 +8526,19 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                                 ])
                         }),
                     ),
-                    context_with_fast_policy(
-                        "req_service_tier",
+                    AttemptContext::new(
+                        RequestAttemptContext::new(
+                            ModelRequestId::new("req_service_tier").unwrap(),
+                            ClientApiKeyId::new("key_openai_contract").unwrap(),
+                        )
+                        .with_request_location(Some(global_request_location())),
+                        NonZeroU32::MIN,
+                        SystemTime::now() + Duration::from_secs(30),
+                        account_policy(),
+                        AccountAttemptContext::new(BTreeSet::new(), None, None)
+                            .with_account_scope(scope),
+                        None,
                         CancellationToken::new(),
-                        fast_mode,
                     ),
                 )
                 .await

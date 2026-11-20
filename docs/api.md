@@ -1072,7 +1072,7 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 | `POST` | `/api/admin/accounts/import-tasks/stop` | `{ taskId }` | 跳过未开始的条目，已开始的条目继续完成 |
 | `POST` | `/api/admin/accounts/refresh` | `{ accountId }` | 手工刷新 OAuth credential（`idToken` / `accessToken` / `refreshToken`），不刷新额度 |
 | `POST` | `/api/admin/accounts/recover` | `{ accountId }` | 恢复账号启用、本地错误/额度/cooldown 事实及 Provider 临时状态；保留窗口上限与暂停依据，不访问上游 |
-| `POST` | `/api/admin/accounts/update` | `{ accountId, enabled, concurrencyLimit, weight, groupIds, displayName?, notes?, schedulingRole?, modelAccess?, outboundProxyId?, outboundProxyUrl?, connection? }` | 一次更新账号设置；`connection` 支持 OpenAI OAuth 传输方式及 API Key 连接配置，见下文 |
+| `POST` | `/api/admin/accounts/update` | `{ accountId, enabled, concurrencyLimit, weight, groupIds, displayName?, fastMode?, notes?, schedulingRole?, modelAccess?, outboundProxyId?, outboundProxyUrl?, connection? }` | 一次更新账号设置；`connection` 支持 OpenAI OAuth 传输方式及 API Key 连接配置，见下文 |
 | `POST` | `/api/admin/accounts/batch-update` | `{ accountIds, enabled?, concurrencyLimit?, weight?, groupIds?, schedulingRole?, modelAccess?, allowCredits?, quotaLimits?, outboundProxyId?, outboundProxyUrl? }` | 一次事务更新所选账号；仅修改提供的字段，至少提供一项修改 |
 | `POST` | `/api/admin/accounts/delete` | `{ provider, accountIds }` | 批量删除 1–200 个账号 |
 | `GET` | `/api/admin/accounts/quota` | `accountId` | 读取当前额度，不强制访问上游；Provider 未提供额度能力时返回空额度投影 |
@@ -1193,6 +1193,21 @@ OpenAI 主动额度刷新和正常响应携带的明确套餐会同步到账号�
 只有对应窗口的新使用率观测或策略调整才能解除暂停，缺失窗口和迟到响应不推断为恢复。
 额度观测可能延迟，上限不是严格的消费封顶。该策略与 `allowCredits`、自动使用重置卡独立，
 也不改变普通／保底用途、会话绑定、原生续接及请求恢复预算
+
+### 账号快速模式
+
+账号列表和详情返回 `fastMode`。`POST /api/admin/accounts/update` 可为 OpenAI 账号设置此字段，省略或 `null` 保留当前值。
+新账号默认为 `default`，设为 `default` 可恢复跟随客户端
+
+| `fastMode` | 行为 |
+| --- | --- |
+| `default`（跟随客户端） | 保留客户端的 `service_tier` |
+| `enabled`（开启） | 所选上游模型目录声明 `priority` 时，将缺失、`null` 或 `default` 改为 `priority` |
+| `disabled`（关闭） | 将 `priority`、`fast`、`auto`、缺失或 `null` 改为显式 `default`，不继承上游项目默认档位 |
+
+仅处理 OpenAI Responses 顶层 `service_tier`，不改变 `flex`、`ultrafast`、嵌套字段或其他协议。
+HTTP 和每个 WebSocket `response.create` 从请求冻结的账号目录读取实际选中账号的策略，换号时按新账号重新计算。
+显式账号设置优先于 request 中间件的调用级 Fast 设置；attempt 中间件仍能改写实际出站字段，统计和费用按最终出站档位计算
 
 ### 账号模型限制
 
@@ -1795,23 +1810,7 @@ GET 和 POST 均返回 `enabled`、`leadMinutes`、`nextDiscoveryAtDisplay`、`n
 ## 6. 账号分组
 
 分组是 Provider-neutral 的账号集合；一个组可包含任意 Provider 账号，一个账号也可属于多个组。
-分组详情和列表返回 `fastMode`，取值为 `default`（默认）、`enabled`（开启）、`disabled`（关闭）。
-创建时省略默认为 `default`，更新时省略或 `null` 保留现值。
-策略取自 Client Key 绑定的分组，包括已禁用分组；多分组冲突时关闭优先，其次开启，最后默认。
-未绑定分组的 Key 跟随客户端，不按最终所选账号的分组判断
-
-- 默认：保留客户端的 `service_tier`
-- 开启：所选上游模型的目录声明 `priority` 时，将缺失、`null` 或显式 `default` 改为 `priority`；目录未声明则保留原值
-- 关闭：将 `priority`（含 `fast` 别名）改为显式 `default`，继续处理请求
-
-策略只作用于 OpenAI Responses 的顶层 `service_tier`，不改变 `flex`、`ultrafast` 等其他显式档位、嵌套字段或其他 Provider。
-OAuth 和 Responses API Key 共用上述档位规则，出站兼容层不额外删除原生 Responses 的 `auto/default`。
-宿主策略在 request 中间件之后应用，形成 attempt 输入基线；attempt 中间件继续改写档位时，以改写后的实际发送值为准。
-HTTP 和每个 WebSocket `response.create` 均使用请求开始时的分组策略，同一请求重试保持该策略；
-HTTP 请求头及新建 WS 的握手提示按当时的最终出站档位构造；复用 WS 时不重发握手头，
-每个 `response.create` 仍独立应用档位策略，请求档位统计与本地费用估算使用各帧的最终出站档位
-
-分组详情和完整列表还返回 `allowImageGeneration`。创建时省略默认为 `true`，更新时省略或 `null` 保留现值。
+分组详情和完整列表返回 `allowImageGeneration`。创建时省略默认为 `true`，更新时省略或 `null` 保留现值。
 Client Key 任一绑定分组（包括已禁用分组）为 `false` 时，禁止生图；未绑定分组的 Key 允许生图。
 限制覆盖 Images 生成与编辑，以及 Responses 中的原生 `image_generation` 工具声明或显式工具选择，
 HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.create` 独立校验并返回对应错误事件。
@@ -1822,8 +1821,8 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 | --- | --- | --- | --- |
 | `GET` | `/api/admin/account-groups` | `page`、`pageSize`、`search`、`enabled` | 分页查询分组；返回账号可用性、并发槽位（Redis 不可用时 `usedSlots=null`）及成功请求 USD 用量 |
 | `GET` | `/api/admin/account-groups/options` | `page`、`pageSize`、`search`、`enabled` | 分页查询分组选择项；item 仅返回 `id`、`name`、`color`、`enabled` |
-| `POST` | `/api/admin/account-groups/create` | `{ name, description, color, fastMode?, allowImageGeneration? }` | 创建空分组；`color` 严格为 `#RRGGBBAA`，返回时统一大写 |
-| `POST` | `/api/admin/account-groups/update` | `{ id, name, description, color, fastMode?, allowImageGeneration? }` | 更新分组信息、Fast 模式和生图权限 |
+| `POST` | `/api/admin/account-groups/create` | `{ name, description, color, allowImageGeneration? }` | 创建空分组；`color` 严格为 `#RRGGBBAA`，返回时统一大写 |
+| `POST` | `/api/admin/account-groups/update` | `{ id, name, description, color, allowImageGeneration? }` | 更新分组信息和生图权限 |
 | `POST` | `/api/admin/account-groups/enable` | `{ id }` | 启用 |
 | `POST` | `/api/admin/account-groups/disable` | `{ id }` | 禁用；已绑定 Key 保持受限，不回退到全部账号 |
 | `POST` | `/api/admin/account-groups/delete` | `{ id }` | 删除未被 Client Key 引用的组 |

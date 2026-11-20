@@ -1,8 +1,6 @@
 import type { RequestOptions } from '../request'
 import request from '../request'
 
-export type FastMode = 'default' | 'enabled' | 'disabled'
-
 export interface AccountGroupRef {
   id: string
   name: string
@@ -27,7 +25,6 @@ export interface AccountGroupUsage {
 }
 
 export interface AccountGroup extends AccountGroupRef {
-  fastMode: FastMode
   allowImageGeneration: boolean
   description: string | null
   memberCount: number
@@ -75,7 +72,6 @@ interface AccountGroupListParams {
 }
 
 interface AccountGroupCreateParam {
-  fastMode?: FastMode
   allowImageGeneration?: boolean
   name: string
   description: string | null
@@ -83,7 +79,6 @@ interface AccountGroupCreateParam {
 }
 
 interface AccountGroupUpdateParam {
-  fastMode?: FastMode
   allowImageGeneration?: boolean
   id: string
   name: string

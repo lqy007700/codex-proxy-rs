@@ -214,6 +214,7 @@ pub struct UpdateAccountRequest {
     pub outbound_proxy_url: Option<super::wire::AccountProxyUpdate>,
     pub account_id: String,
     pub display_name: Option<String>,
+    pub fast_mode: Option<gateway_core::account::FastMode>,
     pub notes: Option<String>,
     pub enabled: bool,
     #[serde(deserialize_with = "deserialize_required_nullable")]
@@ -257,6 +258,7 @@ impl UpdateAccountRequest {
             )?,
             account_id: self.account_id,
             display_name: self.display_name,
+            fast_mode: self.fast_mode,
             notes: self.notes,
             enabled: self.enabled,
             concurrency_limit: parse_concurrency_limit(self.concurrency_limit)?,

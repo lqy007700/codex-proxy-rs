@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ZCard, ZCheckbox, ZConfirmDialog, ZPagination, ZTable } from '@codex-proxy/ui'
-import { ImageOff, Zap, ZapOff } from '@lucide/vue'
+import { ImageOff } from '@lucide/vue'
 import AppPageHeader from '@/components/AppPageHeader.vue'
 import { usePageSelection } from '@/composables/usePageSelection'
 import AccountGroupActions from './components/AccountGroupActions.vue'
@@ -98,19 +98,6 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
                   <strong class="truncate text-z text-z-text">
                     {{ row.name }}
                   </strong>
-                  <span
-                    v-if="row.fastMode !== 'default'"
-                    class="inline-flex size-4 shrink-0 items-center justify-center rounded-full"
-                    :class="row.fastMode === 'enabled'
-                      ? 'bg-z-warning-container text-z-warning-on-container'
-                      : 'bg-z-fill-tertiary text-z-text-tertiary'"
-                    :title="row.fastMode === 'enabled' ? 'Fast 已开启' : 'Fast 已关闭'"
-                    role="img"
-                    :aria-label="row.fastMode === 'enabled' ? 'Fast 已开启' : 'Fast 已关闭'"
-                  >
-                    <Zap v-if="row.fastMode === 'enabled'" class="size-3" stroke-width="2.2" aria-hidden="true" />
-                    <ZapOff v-else class="size-3" stroke-width="2.2" aria-hidden="true" />
-                  </span>
                   <span
                     v-if="!row.allowImageGeneration"
                     class="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-z-fill-tertiary text-z-text-tertiary"

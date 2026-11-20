@@ -47,19 +47,6 @@ const description = computed(() => props.group
         />
       </ZFormItem>
       <div class="flex flex-wrap items-start gap-x-6 gap-y-3">
-        <ZFormItem label="快速模式" class="min-w-0">
-          <ZSegmented
-            v-model="form.fastMode"
-            class="w-64 max-w-full"
-            aria-label="快速模式"
-            :options="[
-              { label: '默认', value: 'default' },
-              { label: '开启', value: 'enabled' },
-              { label: '关闭', value: 'disabled' },
-            ]"
-            :disabled="saving"
-          />
-        </ZFormItem>
         <ZFormItem label="允许生图" class="min-w-0">
           <ZSegmented
             :model-value="form.allowImageGeneration ? 'enabled' : 'disabled'"

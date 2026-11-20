@@ -791,7 +791,10 @@ impl AccountsService for DefaultAccountsService {
     ) -> Result<AccountUpdateResult, AdminError> {
         let account_id = ProviderAccountId::new(command.account_id.clone())
             .map_err(|_| AdminError::invalid("服务商账号 ID 不合法"))?;
-        let (_, provider) = self.provider_for_account(&account_id).await?;
+        let (item, provider) = self.provider_for_account(&account_id).await?;
+        if command.fast_mode.is_some() && item.account.provider_kind.as_str() != "openai" {
+            return Err(AdminError::invalid("只有 OpenAI 账号支持快速模式"));
+        }
         let enabled = command.enabled;
         let result = self
             .accounts

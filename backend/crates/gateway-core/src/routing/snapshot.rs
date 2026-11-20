@@ -91,7 +91,6 @@ impl SnapshotClientPolicyFacts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotAccountGroupFacts {
     allow_image_generation: bool,
-    fast_mode: FastMode,
     id: AccountGroupId,
     name: String,
     enabled: bool,
@@ -105,19 +104,12 @@ impl SnapshotAccountGroupFacts {
     }
 
     #[must_use]
-    pub const fn with_fast_mode(mut self, fast_mode: FastMode) -> Self {
-        self.fast_mode = fast_mode;
-        self
-    }
-
-    #[must_use]
     pub fn new(id: AccountGroupId, name: String, enabled: bool) -> Self {
         Self {
             id,
             name,
             enabled,
             allow_image_generation: true,
-            fast_mode: FastMode::Default,
         }
     }
 }
@@ -125,6 +117,7 @@ impl SnapshotAccountGroupFacts {
 /// Store 读取到的账号及其固有 Provider 事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotProviderAccountFacts {
+    fast_mode: FastMode,
     account_id: ProviderAccountId,
     provider_kind: String,
     model_access: crate::account::AccountModelAccess,
@@ -133,6 +126,12 @@ pub struct SnapshotProviderAccountFacts {
 }
 
 impl SnapshotProviderAccountFacts {
+    #[must_use]
+    pub const fn with_fast_mode(mut self, fast_mode: FastMode) -> Self {
+        self.fast_mode = fast_mode;
+        self
+    }
+
     #[must_use]
     pub const fn with_scheduling_role(
         mut self,
@@ -151,6 +150,7 @@ impl SnapshotProviderAccountFacts {
     pub fn new(account_id: ProviderAccountId, provider_kind: impl Into<String>) -> Self {
         Self {
             account_id,
+            fast_mode: FastMode::Default,
             provider_kind: provider_kind.into(),
             scheduling_role: crate::account::AccountSchedulingRole::Regular,
             model_access: crate::account::AccountModelAccess::all(),
@@ -538,6 +538,7 @@ async fn compile_runtime_snapshot(
                 RuntimeAccount::new(provider_kind, BTreeSet::new())
                     .with_scheduling_role(account.scheduling_role)
                     .with_model_access(account.model_access)
+                    .with_fast_mode(account.fast_mode)
                     .with_model_mappings(account.model_mappings),
             )
             .is_some()
@@ -566,13 +567,13 @@ async fn compile_runtime_snapshot(
         *account = RuntimeAccount::new(account.provider_kind().clone(), group_ids)
             .with_scheduling_role(account.scheduling_role())
             .with_model_access(account.model_access().clone())
+            .with_fast_mode(account.fast_mode())
             .with_model_mappings(account.model_mappings().clone());
     }
     let account_directory = Arc::new(RuntimeAccountDirectory::new(accounts));
 
     let mut client_policies = Vec::with_capacity(facts.client_policies.len());
     for policy in facts.client_policies {
-        let mut fast_mode = FastMode::Default;
         let mut allow_image_generation = true;
         let account_scope = if policy.group_ids.is_empty() {
             FrozenAccountScope::new(
@@ -591,7 +592,6 @@ async fn compile_runtime_snapshot(
                     .get(&group_id)
                     .ok_or(RuntimeSnapshotCompileError::InvalidData)?;
                 // 停用只影响选号，仍绑定的分组继续贡献请求策略
-                fast_mode = fast_mode.merge(group.fast_mode);
                 allow_image_generation &= group.allow_image_generation;
                 bound_groups.push(RoutingGroupSnapshot::new(
                     group.id.clone(),
@@ -617,7 +617,6 @@ async fn compile_runtime_snapshot(
                     account_scope
                         .with_portable_history(policy.portable_history)
                         .with_image_generation(allow_image_generation)
-                        .with_fast_mode(fast_mode)
                         .with_request_profiles(policy.request_profiles),
                 ),
                 true,

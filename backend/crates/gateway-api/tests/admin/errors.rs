@@ -587,6 +587,7 @@ mod provider {
                 outbound_proxy_id: None,
                 outbound_proxy_enabled: true,
                 display_name: None,
+                fast_mode: gateway_core::account::FastMode::Default,
                 notes: None,
                 model_access: Default::default(),
                 id: "acct_error_test".to_owned(),

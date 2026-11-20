@@ -1,4 +1,4 @@
-import type { AccountGroup, ApiKey, FastMode } from '@/api'
+import type { AccountGroup, ApiKey } from '@/api'
 import { normalizeRgbaHexColor } from '@codex-proxy/ui'
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 
@@ -20,7 +20,6 @@ import { errorMessage } from '@/utils/operation'
 import { DEFAULT_ACCOUNT_GROUP_COLOR } from '../constants'
 
 export interface AccountGroupFormValue {
-  fastMode: FastMode
   allowImageGeneration: boolean
   name: string
   description: string
@@ -121,7 +120,6 @@ export function useAccountGroups() {
       name: group.name,
       description: group.description ?? '',
       color: group.color,
-      fastMode: group.fastMode,
       allowImageGeneration: group.allowImageGeneration,
     }
     showFormModal.value = true
@@ -144,7 +142,6 @@ export function useAccountGroups() {
     await savingAction.run(async () => {
       const updating = Boolean(editingGroup.value)
       const description = form.value.description.trim() || null
-      const fastMode = form.value.fastMode
       const allowImageGeneration = form.value.allowImageGeneration
       if (editingGroup.value) {
         await updateAccountGroup({
@@ -152,7 +149,6 @@ export function useAccountGroups() {
           name,
           description,
           color,
-          fastMode,
           allowImageGeneration,
         })
       }
@@ -161,7 +157,6 @@ export function useAccountGroups() {
           name,
           description,
           color,
-          fastMode,
           allowImageGeneration,
         })
       }
@@ -332,7 +327,6 @@ function emptyForm(): AccountGroupFormValue {
     name: '',
     description: '',
     color: DEFAULT_ACCOUNT_GROUP_COLOR,
-    fastMode: 'default',
     allowImageGeneration: true,
   }
 }

@@ -32,7 +32,6 @@ pub struct RuntimeSnapshotData {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotAccountGroupData {
     pub allow_image_generation: bool,
-    pub fast_mode: FastMode,
     pub id: AccountGroupId,
     pub name: String,
     pub enabled: bool,
@@ -40,6 +39,7 @@ pub struct SnapshotAccountGroupData {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotProviderAccountData {
+    pub fast_mode: FastMode,
     pub id: String,
     pub provider_kind: String,
     pub model_access: gateway_core::account::AccountModelAccess,
@@ -158,7 +158,6 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                 .into_iter()
                 .map(|group| {
                     SnapshotAccountGroupFacts::new(group.id, group.name, group.enabled)
-                        .with_fast_mode(group.fast_mode)
                         .with_image_generation(group.allow_image_generation)
                 })
                 .collect();
@@ -171,6 +170,7 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                             SnapshotProviderAccountFacts::new(id, account.provider_kind)
                                 .with_scheduling_role(account.scheduling_role)
                                 .with_model_access(account.model_access)
+                                .with_fast_mode(account.fast_mode)
                                 .with_model_mappings(account.model_mappings)
                         })
                         .map_err(|_| SnapshotStoreError::unavailable())
@@ -356,18 +356,16 @@ async fn load_client_keys(
 async fn load_account_groups(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<Vec<SnapshotAccountGroupData>> {
-    let rows = sqlx::query_as::<_, (String, String, bool, String, bool)>(
-        "select id, name, enabled, fast_mode, allow_image_generation from account_groups order by id",
+    let rows = sqlx::query_as::<_, (String, String, bool, bool)>(
+        "select id, name, enabled, allow_image_generation from account_groups order by id",
     )
     .fetch_all(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("load snapshot account groups", source))?;
     rows.into_iter()
-        .map(|(id, name, enabled, fast_mode, allow_image_generation)| {
+        .map(|(id, name, enabled, allow_image_generation)| {
             Ok(SnapshotAccountGroupData {
                 allow_image_generation,
-                fast_mode: FastMode::parse(&fast_mode)
-                    .ok_or_else(|| invalid("invalid fast_mode"))?,
                 id: AccountGroupId::new(id)
                     .map_err(|source| invalid("invalid account group id").with_source(source))?,
                 name,
@@ -380,24 +378,28 @@ async fn load_account_groups(
 async fn load_provider_accounts(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<Vec<SnapshotProviderAccountData>> {
-    let rows = sqlx::query_as::<_, (String, String, sqlx::types::Json<gateway_core::account::AccountModelAccess>, sqlx::types::Json<gateway_core::account::AccountModelMappings>, String)>(
-        "select id, provider_kind, model_access_json, model_mappings_json, scheduling_role from provider_accounts order by id",
+    let rows = sqlx::query_as::<_, (String, String, sqlx::types::Json<gateway_core::account::AccountModelAccess>, sqlx::types::Json<gateway_core::account::AccountModelMappings>, String, String)>(
+        "select id, provider_kind, model_access_json, model_mappings_json, scheduling_role, fast_mode from provider_accounts order by id",
     )
     .fetch_all(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("load snapshot provider accounts", source))?;
     rows.into_iter()
-        .map(|(id, provider_kind, model_access, model_mappings, role)| {
-            let scheduling_role = gateway_core::account::AccountSchedulingRole::parse(&role)
-                .ok_or_else(|| invalid("invalid scheduling_role"))?;
-            Ok(SnapshotProviderAccountData {
-                id,
-                provider_kind,
-                model_access: model_access.0,
-                model_mappings: model_mappings.0,
-                scheduling_role,
-            })
-        })
+        .map(
+            |(id, provider_kind, model_access, model_mappings, role, fast_mode)| {
+                let scheduling_role = gateway_core::account::AccountSchedulingRole::parse(&role)
+                    .ok_or_else(|| invalid("invalid scheduling_role"))?;
+                Ok(SnapshotProviderAccountData {
+                    id,
+                    provider_kind,
+                    model_access: model_access.0,
+                    fast_mode: FastMode::parse(&fast_mode)
+                        .ok_or_else(|| invalid("invalid fast_mode"))?,
+                    model_mappings: model_mappings.0,
+                    scheduling_role,
+                })
+            },
+        )
         .collect()
 }
 

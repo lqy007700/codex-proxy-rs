@@ -725,17 +725,21 @@ impl CodexResponsesRequest {
     /// 只改写顶层档位；开启需要目录证据，其他显式档位保留客户端选择
     pub(crate) fn apply_fast_policy(&mut self, mode: FastMode, supports_priority: bool) -> bool {
         let tier = self.service_tier().map(str::trim);
+        let unspecified = matches!(self.body.get("service_tier"), None | Some(Value::Null));
         let target = match mode {
             FastMode::Disabled
-                if tier.is_some_and(|tier| {
-                    tier.eq_ignore_ascii_case("priority") || tier.eq_ignore_ascii_case("fast")
-                }) =>
+                if unspecified
+                    || tier.is_some_and(|tier| {
+                        ["priority", "fast", "auto"]
+                            .iter()
+                            .any(|value| tier.eq_ignore_ascii_case(value))
+                    }) =>
             {
                 "default"
             }
             FastMode::Enabled
                 if supports_priority
-                    && (matches!(self.body.get("service_tier"), None | Some(Value::Null))
+                    && (unspecified
                         || tier.is_some_and(|tier| tier.eq_ignore_ascii_case("default"))) =>
             {
                 "priority"

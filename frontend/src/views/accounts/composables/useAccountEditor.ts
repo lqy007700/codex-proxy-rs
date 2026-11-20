@@ -19,6 +19,7 @@ export function useAccountEditor(options: {
   // 保存后列表可能因筛选移除该账号，编辑窗口的退场仍需保留原账号内容。
   const editingAccount = shallowRef<Account | null>(null)
   const displayName = shallowRef('')
+  const fastMode = shallowRef<Account['fastMode']>('default')
   const notes = shallowRef('')
   const schedulingEnabled = shallowRef(true)
   const concurrencyLimit = shallowRef('')
@@ -76,6 +77,7 @@ export function useAccountEditor(options: {
     configurationRequest.invalidate()
     editingAccount.value = account
     displayName.value = account.displayName ?? ''
+    fastMode.value = account.fastMode ?? 'default'
     notes.value = account.notes ?? ''
     proxyMode.value = 'preserve'
     proxyId.value = ''
@@ -139,6 +141,9 @@ export function useAccountEditor(options: {
       const settings = {
         accountId: account.id,
         displayName: nameChanged ? name : undefined,
+        fastMode: account.provider === 'openai' && fastMode.value !== (account.fastMode ?? 'default')
+          ? fastMode.value
+          : undefined,
         notes: notes.value,
         outboundProxyId: proxyMode.value === 'preserve'
           ? undefined
@@ -202,6 +207,7 @@ export function useAccountEditor(options: {
     showEditModal,
     editingAccount,
     displayName,
+    fastMode,
     notes,
     schedulingEnabled,
     schedulingRole,

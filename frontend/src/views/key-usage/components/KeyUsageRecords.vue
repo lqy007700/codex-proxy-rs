@@ -52,7 +52,7 @@ const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetCo
           <span v-else class="text-z-text-tertiary">—</span>
         </template>
         <template #billing="{ row }">
-          <UsageBillingCell :record="row" />
+          <UsageBillingCell :record="row" show-service-tier />
         </template>
         <template #latency="{ row }">
           <UsageLatencyCell :record="row" />

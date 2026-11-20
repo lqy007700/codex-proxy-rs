@@ -4120,7 +4120,7 @@ fn cancelling_pending_admission_cleans_up_a_slot_acquired_before_the_reply() {
 }
 
 #[test]
-fn reused_websocket_client_gets_group_fast_policy_from_each_new_request_snapshot() {
+fn reused_websocket_client_gets_fast_override_from_each_new_request_snapshot() {
     let snapshots = RuntimeSnapshotHandle::new(start_snapshot());
     let admissions = Arc::new(Admissions::default());
     let provider = Arc::new(ChargedProvider::default());

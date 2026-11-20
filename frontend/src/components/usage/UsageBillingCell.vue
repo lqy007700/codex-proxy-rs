@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { UsageListRecord } from '@/api'
 
-import { Zap } from '@lucide/vue'
 import { computed } from 'vue'
 import UsageDetailPopover from '@/components/usage/UsageDetailPopover.vue'
 import { usageBillingText } from './shared/presenter'
+import UsageServiceTierBadge from './UsageServiceTierBadge.vue'
 
 const props = defineProps<{
+  showServiceTier?: boolean
   record: Pick<UsageListRecord, 'billing'>
 }>()
 
@@ -84,19 +85,7 @@ function itemValueClass(tone?: string, accent?: boolean) {
     </span>
 
     <div v-if="billing" class="flex items-center gap-1">
-      <span
-        v-if="billing.serviceTierDisplay === 'Fast' || billing.serviceTierDisplay === 'Ultrafast'"
-        class="inline-flex size-4 items-center justify-center rounded-full bg-z-warning-container text-z-warning-on-container"
-        :title="`${billing.serviceTierDisplay} 模式`"
-        role="img"
-        :aria-label="`${billing.serviceTierDisplay} 模式`"
-      >
-        <template v-if="billing.serviceTierDisplay === 'Ultrafast'">
-          <Zap class="size-2" stroke-width="2.2" aria-hidden="true" />
-          <Zap class="-ml-0.5 size-2" stroke-width="2.2" aria-hidden="true" />
-        </template>
-        <Zap v-else class="size-3" stroke-width="2.2" aria-hidden="true" />
-      </span>
+      <UsageServiceTierBadge v-if="showServiceTier" :tier="billing.serviceTierDisplay" />
       <UsageDetailPopover
         :title="billing.longContextBillingApplied ? '长上下文计费明细' : '计费明细'"
         :trigger-label="billing.longContextBillingApplied ? '查看长上下文计费明细' : '查看费用明细'"

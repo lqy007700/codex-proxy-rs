@@ -104,7 +104,6 @@ async fn create_route_should_create_an_empty_group() {
     assert_eq!(value["data"]["record"]["name"], "Gamma routing");
     assert_eq!(value["data"]["record"]["memberCount"], 0);
     assert_eq!(value["data"]["record"]["color"], "#A855F780");
-    assert_eq!(value["data"]["record"]["fastMode"], "default");
     assert_eq!(value["data"]["record"]["allowImageGeneration"], true);
     assert_eq!(value["data"]["configRevision"], 8);
 }
@@ -337,61 +336,6 @@ async fn response_json(response: axum::response::Response) -> Value {
         .await
         .expect("account group response body");
     serde_json::from_slice(&body).expect("account group response JSON")
-}
-
-#[tokio::test]
-async fn fast_mode_group_updates_preserve_omitted_and_null_values() {
-    let fixture = authenticated_fixture().await;
-    for (value, expected) in [
-        (Some(json!("disabled")), "disabled"),
-        (None, "disabled"),
-        (Some(json!("enabled")), "enabled"),
-        (None, "enabled"),
-        (Some(Value::Null), "enabled"),
-        (Some(json!("default")), "default"),
-    ] {
-        let mut body = json!({"id": PRIMARY_GROUP_ID, "name":"Policy", "description":null,"color":"#F43F5ECC"});
-        if let Some(value) = value {
-            body["fastMode"] = value;
-        }
-        let response = request(
-            router(&fixture),
-            Method::POST,
-            "/api/admin/account-groups/update",
-            Some(body),
-            true,
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response_json(response).await["data"]["record"]["fastMode"],
-            expected
-        );
-    }
-}
-
-#[tokio::test]
-async fn fast_mode_rejects_invalid_values_and_creates_groups_in_each_mode() {
-    let fixture = authenticated_fixture().await;
-    for (mode, expected) in [
-        (json!("enabled"), StatusCode::CREATED),
-        (json!("disabled"), StatusCode::CREATED),
-        (json!("default"), StatusCode::CREATED),
-        (json!("force"), StatusCode::UNPROCESSABLE_ENTITY),
-        (json!(true), StatusCode::BAD_REQUEST),
-    ] {
-        let response = request(
-            router(&fixture), Method::POST, "/api/admin/account-groups/create",
-            Some(json!({"name":format!("Fast {mode}"),"description":null,"color":"#F43F5ECC","fastMode":mode})), true,
-        ).await;
-        assert_eq!(response.status(), expected, "mode={mode}");
-        if expected == StatusCode::CREATED {
-            assert_eq!(
-                response_json(response).await["data"]["record"]["fastMode"],
-                mode
-            );
-        }
-    }
 }
 
 #[tokio::test]

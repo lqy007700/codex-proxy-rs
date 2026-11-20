@@ -104,6 +104,7 @@ pub(super) fn account_view(
         id: account.id.clone(),
         name: account.name,
         display_name: account.display_name,
+        fast_mode: account.fast_mode,
         notes: account.notes,
         provider: account.provider_kind.to_string(),
         groups: account

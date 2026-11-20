@@ -14,7 +14,6 @@ use gateway_admin::{
     ports::store::{AccountGroupStore, AdminStoreErrorKind, ClientKeyStore},
 };
 use gateway_core::{
-    account::FastMode,
     policy::{ClientApiKeyId, RateLimits},
     routing::AccountGroupId,
 };
@@ -64,7 +63,6 @@ async fn groups_aggregate_cross_provider_members_and_key_bindings_without_multip
         .create_account_group(
             NewAccountGroup {
                 allow_image_generation: true,
-                fast_mode: FastMode::Default,
                 id: mixed_group.clone(),
                 name: "Mixed Production".to_owned(),
                 description: Some("cross-provider".to_owned()),
@@ -78,7 +76,6 @@ async fn groups_aggregate_cross_provider_members_and_key_bindings_without_multip
         .create_account_group(
             NewAccountGroup {
                 allow_image_generation: true,
-                fast_mode: FastMode::Default,
                 id: empty_group.clone(),
                 name: "Empty Pool".to_owned(),
                 description: None,
@@ -385,7 +382,6 @@ async fn group_costs_should_include_statusless_websocket_but_reject_statusless_h
         .create_account_group(
             NewAccountGroup {
                 allow_image_generation: true,
-                fast_mode: FastMode::Default,
                 id: group_id(EMPTY_GROUP),
                 name: "Statusless Costs".to_owned(),
                 description: None,
@@ -571,76 +567,6 @@ async fn audit_count(pool: &sqlx::PgPool) -> u64 {
 }
 
 #[tokio::test]
-async fn fast_mode_group_updates_preserve_omitted_values_and_publish_snapshot_facts() {
-    use gateway_admin::model::account_groups::UpdateAccountGroup;
-    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
-    let Some(database) = TestDatabase::create("fast_mode_group").await else {
-        return;
-    };
-    let repository = PgAccountGroupRepository::new(
-        database.pool.clone(),
-        ObservabilityQueryBudget::try_new(4, Duration::from_secs(10), Duration::from_secs(10))
-            .unwrap(),
-    );
-    let id = group_id(MIXED_GROUP);
-    repository
-        .create_account_group(
-            NewAccountGroup {
-                allow_image_generation: true,
-                id: id.clone(),
-                name: "Fast policy".to_owned(),
-                description: None,
-                color: group_color("#2563EBFF"),
-                fast_mode: FastMode::Disabled,
-            },
-            &context("create-fast"),
-        )
-        .await
-        .unwrap();
-    for (value, expected) in [
-        (None, FastMode::Disabled),
-        (Some(FastMode::Enabled), FastMode::Enabled),
-        (None, FastMode::Enabled),
-        (Some(FastMode::Default), FastMode::Default),
-        (Some(FastMode::Disabled), FastMode::Disabled),
-    ] {
-        let mutation = repository
-            .update_account_group(
-                UpdateAccountGroup {
-                    allow_image_generation: None,
-                    id: id.clone(),
-                    name: "Renamed policy".to_owned(),
-                    description: None,
-                    color: group_color("#2563EBFF"),
-                    fast_mode: value,
-                },
-                &context("update-fast"),
-            )
-            .await
-            .unwrap();
-        assert_eq!(mutation.record.unwrap().fast_mode, expected);
-        let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
-            .load_runtime_snapshot()
-            .await
-            .unwrap();
-        assert_eq!(
-            snapshot.config_revision.get(),
-            mutation.config_revision.get()
-        );
-        assert_eq!(
-            snapshot
-                .account_groups
-                .iter()
-                .find(|group| group.id == id)
-                .unwrap()
-                .fast_mode,
-            expected
-        );
-    }
-    database.close().await;
-}
-
-#[tokio::test]
 async fn group_costs_follow_current_members_and_pending_source_replacements() {
     let Some(database) = TestDatabase::create("group_cost_current_members").await else {
         return;
@@ -661,7 +587,6 @@ async fn group_costs_follow_current_members_and_pending_source_replacements() {
             .create_account_group(
                 NewAccountGroup {
                     allow_image_generation: true,
-                    fast_mode: FastMode::Default,
                     id: group_id(id),
                     name: id.to_owned(),
                     description: None,
@@ -774,12 +699,11 @@ async fn image_generation_group_updates_preserve_omitted_values_and_publish_snap
             NewAccountGroup {
                 allow_image_generation: false,
                 id: id.clone(),
-                name: "Fast policy".to_owned(),
+                name: "Image generation policy".to_owned(),
                 description: None,
                 color: group_color("#2563EBFF"),
-                fast_mode: FastMode::Disabled,
             },
-            &context("create-fast"),
+            &context("create-image-policy"),
         )
         .await
         .unwrap();
@@ -797,9 +721,8 @@ async fn image_generation_group_updates_preserve_omitted_values_and_publish_snap
                     name: "Renamed policy".to_owned(),
                     description: None,
                     color: group_color("#2563EBFF"),
-                    fast_mode: None,
                 },
-                &context("update-fast"),
+                &context("update-image-policy"),
             )
             .await
             .unwrap();

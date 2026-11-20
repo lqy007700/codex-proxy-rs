@@ -288,6 +288,7 @@ fn account_page_item(
             groups: Vec::new(),
             name: "synthetic cooldown account".to_owned(),
             display_name: None,
+            fast_mode: gateway_core::account::FastMode::Default,
             notes: None,
             email: None,
             upstream_user_id: None,

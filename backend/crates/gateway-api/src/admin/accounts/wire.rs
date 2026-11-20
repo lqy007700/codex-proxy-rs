@@ -286,6 +286,7 @@ pub struct AccountView {
     pub id: String,
     pub name: String,
     pub display_name: Option<String>,
+    pub fast_mode: gateway_core::account::FastMode,
     pub notes: Option<String>,
     pub provider: String,
     pub groups: Vec<AccountGroupRefView>,

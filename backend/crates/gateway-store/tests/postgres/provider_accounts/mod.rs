@@ -1227,6 +1227,7 @@ async fn terminal_admin_mutations_keep_revision_account_and_audit_atomic() {
                 model_mappings: Default::default(),
                 scheduling_role: None,
                 display_name: None,
+                fast_mode: None,
                 notes: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
@@ -1290,6 +1291,76 @@ async fn terminal_admin_mutations_keep_revision_account_and_audit_atomic() {
 }
 
 #[tokio::test]
+async fn account_fast_mode_persists_and_loads_into_runtime_snapshot() {
+    use gateway_core::account::FastMode;
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+
+    let Some(database) = TestDatabase::create("account_fast_mode").await else {
+        return;
+    };
+    let account_id = "acct_fast";
+    PgProviderAccountRepository::new(database.pool.clone())
+        .insert_provider_account(account(account_id, "fast-user"))
+        .await
+        .unwrap();
+    let store = admin_account_store(&database.pool);
+    let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone());
+    let context = MutationContext {
+        actor: MutationActor::System,
+        request_id: "fast-edit".to_owned(),
+    };
+    for (fast_mode, expected) in [
+        (None, FastMode::Default),
+        (Some(FastMode::Enabled), FastMode::Enabled),
+        (None, FastMode::Enabled),
+        (Some(FastMode::Disabled), FastMode::Disabled),
+        (Some(FastMode::Default), FastMode::Default),
+    ] {
+        let mutation = store
+            .update_account(
+                UpdateAccount {
+                    account_id: account_id.to_owned(),
+                    display_name: None,
+                    fast_mode,
+                    notes: None,
+                    enabled: true,
+                    scheduling_role: None,
+                    concurrency_limit: None,
+                    weight: gateway_core::account::AccountWeight::DEFAULT,
+                    model_access: None,
+                    model_mappings: None,
+                    group_ids: vec![],
+                    outbound_proxy: None,
+                },
+                &context,
+            )
+            .await
+            .unwrap();
+        let item = store
+            .load_account(account_id, AccountRuntimeSnapshot::default())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(item.account.fast_mode, expected);
+        let current = snapshot.load_runtime_snapshot().await.unwrap();
+        assert_eq!(
+            current.config_revision.get(),
+            mutation.config_revision.get()
+        );
+        assert_eq!(
+            current
+                .provider_accounts
+                .iter()
+                .find(|account| account.id == account_id)
+                .unwrap()
+                .fast_mode,
+            expected
+        );
+    }
+    database.close().await;
+}
+
+#[tokio::test]
 async fn account_proxy_edits_preserve_credentials_and_clear_egress_without_audit_secrets() {
     let Some(database) = TestDatabase::create("account_proxy").await else {
         return;
@@ -1310,6 +1381,7 @@ async fn account_proxy_edits_preserve_credentials_and_clear_egress_without_audit
         model_mappings: Default::default(),
         scheduling_role: None,
         display_name: None,
+        fast_mode: None,
         notes: None,
         model_access: Default::default(),
         account_id: "acct_proxy".to_owned(),
@@ -1388,6 +1460,7 @@ async fn account_labels_round_trip_and_survive_import_and_scheduling_updates() {
         scheduling_role: None,
         account_id: "acct_notes".to_owned(),
         display_name: Some("  备用账号  ".to_owned()),
+        fast_mode: None,
         notes: Some("  团队备用\n下月续费  ".to_owned()),
         enabled: true,
         concurrency_limit: None,
@@ -1437,6 +1510,7 @@ async fn account_labels_round_trip_and_survive_import_and_scheduling_updates() {
             UpdateAccount {
                 scheduling_role: None,
                 display_name: None,
+                fast_mode: None,
                 notes: None,
                 ..command.clone()
             },
@@ -1521,6 +1595,7 @@ async fn account_labels_round_trip_and_survive_import_and_scheduling_updates() {
             UpdateAccount {
                 scheduling_role: None,
                 display_name: Some("  ".to_owned()),
+                fast_mode: None,
                 notes: Some(" \n\t ".to_owned()),
                 ..command
             },
@@ -1567,6 +1642,7 @@ async fn invalid_account_notes_roll_back_scheduling_revision_and_audit() {
                 scheduling_role: None,
                 account_id: "acct_notes".to_owned(),
                 display_name: None,
+                fast_mode: None,
                 notes: Some("备".repeat(501)),
                 enabled: false,
                 concurrency_limit: None,
@@ -2598,6 +2674,7 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
             scheduling_role: None,
             allow_credits: None,
             display_name: None,
+            fast_mode: None,
             notes: None,
             model_access: Default::default(),
             outbound_proxy: None,
@@ -2668,6 +2745,7 @@ async fn credential_rotation_and_settings_share_one_transaction() {
         scheduling_role: None,
         account_id: ACCOUNT_ID.to_owned(),
         display_name: Some("统一显示".to_owned()),
+        fast_mode: Some(gateway_core::account::FastMode::Disabled),
         notes: Some("统一保存".to_owned()),
         enabled: false,
         concurrency_limit: Some(AccountConcurrencyLimit::new(3).unwrap()),
@@ -2707,6 +2785,7 @@ async fn credential_rotation_and_settings_share_one_transaction() {
     assert_eq!(before["weight"], 7);
     assert_eq!(before["notes"], "统一保存");
     assert_eq!(before["display_name"], "统一显示");
+    assert_eq!(before["fast_mode"], "disabled");
     assert_eq!(
         account_group_ids(&database.pool, ACCOUNT_ID).await,
         [GROUP_ID]
@@ -2741,6 +2820,7 @@ async fn credential_rotation_and_settings_share_one_transaction() {
                 scheduling_role: None,
                 enabled: true,
                 display_name: Some("must not persist".to_owned()),
+                fast_mode: None,
                 notes: Some("must not persist".to_owned()),
                 ..settings.clone()
             },
@@ -3406,6 +3486,7 @@ async fn proxy_edit_preserves_an_inflight_token_refresh() {
                 model_mappings: Default::default(),
                 scheduling_role: None,
                 display_name: None,
+                fast_mode: None,
                 notes: None,
                 model_access: Default::default(),
                 account_id: id.as_str().to_owned(),

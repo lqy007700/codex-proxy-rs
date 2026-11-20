@@ -7086,7 +7086,7 @@ fn deadline_before_first_event_is_persisted_as_failed_attempt() {
 }
 
 #[test]
-fn global_location_and_group_fast_policy_reach_every_account_retry() {
+fn global_location_and_request_fast_override_reach_every_account_retry() {
     for mode in [FastMode::Default, FastMode::Enabled, FastMode::Disabled] {
         let operation = generate_operation();
         let location = gateway_core::account::RequestLocation {

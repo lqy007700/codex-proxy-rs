@@ -121,6 +121,7 @@ pub struct AccountRecord {
     pub groups: Vec<AccountGroupRef>,
     pub name: String,
     pub display_name: Option<String>,
+    pub fast_mode: gateway_core::account::FastMode,
     pub notes: Option<String>,
     pub email: Option<String>,
     pub upstream_user_id: Option<String>,
@@ -241,6 +242,7 @@ pub struct UpdateAccount {
     pub account_id: String,
     /// 缺省保留显示名称；空字符串恢复默认显示
     pub display_name: Option<String>,
+    pub fast_mode: Option<gateway_core::account::FastMode>,
     /// 缺省保留备注；空字符串清空备注
     pub notes: Option<String>,
     pub enabled: bool,

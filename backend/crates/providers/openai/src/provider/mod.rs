@@ -709,10 +709,6 @@ impl Provider for CodexProvider {
                 UpstreamSendState::NotSent,
             ));
         };
-        let operation = prepare_generate_operation(generate, candidate, &context)?;
-        let Operation::Generate(generate) = &operation else {
-            unreachable!("generate settings keep the operation kind")
-        };
         let adapter = context.upstream_adapter(candidate.provider(), upstream_model)?;
         let adapted = matches!(adapter, UpstreamAdapterSelection::Adapter(_));
         if !adapted
@@ -824,14 +820,12 @@ impl Provider for CodexProvider {
             return Err(continuation_replay_required_error("account_rotated"));
         }
         let selected_candidate = candidate.for_account(lease.account_id());
-        let operation = if selected_candidate.upstream_model() != candidate.upstream_model() {
-            let Operation::Generate(original) = request.operation() else {
-                unreachable!("generate request")
-            };
-            prepare_generate_operation(original, &selected_candidate, &context)?
-        } else {
-            operation
-        };
+        // 选号和合法换号均从原请求计算档位，模型相同也不能沿用前一个账号的策略
+        let operation = prepare_generate_operation(
+            generate,
+            &selected_candidate,
+            context.fast_mode_for_account(lease.account_id()),
+        )?;
         let Operation::Generate(generate) = &operation else {
             unreachable!("generate request")
         };
@@ -1306,10 +1300,10 @@ impl CodexProvider {
 fn prepare_generate_operation(
     generate: &GenerateRequest,
     candidate: &ProviderCandidate,
-    context: &AttemptContext,
+    fast_mode: gateway_core::account::FastMode,
 ) -> Result<Operation, ProviderError> {
     let mut operation = Operation::Generate(generate.clone());
-    if context.fast_mode() != gateway_core::account::FastMode::Default
+    if fast_mode != gateway_core::account::FastMode::Default
         && let Operation::Generate(generate) = &operation
         && generate.protocol_payload().protocol() == PROVIDER_NAME
     {
@@ -1321,7 +1315,7 @@ fn prepare_generate_operation(
                 .iter()
                 .any(|tier| tier.id() == "priority")
         });
-        if request.apply_fast_policy(context.fast_mode(), supports_priority) {
+        if request.apply_fast_policy(fast_mode, supports_priority) {
             let body = serde_json::to_vec(request.body()).map_err(|_| {
                 provider_error(
                     ProviderErrorKind::InvalidRequest,

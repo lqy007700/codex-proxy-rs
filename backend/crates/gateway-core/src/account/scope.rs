@@ -45,6 +45,7 @@ impl fmt::Display for AccountGroupId {
 /// 快照中一个账号的 Provider 与分组归属
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeAccount {
+    fast_mode: FastMode,
     provider_kind: ProviderKind,
     group_ids: Arc<BTreeSet<AccountGroupId>>,
     model_access: super::AccountModelAccess,
@@ -53,6 +54,17 @@ pub struct RuntimeAccount {
 }
 
 impl RuntimeAccount {
+    #[must_use]
+    pub(crate) const fn fast_mode(&self) -> FastMode {
+        self.fast_mode
+    }
+
+    #[must_use]
+    pub const fn with_fast_mode(mut self, fast_mode: FastMode) -> Self {
+        self.fast_mode = fast_mode;
+        self
+    }
+
     #[must_use]
     pub const fn with_scheduling_role(
         mut self,
@@ -72,6 +84,7 @@ impl RuntimeAccount {
         Self {
             provider_kind,
             group_ids: Arc::new(group_ids),
+            fast_mode: FastMode::Default,
             scheduling_role: crate::account::AccountSchedulingRole::Regular,
             model_access: super::AccountModelAccess::all(),
             model_mappings: super::AccountModelMappings::empty(),
@@ -388,7 +401,16 @@ impl FrozenAccountScope {
         &self.request_profiles
     }
 
-    /// Key 绑定分组的冻结 Fast 策略，与账号成员资格无关
+    /// 从冻结目录读取本次实际选中的账号策略
+    #[must_use]
+    pub fn account_fast_mode(&self, account: &ProviderAccountId) -> FastMode {
+        self.directory
+            .accounts
+            .get(account)
+            .map_or(FastMode::Default, RuntimeAccount::fast_mode)
+    }
+
+    /// 兼容请求中间件的调用级 Fast 设置
     #[must_use]
     pub const fn with_fast_mode(mut self, fast_mode: FastMode) -> Self {
         self.fast_mode = fast_mode;

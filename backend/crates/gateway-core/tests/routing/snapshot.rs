@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 use futures::executor::block_on;
 use futures::future::BoxFuture;
 
-use gateway_core::account::FastMode;
 use gateway_core::operation::OperationKind;
 use gateway_core::policy::{ClientApiKeyId, PlaintextClientApiKey, RateLimits};
 use gateway_core::routing::extensions::{
@@ -1703,97 +1702,6 @@ fn decompression_setting_should_validate_and_remain_frozen_across_publication() 
     assert!(reader.acquire().is_err());
     drop(handle);
     assert!(reader.acquire().is_err());
-}
-
-#[test]
-fn fast_mode_merges_only_bound_groups_without_changing_account_scope() {
-    use gateway_core::account::ProviderAccountId;
-    use gateway_core::routing::AccountGroupId;
-    for (mode, other_mode, expected) in [
-        (FastMode::Default, FastMode::Default, FastMode::Default),
-        (FastMode::Default, FastMode::Enabled, FastMode::Enabled),
-        (FastMode::Default, FastMode::Disabled, FastMode::Disabled),
-        (FastMode::Enabled, FastMode::Default, FastMode::Enabled),
-        (FastMode::Enabled, FastMode::Enabled, FastMode::Enabled),
-        (FastMode::Enabled, FastMode::Disabled, FastMode::Disabled),
-        (FastMode::Disabled, FastMode::Default, FastMode::Disabled),
-        (FastMode::Disabled, FastMode::Enabled, FastMode::Disabled),
-        (FastMode::Disabled, FastMode::Disabled, FastMode::Disabled),
-    ] {
-        for group_enabled in [false, true] {
-            for bound in [false, true] {
-                let group_id = AccountGroupId::new("grp_00000000000000000000000000000001").unwrap();
-                let open_group_id =
-                    AccountGroupId::new("grp_00000000000000000000000000000002").unwrap();
-                let account_id = ProviderAccountId::new("acct_fast_policy").unwrap();
-                let facts = SnapshotFacts::new(
-                    revision(1),
-                    revision(1),
-                    SettingsValues::new(3, "smart", BTreeMap::new(), None, None),
-                    vec![SnapshotClientPolicyFacts::new(
-                        ClientApiKeyId::new("key_fast_policy").unwrap(),
-                        PlaintextClientApiKey::new("sk_fast_policy").unwrap(),
-                        if bound {
-                            vec![group_id.clone(), open_group_id.clone()]
-                        } else {
-                            Vec::new()
-                        },
-                        RateLimits::unlimited(),
-                    )],
-                    vec![
-                        SnapshotAccountGroupFacts::new(
-                            group_id.clone(),
-                            "Restricted".to_owned(),
-                            group_enabled,
-                        )
-                        .with_fast_mode(mode),
-                        SnapshotAccountGroupFacts::new(
-                            open_group_id.clone(),
-                            "Open".to_owned(),
-                            true,
-                        )
-                        .with_fast_mode(other_mode),
-                    ],
-                    vec![SnapshotProviderAccountFacts::new(
-                        account_id.clone(),
-                        "alpha",
-                    )],
-                    vec![
-                        SnapshotAccountGroupMemberFacts::new(group_id, account_id.clone()),
-                        SnapshotAccountGroupMemberFacts::new(open_group_id, account_id.clone()),
-                    ],
-                );
-                let snapshot = block_on(
-                    RuntimeSnapshotCompiler::new(
-                        Arc::new(TestSnapshotStore::new(Ok(facts))),
-                        Arc::new(TestCatalog::Unavailable),
-                    )
-                    .compile(),
-                )
-                .unwrap();
-                let scope = snapshot
-                    .client_policies()
-                    .next()
-                    .unwrap()
-                    .account_scope()
-                    .clone();
-                assert!(scope.allows(&account_id));
-                let plan = snapshot
-                    .plan(
-                        &PublicModelId::new("public-model").unwrap(),
-                        &super::operation(),
-                        scope,
-                        &Default::default(),
-                    )
-                    .unwrap();
-                assert_eq!(
-                    plan.fast_mode(),
-                    if bound { expected } else { FastMode::Default },
-                    "mode={mode:?}, other={other_mode:?}, enabled={group_enabled}, bound={bound}"
-                );
-            }
-        }
-    }
 }
 
 #[test]

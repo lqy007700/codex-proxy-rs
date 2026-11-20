@@ -771,6 +771,18 @@ impl AttemptContext {
         self.request.fast_mode
     }
 
+    /// 显式账号设置优先；默认档保留既有请求中间件的调用级设置
+    #[must_use]
+    pub fn fast_mode_for_account(&self, account: &ProviderAccountId) -> FastMode {
+        match self
+            .account_scope()
+            .map_or(FastMode::Default, |scope| scope.account_fast_mode(account))
+        {
+            FastMode::Default => self.fast_mode(),
+            mode => mode,
+        }
+    }
+
     #[must_use]
     pub fn privacy(&self) -> Option<Arc<dyn crate::settings::privacy::CompiledPrivacyPolicy>> {
         self.request.privacy.clone()

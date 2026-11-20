@@ -21,7 +21,7 @@ use gateway_admin::model::{
         UpdateAccountGroup,
     },
 };
-use gateway_core::{account::FastMode, routing::AccountGroupId};
+use gateway_core::routing::AccountGroupId;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -100,8 +100,6 @@ const fn default_allow_image_generation() -> bool {
 struct CreateAccountGroupRequest {
     #[serde(default = "default_allow_image_generation")]
     allow_image_generation: bool,
-    #[serde(default)]
-    fast_mode: FastMode,
     name: String,
     description: Option<String>,
     color: String,
@@ -111,7 +109,6 @@ struct CreateAccountGroupRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateAccountGroupRequest {
     allow_image_generation: Option<bool>,
-    fast_mode: Option<FastMode>,
     id: String,
     name: String,
     description: Option<String>,
@@ -128,7 +125,6 @@ struct AccountGroupIdRequest {
 #[serde(rename_all = "camelCase")]
 struct AccountGroupView {
     allow_image_generation: bool,
-    fast_mode: FastMode,
     id: String,
     name: String,
     description: Option<String>,
@@ -174,7 +170,6 @@ impl From<(AccountGroupRecord, crate::time::TimePresenter)> for AccountGroupView
             id: record.id.to_string(),
             name: record.name,
             description: record.description,
-            fast_mode: record.fast_mode,
             allow_image_generation: record.allow_image_generation,
             color: record.color.as_str().to_owned(),
             enabled: record.enabled,
@@ -374,7 +369,6 @@ where
                     allow_image_generation: request.allow_image_generation,
                     name: request.name,
                     description: request.description,
-                    fast_mode: request.fast_mode,
                     color: group_color(&request.color)?,
                 },
             )
@@ -404,7 +398,6 @@ where
                     id: group_id(request.id)?,
                     name: request.name,
                     description: request.description,
-                    fast_mode: request.fast_mode,
                     color: group_color(&request.color)?,
                 },
             )

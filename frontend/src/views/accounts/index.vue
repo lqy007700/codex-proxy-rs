@@ -222,6 +222,7 @@ const {
   showEditModal,
   editingAccount,
   displayName: editingDisplayName,
+  fastMode: editingFastMode,
   notes: editingNotes,
   schedulingEnabled,
   schedulingRole: editingSchedulingRole,
@@ -506,6 +507,7 @@ const {
     <AccountEditModal
       v-model="showEditModal"
       v-model:display-name="editingDisplayName"
+      v-model:fast-mode="editingFastMode"
       v-model:api-key="editingApiKey"
       v-model:oauth-transport="editingOAuthTransport"
       v-model:notes="editingNotes"

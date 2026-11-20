@@ -759,6 +759,9 @@ impl AccountStore for PgAdminAccountStore {
         if command.outbound_proxy.is_some() {
             changed_fields.push("outbound_proxy".to_owned());
         }
+        if command.fast_mode.is_some() {
+            changed_fields.push("fast_mode".to_owned());
+        }
         if command.display_name.is_some() {
             changed_fields.push("display_name".to_owned());
         }
@@ -772,6 +775,7 @@ impl AccountStore for PgAdminAccountStore {
                 pauses: Default::default(),
                 quota_limits: None,
                 display_name: command.display_name,
+                fast_mode: command.fast_mode,
                 notes: command.notes,
                 allow_credits: None,
                 enabled: Some(command.enabled),
@@ -888,6 +892,7 @@ impl AccountStore for PgAdminAccountStore {
                 pauses,
                 quota_limits: command.quota_limits,
                 display_name: None,
+                fast_mode: None,
                 notes: None,
                 allow_credits: command.allow_credits,
                 enabled: command.enabled,
