@@ -2,7 +2,6 @@
 import type { UsageListRecord } from '@/api'
 import { ZPopover, ZScrollbar } from '@codex-proxy/ui'
 import { computed } from 'vue'
-import UsageServiceTierBadge from '@/components/usage/UsageServiceTierBadge.vue'
 
 const props = withDefaults(defineProps<{ record: UsageListRecord, showMessage?: boolean }>(), { showMessage: true })
 const hasIncompleteError = computed(() => props.record.logicalOutcome === 'incomplete' && !!props.record.message)
@@ -44,7 +43,6 @@ const outcome = computed(() => outcomes[props.record.logicalOutcome] ?? {
           </ZScrollbar>
         </div>
       </ZPopover>
-      <UsageServiceTierBadge :tier="record.serviceTier ?? record.billing?.serviceTierDisplay" />
       <span
         v-if="record.logicalOutcome !== 'succeeded' || record.attemptCount !== 1"
         class="font-mono text-z-xs tabular-nums text-z-text-tertiary"

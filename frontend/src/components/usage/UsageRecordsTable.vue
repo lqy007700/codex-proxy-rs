@@ -120,7 +120,10 @@ withDefaults(
     </template>
 
     <template #model="{ row }">
-      <UsageModelCell :record="row" />
+      <UsageModelCell
+        :record="row"
+        :service-tier="row.serviceTier ?? row.billing?.serviceTierDisplay"
+      />
     </template>
 
     <template #reasoningEffort="{ row }">
