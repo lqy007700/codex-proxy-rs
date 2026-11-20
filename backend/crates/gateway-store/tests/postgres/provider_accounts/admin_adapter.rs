@@ -482,3 +482,135 @@ async fn reset_credit_automation_persists_pending_checks_cas_and_follows_account
     );
     database.close().await;
 }
+
+#[tokio::test]
+async fn model_test_history_keeps_ten_completed_runs_per_account() {
+    use gateway_admin::model::accounts::{
+        AccountModelTest, AccountModelTestDetail, AccountModelTestImage, AccountModelTestKind,
+        AccountModelTestOutcome,
+    };
+    let Some(database) = TestDatabase::create("account_model_test_history").await else {
+        return;
+    };
+    let repository = PgProviderAccountRepository::new(database.pool.clone());
+    for id in ["acct_test_a", "acct_test_b"] {
+        repository
+            .insert_provider_account(account(id, id))
+            .await
+            .unwrap();
+    }
+    let store = admin_account_store(&database.pool);
+    let make = |account_id: &str, index: i64| AccountModelTestDetail {
+        summary: AccountModelTest {
+            id: uuid::Uuid::now_v7(),
+            account_id: account_id.to_owned(),
+            account_name: account_id.to_owned(),
+            model_id: "upstream-model".to_owned(),
+            kind: AccountModelTestKind::Image,
+            started_at: Utc::now() + TimeDelta::seconds(index),
+            finished_at: None,
+            failed: false,
+        },
+        prompt: format!("prompt {index}"),
+        error: None,
+        text: None,
+        has_image: false,
+    };
+    let oldest = make("acct_test_a", 0);
+    let other = make("acct_test_b", 0);
+    for detail in [&oldest, &other] {
+        store.begin_model_test(detail).await.unwrap();
+        store
+            .finish_model_test(
+                detail.summary.id,
+                &detail.summary.account_id,
+                AccountModelTestOutcome::Image(AccountModelTestImage {
+                    content_type: "image/png",
+                    bytes: vec![1, 2, 3],
+                }),
+                10,
+            )
+            .await
+            .unwrap();
+    }
+    for index in 1..10 {
+        let record = make("acct_test_a", index);
+        store.begin_model_test(&record).await.unwrap();
+        store
+            .finish_model_test(
+                record.summary.id,
+                "acct_test_a",
+                AccountModelTestOutcome::Text("answer\0with a zero byte".to_owned()),
+                10,
+            )
+            .await
+            .unwrap();
+    }
+    let running = make("acct_test_a", 10);
+    store.begin_model_test(&running).await.unwrap();
+    let duplicate = store.begin_model_test(&make("acct_test_a", 11)).await;
+    assert!(duplicate.is_err());
+    assert_eq!(
+        store
+            .list_model_tests(Some("acct_test_a"), 0, 20)
+            .await
+            .unwrap()
+            .1,
+        11
+    );
+    assert!(
+        store
+            .model_test_detail(running.summary.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .summary
+            .finished_at
+            .is_none()
+    );
+
+    store
+        .finish_model_test(
+            running.summary.id,
+            "acct_test_a",
+            AccountModelTestOutcome::Failed("rate limited".to_owned()),
+            10,
+        )
+        .await
+        .unwrap();
+
+    let (entries, total) = store
+        .list_model_tests(Some("acct_test_a"), 0, 20)
+        .await
+        .unwrap();
+    assert_eq!(total, 10);
+    assert_eq!(entries[0].id, running.summary.id);
+    assert!(entries[0].failed);
+    assert_eq!(
+        store
+            .model_test_detail(entries[1].id)
+            .await
+            .unwrap()
+            .unwrap()
+            .text
+            .as_deref(),
+        Some("answer\0with a zero byte")
+    );
+    assert!(
+        store
+            .model_test_image(oldest.summary.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        store
+            .model_test_image(other.summary.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .1,
+        vec![1, 2, 3]
+    );
+    database.close().await;
+}

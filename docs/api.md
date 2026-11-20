@@ -1088,6 +1088,10 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 | `GET` | `/api/admin/accounts/models/catalog` | `accountId` | 读取指定账号的完整 Codex 原生模型目录，返回 `{ modelCount, observedAt, catalog }` |
 | `POST` | `/api/admin/accounts/models/refresh` | `{ accountId }` | 强制拉取最新模型并覆盖缓存，响应结构与模型目录查询相同 |
 | `GET` | `/api/admin/accounts/connection-test` | `accountId`、`modelId` | 通过 SSE 返回实时连接测试事件，不作为业务 Responses 用量记录 |
+| `POST` | `/api/admin/accounts/model-tests` | `{ accountId, modelId, kind, prompt }` | 提交后台测试，返回 HTTP 202 和 `{ testId }` |
+| `GET` | `/api/admin/accounts/model-tests` | 可选 `accountId`、`page` | 按发起时间倒序分页查询测试摘要 |
+| `GET` | `/api/admin/accounts/model-tests/detail` | `testId` | 查询测试状态、原始提示词和文本结果 |
+| `GET` | `/api/admin/accounts/model-tests/image` | `testId` | 读取图片结果，需要管理员身份 |
 | `POST` | `/api/admin/accounts/oauth/start` | `{ provider, name, accountId?, outboundProxyId?, outboundProxyUrl? }` | 为支持登录的 Provider 创建 flow；`accountId` 表示重新授权 |
 | `POST` | `/api/admin/accounts/oauth/complete` | `{ provider, flowId, callbackUrl, settings? }` | 消费 OAuth callback；首次授权可附带账号设置，重新授权保留原设置 |
 
@@ -1379,6 +1383,20 @@ OAuth 等待回调期间不持有保护；提交仍拒绝已删除或连接配�
 - `sendState` 为 `not_sent`、`sent`、`ambiguous`，非 Provider 错误为 `null`
 - `error`、`providerErrorCode`、`providerErrorType`、`upstreamStatus`、`upstreamContentType` 和
   `upstreamBody` 是实际捕获的原始诊断字段；缺失时为 `null`，不会由本地猜测或翻译
+
+### 降智测试
+
+从账号的「更多操作」提交测试，在「账号管理 → 降智测试」查看历史。提交成功后可关闭浏览器，网关在请求期限内继续执行。
+同一账号同时执行一个测试，每个账号保留最近 10 条终态记录及其图片，
+删除账号时一并清理。网关中断的在途测试到期后记为失败，重新发起需要管理员操作
+
+`kind` 为 `text`、`animation`（返回 SVG 等文本源码）或 `image`（原生生图）。
+`modelId` 必须是发往上游的原始 ID。网关固定账号，跳过全局映射、账号映射、公开别名与普通账号轮换。
+原生图片目前使用 OpenAI Provider 的 Images 能力，需要填写上游图片模型 ID。提示词上限为 32 KiB，
+可保存的文本与图片分别最多 1 MiB 和 16 MiB
+
+列表数据包含 `items` 与 `page`，记录的 `status` 为 `running`、`succeeded` 或 `failed`。
+详情在摘要字段之外返回 `prompt`、`text`、`error`、`hasImage`。测试会消耗上游额度
 
 ### 后台导入任务
 

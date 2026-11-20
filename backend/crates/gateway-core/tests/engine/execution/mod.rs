@@ -4817,3 +4817,92 @@ fn cancelled_prepared_execution_records_rejection_without_admission_or_model_req
         assert!(store.requests.lock().unwrap().is_empty());
     });
 }
+
+#[test]
+fn model_test_routes_to_the_literal_model_and_fixed_account() {
+    let provider = ProviderKind::new("openai").unwrap();
+    let account = ProviderAccountId::new("acct_probe").unwrap();
+    let model = UpstreamModelId::new("gpt-probe").unwrap();
+    let snapshot = probe_snapshot().with_account_directory(Arc::new(RuntimeAccountDirectory::new(
+        BTreeMap::from([(
+            account.clone(),
+            RuntimeAccount::new(provider.clone(), Default::default()).with_model_mappings(
+                gateway_core::account::AccountModelMappings::new(BTreeMap::from([(
+                    model.as_str().to_owned(),
+                    "account-target".to_owned(),
+                )]))
+                .unwrap(),
+            ),
+        )]),
+    )));
+    let settings = snapshot
+        .settings()
+        .clone()
+        .with_model_mappings(BTreeMap::from([(
+            model.as_str().to_owned(),
+            "global-target".to_owned(),
+        )]));
+    let service = DefaultExecutionService::new(
+        RuntimeSnapshotHandle::new(snapshot.with_settings(&settings).unwrap()),
+        Arc::new(TrackingExecutionStore::default()),
+        ProviderRegistry::new([Arc::new(LiteralModelProbeProvider) as Arc<dyn Provider>]).unwrap(),
+        Arc::new(UnusedAdmissions),
+        Arc::new(UnusedContinuation),
+        Arc::new(RecordingClientApiKeyUsage::default()),
+        Arc::new(crate::RecordingDiagnostics::default()),
+    );
+    let result = block_on(service.test_model(AccountProbeRequest {
+        target: AccountProbeTarget::ModelTest(account),
+        provider_kind: provider,
+        upstream_model: model,
+        operation: probe_operation(),
+    }))
+    .unwrap();
+    assert!(result.json_body.is_none());
+}
+
+struct LiteralModelProbeProvider;
+
+#[async_trait]
+impl Provider for LiteralModelProbeProvider {
+    fn name(&self) -> &'static str {
+        "openai"
+    }
+
+    fn catalog_generation(&self) -> ProviderCatalogGeneration {
+        ProviderCatalogGeneration::default()
+    }
+
+    async fn query_model_capabilities(
+        &self,
+    ) -> Result<Vec<ProviderModelCapabilities>, ProviderError> {
+        Ok(Vec::new())
+    }
+
+    async fn execute(
+        self: Arc<Self>,
+        request: ProviderRequest,
+        context: AttemptContext,
+    ) -> Result<ProviderStream, ProviderError> {
+        let candidate = request.candidate();
+        let account = context.required_account().unwrap();
+        let model = candidate.upstream_model_for_account(account).unwrap();
+        assert_eq!(account.as_str(), "acct_probe");
+        assert_eq!(model.as_str(), "gpt-probe");
+        let metadata = ProviderCallMetadata::new(
+            candidate.provider().clone(),
+            model.clone(),
+            account.clone(),
+            UpstreamTransport::new("http").unwrap(),
+        );
+        let response = ResponseMeta::new("resp_model_test", model.as_str());
+        Ok(ProviderStream::new(
+            metadata,
+            futures::stream::iter([
+                Ok(GatewayEvent::Started(response.clone()).into()),
+                Ok(GatewayEvent::Completed(response).into()),
+            ]),
+            (),
+        ))
+    }
+}

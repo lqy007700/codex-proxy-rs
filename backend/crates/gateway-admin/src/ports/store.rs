@@ -16,9 +16,10 @@ use crate::model::{
         SetAccountGroupEnabled, UpdateAccountGroup,
     },
     accounts::{
-        AccountListQuery, AccountPage, AccountPageItem, AccountRuntimeSnapshot,
-        AccountUpdateResult, AccountUsage, AccountUsageWindowQuery, AccountUsageWindowResult,
-        AccountsUpdateResult, BatchUpdateAccounts, DeleteAccounts, UpdateAccount,
+        AccountListQuery, AccountModelTest, AccountModelTestDetail, AccountModelTestOutcome,
+        AccountPage, AccountPageItem, AccountRuntimeSnapshot, AccountUpdateResult, AccountUsage,
+        AccountUsageWindowQuery, AccountUsageWindowResult, AccountsUpdateResult,
+        BatchUpdateAccounts, DeleteAccounts, UpdateAccount,
     },
     auth::{AdminAuditEvent, AuthSession},
     client_keys::{
@@ -106,11 +107,64 @@ impl AdminStoreError {
 
 pub type AdminStoreResult<T> = Result<T, AdminStoreError>;
 
+fn model_tests_unavailable() -> AdminStoreError {
+    AdminStoreError::new(
+        AdminStoreErrorKind::Unavailable,
+        "model tests",
+        "store unavailable",
+    )
+}
+
 /// 账号目录与公共账号写操作
 #[async_trait]
 pub trait AccountStore:
     super::reset_credit_automation::ResetCreditAutomationStore + Send + Sync
 {
+    async fn begin_model_test(&self, _test: &AccountModelTestDetail) -> AdminStoreResult<()> {
+        Err(model_tests_unavailable())
+    }
+
+    async fn finish_model_test(
+        &self,
+        _id: uuid::Uuid,
+        _account_id: &str,
+        _outcome: AccountModelTestOutcome,
+        _keep: i64,
+    ) -> AdminStoreResult<()> {
+        Err(model_tests_unavailable())
+    }
+
+    async fn list_model_tests(
+        &self,
+        _account_id: Option<&str>,
+        _offset: i64,
+        _limit: i64,
+    ) -> AdminStoreResult<(Vec<AccountModelTest>, u64)> {
+        Err(model_tests_unavailable())
+    }
+
+    async fn expired_model_tests(
+        &self,
+        _account_id: Option<&str>,
+        _before: DateTime<Utc>,
+    ) -> AdminStoreResult<Vec<(uuid::Uuid, String)>> {
+        Err(model_tests_unavailable())
+    }
+
+    async fn model_test_detail(
+        &self,
+        _id: uuid::Uuid,
+    ) -> AdminStoreResult<Option<AccountModelTestDetail>> {
+        Err(model_tests_unavailable())
+    }
+
+    async fn model_test_image(
+        &self,
+        _id: uuid::Uuid,
+    ) -> AdminStoreResult<Option<(String, Vec<u8>)>> {
+        Err(model_tests_unavailable())
+    }
+
     async fn list_accounts(
         &self,
         query: AccountListQuery,

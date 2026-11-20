@@ -20,19 +20,22 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountProbeTarget {
     ConnectionTest(ProviderAccountId),
+    ModelTest(ProviderAccountId),
     FreezeRecovery(ProviderAccountId),
 }
 
 impl AccountProbeTarget {
     pub fn account_id(&self) -> &ProviderAccountId {
         match self {
-            Self::ConnectionTest(account) | Self::FreezeRecovery(account) => account,
+            Self::ConnectionTest(account)
+            | Self::ModelTest(account)
+            | Self::FreezeRecovery(account) => account,
         }
     }
 
     pub(super) fn into_selection(self) -> (ProviderAccountId, AccountEligibilityPolicy) {
         match self {
-            Self::ConnectionTest(account) => {
+            Self::ConnectionTest(account) | Self::ModelTest(account) => {
                 (account, AccountEligibilityPolicy::BypassForDiagnostic)
             }
             Self::FreezeRecovery(account) => (account, AccountEligibilityPolicy::FreezeRecovery),
@@ -51,6 +54,13 @@ pub struct AccountProbeRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountProbeResult {
     pub text: Vec<String>,
+}
+
+/// 模型测试需要保留文本和原生媒体端点的响应表达
+#[derive(Default)]
+pub struct AccountModelTestResult {
+    pub text: Vec<String>,
+    pub json_body: Option<Bytes>,
 }
 
 /// 仅供当前管理端连接测试展示的原始上游失败响应
@@ -199,6 +209,19 @@ impl From<GatewayError> for AccountProbeError {
 }
 
 pub trait AccountProbe: Send + Sync {
+    fn test_model(
+        &self,
+        _request: AccountProbeRequest,
+    ) -> BoxFuture<'_, Result<AccountModelTestResult, AccountProbeError>> {
+        Box::pin(async {
+            Err(GatewayError::new(
+                GatewayErrorKind::Unsupported,
+                "Model testing is unavailable.",
+            )
+            .into())
+        })
+    }
+
     /// 插件管理操作传入其冻结快照；其他调用可使用当前发布视图
     fn probe(
         &self,

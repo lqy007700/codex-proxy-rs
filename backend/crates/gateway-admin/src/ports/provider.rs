@@ -255,6 +255,20 @@ pub trait ProviderAdmin: Send + Sync {
         input_text: &str,
     ) -> Result<Operation, ProviderAdminError>;
 
+    /// 构造使用显式上游模型 ID 的原生图片测试
+    fn model_test_image_operation(
+        &self,
+        _model: &UpstreamModelId,
+        _prompt: &str,
+    ) -> Result<Operation, ProviderAdminError> {
+        Err(ProviderAdminError::new(ProviderAdminErrorKind::Unsupported))
+    }
+
+    /// 从 Provider 原生格式中取出本次图片的编码正文
+    fn model_test_image_base64<'a>(&self, _body: &'a [u8]) -> Option<&'a str> {
+        None
+    }
+
     /// 返回该 Provider 实际持有的 Dashboard 上游身份画像
     fn dashboard_wire_profile(&self) -> Option<DashboardWireProfile>;
 

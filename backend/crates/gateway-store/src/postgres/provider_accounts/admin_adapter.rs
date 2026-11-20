@@ -1,8 +1,14 @@
 //! `gateway-admin` 账号端口的 PostgreSQL adapter
 
-use gateway_admin::model::audit::MutationAuditOperation;
+use gateway_admin::model::{
+    accounts::{
+        AccountModelTest, AccountModelTestDetail, AccountModelTestKind, AccountModelTestOutcome,
+    },
+    audit::MutationAuditOperation,
+};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use gateway_core::provider_ports::ProviderCooldownPort;
 
@@ -230,6 +236,174 @@ impl PgAdminAccountStore {
 
 #[async_trait]
 impl AccountStore for PgAdminAccountStore {
+    async fn begin_model_test(&self, detail: &AccountModelTestDetail) -> AdminStoreResult<()> {
+        let test = &detail.summary;
+        let result = sqlx::query(
+            "insert into account_model_tests
+             (id, account_id, account_name, model_id, kind, prompt, started_at)
+             values ($1, $2, $3, $4, $5, $6, $7)
+             on conflict (account_id) where finished_at is null do nothing",
+        )
+        .bind(test.id)
+        .bind(&test.account_id)
+        .bind(&test.account_name)
+        .bind(&test.model_id)
+        .bind(test.kind.as_str())
+        .bind(&detail.prompt)
+        .bind(test.started_at)
+        .execute(&self.pool)
+        .await
+        .map_err(model_test_sql_error)?;
+        if result.rows_affected() == 0 {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::Conflict,
+                "model tests",
+                "account already has a running test",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn finish_model_test(
+        &self,
+        id: Uuid,
+        account_id: &str,
+        outcome: AccountModelTestOutcome,
+        keep: i64,
+    ) -> AdminStoreResult<()> {
+        let (error, text, image) = match outcome {
+            AccountModelTestOutcome::Text(text) => (None, Some(text.into_bytes()), None),
+            AccountModelTestOutcome::Image(image) => (None, None, Some(image)),
+            AccountModelTestOutcome::Failed(error) => (Some(error), None, None),
+        };
+        let (image_type, image_bytes) = image.map_or((None, None), |image| {
+            (Some(image.content_type), Some(image.bytes))
+        });
+        let mut tx = self.pool.begin().await.map_err(model_test_sql_error)?;
+        // 同一账号的终态写入和淘汰串行化，记录与图片由同一个事务提交
+        sqlx::query("select id from provider_accounts where id = $1 for no key update")
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(model_test_sql_error)?;
+        let update = sqlx::query(
+            "update account_model_tests
+             set finished_at = greatest(started_at, clock_timestamp()), error = $3,
+                 result_text = $4, image_type = $5, image_bytes = $6
+             where id = $1 and account_id = $2 and finished_at is null",
+        )
+        .bind(id)
+        .bind(account_id)
+        .bind(error)
+        .bind(text)
+        .bind(image_type)
+        .bind(image_bytes)
+        .execute(&mut *tx)
+        .await
+        .map_err(model_test_sql_error)?;
+        if update.rows_affected() != 0 {
+            sqlx::query(
+                "delete from account_model_tests where id in (
+                   select id from account_model_tests where account_id = $1 and finished_at is not null
+                   order by started_at desc, id desc offset $2
+                 )",
+            )
+            .bind(account_id)
+            .bind(keep)
+            .execute(&mut *tx)
+            .await
+            .map_err(model_test_sql_error)?;
+        }
+        tx.commit().await.map_err(model_test_sql_error)
+    }
+
+    async fn expired_model_tests(
+        &self,
+        account_id: Option<&str>,
+        before: DateTime<Utc>,
+    ) -> AdminStoreResult<Vec<(Uuid, String)>> {
+        sqlx::query_as(
+            "select id, account_id from account_model_tests
+             where finished_at is null and started_at < $1 and ($2::text is null or account_id = $2)",
+        )
+        .bind(before)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(model_test_sql_error)
+    }
+
+    async fn list_model_tests(
+        &self,
+        account_id: Option<&str>,
+        offset: i64,
+        limit: i64,
+    ) -> AdminStoreResult<(Vec<AccountModelTest>, u64)> {
+        let total: i64 = sqlx::query_scalar(
+            "select count(*) from account_model_tests where $1::text is null or account_id = $1",
+        )
+        .bind(account_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(model_test_sql_error)?;
+        let rows = sqlx::query(
+            "select id, account_id, account_name, model_id, kind, started_at, finished_at,
+                    error is not null as failed
+             from account_model_tests where $1::text is null or account_id = $1
+             order by started_at desc, id desc limit $2 offset $3",
+        )
+        .bind(account_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(model_test_sql_error)?;
+        let tests = rows
+            .iter()
+            .map(model_test_summary)
+            .collect::<AdminStoreResult<_>>()?;
+        Ok((tests, total.unsigned_abs()))
+    }
+
+    async fn model_test_detail(
+        &self,
+        id: Uuid,
+    ) -> AdminStoreResult<Option<AccountModelTestDetail>> {
+        let row = sqlx::query(
+            "select id, account_id, account_name, model_id, kind, started_at, finished_at,
+                    error is not null as failed, error, prompt, result_text,
+                    image_type is not null as has_image
+             from account_model_tests where id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(model_test_sql_error)?;
+        row.map(|row| {
+            let summary = model_test_summary(&row)?;
+            let text: Option<Vec<u8>> = row.try_get("result_text").map_err(model_test_sql_error)?;
+            Ok(AccountModelTestDetail {
+                summary,
+                prompt: row.try_get("prompt").map_err(model_test_sql_error)?,
+                error: row.try_get("error").map_err(model_test_sql_error)?,
+                text: text.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
+                has_image: row.try_get("has_image").map_err(model_test_sql_error)?,
+            })
+        })
+        .transpose()
+    }
+
+    async fn model_test_image(&self, id: Uuid) -> AdminStoreResult<Option<(String, Vec<u8>)>> {
+        sqlx::query_as(
+            "select image_type, image_bytes from account_model_tests
+             where id = $1 and image_type is not null",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(model_test_sql_error)
+    }
+
     async fn load_account_record(
         &self,
         account_id: &CoreProviderAccountId,
@@ -987,5 +1161,47 @@ pub(super) fn rotation_result(
         config_revision: admin_revision(rotation.config_revision)?,
         account_id,
         credential_revision: Some(admin_revision(rotation.credential_revision)?),
+    })
+}
+
+fn model_test_sql_error(error: sqlx::Error) -> AdminStoreError {
+    if error
+        .as_database_error()
+        .is_some_and(sqlx::error::DatabaseError::is_foreign_key_violation)
+    {
+        return AdminStoreError::new(
+            AdminStoreErrorKind::NotFound,
+            "model tests",
+            "account removed",
+        );
+    }
+    admin_store_error(
+        "model tests",
+        postgres_unavailable("account model tests", error),
+    )
+}
+
+fn model_test_summary(row: &sqlx::postgres::PgRow) -> AdminStoreResult<AccountModelTest> {
+    let kind = match row.try_get("kind").map_err(model_test_sql_error)? {
+        "text" => AccountModelTestKind::Text,
+        "image" => AccountModelTestKind::Image,
+        "animation" => AccountModelTestKind::Animation,
+        _ => {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::Invalid,
+                "model tests",
+                "unknown test kind",
+            ));
+        }
+    };
+    Ok(AccountModelTest {
+        id: row.try_get("id").map_err(model_test_sql_error)?,
+        account_id: row.try_get("account_id").map_err(model_test_sql_error)?,
+        account_name: row.try_get("account_name").map_err(model_test_sql_error)?,
+        model_id: row.try_get("model_id").map_err(model_test_sql_error)?,
+        kind,
+        started_at: row.try_get("started_at").map_err(model_test_sql_error)?,
+        finished_at: row.try_get("finished_at").map_err(model_test_sql_error)?,
+        failed: row.try_get("failed").map_err(model_test_sql_error)?,
     })
 }

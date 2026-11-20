@@ -40,8 +40,9 @@ use crate::{
         },
         policy::{ModelRouteDecision, RequestPolicyContext, RequestPolicyExtensionIndex},
         probe::{
-            AccountProbe, AccountProbeError, AccountProbeErrorSource, AccountProbeRequest,
-            AccountProbeResult, AccountProbeUpstreamResponse,
+            AccountModelTestResult, AccountProbe, AccountProbeError, AccountProbeErrorSource,
+            AccountProbeRequest, AccountProbeResult, AccountProbeTarget,
+            AccountProbeUpstreamResponse,
         },
         provider::ProviderRegistry,
     },
@@ -892,7 +893,7 @@ impl DefaultExecutionService {
         &self,
         request: AccountProbeRequest,
         frozen: Option<Arc<crate::routing::RuntimeSnapshot>>,
-    ) -> Result<AccountProbeResult, AccountProbeError> {
+    ) -> Result<AccountModelTestResult, AccountProbeError> {
         let AccountProbeRequest {
             target,
             provider_kind,
@@ -916,19 +917,36 @@ impl DefaultExecutionService {
             PublicModelId::new(upstream_model.as_str().to_owned()).map_err(|_| {
                 GatewayError::new(GatewayErrorKind::Unsupported, "Requested model is invalid.")
             })?;
+        let model_test = matches!(target, AccountProbeTarget::ModelTest(_));
         let routing_context = RoutingContext {
-            required_provider: Some(provider_kind),
+            required_provider: Some(provider_kind.clone()),
             ..RoutingContext::default()
         };
-        let plan = snapshot
-            .plan_diagnostic(&public_model, &operation, &routing_context)
-            .map_err(map_routing_error)?;
+        let plan = if model_test {
+            snapshot.plan_model_test(&public_model, &provider_kind, &operation, &routing_context)
+        } else {
+            snapshot.plan_diagnostic(&public_model, &operation, &routing_context)
+        }
+        .map_err(map_routing_error)?;
+        let (actor_name, request_kind, endpoint) = if model_test {
+            (
+                "admin_model_test",
+                "account_model_test",
+                "/api/admin/accounts/model-tests",
+            )
+        } else {
+            (
+                "admin_connection_test",
+                "account_connection_test",
+                "/api/admin/accounts/connection-test",
+            )
+        };
         let started_at = SystemTime::now();
         let deadline_at = started_at.checked_add(DIAGNOSTIC_TIMEOUT).ok_or_else(|| {
             GatewayError::new(GatewayErrorKind::Internal, "System clock is invalid.")
         })?;
         let request_id = new_request_id()?;
-        let actor = ClientApiKeyId::new("admin_connection_test")
+        let actor = ClientApiKeyId::new(actor_name)
             .map_err(|_| GatewayError::new(GatewayErrorKind::Internal, "Invalid admin actor."))?;
         let new_request = NewModelRequest {
             caller_identity: None,
@@ -938,16 +956,16 @@ impl DefaultExecutionService {
             client_api_key_ref: actor,
             config_revision: plan.config_revision(),
             routing: crate::routing::AccountRoutingSnapshot::all(),
-            protocol: "admin_connection_test".to_owned(),
+            protocol: actor_name.to_owned(),
             operation: operation.kind(),
-            endpoint: "/api/admin/accounts/connection-test".to_owned(),
+            endpoint: endpoint.to_owned(),
             client_transport: ClientTransport::InternalProbe.as_str().to_owned(),
             requested_model: Some(public_model),
             client_ip: None,
             user_agent: None,
             reasoning_effort: None,
             reasoning_preset: None,
-            request_kind: Some("account_connection_test".to_owned()),
+            request_kind: Some(request_kind.to_owned()),
             subagent_kind: None,
             compact: false,
             continuation: Default::default(),
@@ -991,16 +1009,20 @@ impl DefaultExecutionService {
                 .observe_probe_failure(&observed, started_at, &error)
                 .await);
         }
-        Ok(AccountProbeResult {
-            text: events
-                .into_iter()
-                .flat_map(|event| event.into_parts().0)
-                .filter_map(|fact| match fact {
+        let mut result = AccountModelTestResult::default();
+        for event in events {
+            let (canonical, wire) = event.into_parts();
+            result
+                .text
+                .extend(canonical.into_iter().filter_map(|fact| match fact {
                     GatewayEvent::TextDelta(delta) => Some(delta.text),
                     _ => None,
-                })
-                .collect(),
-        })
+                }));
+            if model_test && let Some(body) = wire.and_then(|wire| wire.into_raw_json_body()) {
+                result.json_body = Some(body);
+            }
+        }
+        Ok(result)
     }
 
     /// 探测失败先记录脱敏分类事实，再把请求局部的原始上游响应交给认证管理端
@@ -1341,12 +1363,22 @@ impl ClientKeyVerifier for DefaultExecutionService {
 }
 
 impl AccountProbe for DefaultExecutionService {
+    fn test_model(
+        &self,
+        request: AccountProbeRequest,
+    ) -> BoxFuture<'_, Result<AccountModelTestResult, AccountProbeError>> {
+        Box::pin(self.probe_inner(request, None))
+    }
+
     fn probe(
         &self,
         request: AccountProbeRequest,
         snapshot: Option<Arc<crate::routing::RuntimeSnapshot>>,
     ) -> BoxFuture<'_, Result<AccountProbeResult, AccountProbeError>> {
-        Box::pin(async move { self.probe_inner(request, snapshot).await })
+        Box::pin(async move {
+            let result = self.probe_inner(request, snapshot).await?;
+            Ok(AccountProbeResult { text: result.text })
+        })
     }
 }
 

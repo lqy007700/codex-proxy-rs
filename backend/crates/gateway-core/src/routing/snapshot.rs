@@ -1487,6 +1487,27 @@ impl RuntimeSnapshot {
         )
     }
 
+    /// 固定账号测试使用已选的上游 ID，原生图片端点从正文读取同一 ID
+    pub(crate) fn plan_model_test(
+        &self,
+        model: &PublicModelId,
+        provider: &ProviderKind,
+        operation: &Operation,
+        context: &RoutingContext,
+    ) -> Result<RoutingPlan, RoutingError> {
+        let scope = Arc::new(
+            self.all_account_scope()
+                .as_ref()
+                .clone()
+                .with_request_profiles(self.settings().request_profiles().clone()),
+        );
+        if matches!(operation, Operation::GenerateImage(_)) {
+            self.plan_provider_endpoint(provider, None, operation, scope, context)
+        } else {
+            self.plan_inner(model, operation, scope, context, false, false)
+        }
+    }
+
     fn plan_account_mappings(
         &self,
         public_model: &PublicModelId,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { Account } from '@/api'
-import { useTableColumns, ZCard, ZCheckbox, ZConfirmDialog, ZPagination, ZTable, ZTableColumnSettings } from '@codex-proxy/ui'
+import type { Account, AccountModelTestDetail } from '@/api'
+import { useTableColumns, ZCard, ZCheckbox, ZConfirmDialog, ZPagination, ZSegmented, ZTable, ZTableColumnSettings } from '@codex-proxy/ui'
 
 import { ChevronDown } from '@lucide/vue'
 import { ref, shallowRef } from 'vue'
@@ -22,6 +22,8 @@ import AccountConnectionTestModal from './components/AccountConnectionTestModal.
 import AccountEditModal from './components/AccountEditModal.vue'
 import AccountFilters from './components/AccountFilters.vue'
 import AccountIdentityCell from './components/AccountIdentityCell.vue'
+import AccountModelTestHistory from './components/AccountModelTestHistory.vue'
+import AccountModelTestModal from './components/AccountModelTestModal.vue'
 import AccountSchedulingSwitch from './components/AccountSchedulingSwitch.vue'
 import AccountTableActions from './components/AccountTableActions.vue'
 import AccountUsagePanel from './components/AccountUsagePanel.vue'
@@ -34,6 +36,33 @@ import { useAccountMutations } from './composables/useAccountMutations'
 import { useAccountsQuery } from './composables/useAccountsQuery'
 import { useAccountsTable } from './composables/useAccountsTable'
 import { accountColumns } from './constants'
+
+const section = ref('accounts')
+const sectionOptions = [
+  { label: '账号列表', value: 'accounts' },
+  { label: '降智测试', value: 'model-tests' },
+]
+const modelTestAccount = shallowRef<Account>()
+const modelTestSeed = shallowRef<AccountModelTestDetail>()
+const modelTestOpen = ref(false)
+const modelTestDialogKey = ref(0)
+const modelTestSubmitted = ref(0)
+const historyAccountId = ref<string>()
+const historyAccountName = ref('')
+
+function openModelTest(account: Account, seed?: AccountModelTestDetail) {
+  modelTestAccount.value = account
+  modelTestSeed.value = seed
+  modelTestDialogKey.value += 1
+  modelTestOpen.value = true
+}
+
+function openModelTestHistory(account: Account) {
+  modelTestOpen.value = false
+  historyAccountId.value = account.id
+  historyAccountName.value = accountCompactIdentityLabel(account)
+  section.value = 'model-tests'
+}
 
 const concurrencyAccount = shallowRef<Account | null>(null)
 const showConcurrency = shallowRef(false)
@@ -220,7 +249,10 @@ const {
       description="维护账号池，查看可用性、配额与使用状态"
     />
 
+    <ZSegmented v-model="section" class="mt-4 self-start bg-(--z-input-bg)!" aria-label="账号管理分区" :options="sectionOptions" />
+
     <ZCard
+      v-if="section === 'accounts'"
       class="mt-4 flex flex-col xl:min-h-0 xl:flex-1"
     >
       <template #header>
@@ -376,6 +408,7 @@ const {
                 @refresh="handleRefresh"
                 @reauthorize="openReauthorizeAccount"
                 @test="openConnectionTest"
+                @model-test="openModelTest"
               />
             </template>
 
@@ -401,6 +434,23 @@ const {
         </div>
       </template>
     </ZCard>
+
+    <AccountModelTestHistory
+      v-else
+      v-model:account-id="historyAccountId"
+      :account-name="historyAccountName"
+      :submitted="modelTestSubmitted"
+      @rerun="openModelTest"
+    />
+    <AccountModelTestModal
+      v-if="modelTestAccount"
+      :key="modelTestDialogKey"
+      v-model="modelTestOpen"
+      :account="modelTestAccount"
+      :seed="modelTestSeed"
+      @history="openModelTestHistory"
+      @started="modelTestSubmitted += 1"
+    />
 
     <AccountConcurrencyModal v-model="showConcurrency" :account="concurrencyAccount" />
 

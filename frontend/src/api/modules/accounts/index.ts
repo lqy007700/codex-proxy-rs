@@ -1,5 +1,6 @@
 export * from './credentials'
 export * from './management'
+export * from './model-tests'
 export * from './models'
 export * from './personal-info'
 export * from './quota'

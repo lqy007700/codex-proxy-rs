@@ -1,5 +1,6 @@
 //! 统一账号目录与原生 Provider 分派
 
+mod model_tests;
 mod reset_credit_automation;
 
 use std::{
@@ -22,8 +23,9 @@ use crate::{
         AdminError, MutationContext,
         accounts::{
             AccountConnectionTestEvent, AccountConnectionTestEventStream, AccountListQuery,
-            AccountPageItem, AccountUpdateResult, AccountUsage, AccountUsageWindowQuery,
-            AccountsUpdateResult, BatchUpdateAccounts, UpdateAccount,
+            AccountModelTest, AccountModelTestDetail, AccountModelTestKind, AccountPageItem,
+            AccountUpdateResult, AccountUsage, AccountUsageWindowQuery, AccountsUpdateResult,
+            BatchUpdateAccounts, UpdateAccount,
         },
         observability::TimeRange,
         provider_credentials::{
@@ -176,6 +178,36 @@ pub trait AccountsService: Send + Sync {
         account_id: &ProviderAccountId,
     ) -> Result<ProviderModelCatalogDocument, AdminError>;
 
+    async fn start_model_test(
+        &self,
+        _account_id: ProviderAccountId,
+        _model: UpstreamModelId,
+        _kind: AccountModelTestKind,
+        _prompt: String,
+    ) -> Result<uuid::Uuid, AdminError> {
+        Err(AdminError::unavailable("降智测试不可用"))
+    }
+
+    async fn list_model_tests(
+        &self,
+        _account_id: Option<ProviderAccountId>,
+        _page: u32,
+        _page_size: u32,
+    ) -> Result<(Vec<AccountModelTest>, u64), AdminError> {
+        Err(AdminError::unavailable("降智测试不可用"))
+    }
+
+    async fn model_test_detail(
+        &self,
+        _id: uuid::Uuid,
+    ) -> Result<AccountModelTestDetail, AdminError> {
+        Err(AdminError::unavailable("降智测试不可用"))
+    }
+
+    async fn model_test_image(&self, _id: uuid::Uuid) -> Result<(String, Vec<u8>), AdminError> {
+        Err(AdminError::unavailable("降智测试不可用"))
+    }
+
     async fn test_connection(
         &self,
         target: AccountProbeTarget,
@@ -191,6 +223,7 @@ pub(crate) struct DefaultAccountsService {
     providers: ProviderAdminRegistry,
     snapshot: Arc<dyn SnapshotControl>,
     probe: Arc<dyn AccountProbe>,
+    model_test_slots: Arc<tokio::sync::Semaphore>,
     reset_credit_locks:
         Arc<futures::lock::Mutex<BTreeMap<ProviderAccountId, Arc<futures::lock::Mutex<()>>>>>,
 }
@@ -214,6 +247,7 @@ impl DefaultAccountsService {
             providers,
             snapshot,
             probe,
+            model_test_slots: Arc::new(tokio::sync::Semaphore::new(8)),
             reset_credit_locks: Arc::new(futures::lock::Mutex::new(BTreeMap::new())),
         }
     }
@@ -1141,6 +1175,59 @@ impl AccountsService for DefaultAccountsService {
             .model_catalog_document(account_id)
             .await
             .map_err(|error| map_provider_error(error, "provider model catalog document"))
+    }
+
+    async fn start_model_test(
+        &self,
+        account_id: ProviderAccountId,
+        model: UpstreamModelId,
+        kind: AccountModelTestKind,
+        prompt: String,
+    ) -> Result<uuid::Uuid, AdminError> {
+        self.launch_model_test(account_id, model, kind, prompt)
+            .await
+    }
+
+    async fn list_model_tests(
+        &self,
+        account_id: Option<ProviderAccountId>,
+        page: u32,
+        page_size: u32,
+    ) -> Result<(Vec<AccountModelTest>, u64), AdminError> {
+        let account_id = account_id.as_ref().map(ProviderAccountId::as_str);
+        self.expire_model_tests(account_id).await?;
+        let page_size = i64::from(page_size.clamp(1, 50));
+        self.accounts
+            .list_model_tests(
+                account_id,
+                i64::from(page.saturating_sub(1)) * page_size,
+                page_size,
+            )
+            .await
+            .map_err(|error| map_store_error(error, "model tests"))
+    }
+
+    async fn model_test_detail(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<AccountModelTestDetail, AdminError> {
+        let detail = self.load_model_test_detail(id).await?;
+        if detail.summary.finished_at.is_none()
+            && detail.summary.started_at < Utc::now() - model_tests::MODEL_TEST_EXPIRATION
+        {
+            self.expire_model_tests(Some(&detail.summary.account_id))
+                .await?;
+            return self.load_model_test_detail(id).await;
+        }
+        Ok(detail)
+    }
+
+    async fn model_test_image(&self, id: uuid::Uuid) -> Result<(String, Vec<u8>), AdminError> {
+        self.accounts
+            .model_test_image(id)
+            .await
+            .map_err(|error| map_store_error(error, "model tests"))?
+            .ok_or_else(|| AdminError::not_found("没有可用的测试图片"))
     }
 
     async fn test_connection(

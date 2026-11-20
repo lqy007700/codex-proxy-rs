@@ -353,3 +353,54 @@ pub struct AccountConcurrencyPage {
     pub total: u64,
     pub observed_at: DateTime<Utc>,
 }
+
+/// 题目类型与执行时使用的上游操作
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountModelTestKind {
+    Text,
+    Image,
+    Animation,
+}
+
+impl AccountModelTestKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Image => "image",
+            Self::Animation => "animation",
+        }
+    }
+}
+
+/// 服务端保留测试输入与原样结果，历史列表仅查询摘要
+pub struct AccountModelTest {
+    pub id: uuid::Uuid,
+    pub account_id: String,
+    pub account_name: String,
+    pub model_id: String,
+    pub kind: AccountModelTestKind,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub failed: bool,
+}
+
+pub struct AccountModelTestDetail {
+    pub summary: AccountModelTest,
+    pub prompt: String,
+    pub error: Option<String>,
+    pub text: Option<String>,
+    pub has_image: bool,
+}
+
+pub struct AccountModelTestImage {
+    pub content_type: &'static str,
+    pub bytes: Vec<u8>,
+}
+
+pub enum AccountModelTestOutcome {
+    Text(String),
+    Image(AccountModelTestImage),
+    Failed(String),
+}

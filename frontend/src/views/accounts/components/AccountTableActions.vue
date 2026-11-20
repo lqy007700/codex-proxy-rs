@@ -3,7 +3,7 @@ import type { Account } from '@/api'
 
 import { ZIconButton, ZMenuItem, ZPopover } from '@codex-proxy/ui'
 
-import { Download, KeyRound, MoreHorizontal, Network, Pencil, RefreshCw, RotateCcw, Trash2, Wifi } from '@lucide/vue'
+import { Download, FlaskConical, KeyRound, MoreHorizontal, Network, Pencil, RefreshCw, RotateCcw, Trash2, Wifi } from '@lucide/vue'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -21,6 +21,7 @@ const emit = defineEmits<{
   delete: [account: Account]
   recover: [accountId: string]
   test: [account: Account]
+  modelTest: [account: Account]
   refresh: [accountId: string]
   reauthorize: [account: Account]
   downloadModelCatalog: [account: Account]
@@ -74,6 +75,12 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
               <Wifi class="size-3.5 text-z-text-quaternary" />
             </template>
             测试连接
+          </ZMenuItem>
+          <ZMenuItem @click.stop="(close(), emit('modelTest', account))">
+            <template #icon>
+              <FlaskConical class="size-3.5 text-z-text-quaternary" />
+            </template>
+            降智测试
           </ZMenuItem>
           <ZMenuItem
             v-if="credentialEligible"

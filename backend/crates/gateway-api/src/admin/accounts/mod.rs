@@ -65,6 +65,7 @@ mod concurrency;
 mod credentials;
 mod handlers;
 mod import_tasks;
+mod model_tests;
 mod presenter;
 mod wire;
 

@@ -41,7 +41,9 @@ use gateway_core::account::{
 };
 use gateway_core::error::StoreErrorKind;
 use gateway_core::metering::Money;
-use gateway_core::operation::{GenerateRequest, Operation, ProtocolPayload, RawJsonPayload};
+use gateway_core::operation::{
+    GenerateRequest, ImageRequest, ImageRequestKind, Operation, ProtocolPayload, RawJsonPayload,
+};
 use gateway_core::provider_ports::{
     NewOAuthPendingFlow, OAuthPendingBinding, OAuthPendingClaimOutcome, OAuthPendingConsumeOutcome,
     OAuthPendingFlowPort, OAuthPendingPutOutcome, OAuthPendingReleaseOutcome, ProviderStoreError,
@@ -323,6 +325,36 @@ impl ProviderAdmin for OpenAiAdminProvider {
         input_text: &str,
     ) -> Result<Operation, ProviderAdminError> {
         build_connection_test_operation(upstream_model, input_text)
+    }
+
+    fn model_test_image_operation(
+        &self,
+        model: &UpstreamModelId,
+        prompt: &str,
+    ) -> Result<Operation, ProviderAdminError> {
+        let body = serde_json::json!({"model": model.as_str(), "prompt": prompt, "n": 1});
+        let payload = RawJsonPayload::new("openai", body.to_string().into())
+            .map_err(|_| provider_admin_error(ProviderAdminErrorKind::Invalid))?;
+        Ok(Operation::GenerateImage(ImageRequest::from_raw_json(
+            ImageRequestKind::Generation,
+            payload,
+        )))
+    }
+
+    fn model_test_image_base64<'a>(&self, body: &'a [u8]) -> Option<&'a str> {
+        #[derive(Deserialize)]
+        struct ImagesResponse<'a> {
+            #[serde(borrow)]
+            data: Vec<ImageResponse<'a>>,
+        }
+
+        #[derive(Deserialize)]
+        struct ImageResponse<'a> {
+            b64_json: Option<&'a str>,
+        }
+
+        let result: ImagesResponse<'_> = serde_json::from_slice(body).ok()?;
+        result.data.first()?.b64_json
     }
 
     fn dashboard_wire_profile(&self) -> Option<DashboardWireProfile> {
