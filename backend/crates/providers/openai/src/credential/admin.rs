@@ -516,7 +516,8 @@ impl CodexCredentialAdmin {
             current.account.next_refresh_at(),
         )
         .map_err(|_| CodexCredentialAdminError::InvalidCredential)?
-        .preserving_profile();
+        .preserving_profile()
+        .preserving_access_token_expiry();
         Ok(PreparedCodexCredentialRotation {
             profile,
             credential,
@@ -763,6 +764,8 @@ impl CodexCredentialAdmin {
         if reauthorization && replacement_identity.is_none() && secret.refresh_token.is_none() {
             secret.refresh_token = oauth.refresh_token.clone().map(SecretString::from);
         }
+        let same_access_token = replacement_identity.is_none()
+            && oauth.access_token == *secret.access_token.expose_secret();
         oauth.access_token = secret.access_token.expose_secret().to_owned();
         oauth.refresh_token = secret
             .refresh_token
@@ -784,6 +787,11 @@ impl CodexCredentialAdmin {
             optional_time(next_refresh_at),
         )
         .map_err(|_| CodexCredentialAdminError::InvalidCredential)?;
+        let credential = if same_access_token {
+            credential.preserving_access_token_expiry()
+        } else {
+            credential
+        };
         Ok(PreparedCodexCredentialRotation {
             profile,
             credential: if reauthorization {

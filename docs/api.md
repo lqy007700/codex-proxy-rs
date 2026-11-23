@@ -650,8 +650,9 @@ OAuth 与配置 `prefer_websocket` 的 API Key 账号均适用，HTTP 和 WS 入
 显式 `generate=false` 预热返回 `websocket_message_too_large`，不转为 HTTP 或自动重试。
 允许发送的文本超过 1 MiB 时按 1 MiB 分帧，接收方仍收到一条完整消息
 
-超过当前连接声明上限的 connection-local WS 续接，以及 HTTP `store=false` 成功后标记为 `ReplayRequired`
-的 WS 增量，均在发送前返回 `status: 400 / previous_response_not_found`。客户端应清除旧 ID，
+超过当前连接声明上限的 connection-local WS 续接在发送前返回 `400 previous_response_not_found`。
+上游 HTTP/SSE 在 `store=false` 下成功后，若网关已记录该响应需要完整重放，HTTP 和 WS 客户端携带其
+`previous_response_id` 继续生成时也会收到同一错误。客户端应清除旧 ID，
 携带完整历史及工具调用／输出重试。官方 Codex 支持重连 WS 后完整重发，也可能按自身重试预算
 切到 HTTP；其他客户端需要自行实现此合同。代理不缓存 transcript，不把增量输入当作独立新链，
 连接内续接失去原连接时仍需客户端恢复；HTTP 链后续步骤可能增加一次恢复信号、重连及全量上传
@@ -1633,8 +1634,8 @@ OpenAI 授权码交换与令牌刷新请求的连接超时为 30 秒，单次上
   Provider 临时运行状态，包括 OpenAI 会话的 WebSocket 临时降级
 - 成功额度观测会 revision-fenced 写入 quota；明确 `Allowed` 投影为 `normal`，明确耗尽投影为
   `quota_exhausted`。额度观测不会清除凭据过期、无效或封禁事实；这些事实统一投影为 `error`，并由
-  `errorReason` 区分。额度接口的 401/403 也不足以判定 refresh token 永久失效，credential 终态只由
-  OAuth refresh 的明确永久错误写入
+  `errorReason` 区分。OpenAI 额度查询收到 `401 token_revoked` 时，将所用版本的访问令牌标记为过期，
+  仍有效的 refresh token 可用于续期。其他额度 401/403 保留原状态，refresh token 是否永久失效由 OAuth 续期结果判断
 - xAI 额度百分比只读取 `creditUsagePercent`，缺失时保持未知，不由旧月额度与用量计算。
   预付余额保留上游账本符号，非零余额及剩余按量额度可独立证明可用；窗口已过期或缺少可用证据时，
   不凭旧快照恢复账号
@@ -1676,7 +1677,7 @@ OpenAI 授权码交换与令牌刷新请求的连接超时为 30 秒，单次上
 
 样本仅使用当前额度窗口内、账号加入后开始且截至观测时间已完整交付的请求，缓存命中不重复计入输入
 
-重置或套餐变化后重新积累有效进度，中途加入的账号可在新基线后采样，无需等待下一次重置，职责与断点处理见[额度预测架构](architecture.md#额度预测)
+重置或套餐变化后重新积累有效进度，中途加入的账号可在新基线后采样。疑似跨周期且仍待确认时，接口保留来源用量并暂停估算，详见[额度预测架构](architecture.md#额度预测)
 
 预测不参与调度或账单结算，站外消耗、日志清理、异步延迟、未成功交付的上游消耗和模型组合变化均可能造成误差
 
