@@ -62,7 +62,7 @@ tower-layer = "0.3.3"
 tokio-tungstenite = { git = "https://github.com/openai-oss-forks/tokio-tungstenite", rev = "7447c427513cfe685f236e1ac0513c4ea3dd9c0b", features = ["proxy", "rustls-tls-native-roots"] }
 tracing = "0.1.44"
 tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "bc589d684755a8c02da0fc7e58d0861cbfc306f1", features = ["deflate", "proxy"] }
-url = "2.5.8"
+url = "2.5.9"
 uuid = { version = "1.23.3", features = ["v4", "v7"] }
 # 静态链接 XZ 解码器，不要求部署环境安装 liblzma。
 xz2 = { version = "0.1.7", features = ["static"] }
