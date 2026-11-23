@@ -783,6 +783,23 @@ impl CodexCredentialSelector {
                     && !token_unavailable
                     && (binding.directive().is_none() || defer_token_directive)
             });
+            let image_primary = binding
+                .as_ref()
+                .filter(|_| {
+                    matches!(model, CodexSelectionModel::Image(_))
+                        && affinity_mode == AccountAffinity::Strict
+                        && pinned_account.is_none()
+                })
+                .map(ProviderSessionBinding::account_id)
+                .filter(|id| {
+                    request
+                        .attempt
+                        .account_scope()
+                        .is_some_and(|scope| scope.allows(id))
+                        && accounts
+                            .iter()
+                            .any(|account| account.id() == *id && account.enabled())
+                });
             let mut model_access_rejected = 0_usize;
             let accounts = accounts
                 .into_iter()
@@ -977,6 +994,16 @@ impl CodexCredentialSelector {
                 .iter()
                 .map(|account| account.id().clone())
                 .collect::<Vec<_>>();
+            // 主账号缺少生图资格时只为本次图片借号，繁忙或冷却仍由普通亲和规则处理
+            let image_primary_to_keep = image_primary.filter(|id| !account_ids.contains(id));
+            if image_primary_to_keep.is_some() && queued_account.is_some() {
+                refresh_candidates = true;
+                continue 'capacity;
+            }
+            let follow_only = follow_only && image_primary_to_keep.is_none();
+            // 借号不认领或迁移 Token 主绑定，显式管理员指令仍由原逻辑处理
+            let token_selection =
+                token_selection && (image_primary_to_keep.is_none() || token_directive.is_some());
             let account_revisions = accounts
                 .iter()
                 .map(|account| (account.id().clone(), account.revision()))
@@ -1735,13 +1762,17 @@ impl CodexCredentialSelector {
                                 key,
                                 binding_snapshot.as_ref(),
                                 // 临时分流保留主账号，已确认不可用或持续耗尽时才迁移主绑定
-                                binding
-                                    .as_ref()
-                                    .filter(|_| {
-                                        affinity_mode == AccountAffinity::Preferred
-                                            && session_migration_reason.is_none()
+                                image_primary_to_keep
+                                    .or_else(|| {
+                                        binding
+                                            .as_ref()
+                                            .filter(|_| {
+                                                affinity_mode == AccountAffinity::Preferred
+                                                    && session_migration_reason.is_none()
+                                            })
+                                            .map(ProviderSessionBinding::account_id)
                                     })
-                                    .map_or(account.id(), ProviderSessionBinding::account_id),
+                                    .unwrap_or_else(|| account.id()),
                                 request
                                     .attempt
                                     .account_selection_policy()

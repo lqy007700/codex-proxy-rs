@@ -342,8 +342,13 @@ impl CodexBackendClient {
             connection_profile.push('\0');
             connection_profile.push_str(&profile);
         }
-        let pool_key =
-            self.websocket_pool_key(request, context, pool_account_id, &connection_profile);
+        let pool_key = self.websocket_pool_key(
+            request,
+            context,
+            pool_account_id,
+            &connection_profile,
+            websocket_create.connection().headers(),
+        );
         let pool_log_context = pool_key.as_ref().map(WebSocketPoolLogContext::from_key);
         let downstream_cancellation = context.response_control.and_then(
             gateway_core::engine::response_control::ResponseControl::connection_cancellation,
@@ -462,24 +467,10 @@ impl CodexBackendClient {
                 ..CodexTransportMetrics::default()
             };
             prepared.discard().await;
-            let error = match requirement {
-                TransportRequirement::ExactWebSocketContinuation => {
-                    Some(CodexWebSocketExchangeError::ContinuationUnavailable {
-                        reason: PreviousResponseUnavailableReason::PayloadTooLarge,
-                    })
-                }
-                TransportRequirement::ExplicitWebSocketWarmup => {
-                    Some(CodexWebSocketExchangeError::MessageTooLarge)
-                }
-                TransportRequirement::HttpRequired
-                | TransportRequirement::WebSocketNewChain
-                | TransportRequirement::PersistedContinuation
-                | TransportRequirement::ExternalUnknown
-                | TransportRequirement::NewChain => None,
-            };
-            if let Some(error) = error {
-                return Err(websocket_exchange_error_to_client_error(error));
-            }
+            check_oversized_websocket_fallback(
+                requirement,
+                CodexWebSocketExchangeError::MessageTooLarge,
+            )?;
             context.trace.cloned().unwrap_or_default().record(
                 "transport.fallback",
                 serde_json::json!({
@@ -530,6 +521,19 @@ impl CodexBackendClient {
         })
     }
 
+    async fn http_stream_with_metrics(
+        &self,
+        request: &CodexResponsesRequest,
+        context: CodexRequestContext<'_>,
+        metrics: CodexTransportMetrics,
+    ) -> CodexClientResult<CodexBackendStreamingResponse> {
+        let mut response = self
+            .create_response_stream_http_sse(request, context)
+            .await?;
+        merge_preparation_metrics(&mut response.transport_metrics, metrics);
+        Ok(response)
+    }
+
     #[doc(hidden)]
     pub(crate) async fn create_response_stream_with_prepared(
         &self,
@@ -550,19 +554,16 @@ impl CodexBackendClient {
             }),
         );
         match route {
-            PreparedResponseRoute::Http => self
-                .create_response_stream_http_sse(request, context)
-                .await
-                .map(|mut response| {
-                    merge_preparation_metrics(&mut response.transport_metrics, metrics);
-                    response
-                }),
+            PreparedResponseRoute::Http => {
+                self.http_stream_with_metrics(request, context, metrics)
+                    .await
+            }
             PreparedResponseRoute::WebSocket(route) => {
                 let PreparedWebSocketRoute {
                     request: websocket_request,
                     prepared,
                 } = *route;
-                let mut exchange = execute_prepared_response_create_request_stream(
+                let exchange = execute_prepared_response_create_request_stream(
                     &websocket_request,
                     prepared,
                     context.response_control.cloned(),
@@ -572,8 +573,29 @@ impl CodexBackendClient {
                         .unwrap_or_default()
                         .exchange("websocket"),
                 )
-                .await
-                .map_err(websocket_exchange_error_to_client_error)?;
+                .await;
+                let mut exchange = match exchange {
+                    Err(error) if error.message_too_big_close() => {
+                        // 上游已回复本次上传，HTTP 恢复不再占用发送前的建连窗口
+                        if let Some(budget) = &self.connection_budget {
+                            budget.complete();
+                        }
+                        check_oversized_websocket_fallback(requirement, error)?;
+                        context.trace.cloned().unwrap_or_default().record(
+                            "transport.fallback", serde_json::json!({
+                                "to": "http_sse", "reason": "websocket_message_too_large", "closeCode": 1009,
+                                "requirement": requirement.as_str(), "payloadBytes": websocket_request.payload_text().len(),
+                            }),
+                        );
+                        let mut metrics = metrics;
+                        metrics.decision =
+                            Some(CodexTransportDecision::Http2WebSocketMessageTooLarge);
+                        return self
+                            .http_stream_with_metrics(request, context, metrics)
+                            .await;
+                    }
+                    result => result.map_err(websocket_exchange_error_to_client_error)?,
+                };
                 if requirement.allows_connection_restart() {
                     // 前导帧即时交付；连接寿命拒绝仍沿用原有分类与恢复预算
                     let mut boundary_reached = false;
@@ -628,6 +650,7 @@ impl CodexBackendClient {
         context: CodexRequestContext<'_>,
         pool_account_id: Option<&str>,
         connection_profile: &str,
+        opening_headers: &[(String, String)],
     ) -> Option<CodexWebSocketPoolKey> {
         let account_id = pool_account_id.or(context.account_id)?;
         let conversation_id = request
@@ -638,6 +661,7 @@ impl CodexBackendClient {
             .with_egress_key(&self.egress_key)
             .with_outbound_proxy(self.outbound_proxy.as_ref())
             .with_connection_profile(connection_profile)
+            .with_response_exclusions(opening_headers)
             .with_installation_id(context.installation_id);
         key = key.with_routing_affinity(self.routing_affinity.as_ref().map(|pin| pin.id()));
         if let Some(connection_id) = request.downstream_websocket_connection_id.as_deref() {
@@ -645,6 +669,27 @@ impl CodexBackendClient {
         }
         Some(key)
     }
+}
+
+fn check_oversized_websocket_fallback(
+    requirement: TransportRequirement,
+    cause: CodexWebSocketExchangeError,
+) -> CodexClientResult<()> {
+    let error = match requirement {
+        TransportRequirement::ExactWebSocketContinuation => {
+            CodexWebSocketExchangeError::ContinuationUnavailable {
+                reason: PreviousResponseUnavailableReason::PayloadTooLarge,
+                source: cause.message_too_big_close().then(|| Box::new(cause)),
+            }
+        }
+        TransportRequirement::ExplicitWebSocketWarmup => cause,
+        TransportRequirement::HttpRequired
+        | TransportRequirement::WebSocketNewChain
+        | TransportRequirement::PersistedContinuation
+        | TransportRequirement::ExternalUnknown
+        | TransportRequirement::NewChain => return Ok(()),
+    };
+    Err(websocket_exchange_error_to_client_error(error))
 }
 
 fn is_websocket_replayable_prelude(frame: &[u8]) -> bool {

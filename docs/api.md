@@ -417,6 +417,9 @@ Messages 推理强度只观测顶层 `output_config.effort` 的非空字符串�
 Images 使用原生非流式 JSON 端点，JSON 请求与响应正文原样转发。
 `/v1/images/edits` 还接受 `multipart/form-data`，将上传转换为原生 Images JSON 请求
 
+严格亲和下，会话主账号在授权范围内但其模型权限、套餐或上游协议不支持本次生图时，主会话或后代线程可临时使用有资格的账号。
+会话和可信 Token 的主绑定仍用于后续聊天；借号继续受 Client Key 的账号范围、模型权限和调度约束
+
 multipart 的 `image` 和 `image[]` 上传按出现顺序组成 `images` 数组，每项为
 `{"image_url":"data:image/...;base64,..."}`；`mask` 上传转换为同结构的单个对象。
 图片支持 PNG、JPEG、WebP，根据内容识别格式，原始文件字节直接编码，不缩放或重新编码
@@ -524,6 +527,9 @@ API Key 与 OAuth 共用模拟客户端画像（`User-Agent`、`originator`、`v
 `openai.residency`、`openai.account_routing_override` 控制，配置值覆盖客户端同名头，
 省略或 `null` 时不发送，配置说明见 [部署与运维](../deploy/README.md#启动后的运行设置)。
 `x-openai-fedramp` 按业务头透传，保留原始多值
+
+`x-codex-exclude` 决定上游省略哪些响应字段。上游 WebSocket 通过握手读取该头，连接池按最终握手的全部同名值区分连接。
+头值改变时，依赖旧连接的精确续接需要客户端重放完整历史
 
 Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和 `sec-fetch-*`
 携带的下游 SDK/浏览器环境或页面来源。过滤规则适用于所有下游客户端，与 User-Agent 无关；
@@ -650,7 +656,10 @@ OAuth 与配置 `prefer_websocket` 的 API Key 账号均适用，HTTP 和 WS 入
 显式 `generate=false` 预热返回 `websocket_message_too_large`，不转为 HTTP 或自动重试。
 允许发送的文本超过 1 MiB 时按 1 MiB 分帧，接收方仍收到一条完整消息
 
-超过当前连接声明上限的 connection-local WS 续接在发送前返回 `400 previous_response_not_found`。
+上传开始后，若首条上游响应文本前收到 `1009`，可回退的请求使用同一账号改走 HTTP/SSE，后续请求重新按连接判断。
+显式预热或收到响应文本（包括元数据）后关闭时，保留关闭错误。单独的断管或 TCP 重置走传输失败处理
+
+握手预判超限或上传时收到 `1009` 的 connection-local 精确续接返回 `400 previous_response_not_found`，由客户端完整重放。
 上游 HTTP/SSE 在 `store=false` 下成功后，若网关已记录该响应需要完整重放，HTTP 和 WS 客户端携带其
 `previous_response_id` 继续生成时也会收到同一错误。客户端应清除旧 ID，
 携带完整历史及工具调用／输出重试。官方 Codex 支持重连 WS 后完整重发，也可能按自身重试预算
@@ -1941,7 +1950,8 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 
 严格亲和下的后代线程始终启用账号排队，沿用 `concurrencyWaitTimeoutSeconds` 和请求截止时间；
 `maxWaitingPerAccount` 为 0 时使用每队列 1,000 人上限，否则沿用配置的上限。
-可识别来源的 Search、Images、Live 创建请求采用同样规则，身份与轮次关联见[会话绑定](architecture.md#6-路由账号范围与-continuation)。
+可识别来源的 Search、Images、Live 创建请求共用会话绑定。主账号缺少生图资格时，后代可按 [Images 请求](#images-请求) 规则借号。
+身份与轮次关联见[会话绑定](architecture.md#6-路由账号范围与-continuation)。
 普通请求关闭账号排队且没有可用容量时返回 `503` / `account_capacity_unavailable`，
 与无候选账号的 `no_available_provider` 区分；排队不绕过账号范围、模型权限、RPM 或金额限额
 
