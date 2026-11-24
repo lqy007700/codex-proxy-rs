@@ -92,7 +92,7 @@ async fn proxy_location_rejects_invalid_and_incomplete_input() {
 }
 
 #[derive(Default)]
-pub(super) struct MemoryProxies(Mutex<Vec<ProxyRecord>>);
+pub(super) struct MemoryProxies(Mutex<Vec<ProxyRecord>>, Mutex<Option<ProxyTestTargets>>);
 
 #[tokio::test]
 async fn proxy_enabled_updates_preserve_connection_and_omitted_state() {
@@ -137,6 +137,37 @@ fn missing() -> AdminStoreError {
 
 #[async_trait]
 impl ProxyStore for MemoryProxies {
+    async fn test_targets(&self) -> AdminStoreResult<ProxyTestTargets> {
+        Ok(self
+            .1
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| ProxyTestTargets {
+                revision: Revision::new(1).unwrap(),
+                targets: Vec::new(),
+            }))
+    }
+
+    async fn replace_test_targets(
+        &self,
+        mut settings: ProxyTestTargets,
+        _: &MutationContext,
+    ) -> AdminStoreResult<ProxyTestTargets> {
+        let mut saved = self.1.lock().unwrap();
+        let revision = saved.as_ref().map_or(1, |value| value.revision.get());
+        if revision != settings.revision.get() {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::Conflict,
+                "proxy test targets",
+                "changed",
+            ));
+        }
+        settings.revision = Revision::new(revision + 1).unwrap();
+        *saved = Some(settings.clone());
+        Ok(settings)
+    }
+
     async fn remove_account(
         &self,
         proxy_id: &str,
@@ -347,6 +378,27 @@ pub(super) struct SuccessfulProbe;
 
 #[async_trait]
 impl ProxyProbe for SuccessfulProbe {
+    async fn test_saved(
+        &self,
+        proxy: &OutboundProxy,
+        detect_location: bool,
+        targets: &[ProxyTestTarget],
+    ) -> ProxyTestResult {
+        let mut result = self.test(Some(proxy), detect_location).await;
+        result.target_results = targets
+            .iter()
+            .map(|target| ProxyTargetResult {
+                target: target.clone(),
+                built_in: false,
+                latency_ms: 5,
+                exit_ip: None,
+                status_code: Some(401),
+                error: None,
+            })
+            .collect();
+        result
+    }
+
     async fn test(&self, proxy: Option<&OutboundProxy>, detect_location: bool) -> ProxyTestResult {
         if let Some(proxy) = proxy {
             assert_eq!(
@@ -360,6 +412,7 @@ impl ProxyProbe for SuccessfulProbe {
             "203.0.113.3"
         };
         ProxyTestResult {
+            target_results: Vec::new(),
             location: if detect_location {
                 ProxyLocationDetection::Detected { location: serde_json::from_value(json!({"country":"JP","region":"Tokyo","city":"Tokyo","timezone":"Asia/Tokyo"})).unwrap() }
             } else {
@@ -543,6 +596,7 @@ async fn proxy_probe_checks_unsaved_address_without_creating_or_changing_records
             "location": {"status": "notRequested"},
             "success": true,
             "latencyMs": 15,
+            "targetResults": [],
             "exitIp": "203.0.113.2",
             "exitIpv4": "203.0.113.2",
             "exitIpv6": null,
@@ -1048,4 +1102,84 @@ async fn direct_location_probe_requires_admin_and_does_not_save_configuration() 
     let (_, after) = request(&fixture, "/api/admin/proxies", None, true).await;
     assert_eq!(before["data"], after["data"]);
     assert_eq!(settings_before, *fixture.settings.settings.lock().unwrap());
+}
+
+#[tokio::test]
+async fn proxy_test_targets_are_admin_only_validated_and_returned_with_saved_results() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let path = "/api/admin/proxies/test-targets";
+    let (status, _) = request(&fixture, path, None, false).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, initial) = request(&fixture, path, None, true).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(initial["data"]["targets"], json!([]));
+    let revision = initial["data"]["revision"].clone();
+
+    for url in [
+        "http://example.com",
+        "https://127.0.0.1",
+        "https://10.1.2.3",
+        "https://[::ffff:127.0.0.1]",
+        "https://app.localhost",
+        "https://example.com:8443",
+        "https://name:pass@example.com",
+        "https://example.com?query=1",
+        "https://example.com/#anchor",
+    ] {
+        let body = json!({"revision": revision, "targets": [{"name": "Test", "url": url}]});
+        let (status, _) = request(&fixture, path, Some(body), true).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{url}");
+    }
+
+    let duplicate = json!({"revision": revision, "targets": [
+        {"name": "First", "url": "https://example.com"},
+        {"name": "Second", "url": "https://EXAMPLE.com/"},
+    ]});
+    let (status, _) = request(&fixture, path, Some(duplicate), true).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let body = json!({"revision": revision, "targets": [
+        {"name": " Models ", "url": "https://api.openai.com/v1/models"},
+        {"name": "Example", "url": "https://example.com"},
+    ]});
+    let (status, saved) = request(&fixture, path, Some(body.clone()), true).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["data"]["targets"][0]["name"], "Models");
+    assert_eq!(saved["data"]["targets"][1]["url"], "https://example.com/");
+    let (status, _) = request(&fixture, path, Some(body), true).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (_, read) = request(&fixture, path, None, true).await;
+    assert_eq!(saved["data"], read["data"]);
+
+    let (status, created) = request(
+        &fixture,
+        "/api/admin/proxies/create",
+        Some(json!([{
+            "name": "Office", "proxyUrl": "http://test-user:private-password@proxy.example:8080"
+        }])),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let record = &created["data"][0]["data"]["record"];
+    let (status, tested) = request(
+        &fixture,
+        "/api/admin/proxies/test",
+        Some(json!([{
+            "id": record["id"], "revision": record["revision"]
+        }])),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let result = &tested["data"][0]["data"]["lastTest"];
+    assert_eq!(result["success"], true);
+    assert_eq!(result["targetResults"][0]["statusCode"], 401);
+    assert_eq!(result["targetResults"][1]["target"]["name"], "Example");
+    let (_, listed) = request(&fixture, "/api/admin/proxies", None, true).await;
+    assert_eq!(
+        listed["data"]["items"][0]["lastTest"]["targetResults"],
+        result["targetResults"]
+    );
 }

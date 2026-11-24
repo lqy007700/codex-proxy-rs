@@ -9,6 +9,8 @@ import ProxyAccountsModal from './components/ProxyAccountsModal.vue'
 import ProxyActions from './components/ProxyActions.vue'
 import ProxyFormModal from './components/ProxyFormModal.vue'
 import ProxyRegion from './components/ProxyRegion.vue'
+import ProxyTargetResults from './components/ProxyTargetResults.vue'
+import ProxyTestTargetsModal from './components/ProxyTestTargetsModal.vue'
 import { useProxies } from './composables/useProxies'
 import { useProxyBatchTesting } from './composables/useProxyBatchTesting'
 import { proxyColumns } from './constants'
@@ -50,6 +52,7 @@ const {
   clearCredentials,
 } = useProxies()
 const showAccounts = shallowRef(false)
+const showTestTargets = shallowRef(false)
 const inspected = shallowRef<OutboundProxyRecord | null>(null)
 const { selectedIds, selectedRowKeys, allSelected, indeterminate, toggleSelection, toggleAll } = usePageSelection(proxies)
 const { busy: batchTesting, start: testSelectedProxies } = useProxyBatchTesting({
@@ -80,6 +83,9 @@ watch(search, () => {
             <ZButton v-if="selectedIds.size" :loading="batchTesting" :disabled="loading" aria-label="批量测试代理" @click="testSelectedProxies(selectedRowKeys)">
               <Wifi class="size-4" />
               批量测试 ({{ selectedIds.size }})
+            </ZButton>
+            <ZButton :disabled="batchTesting" @click="showTestTargets = true">
+              测试地址
             </ZButton>
             <ZButton type="primary" @click="openForm()">
               <template #icon>
@@ -135,12 +141,15 @@ watch(search, () => {
               <ProxyRegion :proxy="row" class="text-z-sm" />
             </template>
             <template #latency="{ row }">
-              <span v-if="testingIds.has(row.id)" class="text-z-text-secondary">测试中</span>
-              <span v-else-if="row.lastTest?.success" class="tabular-nums text-z-success">
-                {{ row.lastTest.latencyMs }} ms
-              </span>
-              <span v-else-if="row.lastTest" class="text-z-error" :title="`${row.lastTest.message}（耗时 ${row.lastTest.latencyMs} ms）`">失败</span>
-              <span v-else class="text-z-text-quaternary">未测试</span>
+              <div class="grid justify-items-start gap-0.5">
+                <span v-if="testingIds.has(row.id)" class="text-z-text-secondary">测试中</span>
+                <span v-else-if="row.lastTest?.success" class="tabular-nums text-z-success">
+                  {{ row.lastTest.latencyMs }} ms
+                </span>
+                <span v-else-if="row.lastTest" class="text-z-error" :title="`${row.lastTest.message}（耗时 ${row.lastTest.latencyMs} ms）`">失败</span>
+                <span v-else class="text-z-text-quaternary">未测试</span>
+                <ProxyTargetResults v-if="!testingIds.has(row.id) && row.lastTest" :name="row.name" :results="row.lastTest.targetResults" />
+              </div>
             </template>
             <template #accounts="{ row }">
               <button type="button" class="flex w-fit cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent p-0 text-z-sm text-z-text-secondary outline-none transition-colors hover:text-z-primary-text focus-visible:ring-2 focus-visible:ring-z-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-z-bg-container" :aria-label="`查看 ${row.name} 的 ${row.accountCount} 个关联账号`" @click="inspected = row; showAccounts = true">
@@ -195,6 +204,7 @@ watch(search, () => {
         将自动解除关联账号，关联账号的新请求将改为直连
       </p>
     </ZConfirmDialog>
+    <ProxyTestTargetsModal v-model="showTestTargets" />
     <ProxyAccountsModal v-model="showAccounts" :proxy="inspected" @changed="loadProxies({ silent: true })" />
   </div>
 </template>

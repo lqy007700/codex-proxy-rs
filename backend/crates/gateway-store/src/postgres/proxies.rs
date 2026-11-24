@@ -158,6 +158,12 @@ fn record(row: PgRow) -> StoreResult<ProxyRecord> {
         last_test: success
             .map(|success| -> StoreResult<_> {
                 Ok(ProxyTestResult {
+                    target_results: row
+                        .try_get::<sqlx::types::Json<Vec<ProxyTargetResult>>, _>(
+                            "last_test_targets_json",
+                        )
+                        .map_err(|source| invalid().with_source(source))?
+                        .0,
                     location: row
                         .try_get::<sqlx::types::Json<ProxyLocationDetection>, _>(
                             "last_location_detection_json",
@@ -280,11 +286,12 @@ async fn save_test(
     }
     sqlx::query("update outbound_proxies set last_test_at = now(), last_test_success = $2, last_test_latency_ms = $3,
         last_test_ip = $4, last_test_ipv4 = $5, last_test_ipv6 = $6, last_test_message = $7,
-        last_location_detection_json = $8, detected_location_json = $9 where id = $1")
+        last_location_detection_json = $8, detected_location_json = $9, last_test_targets_json = $10 where id = $1")
         .bind(&current.id).bind(result.success).bind(i64::try_from(result.latency_ms).map_err(|source| invalid().with_source(source))?)
         .bind(result.exit_ip.map(|ip| ip.to_string())).bind(result.exit_ipv4.map(|ip| ip.to_string()))
         .bind(result.exit_ipv6.map(|ip| ip.to_string())).bind(result.message)
         .bind(sqlx::types::Json(result.location)).bind(detected.map(sqlx::types::Json))
+        .bind(sqlx::types::Json(result.target_results))
         .execute(&mut **transaction).await.map_err(unavailable)?;
     Ok(())
 }
@@ -405,8 +412,78 @@ async fn audit(
     .await
 }
 
+fn proxy_targets_revision(revision: i64) -> AdminStoreResult<AdminRevision> {
+    let value = u64::try_from(revision).map_err(|_| store_error(invalid()))?;
+    AdminRevision::new(value).map_err(|_| store_error(invalid()))
+}
+
 #[async_trait]
 impl ProxyStore for PgProxyRepository {
+    async fn test_targets(&self) -> AdminStoreResult<ProxyTestTargets> {
+        let (revision, sqlx::types::Json(targets)) = sqlx::query_as::<_, (i64, sqlx::types::Json<Vec<ProxyTestTarget>>)>(
+            "select proxy_test_targets_revision, proxy_test_targets_json from runtime_settings where id = 1",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| store_error(unavailable(source)))?;
+        Ok(ProxyTestTargets {
+            revision: proxy_targets_revision(revision)?,
+            targets,
+        })
+    }
+
+    async fn replace_test_targets(
+        &self,
+        settings: ProxyTestTargets,
+        context: &MutationContext,
+    ) -> AdminStoreResult<ProxyTestTargets> {
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|source| store_error(unavailable(source)))?;
+        let revision =
+            i64::try_from(settings.revision.get()).map_err(|_| store_error(invalid()))?;
+        let next: Option<i64> = sqlx::query_scalar(
+            "update runtime_settings set proxy_test_targets_json = $1,
+               proxy_test_targets_revision = proxy_test_targets_revision + 1
+             where id = 1 and proxy_test_targets_revision = $2 returning proxy_test_targets_revision",
+        )
+        .bind(sqlx::types::Json(&settings.targets))
+        .bind(revision)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|source| store_error(unavailable(source)))?;
+        let Some(next) = next else {
+            let error = match transaction.rollback().await {
+                Ok(()) => conflict("proxy_test_targets"),
+                Err(cleanup) => conflict("proxy_test_targets").with_cleanup(cleanup),
+            };
+            return Err(store_error(error));
+        };
+        let revision = proxy_targets_revision(next)?;
+        append_admin_audit_event_in_transaction(
+            &mut transaction,
+            mutation_audit(
+                context,
+                MutationAuditOperation::ProxyTestTargetsUpdate,
+                "global",
+                vec!["targets".to_owned()],
+            ),
+            None,
+        )
+        .await
+        .map_err(store_error)?;
+        transaction
+            .commit()
+            .await
+            .map_err(|source| store_error(unavailable(source)))?;
+        Ok(ProxyTestTargets {
+            revision,
+            targets: settings.targets,
+        })
+    }
+
     async fn remove_account(
         &self,
         proxy_id: &str,
@@ -774,6 +851,7 @@ impl ProxyStore for PgProxyRepository {
              last_test_ip = case when $4 is not null and $4 <> proxy_url then null else last_test_ip end,
              last_test_ipv4 = case when $4 is not null and $4 <> proxy_url then null else last_test_ipv4 end,
              last_test_ipv6 = case when $4 is not null and $4 <> proxy_url then null else last_test_ipv6 end,
+             last_test_targets_json = case when $4 is not null and $4 <> proxy_url then '[]'::jsonb else last_test_targets_json end,
              last_test_message = case when $4 is not null and $4 <> proxy_url then null else last_test_message end
              where id = $1 and revision = $2")
             .bind(&command.id).bind(i64::try_from(command.revision.get()).map_err(|_| store_error(invalid()))?)

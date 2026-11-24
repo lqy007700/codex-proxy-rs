@@ -4,6 +4,7 @@ import { ZScrollbar } from '@codex-proxy/ui'
 import { computed } from 'vue'
 import { proxyBatchStates } from '../utils/batch'
 import ProxyRegion from './ProxyRegion.vue'
+import ProxyTargetResults from './ProxyTargetResults.vue'
 
 const props = defineProps<{ items: ProxyBatchItem[], tests?: ProxyBatchItem[] }>()
 const testItems = computed(() => props.tests ?? [])
@@ -70,6 +71,7 @@ const locationPending = computed(() => testItems.value.filter(item => item.statu
             <span v-if="row.test?.record?.lastTest" class="min-w-0 break-all font-mono">
               {{ row.test.record.lastTest.latencyMs }} ms<span v-if="row.test.record.lastTest.exitIpv4"> · IPv4 {{ row.test.record.lastTest.exitIpv4 }}</span><span v-if="row.test.record.lastTest.exitIpv6"> · IPv6 {{ row.test.record.lastTest.exitIpv6 }}</span>
             </span>
+            <ProxyTargetResults v-if="row.test?.record?.lastTest" :name="row.item.name" :results="row.test.record.lastTest.targetResults" />
           </div>
           <span v-if="row.message" class="col-span-2 text-z-xs leading-relaxed wrap-anywhere" :class="row.result.status === 'succeeded' ? 'text-z-warning-text' : proxyBatchStates[row.result.status].tone">{{ row.message }}</span>
         </li>

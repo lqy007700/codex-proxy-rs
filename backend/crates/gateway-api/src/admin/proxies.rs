@@ -13,7 +13,8 @@ use gateway_admin::model::{
     AdminError as ServiceError, PageSize, Revision,
     proxies::{
         NewProxy, ProxyAccountListQuery, ProxyBatchResult, ProxyListQuery, ProxyMutation,
-        ProxyRecord, ProxyTestResult, TestProxy, UpdateProxy,
+        ProxyRecord, ProxyTargetResult, ProxyTestResult, ProxyTestTarget, ProxyTestTargets,
+        TestProxy, UpdateProxy,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -112,6 +113,7 @@ struct ProxyTestView {
     location: gateway_admin::model::proxies::ProxyLocationDetection,
     success: bool,
     latency_ms: u64,
+    target_results: Vec<ProxyTargetResult>,
     exit_ip: Option<String>,
     exit_ipv4: Option<String>,
     exit_ipv6: Option<String>,
@@ -121,6 +123,7 @@ struct ProxyTestView {
 impl From<ProxyTestResult> for ProxyTestView {
     fn from(result: ProxyTestResult) -> Self {
         Self {
+            target_results: result.target_results,
             location: result.location,
             success: result.success,
             latency_ms: result.latency_ms,
@@ -241,6 +244,10 @@ where
         .route("/api/admin/proxies/update", post(update::<S>))
         .route("/api/admin/proxies/delete", post(delete::<S>))
         .route("/api/admin/proxies/test", post(test::<S>))
+        .route(
+            "/api/admin/proxies/test-targets",
+            get(test_targets::<S>).post(replace_test_targets::<S>),
+        )
         .route("/api/admin/proxies/probe", post(probe::<S>))
         .route("/api/admin/proxies/probe/direct", post(probe_direct::<S>))
 }
@@ -558,6 +565,67 @@ where
     Ok(AdminResponse::new(
         StatusCode::OK,
         AdminEnvelope::ok(ProxyTestView::from(result)),
+    ))
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TestTargetsView {
+    revision: u64,
+    targets: Vec<ProxyTestTarget>,
+}
+
+impl From<ProxyTestTargets> for TestTargetsView {
+    fn from(settings: ProxyTestTargets) -> Self {
+        Self {
+            revision: settings.revision.get(),
+            targets: settings.targets,
+        }
+    }
+}
+
+async fn test_targets<S>(
+    _: AdminAuth,
+    State(state): State<S>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let settings = state
+        .admin_services()
+        .proxies()
+        .test_targets()
+        .await
+        .map_err(map_error)?;
+    Ok(AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(TestTargetsView::from(settings)),
+    ))
+}
+
+async fn replace_test_targets<S>(
+    auth: AdminAuth,
+    State(state): State<S>,
+    AdminJson(request): AdminJson<TestTargetsView>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let settings = state
+        .admin_services()
+        .proxies()
+        .replace_test_targets(
+            ProxyTestTargets {
+                revision: revision(request.revision)?,
+                targets: request.targets,
+            },
+            &auth.context().mutation_context(),
+        )
+        .await
+        .map_err(map_error)?;
+    Ok(AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(TestTargetsView::from(settings)),
     ))
 }
 

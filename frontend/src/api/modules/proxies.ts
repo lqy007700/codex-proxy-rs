@@ -10,7 +10,27 @@ export interface DetectedProxyLocation {
   detectedAt: string
 }
 
+export interface ProxyTestTarget {
+  name: string
+  url: string
+}
+
+export interface ProxyTestTargets {
+  revision: number
+  targets: ProxyTestTarget[]
+}
+
+export interface ProxyTargetResult {
+  target: ProxyTestTarget
+  builtIn: boolean
+  latencyMs: number
+  exitIp: string | null
+  statusCode: number | null
+  error: string | null
+}
+
 export interface OutboundProxyTest {
+  targetResults: ProxyTargetResult[]
   location: RequestLocationDetection
   success: boolean
   latencyMs: number
@@ -172,6 +192,23 @@ export function deleteProxy(data: ProxyIdParam) {
     url: '/api/admin/proxies/delete',
     method: 'POST',
     data,
+  })
+}
+
+export function getProxyTestTargets(options: RequestOptions = {}) {
+  return request<ProxyTestTargets>({
+    url: '/api/admin/proxies/test-targets',
+    method: 'GET',
+    ...options,
+  })
+}
+
+export function replaceProxyTestTargets(data: ProxyTestTargets, options: RequestOptions = {}) {
+  return request<ProxyTestTargets>({
+    url: '/api/admin/proxies/test-targets',
+    method: 'POST',
+    data,
+    ...options,
   })
 }
 

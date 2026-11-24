@@ -7,8 +7,12 @@ use std::{
 };
 
 use async_trait::async_trait;
+use futures::future::join_all;
 use gateway_admin::{
-    model::proxies::{ProxyLocationDetection, ProxyTestResult},
+    model::proxies::{
+        ProxyLocationDetection, ProxyTargetResult, ProxyTestResult, ProxyTestTarget,
+        is_public_proxy_test_ip,
+    },
     ports::proxy::ProxyProbe,
 };
 use gateway_core::account::{OutboundProxy, RequestLocation};
@@ -75,11 +79,9 @@ impl HttpProxyProbe {
         self
     }
 
-    async fn exit_ip_at(
-        &self,
+    fn client_builder(
         proxy: Option<&OutboundProxy>,
-        endpoint: &str,
-    ) -> Result<IpAddr, &'static str> {
+    ) -> Result<reqwest::ClientBuilder, &'static str> {
         let mut builder = reqwest::Client::builder()
             .no_proxy()
             .connect_timeout(Duration::from_secs(5))
@@ -89,7 +91,15 @@ impl HttpProxyProbe {
             builder = builder
                 .proxy(reqwest::Proxy::all(proxy.expose_url()).map_err(|_| "代理地址不合法")?);
         }
-        let client = (self.build_client)(builder)?;
+        Ok(builder)
+    }
+
+    async fn exit_ip_at(
+        &self,
+        proxy: Option<&OutboundProxy>,
+        endpoint: &str,
+    ) -> Result<IpAddr, &'static str> {
+        let client = (self.build_client)(Self::client_builder(proxy)?)?;
         let mut response = client.get(endpoint).send().await.map_err(|error| {
             if error.is_timeout() {
                 if proxy.is_some() {
@@ -131,6 +141,60 @@ impl HttpProxyProbe {
 }
 
 impl HttpProxyProbe {
+    async fn test_target(
+        &self,
+        proxy: &OutboundProxy,
+        target: &ProxyTestTarget,
+    ) -> ProxyTargetResult {
+        let started = Instant::now();
+        let result = tokio::time::timeout(Duration::from_secs(12), async {
+            let url = reqwest::Url::parse(&target.url).map_err(|_| "测试地址不合法")?;
+            let host = url.host_str().ok_or("测试地址缺少主机名")?;
+            let addresses = tokio::net::lookup_host((host.trim_matches(['[', ']']), 443))
+                .await
+                .map_err(|_| "测试地址解析失败")?
+                .collect::<Vec<_>>();
+            if addresses.is_empty()
+                || addresses
+                    .iter()
+                    .any(|addr| !is_public_proxy_test_ip(addr.ip()))
+            {
+                return Err("测试地址必须解析到公网 IP");
+            }
+
+            // 本地解析的代理沿用已验证的地址，远端解析沿用管理员配置的代理语义
+            let builder = Self::client_builder(Some(proxy))?
+                .https_only(true)
+                .resolve_to_addrs(host, &addresses);
+            let client = (self.build_client)(builder)?;
+            client
+                .get(url)
+                .send()
+                .await
+                .map(|response| response.status().as_u16())
+                .map_err(|error| {
+                    if error.is_timeout() {
+                        "目标请求超时"
+                    } else if error.is_connect() {
+                        "目标连接失败，请检查代理、网络和证书"
+                    } else {
+                        "目标请求失败"
+                    }
+                })
+        })
+        .await
+        .unwrap_or(Err("目标请求超时"));
+
+        ProxyTargetResult {
+            target: target.clone(),
+            built_in: false,
+            latency_ms: elapsed_ms(started),
+            exit_ip: None,
+            status_code: result.ok(),
+            error: result.err().map(str::to_owned),
+        }
+    }
+
     async fn timed_exit_ip_at(
         &self,
         proxy: Option<&OutboundProxy>,
@@ -138,7 +202,7 @@ impl HttpProxyProbe {
     ) -> (Result<IpAddr, &'static str>, u64) {
         let started = Instant::now();
         let result = self.exit_ip_at(proxy, endpoint).await;
-        let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let latency_ms = elapsed_ms(started);
         (result, latency_ms)
     }
 
@@ -156,8 +220,9 @@ impl HttpProxyProbe {
                 let result =
                     tokio::time::timeout(timeout_limit, self.exit_ip_at(proxy, endpoint)).await;
                 let result = result.unwrap_or(Err(timeout_message));
-                let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                let latency_ms = elapsed_ms(started);
 
+                let target = exit_target("出口 IP", endpoint, latency_ms, result);
                 match result {
                     Ok(ip) => {
                         let (exit_ipv4, exit_ipv6) = match ip {
@@ -165,6 +230,7 @@ impl HttpProxyProbe {
                             IpAddr::V6(v6) => (None, Some(v6)),
                         };
                         ProxyTestResult {
+                            target_results: vec![target],
                             location: ProxyLocationDetection::NotRequested,
                             success: true,
                             latency_ms,
@@ -175,6 +241,7 @@ impl HttpProxyProbe {
                         }
                     }
                     Err(err) => ProxyTestResult {
+                        target_results: vec![target],
                         location: ProxyLocationDetection::NotRequested,
                         success: false,
                         latency_ms,
@@ -196,7 +263,7 @@ impl HttpProxyProbe {
                     )
                 };
                 let result = tokio::time::timeout(timeout_limit, probe_dual).await;
-                let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                let latency_ms = elapsed_ms(started);
 
                 match result {
                     Ok(((res_v4, latency_v4), (res_v6, latency_v6))) => {
@@ -217,8 +284,29 @@ impl HttpProxyProbe {
                             latency_ms
                         };
 
+                        let target_results = vec![
+                            exit_target(
+                                "IPv4 出口",
+                                ipv4_endpoint,
+                                latency_v4,
+                                match res_v4 {
+                                    Ok(IpAddr::V6(_)) => Err("出口服务未返回 IPv4 地址"),
+                                    other => other,
+                                },
+                            ),
+                            exit_target(
+                                "IPv6 出口",
+                                ipv6_endpoint,
+                                latency_v6,
+                                match res_v6 {
+                                    Ok(IpAddr::V4(_)) => Err("出口服务未返回 IPv6 地址"),
+                                    other => other,
+                                },
+                            ),
+                        ];
                         if exit_ipv4.is_some() && exit_ipv6.is_some() {
                             ProxyTestResult {
+                                target_results,
                                 location: ProxyLocationDetection::NotRequested,
                                 success: true,
                                 latency_ms,
@@ -229,6 +317,7 @@ impl HttpProxyProbe {
                             }
                         } else if let Some(v4) = exit_ipv4 {
                             ProxyTestResult {
+                                target_results,
                                 location: ProxyLocationDetection::NotRequested,
                                 success: true,
                                 latency_ms,
@@ -239,6 +328,7 @@ impl HttpProxyProbe {
                             }
                         } else if let Some(v6) = exit_ipv6 {
                             ProxyTestResult {
+                                target_results,
                                 location: ProxyLocationDetection::NotRequested,
                                 success: true,
                                 latency_ms,
@@ -254,6 +344,7 @@ impl HttpProxyProbe {
                                 .unwrap_or("出口连接失败")
                                 .to_owned();
                             ProxyTestResult {
+                                target_results,
                                 location: ProxyLocationDetection::NotRequested,
                                 success: false,
                                 latency_ms,
@@ -265,6 +356,20 @@ impl HttpProxyProbe {
                         }
                     }
                     Err(_) => ProxyTestResult {
+                        target_results: vec![
+                            exit_target(
+                                "IPv4 出口",
+                                ipv4_endpoint,
+                                latency_ms,
+                                Err(timeout_message),
+                            ),
+                            exit_target(
+                                "IPv6 出口",
+                                ipv6_endpoint,
+                                latency_ms,
+                                Err(timeout_message),
+                            ),
+                        ],
                         location: ProxyLocationDetection::NotRequested,
                         success: false,
                         latency_ms,
@@ -411,6 +516,29 @@ impl HttpProxyProbe {
     }
 }
 
+fn elapsed_ms(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+fn exit_target(
+    name: &str,
+    url: &str,
+    latency_ms: u64,
+    result: Result<IpAddr, &'static str>,
+) -> ProxyTargetResult {
+    ProxyTargetResult {
+        target: ProxyTestTarget {
+            name: name.to_owned(),
+            url: url.to_owned(),
+        },
+        built_in: true,
+        latency_ms,
+        exit_ip: result.ok(),
+        status_code: None,
+        error: result.err().map(str::to_owned),
+    }
+}
+
 #[async_trait]
 impl ProxyProbe for HttpProxyProbe {
     async fn test(&self, proxy: Option<&OutboundProxy>, detect_location: bool) -> ProxyTestResult {
@@ -428,6 +556,20 @@ impl ProxyProbe for HttpProxyProbe {
                 }
             };
         }
+        result
+    }
+
+    async fn test_saved(
+        &self,
+        proxy: &OutboundProxy,
+        detect_location: bool,
+        targets: &[ProxyTestTarget],
+    ) -> ProxyTestResult {
+        let (mut result, details) = tokio::join!(
+            self.test(Some(proxy), detect_location),
+            join_all(targets.iter().map(|target| self.test_target(proxy, target))),
+        );
+        result.target_results.extend(details);
         result
     }
 }

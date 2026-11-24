@@ -30,6 +30,21 @@ impl Drop for ImportGuard {
 
 #[async_trait]
 impl ProxyStore for TestProxies {
+    async fn test_targets(&self) -> AdminStoreResult<ProxyTestTargets> {
+        Ok(ProxyTestTargets {
+            revision: Revision::new(1).unwrap(),
+            targets: Vec::new(),
+        })
+    }
+
+    async fn replace_test_targets(
+        &self,
+        _: ProxyTestTargets,
+        _: &MutationContext,
+    ) -> AdminStoreResult<ProxyTestTargets> {
+        Err(super::unavailable("proxy test targets"))
+    }
+
     async fn remove_account(
         &self,
         _: &str,
@@ -116,6 +131,15 @@ impl ProxyStore for TestProxies {
 
 #[async_trait]
 impl ProxyProbe for TestProxies {
+    async fn test_saved(
+        &self,
+        proxy: &OutboundProxy,
+        detect_location: bool,
+        _: &[ProxyTestTarget],
+    ) -> ProxyTestResult {
+        self.test(Some(proxy), detect_location).await
+    }
+
     async fn test(&self, _: Option<&OutboundProxy>, _: bool) -> ProxyTestResult {
         panic!("unexpected proxy probe")
     }
@@ -147,6 +171,7 @@ async fn authorization_uses_selected_proxy_regardless_of_probe_status() {
                         account_count: 0,
                         last_test_at: probe_success.map(|_| now),
                         last_test: probe_success.map(|success| ProxyTestResult {
+                            target_results: Vec::new(),
                             location: Default::default(),
                             success,
                             latency_ms: 10,
@@ -376,6 +401,15 @@ impl Drop for ActiveProbe<'_> {
 
 #[async_trait]
 impl ProxyProbe for GatedProxyProbe {
+    async fn test_saved(
+        &self,
+        proxy: &OutboundProxy,
+        detect_location: bool,
+        _: &[ProxyTestTarget],
+    ) -> ProxyTestResult {
+        self.test(Some(proxy), detect_location).await
+    }
+
     async fn test(&self, _: Option<&OutboundProxy>, _: bool) -> ProxyTestResult {
         self.active
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -383,6 +417,7 @@ impl ProxyProbe for GatedProxyProbe {
         self.started.send(()).unwrap();
         self.release.acquire().await.unwrap().forget();
         ProxyTestResult {
+            target_results: Vec::new(),
             location: Default::default(),
             success: true,
             latency_ms: 1,

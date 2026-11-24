@@ -1,8 +1,11 @@
 //! 账号出站代理的管理、账号解绑与连通性测试用例
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    collections::HashSet,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use async_trait::async_trait;
@@ -13,6 +16,7 @@ use gateway_core::{
     runtime::SnapshotControl,
 };
 use tokio::sync::Semaphore;
+use url::{Host, Url};
 
 use super::{map_store_error, publish_committed};
 use crate::{
@@ -30,6 +34,13 @@ use crate::{
 
 #[async_trait]
 pub trait ProxiesService: Send + Sync {
+    async fn test_targets(&self) -> Result<ProxyTestTargets, AdminError>;
+    async fn replace_test_targets(
+        &self,
+        settings: ProxyTestTargets,
+        context: &MutationContext,
+    ) -> Result<ProxyTestTargets, AdminError>;
+
     async fn create_batch(
         &self,
         commands: Vec<Result<NewProxy, AdminError>>,
@@ -67,13 +78,6 @@ pub trait ProxiesService: Send + Sync {
         revision: Revision,
         context: &MutationContext,
     ) -> Result<Revision, AdminError>;
-    async fn test(
-        &self,
-        id: &str,
-        revision: Revision,
-        detect_location: bool,
-        context: &MutationContext,
-    ) -> Result<ProxyRecord, AdminError>;
     /// 探测未保存的连接地址或服务器直连出口，不写入配置或修改账号绑定
     async fn probe(
         &self,
@@ -105,10 +109,68 @@ impl DefaultProxiesService {
             test_slots: Semaphore::new(4),
         }
     }
+
+    async fn test_saved(
+        &self,
+        id: &str,
+        revision: Revision,
+        detect_location: bool,
+        targets: &[ProxyTestTarget],
+        context: &MutationContext,
+    ) -> Result<ProxyRecord, AdminError> {
+        let _permit = self.test_slots.try_acquire().map_err(|_| {
+            AdminError::new(AdminErrorKind::RateLimited, "代理测试繁忙，请稍后重试")
+        })?;
+        let record = self
+            .store
+            .get(id)
+            .await
+            .map_err(|error| map_store_error(error, "proxy"))?;
+        if record.revision != revision {
+            return Err(AdminError::conflict("代理已被修改，请刷新后重新测试"));
+        }
+        // 手动解析只为本次测试请求位置，不改变自动跟随的持久配置
+        let result = self
+            .probe
+            .test_saved(
+                &record.proxy,
+                record.auto_location || detect_location,
+                targets,
+            )
+            .await;
+        let mutation = self
+            .store
+            .record_test(id, revision, result, context)
+            .await
+            .map_err(|error| map_store_error(error, "proxy"))?;
+        if record.effective_location() != mutation.record.effective_location() {
+            publish_committed(self.snapshot.as_ref(), mutation.config_revision).await?;
+        }
+        Ok(mutation.record)
+    }
 }
 
 #[async_trait]
 impl ProxiesService for DefaultProxiesService {
+    async fn test_targets(&self) -> Result<ProxyTestTargets, AdminError> {
+        self.store
+            .test_targets()
+            .await
+            .map_err(|error| map_store_error(error, "proxy test targets"))
+    }
+
+    async fn replace_test_targets(
+        &self,
+        mut settings: ProxyTestTargets,
+        context: &MutationContext,
+    ) -> Result<ProxyTestTargets, AdminError> {
+        validate_test_targets(&mut settings.targets)?;
+        self.store
+            .replace_test_targets(settings, context)
+            .await
+            .map_err(|error| map_store_error(error, "proxy test targets"))
+    }
+
     async fn create_batch(
         &self,
         commands: Vec<Result<NewProxy, AdminError>>,
@@ -146,21 +208,24 @@ impl ProxiesService for DefaultProxiesService {
         {
             return Err(AdminError::invalid("批量测试不能包含重复代理"));
         }
+        let settings = self.test_targets().await?;
         let stopped = AtomicBool::new(false);
         // 与单条测试共用全局容量，批次最多占用两槽，保留交互操作的容量
         Ok(stream::iter(commands)
             .map(|command| {
                 let stopped = &stopped;
+                let targets = &settings.targets;
                 async move {
                     if stopped.load(Ordering::Relaxed) {
                         return ProxyBatchResult::Skipped;
                     }
                     let result = match command {
                         Ok(command) => {
-                            self.test(
+                            self.test_saved(
                                 &command.id,
                                 command.revision,
                                 command.detect_location,
+                                targets,
                                 context,
                             )
                             .await
@@ -352,40 +417,53 @@ impl ProxiesService for DefaultProxiesService {
         })?;
         Ok(self.probe.test(proxy, detect_location).await)
     }
+}
 
-    async fn test(
-        &self,
-        id: &str,
-        revision: Revision,
-        detect_location: bool,
-        context: &MutationContext,
-    ) -> Result<ProxyRecord, AdminError> {
-        let _permit = self.test_slots.try_acquire().map_err(|_| {
-            AdminError::new(AdminErrorKind::RateLimited, "代理测试繁忙，请稍后重试")
-        })?;
-        let record = self
-            .store
-            .get(id)
-            .await
-            .map_err(|error| map_store_error(error, "proxy"))?;
-        if record.revision != revision {
-            return Err(AdminError::conflict("代理已被修改，请刷新后重新测试"));
-        }
-        // 手动解析只为本次测试请求位置，不改变自动跟随的持久配置
-        let result = self
-            .probe
-            .test(Some(&record.proxy), record.auto_location || detect_location)
-            .await;
-        let mutation = self
-            .store
-            .record_test(id, revision, result, context)
-            .await
-            .map_err(|error| map_store_error(error, "proxy"))?;
-        if record.effective_location() != mutation.record.effective_location() {
-            publish_committed(self.snapshot.as_ref(), mutation.config_revision).await?;
-        }
-        Ok(mutation.record)
+fn validate_test_targets(targets: &mut [ProxyTestTarget]) -> Result<(), AdminError> {
+    if targets.len() > MAX_PROXY_TEST_TARGETS {
+        return Err(AdminError::invalid("最多可配置 5 个测试地址"));
     }
+    let mut urls = HashSet::with_capacity(targets.len());
+    for target in targets {
+        target.name = validate_name(&target.name)?;
+        let input = target.url.trim();
+        let invalid_target = || {
+            AdminError::invalid("测试地址需使用公网 HTTPS URL，且不能包含认证信息、查询参数或片段")
+        };
+        if input.len() > 2048
+            || input
+                .chars()
+                .any(|ch| ch.is_control() || ch.is_whitespace())
+        {
+            return Err(invalid_target());
+        }
+        let url = Url::parse(input).map_err(|_| invalid_target())?;
+        if url.scheme() != "https"
+            || url.port().is_some()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(invalid_target());
+        }
+        let public_host = match url.host().ok_or_else(invalid_target)? {
+            Host::Domain(name) => {
+                let name = name.trim_end_matches('.');
+                name.contains('.') && !name.ends_with(".localhost") && !name.ends_with(".local")
+            }
+            Host::Ipv4(ip) => is_public_proxy_test_ip(ip.into()),
+            Host::Ipv6(ip) => is_public_proxy_test_ip(ip.into()),
+        };
+        if !public_host {
+            return Err(invalid_target());
+        }
+        target.url = url.into();
+        if !urls.insert(target.url.as_str()) {
+            return Err(AdminError::invalid("测试地址不能重复"));
+        }
+    }
+    Ok(())
 }
 
 fn validate_name(value: &str) -> Result<String, AdminError> {

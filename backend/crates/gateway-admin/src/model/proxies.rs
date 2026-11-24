@@ -56,8 +56,62 @@ pub struct ProxyAccountPage {
     pub page_size: u16,
 }
 
+pub const MAX_PROXY_TEST_TARGETS: usize = 5;
+
+/// 自定义探测只接收公网地址，排除私网、链路本地和特殊用途地址段
+#[must_use]
+pub fn is_public_proxy_test_ip(address: std::net::IpAddr) -> bool {
+    match address {
+        std::net::IpAddr::V4(address) => {
+            let [a, b, c, _] = address.octets();
+            !(a == 0
+                || a == 10
+                || a == 127
+                || a >= 224
+                || (a == 100 && (64..=127).contains(&b))
+                || (a == 169 && b == 254)
+                || (a == 172 && (16..=31).contains(&b))
+                || (a == 192 && (b == 0 || b == 168))
+                || (a == 198 && (b == 18 || b == 19 || (b == 51 && c == 100)))
+                || (a == 203 && b == 0 && c == 113))
+        }
+        std::net::IpAddr::V6(address) => {
+            let [a, b, ..] = address.segments();
+            (a & 0xe000) == 0x2000
+                && !(a == 0x2001 && (b < 0x200 || b == 0x0db8))
+                && a != 0x2002
+                && (a != 0x3fff || b >= 0x1000)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProxyTestTarget {
+    pub name: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyTestTargets {
+    pub revision: Revision,
+    pub targets: Vec<ProxyTestTarget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyTargetResult {
+    pub target: ProxyTestTarget,
+    pub built_in: bool,
+    pub latency_ms: u64,
+    pub exit_ip: Option<std::net::IpAddr>,
+    pub status_code: Option<u16>,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxyTestResult {
+    pub target_results: Vec<ProxyTargetResult>,
     pub location: ProxyLocationDetection,
     pub success: bool,
     pub latency_ms: u64,

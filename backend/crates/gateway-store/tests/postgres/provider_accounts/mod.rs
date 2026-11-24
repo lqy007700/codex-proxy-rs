@@ -2237,6 +2237,7 @@ async fn authorization_import_rejects_a_saved_proxy_changed_during_oauth() {
         .unwrap()
         .record;
     let success = ProxyTestResult {
+        target_results: Vec::new(),
         location: Default::default(),
         success: true,
         latency_ms: 1,

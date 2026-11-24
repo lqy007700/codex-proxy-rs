@@ -8,12 +8,20 @@ use crate::model::{
     MutationContext, Revision,
     proxies::{
         ImportProxyBinding, NewProxy, ProxyAccountListQuery, ProxyAccountPage, ProxyListQuery,
-        ProxyMutation, ProxyPage, ProxyRecord, ProxyTestResult, UpdateProxy,
+        ProxyMutation, ProxyPage, ProxyRecord, ProxyTestResult, ProxyTestTarget, ProxyTestTargets,
+        UpdateProxy,
     },
 };
 
 #[async_trait]
 pub trait ProxyStore: Send + Sync {
+    async fn test_targets(&self) -> AdminStoreResult<ProxyTestTargets>;
+    async fn replace_test_targets(
+        &self,
+        settings: ProxyTestTargets,
+        context: &MutationContext,
+    ) -> AdminStoreResult<ProxyTestTargets>;
+
     /// 在凭据交换到提交期间保护选定代理的连接配置和测试结果
     async fn reserve_import(&self, id: &str) -> AdminStoreResult<ProxyImportReservation>;
     async fn list(&self, query: ProxyListQuery) -> AdminStoreResult<ProxyPage>;
@@ -66,4 +74,10 @@ pub struct ProxyImportReservation {
 pub trait ProxyProbe: Send + Sync {
     /// 未指定代理时探测网关直连出口，显式代理失败不能退回直连
     async fn test(&self, proxy: Option<&OutboundProxy>, detect_location: bool) -> ProxyTestResult;
+    async fn test_saved(
+        &self,
+        proxy: &OutboundProxy,
+        detect_location: bool,
+        targets: &[ProxyTestTarget],
+    ) -> ProxyTestResult;
 }

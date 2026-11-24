@@ -389,6 +389,7 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
 
 fn success() -> ProxyTestResult {
     ProxyTestResult {
+        target_results: Vec::new(),
         location: Default::default(),
         success: true,
         latency_ms: 10,
@@ -1545,4 +1546,92 @@ async fn retired_plugin_archives_do_not_block_native_proxy_deletion() {
     assert_eq!(artifact.1, vec![1_u8]);
     assert!(proxies.get(&saved.id).await.is_err());
     database.close().await;
+}
+
+#[tokio::test]
+async fn proxy_test_targets_and_last_details_survive_reload_and_respect_revisions() {
+    let Some(database) = TestDatabase::create("proxy_test_targets").await else {
+        return;
+    };
+    let store = PgProxyRepository::new(database.pool.clone());
+    let context = context();
+    let original = store.test_targets().await.unwrap();
+    assert!(original.targets.is_empty());
+    let target = ProxyTestTarget {
+        name: "Models".to_owned(),
+        url: "https://api.openai.com/v1/models".to_owned(),
+    };
+    let command = ProxyTestTargets {
+        revision: original.revision,
+        targets: vec![target.clone()],
+    };
+    let saved = store
+        .replace_test_targets(command.clone(), &context)
+        .await
+        .unwrap();
+    assert!(saved.revision.get() > original.revision.get());
+    assert_eq!(store.test_targets().await.unwrap(), saved);
+    assert_eq!(
+        store
+            .replace_test_targets(command, &context)
+            .await
+            .unwrap_err()
+            .kind(),
+        AdminStoreErrorKind::Conflict
+    );
+
+    let created = store
+        .create(
+            NewProxy {
+                name: "Office".to_owned(),
+                proxy: OutboundProxy::parse("http://127.0.0.1:18080").unwrap(),
+                location: None,
+                auto_location: false,
+                test: None,
+            },
+            &context,
+        )
+        .await
+        .unwrap()
+        .record;
+    let detail = ProxyTargetResult {
+        target,
+        built_in: false,
+        latency_ms: 30,
+        exit_ip: None,
+        status_code: Some(401),
+        error: None,
+    };
+    store
+        .record_test(
+            &created.id,
+            created.revision,
+            ProxyTestResult {
+                target_results: vec![detail.clone()],
+                ..success()
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    let loaded = store.get(&created.id).await.unwrap();
+    assert_eq!(loaded.last_test.unwrap().target_results, vec![detail]);
+    let updated = store
+        .update(
+            UpdateProxy {
+                id: created.id,
+                revision: loaded.revision,
+                name: created.name,
+                proxy: Some(OutboundProxy::parse("http://127.0.0.1:18081").unwrap()),
+                location: None,
+                auto_location: None,
+                enabled: None,
+                max_websocket_connections: None,
+                test: None,
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    assert!(updated.record.last_test.is_none());
 }

@@ -499,3 +499,50 @@ async fn direct_location_probe_preserves_single_stack_and_does_not_retry_failed_
         ProxyLocationDetection::Failed { .. }
     ));
 }
+
+#[tokio::test]
+async fn saved_proxy_tests_report_both_exit_checks_and_block_private_target_resolution() {
+    use gateway_admin::model::proxies::ProxyTestTarget;
+
+    let proxy_server = MockServer::start().await;
+    Mock::given(path("/ipv4"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ip": "203.0.113.8"})))
+        .expect(1)
+        .mount(&proxy_server)
+        .await;
+    Mock::given(path("/ipv6"))
+        .respond_with(ResponseTemplate::new(502))
+        .expect(1)
+        .mount(&proxy_server)
+        .await;
+    let proxy = OutboundProxy::parse(&proxy_server.uri()).unwrap();
+    let probe = HttpProxyProbe::new_dual(
+        "http://unresolvable.invalid/ipv4",
+        "http://unresolvable.invalid/ipv6",
+    );
+    let result = probe
+        .test_saved(
+            &proxy,
+            false,
+            &[ProxyTestTarget {
+                name: "Private".to_owned(),
+                url: "https://127.0.0.1/".to_owned(),
+            }],
+        )
+        .await;
+
+    assert!(result.success);
+    assert_eq!(result.target_results.len(), 3);
+    assert_eq!(
+        result.target_results[0].exit_ip,
+        result.exit_ipv4.map(Into::into)
+    );
+    assert!(result.target_results[1].built_in);
+    assert!(result.target_results[1].error.is_some());
+    assert!(!result.target_results[2].built_in);
+    assert_eq!(
+        result.target_results[2].error.as_deref(),
+        Some("测试地址必须解析到公网 IP")
+    );
+    assert_eq!(proxy_server.received_requests().await.unwrap().len(), 2);
+}

@@ -1279,7 +1279,7 @@ Images、独立 Search、Live 和管理员连接测试不应用账号模型映�
 
 ### 独立代理管理 / Managed Proxies
 
-所有端点要求管理员身份。所有响应只返回去掉认证信息的 `endpoint`，不会返回完整 URL
+所有端点要求管理员身份。代理自身的连接地址仅通过脱敏后的 `endpoint` 返回
 
 | 方法 / Method | 路径 / Path | 请求 / Request | 结果 / Result |
 | --- | --- | --- | --- |
@@ -1290,6 +1290,8 @@ Images、独立 Search、Live 和管理员连接测试不应用账号模型映�
 | `POST` | `/api/admin/proxies/update` | `{ id, revision, name, enabled?, proxyUrl?, location?, autoLocation?, maxWebsocketConnections? }` | `{ record, configRevision }` |
 | `POST` | `/api/admin/proxies/probe` | `{ proxyUrl, detectLocation? }` | 测试未保存的地址，空字符串表示直连，返回连通性及可选位置结果，不创建代理 |
 | `POST` | `/api/admin/proxies/probe/direct` | 无 | 解析网关服务器的直连出口位置，返回同一探测结果结构，不修改配置 |
+| `GET` | `/api/admin/proxies/test-targets` | 无 | `{ revision, targets: [{ name, url }] }` |
+| `POST` | `/api/admin/proxies/test-targets` | `{ revision, targets: [{ name, url }] }` | 更新后的配置，版本过期返回 409 |
 | `POST` | `/api/admin/proxies/test` | `[{ id, revision, detectLocation? }]` | 逐项结果数组，成功项的 `data` 为最新代理记录 |
 | `POST` | `/api/admin/proxies/delete` | `{ id, revision }` | `{ configRevision }` |
 
@@ -1303,7 +1305,7 @@ Images、独立 Search、Live 和管理员连接测试不应用账号模型映�
 
 `record` 包含 `id`、`name`、`enabled`、`endpoint`、`hasAuthentication`、`revision`、`accountCount`、`location`、
 `autoLocation`、`detectedLocation`、`maxWebsocketConnections`、`lastTestAt`、
-`lastTest: { success, latencyMs, exitIp, exitIpv4, exitIpv6, message, location }`、`createdAt`、`updatedAt`。
+`lastTest: { success, latencyMs, exitIp, exitIpv4, exitIpv6, message, location, targetResults }`、`createdAt`、`updatedAt`。
 未测试时 `lastTestAt` / `lastTest` 为 `null`。连通性失败返回 HTTP 200 和 `lastTest.success=false`；
 记录版本过期、重复 URL 或代理正在用于账号导入时对应 409，并发测试满载对应 429；
 添加和测试在各项的 `httpStatus` 返回这些状态，其他单项接口使用 HTTP 状态码
@@ -1328,6 +1330,15 @@ Images、独立 Search、Live 和管理员连接测试不应用账号模型映�
 代理默认启用，更新 `enabled: false` 后保留配置、测试结果和账号绑定，关联账号的新请求改为直连，
 不应用该代理的位置覆盖；重新启用后恢复原出口及位置规则。省略 `enabled` 保留当前状态。
 禁用代理仍可执行连接测试，但不能以 ID 选择用于账号绑定、新的账号授权、导入
+
+「代理管理 → 测试地址」的附加地址由所有已保存代理共用，最多 5 项。使用默认端口的公网 HTTPS URL，
+可以填写路径，禁止认证信息、查询参数或片段。传入空数组清除附加地址。
+每个测试请求读取一次配置；通过代理发起 GET，公网解析检查在网关执行，远端解析由所选代理负责，探测不跟随重定向。
+未保存代理和网关直连探测只运行内置出口检测。
+
+`targetResults` 按探测顺序包含 `{ target: { name, url }, builtIn, latencyMs, exitIp, statusCode, error }`，
+与最近一次测试一起保存。内置探测记录出口 IP 或失败信息。附加地址有 HTTP 响应时记录状态码，连接失败时记录错误。
+附加地址的结果与现有出口连通性判定独立。没有逐地址明细的旧记录返回空数组
 
 `detectLocation: true` 在测试连接时解析出口位置；结果 `location.status` 为 `notRequested`、
 `detected`、`failed` 或 `conflict`。`detected` 携带 `location`，`failed` 携带安全错误说明；
