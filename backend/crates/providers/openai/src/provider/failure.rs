@@ -350,7 +350,11 @@ pub(super) async fn apply_failure(
     }
     let needs_authoritative_quota_refresh = matches!(
         failure.account_failure,
-        Some(CodexAccountFailure::QuotaExhausted | CodexAccountFailure::UsageLimitExhausted { .. })
+        Some(
+            CodexAccountFailure::QuotaExhausted
+                | CodexAccountFailure::SpendLimitExceeded
+                | CodexAccountFailure::UsageLimitExhausted { .. }
+        )
     );
     if failure.cyber_policy_failure {
         context
@@ -1556,8 +1560,10 @@ pub(super) fn map_upstream_failure(
     // WS opening 的 426 是明确的传输切换信号；普通拒绝不能仅凭 NotSent 触发换号
     let upgrade_required = failure.send_phase == CodexUpstreamSendPhase::BeforePayload
         && failure.status == Some(reqwest::StatusCode::UPGRADE_REQUIRED);
-    if category == CodexFailureCategory::FlexUnavailable
-        || (!replay_safe && continuation_failure.is_none() && !upgrade_required)
+    if matches!(
+        category,
+        CodexFailureCategory::FlexUnavailable | CodexFailureCategory::SpendLimitExceeded
+    ) || (!replay_safe && continuation_failure.is_none() && !upgrade_required)
     {
         error = error.with_retry_prohibited();
     }
@@ -1700,7 +1706,9 @@ pub(super) const fn provider_error_kind(category: CodexFailureCategory) -> Provi
         CodexFailureCategory::RateLimited | CodexFailureCategory::TurnRateLimited => {
             ProviderErrorKind::RateLimited
         }
-        CodexFailureCategory::QuotaExhausted => ProviderErrorKind::QuotaExhausted,
+        CodexFailureCategory::QuotaExhausted | CodexFailureCategory::SpendLimitExceeded => {
+            ProviderErrorKind::QuotaExhausted
+        }
         CodexFailureCategory::CloudflareChallenge
         | CodexFailureCategory::CloudflarePathBlocked
         | CodexFailureCategory::FlexUnavailable
@@ -1747,6 +1755,7 @@ pub(super) fn account_failure(
             retry_after: retry_after_seconds.map(Duration::from_secs),
         }),
         CodexFailureCategory::QuotaExhausted => Some(CodexAccountFailure::QuotaExhausted),
+        CodexFailureCategory::SpendLimitExceeded => Some(CodexAccountFailure::SpendLimitExceeded),
         CodexFailureCategory::CloudflareChallenge => {
             Some(CodexAccountFailure::CloudflareChallenge {
                 retry_after: retry_after_seconds.map(Duration::from_secs),

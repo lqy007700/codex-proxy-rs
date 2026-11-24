@@ -51,6 +51,8 @@ pub enum CodexFailureCategory {
     RateLimited,
     /// 当前 turn 的限流交给客户端等待，不据此推导账号级冷却
     TurnRateLimited,
+    /// 上游 API 支出已达上限，原始错误码区分支出范围
+    SpendLimitExceeded,
     QuotaExhausted,
     CloudflareChallenge,
     CloudflarePathBlocked,
@@ -476,6 +478,18 @@ fn classify_upstream_failure(
     }
     if code == "turn_rate_limit_exceeded" {
         return CodexFailureCategory::TurnRateLimited;
+    }
+    if matches!(status, None | Some(StatusCode::TOO_MANY_REQUESTS))
+        && matches!(
+            fields.code.as_deref(),
+            Some(
+                "api_key_spend_limit_exceeded"
+                    | "project_spend_limit_exceeded"
+                    | "organization_spend_limit_exceeded"
+            )
+        )
+    {
+        return CodexFailureCategory::SpendLimitExceeded;
     }
 
     // 容量拒绝可能带 400/429/503；仅用结构化错误字段识别，不能扫描任意正文

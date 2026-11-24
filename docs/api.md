@@ -882,6 +882,10 @@ headers 中移除，避免客户端再次等待旧账号；关联 ID 等其他�
 
 #### 额度耗尽与续写
 
+上游 HTTP 429 或无 HTTP 状态的流内错误携带 `api_key_spend_limit_exceeded`、
+`project_spend_limit_exceeded` 或 `organization_spend_limit_exceeded` 时，保留原始错误码，
+记录当前账号的额度拒绝，并结束本次请求。原生续写返回同一支出上限错误。
+
 明确额度耗尽触发账号隔离与安全换号，包括 WebSocket 握手返回的 429；不会因其长 `Retry-After` 而转入同账号传输恢复等待
 
 OpenAI 选号阶段确认本次可选账号全部额度耗尽时，HTTP 返回 `429`，WebSocket 错误帧返回
