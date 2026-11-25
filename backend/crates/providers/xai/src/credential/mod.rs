@@ -1,5 +1,6 @@
 //! Grok Build OAuth credential 与运行时 selector
 
+pub(crate) mod api_key;
 mod authorization_code;
 mod catalog;
 mod client;
@@ -16,6 +17,8 @@ mod selector;
 mod token;
 mod types;
 mod verification;
+
+pub(crate) use import::{MAX_IMPORT_ACCOUNTS, MAX_IMPORT_DOCUMENT_BYTES};
 
 pub use authorization_code::{AuthorizationCallback, AuthorizationCodeGrant, PendingAuthorization};
 pub use client::GrokOAuthClient;

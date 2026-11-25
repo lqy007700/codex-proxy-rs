@@ -41,12 +41,13 @@ pub enum GrokModelCatalogSessionError {
     InvalidHeaderData,
 }
 
-/// 一次模型目录请求使用的 OAuth session，不支持 API Key
+/// 一次模型目录请求使用的 OAuth 或标准 API Key session
 #[derive(Clone)]
 pub struct GrokModelCatalogSession {
     access_token: SecretValue,
-    user_id: SecretValue,
+    user_id: Option<SecretValue>,
     email: Option<SecretValue>,
+    api_key_endpoint: Option<Url>,
     wire_profile: XaiWireProfileState,
     outbound_proxy: Option<gateway_core::account::OutboundProxy>,
 }
@@ -73,11 +74,43 @@ impl GrokModelCatalogSession {
         }
         Ok(Self {
             access_token,
-            user_id,
+            user_id: Some(user_id),
             email,
+            api_key_endpoint: None,
             wire_profile,
             outbound_proxy: None,
         })
+    }
+
+    pub fn new_api_key(
+        access_token: SecretValue,
+        base_url: Url,
+    ) -> Result<Self, GrokModelCatalogSessionError> {
+        if !valid_secret_header(&access_token, 16 * 1024)
+            || base_url.host_str().is_none()
+            || !matches!(base_url.scheme(), "http" | "https")
+        {
+            return Err(GrokModelCatalogSessionError::InvalidHeaderData);
+        }
+        let mut endpoint = base_url;
+        endpoint
+            .path_segments_mut()
+            .map_err(|_| GrokModelCatalogSessionError::InvalidHeaderData)?
+            .pop_if_empty()
+            .push("models");
+        Ok(Self {
+            access_token,
+            user_id: None,
+            email: None,
+            api_key_endpoint: Some(endpoint),
+            wire_profile: XaiWireProfileState::new(Default::default()),
+            outbound_proxy: None,
+        })
+    }
+
+    #[must_use]
+    pub fn is_api_key(&self) -> bool {
+        self.api_key_endpoint.is_some()
     }
 
     #[must_use]
@@ -96,6 +129,7 @@ impl fmt::Debug for GrokModelCatalogSession {
             .debug_struct("GrokModelCatalogSession")
             .field("access_token", &"[REDACTED]")
             .field("user_id", &"[REDACTED]")
+            .field("api_key_endpoint", &self.api_key_endpoint)
             .field("email", &self.email.as_ref().map(|_| "[REDACTED]"))
             .field("wire_profile", &self.wire_profile)
             .finish()
@@ -112,22 +146,26 @@ pub struct GrokModelCatalogRequest {
 
 impl GrokModelCatalogRequest {
     fn from_session(session: &GrokModelCatalogSession) -> Result<Self, GrokModelCatalogError> {
-        let endpoint = Url::parse(GROK_MODEL_CATALOG_URL)
-            .map_err(|_| GrokModelCatalogError::InvalidRequest)?;
-        let mut headers = vec![
-            GrokHeader::sensitive(
-                "authorization",
-                SecretValue::new(format!("Bearer {}", session.access_token.expose())),
-            ),
-            GrokHeader::public("X-XAI-Token-Auth", "xai-grok-cli"),
-            GrokHeader::sensitive("x-userid", session.user_id.clone()),
-            GrokHeader::public(
-                "x-grok-client-version",
-                session.wire_profile.client_version(),
-            ),
-            GrokHeader::public("x-grok-client-mode", session.wire_profile.client_mode()),
-            GrokHeader::public("accept", "application/json"),
-        ];
+        let endpoint = session.api_key_endpoint.clone().unwrap_or(
+            Url::parse(GROK_MODEL_CATALOG_URL)
+                .map_err(|_| GrokModelCatalogError::InvalidRequest)?,
+        );
+        let mut headers = vec![GrokHeader::sensitive(
+            "authorization",
+            SecretValue::new(format!("Bearer {}", session.access_token.expose())),
+        )];
+        if let Some(user_id) = &session.user_id {
+            headers.extend([
+                GrokHeader::public("X-XAI-Token-Auth", "xai-grok-cli"),
+                GrokHeader::sensitive("x-userid", user_id.clone()),
+                GrokHeader::public(
+                    "x-grok-client-version",
+                    session.wire_profile.client_version(),
+                ),
+                GrokHeader::public("x-grok-client-mode", session.wire_profile.client_mode()),
+            ]);
+        }
+        headers.push(GrokHeader::public("accept", "application/json"));
         if let Some(email) = &session.email {
             headers.push(GrokHeader::sensitive("x-email", email.clone()));
         }
@@ -148,6 +186,13 @@ impl GrokModelCatalogRequest {
     #[must_use]
     pub fn headers(&self) -> &[GrokHeader] {
         &self.headers
+    }
+
+    #[must_use]
+    pub fn is_api_key(&self) -> bool {
+        self.headers
+            .iter()
+            .all(|header| !header.name().eq_ignore_ascii_case("x-xai-token-auth"))
     }
 }
 
@@ -283,7 +328,13 @@ impl GrokBillingRequest {
                 SecretValue::new(format!("Bearer {}", session.access_token.expose())),
             ),
             GrokHeader::public("X-XAI-Token-Auth", "xai-grok-cli"),
-            GrokHeader::sensitive("x-userid", session.user_id.clone()),
+            GrokHeader::sensitive(
+                "x-userid",
+                session
+                    .user_id
+                    .clone()
+                    .expect("OAuth catalog session user ID"),
+            ),
             GrokHeader::public(
                 "x-grok-client-version",
                 session.wire_profile.client_version(),
@@ -933,8 +984,13 @@ impl GrokModelCatalogClient {
         session: &GrokModelCatalogSession,
     ) -> Result<GrokModelCatalogSnapshot, GrokModelCatalogError> {
         let request = GrokModelCatalogRequest::from_session(session)?;
+        let standard = request.is_api_key();
         let response = self.transport.execute(request).await?;
-        parse_grok_model_catalog(response.body(), response.etag())
+        if standard {
+            parse_standard_grok_model_catalog(response.body(), response.etag())
+        } else {
+            parse_grok_model_catalog(response.body(), response.etag())
+        }
     }
 }
 
@@ -962,7 +1018,7 @@ enum GrokModelsObject {
 #[derive(Debug, Deserialize)]
 struct GrokModelWire {
     id: Option<String>,
-    model: String,
+    model: Option<String>,
     name: Option<String>,
     description: Option<String>,
     context_window: Option<u64>,
@@ -994,6 +1050,21 @@ pub fn parse_grok_model_catalog(
     body: &[u8],
     etag: Option<&str>,
 ) -> Result<GrokModelCatalogSnapshot, GrokModelCatalogError> {
+    parse_grok_model_catalog_inner(body, etag, false)
+}
+
+pub fn parse_standard_grok_model_catalog(
+    body: &[u8],
+    etag: Option<&str>,
+) -> Result<GrokModelCatalogSnapshot, GrokModelCatalogError> {
+    parse_grok_model_catalog_inner(body, etag, true)
+}
+
+fn parse_grok_model_catalog_inner(
+    body: &[u8],
+    etag: Option<&str>,
+    allow_id_as_model: bool,
+) -> Result<GrokModelCatalogSnapshot, GrokModelCatalogError> {
     if body.len() > MAX_GROK_MODEL_CATALOG_BYTES {
         return Err(GrokModelCatalogError::ResponseTooLarge);
     }
@@ -1014,7 +1085,7 @@ pub fn parse_grok_model_catalog(
     let mut seen = BTreeSet::new();
     let mut models = Vec::with_capacity(data.len());
     for model in data {
-        let model = normalize_model(model)?;
+        let model = normalize_model(model, allow_id_as_model)?;
         if !seen.insert(model.request_model.as_str().to_owned()) {
             return Err(GrokModelCatalogError::DuplicateModelSlug);
         }
@@ -1023,9 +1094,17 @@ pub fn parse_grok_model_catalog(
     Ok(GrokModelCatalogSnapshot { models, etag })
 }
 
-fn normalize_model(wire: GrokModelWire) -> Result<GrokCatalogModel, GrokModelCatalogError> {
+fn normalize_model(
+    wire: GrokModelWire,
+    allow_id_as_model: bool,
+) -> Result<GrokCatalogModel, GrokModelCatalogError> {
     let (context_window_tokens, max_context_window_tokens) = context_window_limits(&wire)?;
-    let actual_model = wire.model;
+    let actual_model = if allow_id_as_model {
+        wire.model.or_else(|| wire.id.clone())
+    } else {
+        wire.model
+    }
+    .ok_or(GrokModelCatalogError::InvalidWire)?;
     if !valid_model_slug(&actual_model) {
         return Err(GrokModelCatalogError::InvalidModelSlug);
     }

@@ -101,6 +101,13 @@ impl GrokHeader {
     }
 }
 
+pub(crate) fn bearer_header(secret: &SecretValue) -> GrokHeader {
+    GrokHeader::sensitive(
+        "authorization",
+        SecretValue::new(format!("Bearer {}", secret.expose())),
+    )
+}
+
 pub fn build_grok_headers(
     profile: &XaiWireProfileState,
     session: &SelectedGrokSession,
@@ -110,19 +117,23 @@ pub fn build_grok_headers(
     turn_index: Option<&str>,
     model: &UpstreamModelId,
 ) -> Vec<GrokHeader> {
+    let Some(user_id) = session.user_id() else {
+        return vec![
+            bearer_header(session.access_token()),
+            GrokHeader::public("content-type", "application/json"),
+            GrokHeader::public("accept", "text/event-stream"),
+        ];
+    };
     let upstream_request_id = Uuid::new_v4().hyphenated().to_string();
     let trace_id = Uuid::new_v4().simple().to_string();
     let span_source = Uuid::new_v4().simple().to_string();
     let traceparent = format!("00-{trace_id}-{}-01", &span_source[..16]);
 
     let mut headers = vec![
-        GrokHeader::sensitive(
-            "authorization",
-            SecretValue::new(format!("Bearer {}", session.access_token().expose())),
-        ),
+        bearer_header(session.access_token()),
         GrokHeader::public("X-XAI-Token-Auth", "xai-grok-cli"),
         GrokHeader::public("x-authenticateresponse", "authenticate-response"),
-        GrokHeader::sensitive("x-grok-user-id", session.user_id().clone()),
+        GrokHeader::sensitive("x-grok-user-id", user_id.clone()),
         GrokHeader::public("x-grok-client-version", profile.client_version()),
         GrokHeader::public("x-grok-client-mode", profile.client_mode()),
         GrokHeader::public("x-grok-client-identifier", profile.client_identifier()),

@@ -4,6 +4,10 @@ export function isOpenAiApiKeyAccount(account: Pick<Account, 'provider' | 'authe
   return account?.provider === 'openai' && account.authenticationKind === 'api_key'
 }
 
+export function isXaiApiKeyAccount(account: Pick<Account, 'provider' | 'authenticationKind'> | null | undefined): boolean {
+  return account?.provider === 'xai' && account.authenticationKind === 'api_key'
+}
+
 export function isOpenAiOAuthAccount(account: Pick<Account, 'provider' | 'authenticationKind'> | null | undefined): boolean {
   return account?.provider === 'openai' && account.authenticationKind === 'oauth'
 }

@@ -6,6 +6,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+use url::Url;
 
 use gateway_core::account::{
     AccountCapacitySnapshot, AccountEligibilityPolicy, AccountSelectionPolicy, CredentialRevision,
@@ -20,7 +21,11 @@ use crate::SecretValue;
 
 /// 注入的推理 transport 可识别的不透明假名化 egress/session 键
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct GrokSessionBinding(String, Option<gateway_core::account::OutboundProxy>);
+pub struct GrokSessionBinding {
+    id: String,
+    outbound_proxy: Option<gateway_core::account::OutboundProxy>,
+    api_key_target: Option<(CredentialRevision, Url)>,
+}
 
 impl GrokSessionBinding {
     /// 创建有界的非敏感绑定引用
@@ -37,13 +42,17 @@ impl GrokSessionBinding {
         {
             return Err(GrokSessionDataError::InvalidBinding);
         }
-        Ok(Self(value, None))
+        Ok(Self {
+            id: value,
+            outbound_proxy: None,
+            api_key_target: None,
+        })
     }
 
     /// 返回假名化的 transport 查找键
     #[must_use]
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.id
     }
 
     #[must_use]
@@ -51,12 +60,16 @@ impl GrokSessionBinding {
         mut self,
         proxy: Option<gateway_core::account::OutboundProxy>,
     ) -> Self {
-        self.1 = proxy;
+        self.outbound_proxy = proxy;
         self
     }
 
     pub(crate) fn outbound_proxy(&self) -> Option<&gateway_core::account::OutboundProxy> {
-        self.1.as_ref()
+        self.outbound_proxy.as_ref()
+    }
+
+    pub(crate) fn api_key_endpoint(&self) -> Option<&Url> {
+        self.api_key_target.as_ref().map(|(_, endpoint)| endpoint)
     }
 }
 
@@ -97,13 +110,13 @@ pub trait GrokSessionLeaseGuard: Send + Sync + 'static {}
 
 impl<T> GrokSessionLeaseGuard for T where T: Send + Sync + 'static {}
 
-/// 一个选中的 OAuth 会话及其持有的活跃 lease
+/// 一个选中的 xAI 凭据及其持有的活跃 lease
 pub struct SelectedGrokSession {
     account_snapshot: Option<gateway_core::account::AccountHistorySnapshot>,
     account_id: ProviderAccountId,
     credential_revision: CredentialRevision,
     access_token: SecretValue,
-    user_id: SecretValue,
+    user_id: Option<SecretValue>,
     email: Option<SecretValue>,
     binding: GrokSessionBinding,
     allows_account_state_mutation: bool,
@@ -139,8 +152,34 @@ impl SelectedGrokSession {
             account_id,
             credential_revision,
             access_token,
-            user_id,
+            user_id: Some(user_id),
             email,
+            binding,
+            allows_account_state_mutation: true,
+            capacity: None,
+            _guard: Box::new(guard),
+        })
+    }
+
+    pub(crate) fn new_api_key(
+        account_id: ProviderAccountId,
+        credential_revision: CredentialRevision,
+        api_key: SecretValue,
+        endpoint: Url,
+        mut binding: GrokSessionBinding,
+        guard: impl GrokSessionLeaseGuard,
+    ) -> Result<Self, GrokSessionDataError> {
+        if !valid_secret_header(&api_key, 16 * 1024) {
+            return Err(GrokSessionDataError::InvalidSecretValue);
+        }
+        binding.api_key_target = Some((credential_revision, endpoint));
+        Ok(Self {
+            account_snapshot: None,
+            account_id,
+            credential_revision,
+            access_token: api_key,
+            user_id: None,
+            email: None,
             binding,
             allows_account_state_mutation: true,
             capacity: None,
@@ -190,7 +229,7 @@ impl SelectedGrokSession {
         self.credential_revision
     }
 
-    /// 返回用于显式构造 header 的 OAuth access token
+    /// 返回用于 Authorization header 的 OAuth access token 或 API Key
     #[must_use]
     pub const fn access_token(&self) -> &SecretValue {
         &self.access_token
@@ -198,8 +237,18 @@ impl SelectedGrokSession {
 
     /// 返回用于官方代理 header 的已验证 user ID
     #[must_use]
-    pub const fn user_id(&self) -> &SecretValue {
-        &self.user_id
+    pub const fn user_id(&self) -> Option<&SecretValue> {
+        self.user_id.as_ref()
+    }
+
+    #[must_use]
+    pub fn is_api_key(&self) -> bool {
+        self.binding.api_key_endpoint().is_some()
+    }
+
+    #[must_use]
+    pub(crate) fn endpoint<'a>(&'a self, official: &'a Url) -> &'a Url {
+        self.binding.api_key_endpoint().unwrap_or(official)
     }
 
     /// 返回用于官方代理 header 的可选已验证 email
@@ -232,7 +281,7 @@ impl fmt::Debug for SelectedGrokSession {
             .field("account_id", &self.account_id)
             .field("credential_revision", &self.credential_revision)
             .field("access_token", &"[REDACTED]")
-            .field("user_id", &"[REDACTED]")
+            .field("user_id", &self.user_id.as_ref().map(|_| "[REDACTED]"))
             .field("email", &self.email.as_ref().map(|_| "[REDACTED]"))
             .field("binding", &self.binding)
             .field(

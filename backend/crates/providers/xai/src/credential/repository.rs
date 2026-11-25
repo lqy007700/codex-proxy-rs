@@ -97,6 +97,7 @@ pub(crate) struct LoadedGrokCredential {
     pub(crate) id_token: Option<SecretValue>,
     pub(crate) scope: String,
     pub(crate) refresh_token_expires_at: Option<DateTime<Utc>>,
+    pub(crate) api_key_base_url: Option<url::Url>,
 }
 
 /// 管理端可读取的 xAI credential 生命周期事实；不包含任何 OAuth secret
@@ -494,12 +495,18 @@ impl GrokCredentialRepository {
         account_id: &ProviderAccountId,
         revision: CredentialRevision,
     ) -> Result<LoadedGrokCredential, GrokCredentialRepositoryError> {
-        let loaded = self
-            .store
+        loaded_from_core(self.load_material(account_id, revision).await?)
+    }
+
+    pub(crate) async fn load_material(
+        &self,
+        account_id: &ProviderAccountId,
+        revision: CredentialRevision,
+    ) -> Result<LoadedCredential, GrokCredentialRepositoryError> {
+        self.store
             .load_credential(account_id, revision)
             .await
-            .map_err(map_store_error)?;
-        loaded_from_core(loaded)
+            .map_err(map_store_error)
     }
 
     /// 读取 xAI Provider 的全部账号；credential 逐行按 revision fence 加载
@@ -518,7 +525,9 @@ impl GrokCredentialRepository {
             .map_err(map_store_error)?;
         let mut loaded = Vec::with_capacity(accounts.len());
         for account in accounts {
-            ensure_xai(&account)?;
+            if account.authentication_kind() != super::api_key::AUTHENTICATION_KIND {
+                ensure_xai(&account)?;
+            }
             let credential = self.load(account.id(), account.revision()).await?;
             loaded.push(credential);
         }
@@ -539,7 +548,9 @@ impl GrokCredentialRepository {
             .await
             .map_err(map_store_error)?;
         for account in &accounts {
-            ensure_xai(account)?;
+            if account.authentication_kind() != super::api_key::AUTHENTICATION_KIND {
+                ensure_xai(account)?;
+            }
         }
         Ok(accounts)
     }
@@ -648,7 +659,9 @@ impl GrokCredentialRepository {
             .await
             .map_err(map_store_error)?
             .ok_or(GrokCredentialRepositoryError::CredentialNotFound)?;
-        ensure_xai(&account)?;
+        if account.authentication_kind() != super::api_key::AUTHENTICATION_KIND {
+            ensure_xai(&account)?;
+        }
         Ok(account)
     }
 }
@@ -656,6 +669,18 @@ impl GrokCredentialRepository {
 pub(crate) fn loaded_from_core(
     loaded: LoadedCredential,
 ) -> Result<LoadedGrokCredential, GrokCredentialRepositoryError> {
+    if loaded.account.authentication_kind() == super::api_key::AUTHENTICATION_KIND {
+        let credential = super::api_key::ApiKeyCredential::decode(&loaded)?;
+        return Ok(LoadedGrokCredential {
+            account: loaded.account,
+            access_token: credential.key,
+            refresh_token: SecretValue::new(String::new()),
+            id_token: None,
+            scope: String::new(),
+            refresh_token_expires_at: None,
+            api_key_base_url: Some(credential.base_url),
+        });
+    }
     ensure_xai(&loaded.account)?;
     let mut wire = decode_secret(&loaded.credential)?;
     let access_token = SecretValue::new(std::mem::take(&mut wire.access_token));
@@ -669,6 +694,7 @@ pub(crate) fn loaded_from_core(
         id_token,
         scope,
         refresh_token_expires_at: wire.refresh_token_expires_at,
+        api_key_base_url: None,
     })
 }
 

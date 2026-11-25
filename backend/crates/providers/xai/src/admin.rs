@@ -26,9 +26,9 @@ use gateway_admin::model::provider_credentials::{
 use gateway_admin::model::{AdminError, MutationContext, Revision};
 use gateway_admin::ports::provider::{ProviderAdmin, ProviderAdminError, ProviderAdminErrorKind};
 use gateway_core::account::{
-    CredentialCasUpdateParts, CredentialRevision, LoadedCredential, NewProviderAccount,
-    OpaqueProviderData, PlaintextCredential, ProviderAccount, ProviderAccountId,
-    ProviderAccountStore,
+    CredentialCasUpdate, CredentialCasUpdateParts, CredentialRevision, LoadedCredential,
+    NewProviderAccount, OpaqueProviderData, PlaintextCredential, ProviderAccount,
+    ProviderAccountId, ProviderAccountStore, ProviderAccountUpdate,
 };
 use gateway_core::error::StoreErrorKind;
 use gateway_core::metering::Money;
@@ -44,15 +44,17 @@ use serde_json::{Map, Number, Value};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
+use crate::credential::api_key::{AUTHENTICATION_KIND as API_KEY, ApiKeyCredential};
 use crate::credential::{
     FailureClass, GrokAccountProfile, GrokCredentialAdmin, GrokCredentialCatalogError,
     GrokCredentialCatalogService, GrokCredentialQuotaService, GrokCredentialRefreshError,
     GrokCredentialRefreshService, GrokCredentialRepository, GrokCredentialRepositoryError,
     GrokOAuthClient, GrokOAuthConfig, GrokOAuthImportCandidate, GrokOAuthImportDocument,
     GrokOAuthImportMetadata, GrokOAuthImportTokens, GrokOAuthSecret, GrokQuotaError,
-    GrokQuotaPeriodKind, GrokQuotaSnapshot, OAuthError, PendingAuthorization,
-    PreparedGrokCredentialRotation, PreparedGrokCredentialRotationGuard, RedirectUriAllowlist,
-    RotateManagedGrokCredential, VerifiedGrokAccount, VerifiedTokenSet,
+    GrokQuotaPeriodKind, GrokQuotaSnapshot, MAX_IMPORT_ACCOUNTS, MAX_IMPORT_DOCUMENT_BYTES,
+    OAuthError, PendingAuthorization, PreparedGrokCredentialRotation,
+    PreparedGrokCredentialRotationGuard, RedirectUriAllowlist, RotateManagedGrokCredential,
+    VerifiedGrokAccount, VerifiedTokenSet, XAI_AUTHENTICATION_KIND_OAUTH,
 };
 use crate::transport::profile::{GrokCliReleaseSnapshot, GrokCliReleaseStatus};
 use crate::transport::{GROK_CLI_BASE_URL, XAI_PROVIDER_NAME, grok_billing_breakdown_with_tier};
@@ -522,17 +524,64 @@ impl ProviderAdmin for XaiAdminProvider {
         &self,
         command: PrepareCredentialImport,
     ) -> Result<PreparedCredentialImport, ProviderAdminError> {
-        let document = serde_json::to_vec(&Value::Object(
-            command.document.into_provider_data().into_inner(),
-        ))
-        .map_err(|_| provider_error(ProviderAdminErrorKind::Invalid))?;
-        let document = GrokOAuthImportDocument::parse_json_with_proxy(
-            &document,
-            command.default_outbound_proxy.as_ref(),
-        )
-        .map_err(|_| provider_error(ProviderAdminErrorKind::Invalid))?;
-        let mut subjects = BTreeSet::new();
+        let mut document = command.document.into_provider_data().into_inner();
+        let document_size = serde_json::to_vec(&document)
+            .map_err(|_| provider_error(ProviderAdminErrorKind::Invalid))?;
+        if document_size.len() > MAX_IMPORT_DOCUMENT_BYTES {
+            return Err(provider_error(ProviderAdminErrorKind::Invalid));
+        }
         let mut credentials = Vec::new();
+        let mut first_failure = None;
+        let oauth_document = match document.get_mut("accounts") {
+            Some(Value::Array(accounts)) if accounts.len() <= MAX_IMPORT_ACCOUNTS => {
+                let mut oauth_accounts = Vec::new();
+                for item in std::mem::take(accounts) {
+                    if is_api_key_import(&item) {
+                        self.prepare_api_key_import(
+                            item,
+                            command.default_outbound_proxy.as_ref(),
+                            &mut credentials,
+                            &mut first_failure,
+                        );
+                    } else {
+                        oauth_accounts.push(item);
+                    }
+                }
+                *accounts = oauth_accounts;
+                (!accounts.is_empty()).then_some(document)
+            }
+            Some(_) => return Err(provider_error(ProviderAdminErrorKind::Invalid)),
+            None => {
+                let item = Value::Object(document);
+                if is_api_key_import(&item) {
+                    self.prepare_api_key_import(
+                        item,
+                        command.default_outbound_proxy.as_ref(),
+                        &mut credentials,
+                        &mut first_failure,
+                    );
+                    None
+                } else {
+                    Some(item.as_object().cloned().unwrap_or_default())
+                }
+            }
+        };
+        let mut subjects = BTreeSet::new();
+        let oauth_entries = oauth_document
+            .map(|document| {
+                let bytes = zeroize::Zeroizing::new(
+                    serde_json::to_vec(&document)
+                        .map_err(|_| provider_error(ProviderAdminErrorKind::Invalid))?,
+                );
+                GrokOAuthImportDocument::parse_json_with_proxy(
+                    &bytes,
+                    command.default_outbound_proxy.as_ref(),
+                )
+                .map(GrokOAuthImportDocument::into_entries)
+                .map_err(|_| provider_error(ProviderAdminErrorKind::Invalid))
+            })
+            .transpose()?
+            .unwrap_or_default();
         // 逐条目独立成败：verify 会真实轮换 RT，后续条目的任何失败都不得
         // 丢弃已轮换成功的凭据（旧 RT 已被上游作废，丢弃即不可逆报废）
         // 失败条目跳过；仅当没有任何条目成功时返回首个失败
@@ -540,8 +589,7 @@ impl ProviderAdmin for XaiAdminProvider {
         // 成功计数，每个被跳过的条目在此逐条留日志——尤其 verify 成功后
         // 才失败/被去重的条目，其源文件里的 RT 已被轮换作废，运维只能从
         // 日志得知需要重新授权
-        let mut first_failure: Option<ProviderAdminError> = None;
-        for entry in document.into_entries() {
+        for entry in oauth_entries {
             let model_access = entry.model_access().cloned();
             let name = entry.name().to_owned();
             let email = entry.email().map(str::to_owned);
@@ -643,6 +691,9 @@ impl ProviderAdmin for XaiAdminProvider {
             if current.account.provider() != &self.provider_kind {
                 return Err(provider_error(ProviderAdminErrorKind::NotFound));
             }
+            if current.account.authentication_kind() != XAI_AUTHENTICATION_KIND_OAUTH {
+                return Err(provider_error(ProviderAdminErrorKind::Unsupported));
+            }
         }
         let discovery = self
             .oauth
@@ -714,10 +765,34 @@ impl ProviderAdmin for XaiAdminProvider {
             return Err(provider_error(ProviderAdminErrorKind::Conflict)
                 .with_public_message("账号凭据已被更新，请刷新账号列表后重试"));
         }
-        let rotation: RotationDocument = serde_json::from_value(Value::Object(
-            command.provider_material.into_provider_data().into_inner(),
-        ))
-        .map_err(|_| provider_error(ProviderAdminErrorKind::Invalid))?;
+        let material = command.provider_material.into_provider_data().into_inner();
+        if current.account.authentication_kind() == API_KEY {
+            let credential = ApiKeyCredential::decode(&current)
+                .and_then(|credential| credential.rotate(material))
+                .map_err(map_repository_error)?;
+            let profile = ProviderAccountUpdate {
+                account_id: account_id.clone(),
+                name: current.account.name().to_owned(),
+                email: None,
+                plan_type: None,
+            };
+            let update = CredentialCasUpdate::new(
+                account_id,
+                current.account.revision(),
+                profile.clone(),
+                credential.encode(),
+                false,
+                None,
+                None,
+            )
+            .map_err(|_| provider_error(ProviderAdminErrorKind::Invalid))?;
+            return prepared_rotation(
+                PreparedGrokCredentialRotation::new(profile, update),
+                command.account.provider_kind,
+            );
+        }
+        let rotation: RotationDocument = serde_json::from_value(Value::Object(material))
+            .map_err(|_| provider_error(ProviderAdminErrorKind::Invalid))?;
         let tokens = match rotation.id_token {
             Some(id_token) => GrokOAuthImportTokens::new(
                 SecretValue::new(rotation.access_token),
@@ -768,12 +843,34 @@ impl ProviderAdmin for XaiAdminProvider {
             return Err(provider_error(ProviderAdminErrorKind::Conflict)
                 .with_public_message("账号凭据已被更新，请刷新账号列表后重试"));
         }
+        if current.account.authentication_kind() != XAI_AUTHENTICATION_KIND_OAUTH {
+            return Err(provider_error(ProviderAdminErrorKind::Unsupported));
+        }
         let prepared = self
             .refresh
             .prepare_manual_refresh(current)
             .await
             .map_err(map_refresh_error)?;
         prepared_rotation(prepared, command.account.provider_kind)
+    }
+
+    async fn account_configuration(
+        &self,
+        account_id: &ProviderAccountId,
+    ) -> Result<Option<ProviderDocument>, ProviderAdminError> {
+        let account = self.account(account_id).await?;
+        if account.authentication_kind() != API_KEY {
+            return Ok(None);
+        }
+        let loaded = self
+            .accounts
+            .load_credential(account_id, account.revision())
+            .await
+            .map_err(map_store_error)?;
+        let credential = ApiKeyCredential::decode(&loaded).map_err(map_repository_error)?;
+        Ok(Some(ProviderDocument::new(OpaqueProviderData::new(
+            credential.configuration(),
+        ))))
     }
 
     async fn quota(
@@ -786,6 +883,9 @@ impl ProviderAdmin for XaiAdminProvider {
             rolling_usage,
         } = request;
         let mut account = self.account(&account_id).await?;
+        if account.authentication_kind() != XAI_AUTHENTICATION_KIND_OAUTH {
+            return Err(provider_error(ProviderAdminErrorKind::Unsupported));
+        }
         let lifecycle = self
             .repository
             .read_lifecycle(&account_id)
@@ -853,7 +953,11 @@ impl ProviderAdmin for XaiAdminProvider {
         &self,
         credentials: Vec<ProviderExportCredentialInput>,
     ) -> Result<ProviderExport, ProviderAdminError> {
+        if credentials.len() > MAX_IMPORT_ACCOUNTS {
+            return Err(provider_error(ProviderAdminErrorKind::Invalid));
+        }
         let mut account_ids = Vec::with_capacity(credentials.len());
+        let mut api_key_entries = Vec::new();
         let mut loaded = Vec::with_capacity(credentials.len());
         for input in credentials {
             validate_account_record(&input.account, &self.provider_kind)?;
@@ -864,12 +968,21 @@ impl ProviderAdmin for XaiAdminProvider {
                 ),
             };
             account_ids.push(current.account.id().clone());
-            loaded.push(current);
+            if current.account.authentication_kind() == API_KEY {
+                api_key_entries
+                    .push(ApiKeyCredential::export(&current).map_err(map_repository_error)?);
+            } else {
+                loaded.push(current);
+            }
         }
-        let document = GrokCredentialAdmin
+        let mut document = GrokCredentialAdmin
             .export_oauth_bundle(&loaded, Utc::now())
             .map_err(map_repository_error)?
             .into_value();
+        let Some(entries) = document.get_mut("accounts").and_then(Value::as_array_mut) else {
+            return Err(provider_error(ProviderAdminErrorKind::Internal));
+        };
+        entries.append(&mut api_key_entries);
         let Value::Object(document) = document else {
             return Err(provider_error(ProviderAdminErrorKind::Internal));
         };
@@ -881,7 +994,30 @@ impl ProviderAdmin for XaiAdminProvider {
     }
 }
 
+fn is_api_key_import(item: &Value) -> bool {
+    item.get("authentication_kind").and_then(Value::as_str) == Some(API_KEY)
+}
+
 impl XaiAdminProvider {
+    fn prepare_api_key_import(
+        &self,
+        item: Value,
+        proxy: Option<&gateway_core::account::OutboundProxy>,
+        credentials: &mut Vec<PreparedCredentialCreate>,
+        first_failure: &mut Option<ProviderAdminError>,
+    ) {
+        match ApiKeyCredential::create(item, &self.provider_kind, proxy)
+            .map_err(map_repository_error)
+            .and_then(|prepared| prepared_create(prepared, Utc::now()))
+        {
+            Ok(prepared) => credentials.push(prepared),
+            Err(error) => {
+                tracing::warn!(target: "xai_admin", "API Key 导入条目校验失败，已跳过");
+                first_failure.get_or_insert(error);
+            }
+        }
+    }
+
     async fn complete_claimed_authorization(
         &self,
         stored: StoredXaiAuthorization,

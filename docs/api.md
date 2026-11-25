@@ -1086,7 +1086,7 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 | `POST` | `/api/admin/accounts/import-tasks/stop` | `{ taskId }` | 跳过未开始的条目，已开始的条目继续完成 |
 | `POST` | `/api/admin/accounts/refresh` | `{ accountId }` | 手工刷新 OAuth credential（`idToken` / `accessToken` / `refreshToken`），不刷新额度 |
 | `POST` | `/api/admin/accounts/recover` | `{ accountId }` | 恢复账号启用、本地错误/额度/cooldown 事实及 Provider 临时状态；保留窗口上限与暂停依据，不访问上游 |
-| `POST` | `/api/admin/accounts/update` | `{ accountId, enabled, concurrencyLimit, weight, groupIds, displayName?, fastMode?, notes?, schedulingRole?, modelAccess?, outboundProxyId?, outboundProxyUrl?, connection? }` | 一次更新账号设置；`connection` 支持 OpenAI OAuth 传输方式及 API Key 连接配置，见下文 |
+| `POST` | `/api/admin/accounts/update` | `{ accountId, enabled, concurrencyLimit, weight, groupIds, displayName?, fastMode?, notes?, schedulingRole?, modelAccess?, outboundProxyId?, outboundProxyUrl?, connection? }` | 一次更新账号设置；`connection` 支持 OpenAI OAuth 传输方式及 OpenAI/xAI API Key 连接配置，见下文 |
 | `POST` | `/api/admin/accounts/batch-update` | `{ accountIds, enabled?, concurrencyLimit?, weight?, groupIds?, schedulingRole?, modelAccess?, allowCredits?, quotaLimits?, outboundProxyId?, outboundProxyUrl? }` | 一次事务更新所选账号；仅修改提供的字段，至少提供一项修改 |
 | `POST` | `/api/admin/accounts/delete` | `{ provider, accountIds }` | 批量删除 1–200 个账号 |
 | `GET` | `/api/admin/accounts/quota` | `accountId` | 读取当前额度，不强制访问上游；Provider 未提供额度能力时返回空额度投影 |
@@ -1481,9 +1481,9 @@ OAuth 等待回调期间不持有保护；提交仍拒绝已删除或连接配�
   RT-only 会在导入时换取 AT，已知过期的 AT-only 会拒绝导入，其他 AT-only 不具备自动续期能力
 - OpenAI 与 xAI 的账号条目接受 `outboundProxyUrl`；OpenAI 还会解析 sub2api 的 `proxy_key` 和顶层 `proxies`。
   代理在 token 刷新前绑定。缺失、重复、停用、带到期时间或配置回退策略的 sub2api 代理会拒绝导入
-- xAI 从单账号 object 或 `accounts` 数组中提取 OAuth token；并发、优先级等字段不参与认证
+- xAI 从单账号 object 或 `accounts` 数组中提取 OAuth token 或标准 API Key；并发、优先级等字段不参与认证
 - xAI 批量导入逐条独立校验：失败条目跳过并记录日志，不中断其余条目，仅当没有任何条目成功时整个导入才报错
-- xAI API Key 不是受支持的账号 credential
+- xAI API Key 仅支持 Responses 兼容上游，要求 `base_url`、`api_key`，并固定使用 HTTP/SSE
 - OAuth 导入由目标 Provider 完成必要的 token exchange 或身份投影。API Key 导入校验凭据格式与地址，不调用 OAuth 或 ChatGPT 身份接口；可用性由模型目录和连接测试验证
 
 API Key 账号使用以下独立凭据形态：
@@ -1511,6 +1511,10 @@ Responses 使用 Bearer，传输默认 `http`，可选 `prefer_websocket`；Mess
 两者均不携带 OAuth Cookie 或 ChatGPT 身份，目录按账号和凭据版本隔离，资格与能力规则见[模型目录](#模型目录)。
 API Key 每次导入创建独立账号；更新已有账号使用 `/api/admin/accounts/update` 的 `connection` 字段。
 导出会显式包含密钥，沿用敏感导出的确认合同
+
+xAI API Key 使用相同的账号文档结构，将 `provider` 改为 `xai`。xAI 只接受 `protocol: "responses"`
+和 `transport: "http"`，第三方上游需要提供标准 Bearer 认证、`GET {base_url}/models` 和
+`POST {base_url}/responses`。
 
 sub2api 的 `platform=openai`、`type=apikey` 使用 `credentials.base_url` / `credentials.api_key`；
 导入时按其端点规则将服务根、版本前缀或完整 `/responses` 地址转换为 API 前缀，缺省地址为官方 `/v1`。
@@ -1553,7 +1557,7 @@ OpenAI 的 CPR 导出保持 OAuth 账号的既有 token 与过期时间字段。
 导入条目未提供 `modelAccess` 且 `settings` 未指定该字段时，新账号默认 `all`，已有账号保留原值；凭据刷新、重新授权和目录刷新均保留政策。
 sub2api 的 `credentials.model_mapping` 不转换为本项目的账号模型限制
 
-编辑 OpenAI API Key 账号时，在 `POST /api/admin/accounts/update` 的账号设置中附带 `connection`：
+编辑 OpenAI 或 xAI API Key 账号时，在 `POST /api/admin/accounts/update` 的账号设置中附带 `connection`：
 
 ```json
 {
@@ -1573,6 +1577,7 @@ sub2api 的 `credentials.model_mapping` 不转换为本项目的账号模型限�
 
 `connection.protocol` 支持 `responses`、`messages`，省略保留当前协议；Messages 仅支持 `connection.transport: http`。
 Responses 的 `transport` 支持 `http`、`prefer_websocket`。省略 `connection` 时只更新账号设置；
+xAI API Key 只接受 `protocol: responses` 和 `transport: http`。
 省略 `connection.apiKey` 保留当前密钥，空字符串无效。
 OpenAI OAuth 账号只接受 `connection: { transport }`，不接受 `protocol`、`baseUrl`、`apiKey` 或 OAuth token。
 连接设置不能修改账号 ID、Provider 或认证类型，也不接受通用凭据文档。

@@ -84,6 +84,7 @@ impl UpstreamAccountConnection for SelectedConnection {
     }
 
     fn authorization(&self) -> Result<Vec<MiddlewareHeader>, ProviderError> {
+        let user_id = self.session.user_id().ok_or_else(protocol_not_sent)?;
         Ok(vec![
             MiddlewareHeader::new(
                 "authorization",
@@ -91,7 +92,7 @@ impl UpstreamAccountConnection for SelectedConnection {
             ),
             MiddlewareHeader::new(
                 "x-grok-user-id",
-                bytes::Bytes::copy_from_slice(self.session.user_id().expose().as_bytes()),
+                bytes::Bytes::copy_from_slice(user_id.expose().as_bytes()),
             ),
             MiddlewareHeader::new(
                 "x-xai-token-auth",

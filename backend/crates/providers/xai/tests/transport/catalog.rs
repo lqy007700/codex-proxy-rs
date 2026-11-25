@@ -2,6 +2,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use url::Url;
 
 use provider_xai::{
     GROK_BILLING_URL, GROK_MODEL_CATALOG_URL, GROK_SUBSCRIPTION_URL, GrokBillingClient,
@@ -123,6 +124,39 @@ async fn client_should_send_exact_oauth_headers_without_api_key() {
             Some("\"grok-v1\""),
         )
     );
+}
+
+#[tokio::test]
+async fn client_should_send_standard_bearer_headers_to_api_key_catalog() {
+    let transport = Arc::new(CapturingTransport::success(
+        br#"{"object":"list","data":[{"id":"grok-3"}]}"#,
+        None,
+    ));
+    let client = GrokModelCatalogClient::new(transport.clone());
+    let session = GrokModelCatalogSession::new_api_key(
+        SecretValue::new("third-party-key"),
+        Url::parse("https://upstream.example/v1").expect("base URL"),
+    )
+    .expect("valid API key session");
+    let snapshot = client.fetch(&session).await.expect("fetch API key fixture");
+    let request = transport.request.lock().expect("captured request");
+    let request = request.as_ref().expect("one request");
+    let headers = request
+        .headers()
+        .iter()
+        .map(|header| (header.name().to_ascii_lowercase(), header.value().expose()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        request.endpoint().as_str(),
+        "https://upstream.example/v1/models"
+    );
+    assert_eq!(
+        header_value(&headers, "authorization"),
+        Some("Bearer third-party-key")
+    );
+    assert_eq!(header_value(&headers, "x-xai-token-auth"), None);
+    assert_eq!(snapshot.models()[0].request_model().as_str(), "grok-3");
 }
 
 #[tokio::test]

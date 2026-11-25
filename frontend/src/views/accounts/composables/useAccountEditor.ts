@@ -9,7 +9,7 @@ import { notification as ZNotification } from '@/utils/notification'
 import { accountModelAccessError } from '../utils/modelAccess'
 import { accountModelMappingsError } from '../utils/modelMappings'
 import { concurrencyLimitInput, parseAccountSchedulingForm } from '../utils/schedulingForm'
-import { apiKeyAccountError, emptyApiKeyAccountForm, isOpenAiApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
+import { apiKeyAccountError, emptyApiKeyAccountForm, isOpenAiApiKeyAccount, isOpenAiOAuthAccount, isXaiApiKeyAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
 
 export function useAccountEditor(options: {
   reloadAccounts: () => Promise<unknown>
@@ -97,7 +97,7 @@ export function useAccountEditor(options: {
     savedConfiguration.value = undefined
     configurationReady.value = false
     showEditModal.value = true
-    if (isOpenAiApiKeyAccount(account) || isOpenAiOAuthAccount(account))
+    if (isOpenAiApiKeyAccount(account) || isXaiApiKeyAccount(account) || isOpenAiOAuthAccount(account))
       void loadConfiguration(account.id)
   }
 
@@ -105,7 +105,7 @@ export function useAccountEditor(options: {
     const account = editingAccount.value
     if (!account || saving.value)
       return
-    const isApiKey = isOpenAiApiKeyAccount(account)
+    const isApiKey = isOpenAiApiKeyAccount(account) || isXaiApiKeyAccount(account)
     const isOAuth = isOpenAiOAuthAccount(account)
     if (isApiKey && !configurationReady.value)
       return

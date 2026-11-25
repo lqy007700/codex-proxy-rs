@@ -49,4 +49,17 @@ impl CredentialsService {
             self.snapshot.clone(),
         ))
     }
+
+    pub async fn for_account(
+        &self,
+        account_id: &gateway_core::account::ProviderAccountId,
+    ) -> Result<ProviderCredentials, AdminError> {
+        let account = self
+            .accounts
+            .load_account_record(account_id)
+            .await
+            .map_err(|error| super::map_store_error(error, "provider account"))?
+            .ok_or_else(|| AdminError::not_found("服务商账号不存在"))?;
+        self.for_provider(&account.provider_kind)
+    }
 }

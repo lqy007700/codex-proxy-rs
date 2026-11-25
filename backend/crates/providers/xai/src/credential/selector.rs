@@ -19,9 +19,12 @@ use gateway_core::provider_ports::{
 };
 use gateway_core::routing::{ProviderKind, UpstreamModelId};
 
+use super::api_key::{AUTHENTICATION_KIND as API_KEY, ApiKeyCredential};
 use super::catalog::{GrokCatalogScope, GrokCredentialCatalogCache};
 use super::quota::GrokCredentialQuotaService;
-use super::repository::{GrokCredentialRepository, GrokCredentialRepositoryError};
+use super::repository::{
+    GrokCredentialRepository, GrokCredentialRepositoryError, loaded_from_core,
+};
 use super::types::UpdateGrokCredentialState;
 use crate::{
     GrokCredentialFailure, GrokCredentialFeedbackFuture, GrokSessionBinding, GrokSessionSelection,
@@ -165,7 +168,9 @@ impl GrokAccountSessionSelector {
                             )
                             .is_ok_and(|adapter| {
                                 adapter.map_or(!request.adapter_required, |adapter| {
-                                    adapter.supports_authentication(account.authentication_kind())
+                                    account.authentication_kind() != API_KEY
+                                        && adapter
+                                            .supports_authentication(account.authentication_kind())
                                 })
                             })
                     })
@@ -205,7 +210,12 @@ impl GrokAccountSessionSelector {
                     .zip(account_scopes)
                     .filter_map(|(account, scope)| {
                         let unsupported = scope.is_some_and(|scope| {
-                            matches!(support_by_scope.get(&scope), Some(Ok(Some(false))))
+                            let support = support_by_scope.get(&scope);
+                            if account.authentication_kind() == API_KEY {
+                                !matches!(support, Some(Ok(Some(true))))
+                            } else {
+                                matches!(support, Some(Ok(Some(false))))
+                            }
                         });
                         (!unsupported).then_some(account)
                     })
@@ -376,20 +386,11 @@ impl GrokAccountSessionSelector {
 
                 let loaded = self
                     .repository
-                    .load(&selected_id, selected_revision)
+                    .load_material(&selected_id, selected_revision)
                     .await
-                    .map_err(|source| {
-                        GrokSessionSelectorError::InvalidSession(Some(
-                            gateway_core::error::ErrorSource::new(source),
-                        ))
-                    })?;
-                if !diagnostic
-                    && loaded
-                        .refresh_token_expires_at
-                        .is_some_and(|expires_at| expires_at <= Utc::now())
-                {
-                    return Err(GrokSessionSelectorError::InvalidSession(None));
-                }
+                    .map_err(invalid_session)?;
+                let snapshot =
+                    gateway_core::account::AccountHistorySnapshot::from_account(&loaded.account);
                 let binding = GrokSessionBinding::new(selected_id.as_str())
                     .map_err(|source| {
                         GrokSessionSelectorError::InvalidSession(Some(
@@ -397,30 +398,46 @@ impl GrokAccountSessionSelector {
                         ))
                     })?
                     .with_outbound_proxy(loaded.account.outbound_proxy().cloned());
-                let upstream_user_id = loaded
-                    .account
-                    .upstream_user_id()
-                    .ok_or(GrokSessionSelectorError::InvalidSession(None))?;
-                let session = SelectedGrokSession::new(
-                    selected_id,
-                    selected_revision,
-                    loaded.access_token,
-                    SecretValue::new(upstream_user_id),
-                    loaded
+                let session = if loaded.account.authentication_kind() == API_KEY {
+                    let credential = ApiKeyCredential::decode(&loaded).map_err(invalid_session)?;
+                    let endpoint = credential.endpoint("responses");
+                    SelectedGrokSession::new_api_key(
+                        selected_id,
+                        selected_revision,
+                        credential.key,
+                        endpoint,
+                        binding,
+                        guard,
+                    )
+                } else {
+                    let loaded = loaded_from_core(loaded).map_err(invalid_session)?;
+                    if !diagnostic
+                        && loaded
+                            .refresh_token_expires_at
+                            .is_some_and(|expiry| expiry <= Utc::now())
+                    {
+                        return Err(GrokSessionSelectorError::InvalidSession(None));
+                    }
+                    let upstream_user_id = loaded
                         .account
-                        .email()
-                        .map(|value| SecretValue::new(value.to_owned())),
-                    binding,
-                    guard,
-                )
+                        .upstream_user_id()
+                        .ok_or(GrokSessionSelectorError::InvalidSession(None))?;
+                    SelectedGrokSession::new(
+                        selected_id,
+                        selected_revision,
+                        loaded.access_token,
+                        SecretValue::new(upstream_user_id),
+                        loaded.account.email().map(SecretValue::new),
+                        binding,
+                        guard,
+                    )
+                }
                 .map_err(|source| {
                     GrokSessionSelectorError::InvalidSession(Some(
                         gateway_core::error::ErrorSource::new(source),
                     ))
                 })?
-                .with_account_snapshot(gateway_core::account::AccountHistorySnapshot::from_account(
-                    &loaded.account,
-                ))
+                .with_account_snapshot(snapshot)
                 .with_capacity_snapshot(
                     capacity.map(AccountCapacitySnapshot::with_acquired_request),
                 );
@@ -659,7 +676,12 @@ impl GrokSessionSelector for GrokAccountSessionSelector {
                 }
                 GrokCredentialFailure::QuotaExhausted
                 | GrokCredentialFailure::FreeQuotaExhausted => {
-                    self.persist_quota_failure(session, observed_at).await;
+                    if session.is_api_key() {
+                        self.record_runtime_cooldown(session, PAYMENT_REQUIRED_COOLDOWN)
+                            .await;
+                    } else {
+                        self.persist_quota_failure(session, observed_at).await;
+                    }
                 }
                 // bare 402 没有结构化 quota code，不能证明账号额度耗尽：
                 // 只写短期账号级 runtime cooldown（TransientBackoff），
@@ -741,10 +763,10 @@ impl GrokSessionSelector for GrokAccountSessionSelector {
             if !session.allows_account_state_mutation() {
                 return;
             }
-            let Ok(current) = self.repository.load_current(session.account_id()).await else {
+            let Ok(Some(account)) = self.repository.account_by_id(session.account_id()).await
+            else {
                 return;
             };
-            let account = &current.account;
             if account.revision() != session.credential_revision() || !account.enabled() {
                 return;
             }
@@ -770,7 +792,8 @@ impl GrokSessionSelector for GrokAccountSessionSelector {
             }
             // 已经发出的并发请求可能晚于耗尽事实成功返回；真实成功可以收敛
             // 该事实，但 selector 不会为恢复探测而放行耗尽账号
-            if account.quota().access() == QuotaAccessState::Exhausted
+            if !session.is_api_key()
+                && account.quota().access() == QuotaAccessState::Exhausted
                 && let Err(error) = self
                     .repository
                     .update_quota_access(
@@ -788,6 +811,10 @@ impl GrokSessionSelector for GrokAccountSessionSelector {
             }
         })
     }
+}
+
+fn invalid_session(error: GrokCredentialRepositoryError) -> GrokSessionSelectorError {
+    GrokSessionSelectorError::InvalidSession(Some(gateway_core::error::ErrorSource::new(error)))
 }
 
 fn minimum_retry_after(left: Option<Duration>, right: Option<Duration>) -> Option<Duration> {

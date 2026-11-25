@@ -363,6 +363,9 @@ impl ReqwestGrokInferenceTransport {
         };
         let client = entry
             .get_or_try_init(|| async {
+                if binding.api_key_endpoint().is_some() {
+                    return build_client(None, None, binding.outbound_proxy());
+                }
                 if binding.outbound_proxy().is_none()
                     && let Some(client) = self
                         .unbound_client
@@ -394,7 +397,13 @@ impl fmt::Debug for ReqwestGrokInferenceTransport {
 impl GrokInferenceTransport for ReqwestGrokInferenceTransport {
     fn execute(&self, request: GrokInferenceRequest) -> GrokInferenceTransportFuture<'_> {
         Box::pin(async move {
-            if !self.endpoint_policy.validate_inference(request.endpoint()) {
+            let valid_endpoint = match request.binding().api_key_endpoint() {
+                Some(endpoint) => {
+                    request.endpoint() == endpoint && request.method() == reqwest::Method::POST
+                }
+                None => self.endpoint_policy.validate_inference(request.endpoint()),
+            };
+            if !valid_endpoint {
                 return Err(GrokInferenceTransportError::new(
                     GrokInferenceTransportErrorKind::InvalidRequest,
                     UpstreamSendState::NotSent,
@@ -566,10 +575,24 @@ impl GrokModelCatalogTransport for ReqwestGrokModelCatalogTransport {
     fn execute(&self, request: GrokModelCatalogRequest) -> GrokModelCatalogTransportFuture<'_> {
         let endpoint_policy = self.endpoint_policy.clone();
         Box::pin(async move {
-            if !endpoint_policy.validate_model_catalog(request.endpoint()) {
+            if !request.is_api_key() && !endpoint_policy.validate_model_catalog(request.endpoint())
+            {
                 return Err(GrokModelCatalogTransportError::new(
                     GrokModelCatalogTransportErrorKind::Protocol,
                 ));
+            }
+            if request.is_api_key() {
+                let client = build_client(
+                    None,
+                    Some(OAUTH_REQUEST_TIMEOUT),
+                    request.outbound_proxy.as_ref(),
+                )
+                .map_err(|_| {
+                    GrokModelCatalogTransportError::new(
+                        GrokModelCatalogTransportErrorKind::Protocol,
+                    )
+                })?;
+                return execute_model_catalog_request(client, request).await;
             }
             let entry = self
                 .clients
@@ -633,6 +656,47 @@ impl GrokModelCatalogTransport for ReqwestGrokModelCatalogTransport {
     }
 }
 
+async fn execute_model_catalog_request(
+    client: Client,
+    request: GrokModelCatalogRequest,
+) -> Result<GrokModelCatalogTransportResponse, GrokModelCatalogTransportError> {
+    let mut builder = client.get(request.endpoint().clone());
+    for header in request.headers() {
+        builder = builder.header(header.name(), header.value().expose());
+    }
+    let response = builder
+        .send()
+        .await
+        .map_err(classify_model_catalog_reqwest_error)?;
+    if !response.status().is_success() {
+        return Err(classify_model_catalog_status(response).await);
+    }
+    if !is_json_response(&response) {
+        return Err(GrokModelCatalogTransportError::new(
+            GrokModelCatalogTransportErrorKind::Protocol,
+        ));
+    }
+    let etag = response
+        .headers()
+        .get(ETAG)
+        .map(|value| {
+            value.to_str().map(str::to_owned).map_err(|_| {
+                GrokModelCatalogTransportError::new(GrokModelCatalogTransportErrorKind::Protocol)
+            })
+        })
+        .transpose()?;
+    let body = match collect_bounded(response, MAX_GROK_MODEL_CATALOG_BYTES).await {
+        Ok(BoundedBody::Body(body)) => body,
+        Ok(BoundedBody::TooLarge) => {
+            return Err(GrokModelCatalogTransportError::new(
+                GrokModelCatalogTransportErrorKind::Protocol,
+            ));
+        }
+        Err(error) => return Err(classify_model_catalog_reqwest_error(error)),
+    };
+    Ok(GrokModelCatalogTransportResponse::new(body, etag))
+}
+
 impl GrokBillingTransport for ReqwestGrokModelCatalogTransport {
     fn execute(&self, request: GrokBillingRequest) -> GrokBillingTransportFuture<'_> {
         let endpoint_policy = self.endpoint_policy.clone();
@@ -694,6 +758,14 @@ fn build_official_client(
     timeout: Option<Duration>,
     proxy: Option<&OutboundProxy>,
 ) -> Result<Client, GrokReqwestTransportBuildError> {
+    build_client(Some(dns_policy), timeout, proxy)
+}
+
+fn build_client(
+    dns_policy: Option<GrokDnsResolutionPolicy>,
+    timeout: Option<Duration>,
+    proxy: Option<&OutboundProxy>,
+) -> Result<Client, GrokReqwestTransportBuildError> {
     let mut builder = Client::builder()
         // 工作区可能同时启用 native-tls；与官方 Grok CLI 一样显式固定 rustls，避免握手画像漂移
         .use_rustls_tls()
@@ -707,7 +779,7 @@ fn build_official_client(
         .http2_keep_alive_timeout(HTTP2_KEEP_ALIVE_TIMEOUT)
         .http2_keep_alive_while_idle(true)
         .tcp_nodelay(true)
-        .https_only(true);
+        .https_only(dns_policy.is_some());
     if let Some(proxy) = proxy {
         // 保留 reqwest 的代理解析语义（socks5 本地解析、socks5h 远端解析）；
         // 只允许官方 host 的直连 resolver 不能用于解析代理端点
@@ -715,7 +787,7 @@ fn build_official_client(
             reqwest::Proxy::all(proxy.expose_url())
                 .map_err(|_| GrokReqwestTransportBuildError::ClientInitialization)?,
         );
-    } else {
+    } else if let Some(dns_policy) = dns_policy {
         builder = builder.dns_resolver(Arc::new(StrictDnsResolver::new(dns_policy)?));
     }
     if let Some(timeout) = timeout {

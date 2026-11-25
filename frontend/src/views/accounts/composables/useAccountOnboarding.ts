@@ -67,17 +67,18 @@ export function useAccountOnboarding(options: {
         return
       const provider = accountCreateProvider(form)
       if (mode === 'api_key') {
-        if (requireImportProvider(provider) !== 'openai')
+        if (!['openai', 'xai'].includes(requireImportProvider(provider)))
           throw new Error('当前平台不支持 API Key 账号')
         const error = apiKeyAccountError(form.apiKey)
         if (error)
           throw new Error(error)
+        const apiKeyProvider = provider as 'openai' | 'xai'
         await importAccounts({
-          provider: 'openai',
+          provider: apiKeyProvider,
           settings,
           outboundProxyId,
           data: {
-            provider: 'openai',
+            provider: apiKeyProvider,
             authentication_kind: 'api_key',
             name: form.apiKey.name.trim(),
             base_url: form.apiKey.base_url.trim(),

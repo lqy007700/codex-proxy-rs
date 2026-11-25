@@ -7,7 +7,7 @@ import type { Account, AccountGroupRef, AccountModelAccess } from '@/api'
 import { ZButton, ZDialog, ZEmpty, ZFormItem, ZInput, ZSegmented, ZTextarea } from '@codex-proxy/ui'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
-import { isOpenAiApiKeyAccount, isOpenAiOAuthAccount } from '../utils/upstreamApiKey'
+import { isOpenAiApiKeyAccount, isOpenAiOAuthAccount, isXaiApiKeyAccount } from '../utils/upstreamApiKey'
 import AccountApiKeyFields from './AccountApiKeyFields.vue'
 import AccountIdentityCell from './AccountIdentityCell.vue'
 import AccountModelMappingsField from './AccountModelMappingsField.vue'
@@ -86,7 +86,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         <ZSegmented v-else v-model="oauthTransport" aria-label="上游传输方式" :options="transportOptions" :disabled="saving" />
       </ZFormItem>
 
-      <section v-if="isOpenAiApiKeyAccount(account)" class="grid gap-4">
+      <section v-if="isOpenAiApiKeyAccount(account) || isXaiApiKeyAccount(account)" class="grid gap-4">
         <h3 class="m-0 text-z font-heavy text-z-text">
           上游连接
         </h3>
@@ -94,7 +94,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
           正在读取上游设置…
         </p>
         <ZEmpty v-else-if="!configurationReady" title="上游设置读取失败" description="请关闭后重试" size="small" surface="none" role="alert" />
-        <AccountApiKeyFields v-else v-model="apiKey" editing :disabled="saving" />
+        <AccountApiKeyFields v-else v-model="apiKey" :provider="account?.provider" editing :disabled="saving" />
       </section>
 
       <ZFormItem v-if="account.provider === 'openai'" label="快速模式">
@@ -152,7 +152,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
       <ZButton
         type="primary"
         :loading="saving"
-        :disabled="!account || groupsLoading || (isOpenAiApiKeyAccount(account) && !configurationReady)"
+        :disabled="!account || groupsLoading || ((isOpenAiApiKeyAccount(account) || isXaiApiKeyAccount(account)) && !configurationReady)"
         @click="emit('save')"
       >
         保存更改

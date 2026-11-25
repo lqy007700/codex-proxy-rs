@@ -28,7 +28,7 @@ pub use catalog::{
     GrokModelCatalogSnapshot, GrokModelCatalogTransport, GrokModelCatalogTransportError,
     GrokModelCatalogTransportErrorKind, GrokModelCatalogTransportFuture,
     GrokModelCatalogTransportResponse, MAX_GROK_BILLING_BYTES, MAX_GROK_MODEL_CATALOG_BYTES,
-    parse_grok_billing, parse_grok_model_catalog,
+    parse_grok_billing, parse_grok_model_catalog, parse_standard_grok_model_catalog,
 };
 pub use compaction::{
     GrokCompactionDecodeError, GrokCompactionRequest, GrokCompactionSummaryDecoder,

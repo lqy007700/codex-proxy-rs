@@ -97,6 +97,7 @@ export function accountImportModes(provider: string | undefined) {
   if (provider === 'xai') {
     return [
       { label: 'OAuth', value: 'oauth' as const },
+      { label: 'API Key', value: 'api_key' as const },
       { label: '账号文件', value: 'json' as const },
     ]
   }

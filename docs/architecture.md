@@ -61,7 +61,7 @@ flowchart TB
 | `gateway-store` | PostgreSQL、Redis、S3/R2、`pg_dump` 适配器；不拥有业务策略 |
 | `gateway-host` | 配置加载、日志、HTTP 生命周期、Worker 监督与历史保留任务、系统更新及外部价格源适配 |
 | `providers/openai` | OpenAI OAuth、Responses/Messages API Key、账号选择、目录、额度和上游 transport |
-| `providers/xai` | xAI OAuth session、账号选择、目录、额度和 Grok/Responses 转换 |
+| `providers/xai` | xAI OAuth/API Key session、账号选择、目录、额度和 Grok/Responses 转换 |
 | `frontend` | Vue 管理端与 Key 用量页，仅通过各自身份允许的控制面 API 访问状态 |
 | 独立仓库 `codex-proxy-ui` | 管理端使用的 Vue 基础组件、纯主题算法和样式，不依赖宿主业务状态、路由或 API |
 
@@ -872,7 +872,8 @@ credential 与 quota 是两组独立事实：credential refresh 不等于 quota 
 - OpenAI 重新授权提交本次登录的身份、邮箱和套餐；Store 在凭据 CAS 与审计事务中保留提交时的本地名称和账号设置。
   真实用户或工作区变化时清除旧凭据 Cookie、principal 及额度限制事实；普通令牌续期不更改身份和资料。
   重新授权缺少 refresh token 时，仅同身份允许沿用旧值
-- xAI 使用 OAuth session；API Key 不是受支持的账号 credential。刷新额度时同步查询官方实时订阅，
+- xAI 使用 OAuth session 或标准 Bearer API Key session。API Key 使用账号配置的 Responses 上游地址，
+  不参与 OAuth 刷新和官方额度查询。OAuth 刷新额度时同步查询官方实时订阅，
   只把套餐事实写入现有 quota JSON。明确无付费订阅的个人账号显示 Free；查询失败、缺失字段或
   团队身份不推断为 Free，订阅查询失败不影响额度观测
 - 账号导入和 OAuth complete（包括重新授权）在 credential 提交、Provider 事实失效及快照发布后，

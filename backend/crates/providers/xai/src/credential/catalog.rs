@@ -104,6 +104,15 @@ pub struct GrokCatalogScope(ProviderCatalogScope);
 impl GrokCatalogScope {
     /// 从账号已验证的套餐事实构造目录作用域
     pub fn for_account(account: &ProviderAccount) -> Result<Self, GrokCatalogCacheError> {
+        if account.authentication_kind() == super::api_key::AUTHENTICATION_KIND {
+            return ProviderCatalogScope::new(format!(
+                "account:{}:revision:{}",
+                account.id(),
+                account.revision().get()
+            ))
+            .map(Self)
+            .map_err(|_| GrokCatalogCacheError::InvalidData);
+        }
         let plan = account
             .plan_type()
             .map(str::trim)
@@ -645,12 +654,13 @@ fn eligible_catalog_candidate(candidate: &LoadedGrokCredential) -> bool {
     let account = &candidate.account;
     let now = SystemTime::now();
     account.enabled()
-        && account
-            .access_token_expires_at()
-            .is_some_and(|expires_at| expires_at > now)
-        && candidate
-            .refresh_token_expires_at
-            .is_none_or(|expires_at| expires_at > Utc::now())
+        && (account.authentication_kind() == super::api_key::AUTHENTICATION_KIND
+            || (account
+                .access_token_expires_at()
+                .is_some_and(|expires_at| expires_at > now)
+                && candidate
+                    .refresh_token_expires_at
+                    .is_none_or(|expires_at| expires_at > Utc::now())))
         && matches!(
             account.credential_state(),
             CredentialState::Unknown | CredentialState::Ready
@@ -663,19 +673,23 @@ async fn fetch_candidate_catalog(
     candidate: LoadedGrokCredential,
     wire_profile: XaiWireProfileState,
 ) -> Result<FetchedCredentialCatalog, GrokCredentialCatalogError> {
-    let upstream_user_id = candidate
-        .account
-        .upstream_user_id()
-        .ok_or(GrokCredentialCatalogError::InvalidCredentialData)?;
-    let session = GrokModelCatalogSession::new(
-        candidate.access_token,
-        SecretValue::new(upstream_user_id),
-        candidate
+    let session = if let Some(base_url) = candidate.api_key_base_url {
+        GrokModelCatalogSession::new_api_key(candidate.access_token, base_url)
+    } else {
+        let upstream_user_id = candidate
             .account
-            .email()
-            .map(|value| SecretValue::new(value.to_owned())),
-        wire_profile,
-    )
+            .upstream_user_id()
+            .ok_or(GrokCredentialCatalogError::InvalidCredentialData)?;
+        GrokModelCatalogSession::new(
+            candidate.access_token,
+            SecretValue::new(upstream_user_id),
+            candidate
+                .account
+                .email()
+                .map(|value| SecretValue::new(value.to_owned())),
+            wire_profile,
+        )
+    }
     .map_err(|_| GrokCredentialCatalogError::InvalidCredentialData)?
     .with_outbound_proxy(candidate.account.outbound_proxy().cloned());
     let snapshot = client

@@ -23,8 +23,8 @@ const MAX_EXPORTED_AT_FUTURE_SKEW: ChronoDuration = ChronoDuration::minutes(5);
 const MIN_REMAINING_LIFETIME: ChronoDuration = ChronoDuration::seconds(30);
 const MAX_DECLARED_LIFETIME: ChronoDuration = ChronoDuration::hours(24);
 const REQUIRED_SCOPES: &[&str] = &["openid", "offline_access", "grok-cli:access", "api:access"];
-const MAX_IMPORT_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
-const MAX_IMPORT_ACCOUNTS: usize = 200;
+pub(crate) const MAX_IMPORT_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_IMPORT_ACCOUNTS: usize = 200;
 const MAX_ACCOUNT_NAME_BYTES: usize = 512;
 const MAX_EMAIL_BYTES: usize = 2_048;
 
