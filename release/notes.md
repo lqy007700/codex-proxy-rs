@@ -1,6 +1,7 @@
-# v3.53.0+lqy007700.v11
+# v3.53.0+lqy007700.v12
 
-## 问题修复
+## 功能更新
 
-- 兼容 Codex 0.172 的 API Key、项目和组织支出上限错误，保留上游错误码并结束本次请求的自动重试
-- OpenAI 出站 WebSocket 帧的 TRACE 日志仅记录帧类型、结束标志和长度
+- xAI 账号导入支持 API Key 认证，可填写账号名称、三方上游 API 地址和 API Key
+- xAI API Key 账号支持标准 Bearer 认证、模型目录读取和 Responses 请求
+- xAI OAuth 账号的原有认证、额度和上游路由行为保持兼容
