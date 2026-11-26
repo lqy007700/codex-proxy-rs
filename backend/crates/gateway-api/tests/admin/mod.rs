@@ -210,6 +210,13 @@ impl AdminTestFixture {
         let provider_models = Arc::new(Mutex::new(None));
         let providers: Vec<Arc<dyn ProviderAdmin>> = vec![
             Arc::new(UnusedProvider::new(
+                "antigravity",
+                Arc::clone(&provider_error),
+                Arc::clone(&provider_quota),
+                Arc::clone(&provider_quota_gate),
+                Arc::clone(&provider_models),
+            )),
+            Arc::new(UnusedProvider::new(
                 "openai",
                 Arc::clone(&provider_error),
                 Arc::clone(&provider_quota),
@@ -515,6 +522,7 @@ struct StaticPricingSource;
 impl gateway_admin::ports::pricing::PricingSource for StaticPricingSource {
     async fn fetch(
         &self,
+        _scope: &gateway_admin::ports::pricing::PricingSourceScope,
     ) -> Result<gateway_admin::model::pricing::PricingSyncPreview, gateway_admin::model::AdminError>
     {
         Ok(gateway_admin::model::pricing::PricingSyncPreview {
@@ -1668,6 +1676,16 @@ impl UnusedProvider {
 
 #[async_trait]
 impl ProviderAdmin for UnusedProvider {
+    fn account_usage_lookback(
+        &self,
+    ) -> gateway_admin::model::provider_credentials::AccountUsageLookback {
+        use gateway_admin::model::provider_credentials::AccountUsageLookback;
+        match self.kind.as_str() {
+            "antigravity" => AccountUsageLookback::RecentWeek,
+            _ => AccountUsageLookback::RollingDay,
+        }
+    }
+
     fn pricing_catalog(&self) -> gateway_admin::model::pricing::ProviderPricingCatalog {
         serde_json::from_value(serde_json::json!({
             "builtin-model": {

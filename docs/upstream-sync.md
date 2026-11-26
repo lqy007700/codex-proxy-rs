@@ -15,7 +15,7 @@
 | 最近完整合并的上游稳定基线 | `v3.29.7`，`78bc57c5cf24b01a38e985cdd739bb4ae89ce11f` |
 | 同步方式 | 按主题移植上游修复，保留二开请求恢复、账号调度及审计接口 |
 | 核对过的上游稳定版 | `v3.55.2`，`be6aa130d24d1289cc3838977a80dab866c17517`，选择性整合 |
-| 同步范围 | 额度窗口恢复、禁用 OAuth 后台刷新、同身份重授权保额度、隐私工作区匿名化、Guardian 审核模型与亲和、Codex OAuth 请求国家策略、分组策略、Key 批量编辑与 7d/30d 用量统计、备份密钥加固及 `settings_revision` 乐观锁 |
+| 同步范围 | 额度窗口恢复、禁用 OAuth 后台刷新、同身份重授权保额度、隐私工作区匿名化、Guardian 审核模型与亲和、Codex OAuth 请求国家策略、分组策略、Key 批量编辑与 7d/30d 用量统计、备份密钥加固、`settings_revision` 乐观锁及 Antigravity Provider 与 GenAI 入口 |
 | 维护分支与来源 | 在 `main` 维护，`origin` 为 `lqy007700/codex-proxy-rs`，`upstream` 为 `zyycn/codex-proxy-rs` |
 
 上游后续可能继续更新；下一次规划须重新获取远端状态，不能将上述稳定版视为实时最新版本
@@ -104,6 +104,7 @@
 | 构建与重启 | 共享二进制构建、依赖缓存、预构建容器验证、JUnit 与构建耗时、同源码 CI 复用及只读发行预检；保留单平台、兼容 manifest 和同 tag 恢复；二进制使用资源释放交接启动替换进程 |
 | v3.53–v3.55 稳定与路由 | 纳入 `quota_limit_window_minutes` 窗口恢复、同身份 OAuth 重授权保额度、禁用 OAuth 后台额度刷新、WS 控制连接绑定修复、macOS 27.2.1 CLI 预设、未引用 `item_*` 省略、工作区路径匿名化（4 步隐私模型）、Guardian 审核模型与父会话亲和及 Codex OAuth 请求国家策略 |
 | 分组、密钥与备份加固 | 纳入分组协作子代理与模型限制、账号级 `fast_mode` 扩展 `ultrafast`、常用生图模型快捷添加、API Key 批量编辑、7d/30d 用量统计弹窗、`settings_revision` 乐观锁及备份存储 `storageRevision` 与 `secretConfigured` 密钥脱敏；保持账号级 `fast_mode`、直译中文界面与 UI `v0.11.0`，不引入 CPR 互联与显式预算窗口对齐 |
+| Antigravity Provider | 采用 `be6aa130d`、`3e747cb23`、`0bf3c8daa`、`080d3867f` 的 Provider、GenAI 协议与 `/v1beta/models` 入口、通用会话亲和、按 Provider 价格源与近一周用量、模型分组档位；出站沿用账号代理，不引入环境代理和插件、对等共享能力，不新增数据库迁移，沿用 `openai_account_affinity` 等既有设置列 |
 
 ## 继续保留的二开差异
 
@@ -126,7 +127,7 @@
 
 | 提交或范围 | 上游主题 | 当前处理 | 后续核对重点 |
 | --- | --- | --- | --- |
-| `be6aa130d`（Antigravity 与前端重构部分） | Antigravity Provider、前端 `providers/` 重组与 UI `v0.13.2` | 暂缓，独立迭代 | 单独评估 Antigravity Provider 接入与前端组件库升级，不与本次稳定与管理能力混改 |
+| `be6aa130d`（前端重构部分） | 前端 `providers/` 重组与 UI `v0.13.2` | 暂缓，独立迭代 | Antigravity 页面已在 UI `v0.11.0` 上接入；组件库升级需单独评估中文定制页面 |
 | `4d4c1e48c`、`832858dad` | 插件调度和额度查询能力 | 跟随本仓无插件运行边界 | 保持内置 Provider 调度 |
 | `a9e8fa8a4`、`437322ee4` | 选号、会话准入与尝试失败重构 | 保留本地选号及恢复实现 | 可信 Token 主绑定、保底与分阶段预算 |
 | `de58b436b` | 显式 Key 预算窗口 | 暂缓，独立迭代 | 准入、幂等结算、迟到费用、备份与 API 兼容 |

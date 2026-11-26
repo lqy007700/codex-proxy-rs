@@ -54,7 +54,7 @@ flowchart TB
 | 路径 | 责任 |
 | --- | --- |
 | `backend/apps/gateway` | 读取顶层配置、连接 Bundle、注册 Provider 与 Worker |
-| `gateway-protocol` | 跨层共享的 Responses、Chat、Messages wire contract、双向转换、请求事实与 SSE 编解码，不依赖其他 workspace crate |
+| `gateway-protocol` | 跨层共享的 Responses、Chat、Messages、GenAI wire contract、双向转换、请求事实与 SSE 编解码，不依赖其他 workspace crate |
 | `gateway-core` | operation、canonical event、请求快照、路由、admission、attempt 协调、交付边界和计量 |
 | `gateway-admin` | 管理领域、Key 用量、Provider/Store 端口、审计语义、备份与历史保留策略 |
 | `gateway-api` | HTTP/WS/SSE 解码与交付、Admin 与 Key 用量 wire、静态 Web UI；不直接访问 Store 或具体 Provider |
@@ -62,6 +62,7 @@ flowchart TB
 | `gateway-host` | 配置加载、日志、HTTP 生命周期、Worker 监督与历史保留任务、系统更新及外部价格源适配 |
 | `providers/openai` | OpenAI OAuth、Responses/Messages API Key、账号选择、目录、额度和上游 transport |
 | `providers/xai` | xAI OAuth/API Key session、账号选择、目录、额度和 Grok/Responses 转换 |
+| `providers/antigravity` | 个人账号 OAuth 与凭据文件、项目与模型目录、套餐和模型分组额度、原生 GenAI 生成与计费，以及 Desktop／CLI 发布资料和请求身份；出站使用账号所选代理，不读取环境代理 |
 | `frontend` | Vue 管理端与 Key 用量页，仅通过各自身份允许的控制面 API 访问状态 |
 | 独立仓库 `codex-proxy-ui` | 管理端使用的 Vue 基础组件、纯主题算法和样式，不依赖宿主业务状态、路由或 API |
 

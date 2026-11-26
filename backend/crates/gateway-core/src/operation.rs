@@ -216,6 +216,7 @@ impl fmt::Debug for ProviderSessionState {
 pub struct ProtocolPayload {
     protocol: String,
     body: Map<String, Value>,
+    raw_json_body: Option<Bytes>,
     context: Map<String, Value>,
 }
 
@@ -236,8 +237,31 @@ impl ProtocolPayload {
         Ok(Self {
             protocol,
             body,
+            raw_json_body: None,
             context: Map::new(),
         })
+    }
+
+    /// 保留客户端原始 JSON 字节，供原生透传路径直接复发
+    ///
+    /// # Errors
+    ///
+    /// 协议名称无效或正文不是 JSON object 时返回错误
+    pub fn from_json_bytes(
+        protocol: impl Into<String>,
+        body: Bytes,
+    ) -> Result<Self, OperationError> {
+        let object = serde_json::from_slice(&body).map_err(|_| OperationError::EmptyField {
+            field: "protocol_payload body",
+        })?;
+        let mut payload = Self::json_object(protocol, object)?;
+        payload.raw_json_body = Some(body);
+        Ok(payload)
+    }
+
+    #[must_use]
+    pub fn raw_json_body(&self) -> Option<&Bytes> {
+        self.raw_json_body.as_ref()
     }
 
     /// 返回协议名称
@@ -421,6 +445,7 @@ pub struct GenerateRequest {
 #[derive(Clone, PartialEq)]
 struct GeneratePayload {
     source_image_generation: bool,
+    requires_native_protocol: bool,
     wire_facts: RequestFacts,
     protocol_payload: ProtocolPayload,
     client_turn: Option<ClientTurn>,
@@ -465,6 +490,7 @@ impl GenerateRequest {
         Self {
             payload: Arc::new(GeneratePayload {
                 source_image_generation: false,
+                requires_native_protocol: false,
                 wire_facts: request_facts(protocol_payload.protocol(), protocol_payload.body()),
                 protocol_payload,
                 client_turn: None,
@@ -473,6 +499,17 @@ impl GenerateRequest {
                 inherited_capability_requirements: None,
             }),
         }
+    }
+
+    #[must_use]
+    pub fn requiring_native_protocol(mut self) -> Self {
+        Arc::make_mut(&mut self.payload).requires_native_protocol = true;
+        self
+    }
+
+    #[must_use]
+    pub fn requires_native_protocol(&self) -> bool {
+        self.payload.requires_native_protocol
     }
 
     #[must_use]
@@ -704,12 +741,27 @@ impl fmt::Debug for StandaloneSearchRequest {
 #[derive(Clone, PartialEq, Eq)]
 pub struct TokenCountRequest {
     payload: RawJsonPayload,
+    requires_native_protocol: bool,
 }
 
 impl TokenCountRequest {
     #[must_use]
     pub const fn from_raw_json(payload: RawJsonPayload) -> Self {
-        Self { payload }
+        Self {
+            payload,
+            requires_native_protocol: false,
+        }
+    }
+
+    #[must_use]
+    pub const fn requiring_native_protocol(mut self) -> Self {
+        self.requires_native_protocol = true;
+        self
+    }
+
+    #[must_use]
+    pub const fn requires_native_protocol(&self) -> bool {
+        self.requires_native_protocol
     }
 
     #[must_use]
@@ -901,6 +953,40 @@ pub enum Operation {
 }
 
 impl Operation {
+    pub(crate) fn requires_native_protocol(&self) -> bool {
+        match self {
+            Self::Generate(request) => request.requires_native_protocol(),
+            Self::CountTokens(request) => request.requires_native_protocol(),
+            _ => false,
+        }
+    }
+
+    /// 仅提取本次正文明确声明的推理档位，路由不继承 Provider 会话默认值
+    pub(crate) fn requested_reasoning_effort(&self) -> Option<String> {
+        let observation = match self {
+            Self::Generate(request) => {
+                let payload = request.protocol_payload();
+                gateway_protocol::request::request_observation(
+                    payload.protocol(),
+                    payload.body(),
+                    payload.context(),
+                    None,
+                )
+            }
+            Self::CountTokens(request) => {
+                let payload = request.payload();
+                let body = serde_json::from_slice::<Map<String, Value>>(payload.body()).ok()?;
+                gateway_protocol::request::token_count_observation(
+                    payload.protocol(),
+                    &body,
+                    payload.context(),
+                )
+            }
+            _ => return None,
+        };
+        observation.reasoning_effort
+    }
+
     pub(crate) fn with_inherited_capability_requirements(
         self,
         inherited: CapabilityRequirements,
@@ -921,6 +1007,11 @@ impl Operation {
     /// 生成请求的 JSON object 无法编码时返回错误
     pub fn middleware_body(&self) -> Result<Bytes, OperationError> {
         match self {
+            Self::Generate(request)
+                if let Some(body) = request.protocol_payload().raw_json_body() =>
+            {
+                Ok(body.clone())
+            }
             Self::Generate(request) => serde_json::to_vec(request.protocol_payload().body())
                 .map(Bytes::from)
                 .map_err(|_| OperationError::EmptyField {
@@ -1086,6 +1177,7 @@ impl Operation {
                         context,
                         translated: payload.translated || translating,
                     },
+                    requires_native_protocol: request.requires_native_protocol,
                 }))
             }
             Self::ProviderHttp(request) => {

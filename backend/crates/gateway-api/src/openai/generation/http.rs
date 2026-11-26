@@ -123,6 +123,8 @@ pub(crate) async fn execute_prepared_generation(
                             .client()
                             .snapshot()
                             .responses_max_decompressed_body_bytes(),
+                        client_model.as_str(),
+                        stream,
                     )
                     .map_err(|_| MiddlewareError::Rejected)?
                     .with_client_context(client_ip, user_agent)
@@ -189,21 +191,34 @@ pub(crate) async fn execute_prepared_generation(
         }
     };
     let response = if stream {
-        if protocol == GenerationProtocol::Responses {
-            crate::openai::responses::keepalive::response(response, keepalive).await
-        } else {
-            crate::openai::middleware::keepalive_response(response, keepalive, |response| {
-                Box::pin(crate::openai::messages::stream_failure(response))
-            })
-            .await
+        match protocol {
+            GenerationProtocol::Responses => {
+                crate::openai::responses::keepalive::response(response, keepalive).await
+            }
+            GenerationProtocol::GenAi | GenerationProtocol::GenAiTokenCount => {
+                crate::openai::middleware::keepalive_response(response, keepalive, |response| {
+                    Box::pin(crate::openai::genai::stream_failure(response))
+                })
+                .await
+            }
+            GenerationProtocol::Messages | GenerationProtocol::MessageTokenCount => {
+                crate::openai::middleware::keepalive_response(response, keepalive, |response| {
+                    Box::pin(crate::openai::messages::stream_failure(response))
+                })
+                .await
+            }
         }
     } else {
         response.await
     };
-    let response = if protocol == GenerationProtocol::Responses {
-        response
-    } else {
-        crate::openai::messages::project_error_response(response).await
+    let response = match protocol {
+        GenerationProtocol::Responses => response,
+        GenerationProtocol::GenAi | GenerationProtocol::GenAiTokenCount => {
+            crate::openai::genai::project_error_response(response).await
+        }
+        GenerationProtocol::Messages | GenerationProtocol::MessageTokenCount => {
+            crate::openai::messages::project_error_response(response).await
+        }
     };
     // 预留 ID 没有对应执行记录，中间件提前返回时保留 HTTP 入口关联 ID
     if execution_entered.load(Ordering::Relaxed) {

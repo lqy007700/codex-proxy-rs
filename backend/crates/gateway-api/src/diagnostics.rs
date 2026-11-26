@@ -18,16 +18,17 @@ use http_body::{Body as _, Frame, SizeHint};
 use serde_json::json;
 use tower_http::request_id::RequestId;
 
-use crate::client_error::{AccessRejection, ProtocolError, ProtocolErrorBody};
+use crate::client_error::{AccessRejection, ProtocolErrorBody};
 
 pub(crate) async fn record_ingress(
     State(diagnostics): State<Arc<dyn OperationalDiagnostics>>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    if request.uri().path() != "/v1" && !request.uri().path().starts_with("/v1/") {
+    let Some(namespace) = crate::openai::router::DataPlaneNamespace::for_path(request.uri().path())
+    else {
         return next.run(request).await;
-    }
+    };
     let correlation_id = request
         .extensions()
         .get::<RequestId>()
@@ -63,17 +64,7 @@ pub(crate) async fn record_ingress(
     };
     let mut response = if endpoint.is_none() {
         // 数据面未知路径不能落入 SPA fallback，否则会把协议错误伪装成 HTML 成功
-        crate::openai::error::protocol_error_response(
-            StatusCode::NOT_FOUND,
-            ProtocolErrorBody {
-                error: ProtocolError {
-                    kind: "invalid_request_error",
-                    code: "unknown_endpoint",
-                    message: "The requested API endpoint does not exist.".into(),
-                    param: None,
-                },
-            },
-        )
+        namespace.unmatched_response().await
     } else {
         next.run(request).await
     };
@@ -109,7 +100,7 @@ pub(crate) async fn record_ingress(
                         byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'[' | b']')
                     })
             });
-        let endpoint = endpoint.as_deref().unwrap_or("/v1/<unmatched>");
+        let endpoint = endpoint.as_deref().unwrap_or(namespace.unmatched_path());
         let model_request_id = execution_observed
             .then(|| {
                 response

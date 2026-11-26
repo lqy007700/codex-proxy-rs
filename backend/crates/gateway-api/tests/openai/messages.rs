@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::{collections::VecDeque, time::Duration};
 
 #[derive(Default)]
-struct Trace {
+pub(super) struct Trace {
     pub commits: AtomicUsize,
     pub discarded: AtomicUsize,
     pub cancelled: AtomicBool,
@@ -39,14 +39,14 @@ struct Trace {
 }
 
 #[derive(Default)]
-enum Finish {
+pub(super) enum Finish {
     #[default]
     Success,
     Error,
     Pending,
 }
 
-struct Session {
+pub(super) struct Session {
     events: VecDeque<Vec<ProviderEvent>>,
     pub trace: Arc<Trace>,
     pub finish: Finish,

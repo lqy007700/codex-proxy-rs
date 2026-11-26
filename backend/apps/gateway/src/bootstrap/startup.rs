@@ -35,6 +35,7 @@ impl Environment {
 pub(super) struct Providers {
     pub(super) openai: provider_openai::ProviderBundle,
     pub(super) xai: provider_xai::ProviderBundle,
+    pub(super) antigravity: provider_antigravity::ProviderBundle,
     pub(super) core: ProviderRegistry,
     pub(super) admin: ProviderAdminRegistry,
 }
@@ -49,14 +50,27 @@ impl Providers {
             provider_openai::initialize(config.with_timezone(environment.timezone), ports.clone())
                 .await?;
         environment.host.report_startup_ready("OpenAI Provider");
+        let antigravity = provider_antigravity::initialize(ports.clone())?;
+        environment
+            .host
+            .report_startup_ready("Antigravity Provider");
         let xai = provider_xai::initialize(ports).await?;
         environment.host.report_startup_ready("xAI Provider");
-        let core = ProviderRegistry::new([openai.core_provider(), xai.core_provider()])?;
-        let admin = ProviderAdminRegistry::new([openai.admin_provider(), xai.admin_provider()])
-            .map_err(|_| gateway_admin::model::AdminError::invalid("Provider 管理身份冲突"))?;
+        let core = ProviderRegistry::new([
+            openai.core_provider(),
+            xai.core_provider(),
+            antigravity.core_provider(),
+        ])?;
+        let admin = ProviderAdminRegistry::new([
+            openai.admin_provider(),
+            xai.admin_provider(),
+            antigravity.admin_provider(),
+        ])
+        .map_err(|_| gateway_admin::model::AdminError::invalid("Provider 管理身份冲突"))?;
         Ok(Self {
             openai,
             xai,
+            antigravity,
             core,
             admin,
         })

@@ -136,3 +136,61 @@ export function previewXaiClientProfile(data: XaiClientProfilePreviewParam) {
     silent: true,
   })
 }
+
+export interface AntigravityClientProfileSelection {
+  client: 'desktop' | 'cli'
+  platform: 'macos' | 'linux' | 'windows'
+  versionMode: 'latest' | 'fixed'
+  clientVersion: string | null
+  arch: string | null
+  systemPrompt?: string | null
+}
+
+export interface AntigravityClientProfileOptions {
+  defaultSystemPrompt: string
+  systemPromptSource: string
+  defaults: AntigravityClientProfileSelection
+  presets: {
+    configuration: AntigravityClientProfileSelection
+    automaticAvailable: boolean
+    reason: string | null
+  }[]
+  globalConfiguration: AntigravityClientProfileSelection
+}
+
+export interface AntigravityClientProfilePreview {
+  configuration: AntigravityClientProfileSelection
+  source: 'global' | 'override'
+  product: string
+  osType: string
+  arch: string
+  clientVersion: string
+  userAgent: string
+  versionSource: 'official' | 'custom'
+  verifiedAt: string | null
+  verifiedAtDisplay: string | null
+  checkedAt: string | null
+  checkedAtDisplay: string | null
+  error: string | null
+}
+
+interface AntigravityClientProfilePreviewParam {
+  configuration: AntigravityClientProfileSelection | null
+}
+
+export function getAntigravityClientProfileOptions() {
+  return request<AntigravityClientProfileOptions>({
+    url: '/api/admin/settings/client-profiles/antigravity',
+    method: 'GET',
+    silent: true,
+  })
+}
+
+export function previewAntigravityClientProfile(data: AntigravityClientProfilePreviewParam) {
+  return request<AntigravityClientProfilePreview>({
+    url: '/api/admin/settings/client-profiles/antigravity/preview',
+    method: 'POST',
+    data,
+    silent: true,
+  })
+}

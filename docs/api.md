@@ -246,6 +246,11 @@ WebSocket message 和 frame 不设置网关私有长度上限；协议可接受�
 | `POST` | `/v1/chat/completions` | Chat Completions 兼容接口；通过 Responses 执行，支持 JSON 与 SSE |
 | `POST` | `/v1/messages` | Anthropic Messages；`stream=true` 返回 SSE，否则返回完整 JSON |
 | `POST` | `/v1/messages/count_tokens` | 返回输入 Token 数，原生计数与本地估算的边界见下 |
+| `POST` | `/v1beta/models/{model}:generateContent` | Google GenAI 原生 JSON，见 [Antigravity 原生生成](#antigravity-原生生成) |
+| `POST` | `/v1beta/models/{model}:streamGenerateContent?alt=sse` | Google GenAI 原生 SSE，允许最后一个候选结束后继续接收用量帧 |
+| `POST` | `/v1beta/models/{model}:countTokens` | 上游输入计数 JSON，返回 `totalTokens` |
+| `GET` | `/v1beta/models`、`/v1beta/models/{model}` | Gemini 格式的模型列表与详情，仅包含当前 Key 可经原生 GenAI 入口路由的模型 |
+| `POST` | `/v1beta:{method}` | 客户端后台指标；验证 Key 后返回 `{}`，不启动模型请求 |
 | `GET` | `/v1/responses` | 通过 HTTP Upgrade 建立 Responses WebSocket |
 | `POST` | `/v1/alpha/search` | Codex standalone web search；JSON 请求与响应正文原样转发 |
 | `POST` | `/v1/images/generations` | 通过 OpenAI Provider 发起图像生成；JSON 请求与响应正文原样转发 |
@@ -256,6 +261,15 @@ WebSocket message 和 frame 不设置网关私有长度上限；协议可接受�
 | `GET` / `POST` | `/v1/providers/{provider}/http/{endpoint}` | 调用指定 Provider 预先声明的固定 HTTP 操作；不是任意 URL 代理 |
 | `GET` | `/v1/usage` | 查询当前 Client Key 的日与周额度，仅使用网关已结算的 USD 账本 |
 | `GET` | `/v1/cpr/link` | 返回当前 Key 获准公开的预算及直连账号池观测 |
+
+### Antigravity 原生生成
+
+GenAI 短路径使用 `Authorization: Bearer <Client Key>`。模型名取自 URL，入口只在当前 Key 的账号范围内选择声明 GenAI 协议的原生模型，目前由 Antigravity OAuth 账号承接；Responses、Chat Completions 与 Messages 也可转换到 Antigravity 目录中声明接受转换的模型
+
+- 上游目录声明的模型分组可使用基础模型名，并通过 `generationConfig.thinkingConfig.thinkingLevel` 指定档位；缺少或不支持的档位返回 400，完整型号与指向完整型号的模型映射保持原目标
+- 会话亲和使用 `X-Http-Session-Id`，缺失时使用 `X-Session-Id`；转换入口沿用 Codex 与 Claude Code 会话解析，绑定按 Client Key、模型和入站协议隔离，共用 `openaiAccountAffinity` 设置
+- 账号列表的本地用量按部署时区汇总今天及前 6 天，`usage.windowLabelDisplay` 为 `近一周`
+- 价格档位支持 `standard`、`long_standard` 与 `image`；全局客户端画像保存在 `providerRequestProfiles.antigravity`，Key 可用 `providerRequestProfileOverrides.antigravity` 覆盖
 
 ### Chat Completions 请求
 

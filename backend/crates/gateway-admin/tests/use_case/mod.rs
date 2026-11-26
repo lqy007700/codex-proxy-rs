@@ -882,6 +882,7 @@ struct UnavailablePricingSource;
 impl gateway_admin::ports::pricing::PricingSource for UnavailablePricingSource {
     async fn fetch(
         &self,
+        _scope: &gateway_admin::ports::pricing::PricingSourceScope,
     ) -> Result<gateway_admin::model::pricing::PricingSyncPreview, gateway_admin::model::AdminError>
     {
         Err(gateway_admin::model::AdminError::internal(

@@ -1,10 +1,11 @@
 import type { Component } from 'vue'
-import { Key, LinkAlt, Openai, Xai } from '@boxicons/vue'
+import { GoogleAntigravity, Key, LinkAlt, Openai, Xai } from '@boxicons/vue'
 import { Fingerprint, Plug } from '@lucide/vue'
 
 const PROVIDER_DISPLAY_NAMES = {
   openai: 'OpenAI',
   xai: 'xAI',
+  antigravity: 'Antigravity',
 } as const
 
 export const PROVIDER_IDS = Object.keys(PROVIDER_DISPLAY_NAMES) as Array<keyof typeof PROVIDER_DISPLAY_NAMES>
@@ -27,6 +28,7 @@ export function providerIcon(value: string): Component {
   switch (value.trim().toLowerCase()) {
     case 'openai': return Openai
     case 'xai': return Xai
+    case 'antigravity': return GoogleAntigravity
     default: return Plug
   }
 }

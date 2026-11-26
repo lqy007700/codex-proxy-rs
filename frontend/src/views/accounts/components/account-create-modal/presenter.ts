@@ -62,8 +62,12 @@ export function resolveAccountCreatePresentation(input: {
         : '回调地址',
       callbackPlaceholder: id === 'openai'
         ? 'http://localhost:1455/auth/callback?code=...&state=...'
-        : '回调地址、?code=...&state=... 或授权码',
-      description: '打开授权链接，完成浏览器授权后粘贴回调地址或授权码',
+        : id === 'antigravity'
+          ? 'http://localhost:.../oauth-callback?state=...&code=...'
+          : '回调地址、?code=...&state=... 或授权码',
+      description: id === 'antigravity'
+        ? '打开授权链接，完成 Google 浏览器授权后粘贴完整回调地址'
+        : '打开授权链接，完成浏览器授权后粘贴回调地址或授权码',
     },
     importInput: form.mode === 'access_token'
       ? { label: 'Access Token', placeholder: '每行粘贴一个 Access Token', uploadable: false }

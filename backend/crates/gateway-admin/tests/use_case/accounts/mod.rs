@@ -73,6 +73,7 @@ use serde_json::{Map, json};
 pub(super) type EventLog = Arc<Mutex<Vec<&'static str>>>;
 pub(super) struct FakeProviderAdmin {
     kind: ProviderKind,
+    usage_lookback: Mutex<gateway_admin::model::provider_credentials::AccountUsageLookback>,
     capabilities: Mutex<gateway_admin::model::accounts::ProviderAccountCapabilities>,
     websocket_degraded: Mutex<bool>,
     events: EventLog,
@@ -105,6 +106,7 @@ impl FakeProviderAdmin {
     pub(super) fn new(kind: &str, events: EventLog) -> Arc<Self> {
         Arc::new(Self {
             kind: ProviderKind::new(kind).expect("provider kind"),
+            usage_lookback: Mutex::default(),
             capabilities: Mutex::new(
                 gateway_admin::model::accounts::ProviderAccountCapabilities {
                     quota: true,
@@ -294,6 +296,12 @@ impl FakeProviderAdmin {
 
 #[async_trait]
 impl ProviderAdmin for FakeProviderAdmin {
+    fn account_usage_lookback(
+        &self,
+    ) -> gateway_admin::model::provider_credentials::AccountUsageLookback {
+        *self.usage_lookback.lock().unwrap()
+    }
+
     fn account_capabilities(
         &self,
         _account_id: &ProviderAccountId,
@@ -676,6 +684,8 @@ pub(super) struct FakeAccountStore {
     audit_requests: Mutex<Vec<String>>,
     import_settings: Mutex<Vec<Option<gateway_admin::model::accounts::AccountImportSettings>>>,
     quota_window_usage: Mutex<Vec<AccountUsageWindowResult>>,
+    rolling_usage: Mutex<Vec<AccountUsage>>,
+    usage_queries: Mutex<Vec<(TimeRange, Vec<String>)>>,
     quota_window_queries: Mutex<Vec<AccountUsageWindowQuery>>,
     quota_forecast_history: Mutex<QuotaForecastHistory>,
     update_commands: Mutex<Vec<UpdateAccount>>,
@@ -705,6 +715,8 @@ impl FakeAccountStore {
             audit_requests: Mutex::new(Vec::new()),
             import_settings: Mutex::new(Vec::new()),
             quota_window_usage: Mutex::new(Vec::new()),
+            rolling_usage: Mutex::default(),
+            usage_queries: Mutex::default(),
             quota_window_queries: Mutex::new(Vec::new()),
             quota_forecast_history: Mutex::new(QuotaForecastHistory::default()),
             update_commands: Mutex::new(Vec::new()),
@@ -905,10 +917,21 @@ impl AccountStore for FakeAccountStore {
 
     async fn load_account_usage(
         &self,
-        _: TimeRange,
-        _: &[String],
+        range: TimeRange,
+        ids: &[String],
     ) -> AdminStoreResult<Vec<AccountUsage>> {
-        Ok(Vec::new())
+        self.usage_queries
+            .lock()
+            .unwrap()
+            .push((range, ids.to_vec()));
+        Ok(self
+            .rolling_usage
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|usage| ids.contains(&usage.account_id))
+            .cloned()
+            .collect())
     }
 
     async fn load_account_usage_by_windows(
@@ -3998,4 +4021,98 @@ async fn quota_limits_allow_existing_missing_windows_and_distinguish_omission_fr
             .1
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn accounts_list_and_detail_keep_recent_week_usage_separate_from_group_quotas() {
+    use gateway_admin::model::provider_credentials::{AccountUsageLookback, AccountUsagePeriod};
+
+    let provider = FakeProviderAdmin::new("antigravity", events());
+    *provider.usage_lookback.lock().unwrap() = AccountUsageLookback::RecentWeek;
+    let store = FakeAccountStore::new("antigravity", events());
+    let expected_usage = quota_local_usage("acct_test", 139);
+    let mut daily_account = account_record("xai");
+    daily_account.id = "acct_daily".to_owned();
+    store.accounts.lock().unwrap().push(daily_account);
+    let daily_usage = quota_local_usage("acct_daily", 23);
+    *store.rolling_usage.lock().unwrap() = vec![expected_usage.clone(), daily_usage];
+    let services = super::AdminHarness::new()
+        .accounts(store.clone())
+        .settings(Arc::new(StaticSettingsStore::default()))
+        .provider(provider.clone())
+        .provider(FakeProviderAdmin::new("xai", events()))
+        .build()
+        .await;
+    let grouped_window = ProviderQuotaWindow {
+        key: "gemini-weekly".to_owned(),
+        group: "shortTerm".to_owned(),
+        label: "周额度".to_owned(),
+        limit_id: Some("gemini".to_owned()),
+        limit_name: Some("Gemini Models".to_owned()),
+        role: None,
+        local_usage_attribution: QuotaLocalUsageAttribution::Unavailable,
+        window_seconds: Some(604_800),
+        used_percent: Some(25.0),
+        reset_at: Some(Utc::now() + TimeDelta::days(6)),
+        limit_reached: false,
+        local_usage: None,
+        provider_data: None,
+    };
+    for windows in [Vec::new(), vec![grouped_window]] {
+        provider.set_quota(ProviderQuota {
+            windows: windows.clone(),
+            ..empty_quota()
+        });
+        let page = services
+            .accounts()
+            .list(AccountListQuery {
+                page: 1,
+                page_size: gateway_admin::model::PageSize::new(20).unwrap(),
+                provider_kind: None,
+                group_filter: None,
+                search: None,
+                status: None,
+                sort: None,
+            })
+            .await
+            .unwrap();
+        let detail = services
+            .accounts()
+            .quota(&ProviderAccountId::new("acct_test").unwrap(), false)
+            .await
+            .unwrap();
+        let refreshed = services
+            .accounts()
+            .quota(&ProviderAccountId::new("acct_test").unwrap(), true)
+            .await
+            .unwrap();
+        for item in [&page.items[0], &detail, &refreshed] {
+            assert_eq!(item.quota.windows, windows);
+            assert_eq!(item.usage.as_ref(), Some(&expected_usage));
+            assert_eq!(item.usage_period, Some(AccountUsagePeriod::RecentWeek));
+        }
+        assert!(store.quota_window_queries().is_empty());
+        let daily = page
+            .items
+            .iter()
+            .find(|item| item.account.id == "acct_daily")
+            .unwrap();
+        // 二开保留既有展示：其他 OAuth 账号没有额度用量窗口时不回退滚动用量
+        assert!(daily.usage.is_none());
+        assert!(daily.usage_period.is_none());
+        let queries = std::mem::take(&mut *store.usage_queries.lock().unwrap());
+        assert_eq!(queries.len(), 4);
+        assert_eq!(queries[0].0.end, queries[1].0.end);
+        for (range, ids) in queries {
+            if ids == ["acct_daily"] {
+                assert_eq!(range.end - range.start, TimeDelta::hours(24));
+                continue;
+            }
+            assert_eq!(ids, ["acct_test"]);
+            let timezone = gateway_core::time::DeploymentTimeZone::default();
+            assert_eq!(range.start, timezone.days_before(range.end, 6).unwrap());
+            assert!(range.end - range.start >= TimeDelta::days(6));
+            assert!(range.end - range.start < TimeDelta::days(7));
+        }
+    }
 }

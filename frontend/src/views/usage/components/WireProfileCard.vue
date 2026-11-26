@@ -142,9 +142,11 @@ const clientIdentity = computed(() => {
   if (!current)
     return '—'
   const value = current.attributes.find(attribute => attribute.label === '客户端标识')?.value ?? '—'
-  return current.provider === 'xai'
-    ? toPascalCase(value)
-    : value
+  if (current.provider === 'xai')
+    return toPascalCase(value)
+  if (current.provider === 'antigravity')
+    return value.replace(/^antigravity\/hub\//, 'Antigravity/Hub/').replace(/^antigravity\/cli\//, 'Antigravity/CLI/')
+  return value
 })
 
 const identityAttributes = computed(() => {
@@ -279,7 +281,7 @@ watch(
             <div class="min-w-0 flex-auto">
               <dt class="flex items-center gap-1.5 text-[10px] leading-none font-bold text-z-text-quaternary">
                 <Monitor class="size-3.25 text-z-text-tertiary" />
-                {{ profile.provider === 'openai' ? '模拟运行环境' : '运行环境' }}
+                {{ profile.provider === 'openai' || profile.provider === 'antigravity' ? '模拟运行环境' : '运行环境' }}
               </dt>
               <dd
                 class="mt-2 mb-0 font-mono text-z-lg leading-snug font-bold wrap-anywhere tabular-nums text-z-text"

@@ -343,17 +343,17 @@ async fn account_usage_preserves_periods_cache_counts_and_missing_values() {
         last_error_reason: None,
         last_error_message: None,
     };
-    for (authentication_kind, read, write) in [
-        ("api_key", Some(13), Some(7)),
-        ("api_key", None, None),
-        ("oauth", Some(13), Some(7)),
-        ("oauth", None, None),
+    for (provider_kind, authentication_kind, window_label, read, write) in [
+        ("openai", "api_key", "通用额度", Some(13), Some(7)),
+        ("openai", "api_key", "通用额度", None, None),
+        ("xai", "oauth", "近 24 小时", Some(13), Some(7)),
+        ("xai", "oauth", "近 24 小时", None, None),
+        ("antigravity", "oauth", "近一周", Some(13), Some(7)),
+        ("antigravity", "oauth", "近一周", None, None),
     ] {
         let mut account = account_page_item(facts.clone(), now, authentication_kind);
-        if authentication_kind == "oauth" {
-            account.account.provider_kind =
-                gateway_core::routing::ProviderKind::new("xai").unwrap();
-        }
+        account.account.provider_kind =
+            gateway_core::routing::ProviderKind::new(provider_kind).unwrap();
         *fixture.account.lock().unwrap() = Some(account);
         let local_usage = AccountUsage {
             account_id: "acct_cooldown".to_owned(),
@@ -417,12 +417,16 @@ async fn account_usage_preserves_periods_cache_counts_and_missing_values() {
                     limit_id: None,
                     limit_name: None,
                     role: None,
-                    local_usage_attribution: QuotaLocalUsageAttribution::AccountWide,
+                    local_usage_attribution: if provider_kind == "antigravity" {
+                        QuotaLocalUsageAttribution::Unavailable
+                    } else {
+                        QuotaLocalUsageAttribution::AccountWide
+                    },
                     window_seconds: Some(86_400),
                     used_percent: None,
                     reset_at: None,
                     limit_reached: false,
-                    local_usage: Some(local_usage),
+                    local_usage: (provider_kind != "antigravity").then_some(local_usage),
                     provider_data: None,
                 }],
                 ..Default::default()
@@ -444,14 +448,7 @@ async fn account_usage_preserves_periods_cache_counts_and_missing_values() {
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(status, StatusCode::OK, "{value}");
         let usage = &value["data"]["items"][0]["usage"];
-        assert_eq!(
-            usage["windowLabelDisplay"],
-            if authentication_kind == "oauth" {
-                "近 24 小时"
-            } else {
-                "通用额度"
-            }
-        );
+        assert_eq!(usage["windowLabelDisplay"], window_label);
         assert_eq!(usage["models"][0]["successRateDisplay"], "33.3%");
         assert!((usage["models"][0]["successRate"].as_f64().unwrap() - 100.0 / 3.0).abs() < 0.001);
         assert_eq!(usage["models"][1]["successRate"], 0.0);
@@ -461,7 +458,7 @@ async fn account_usage_preserves_periods_cache_counts_and_missing_values() {
         assert_eq!(usage["models"][2]["successRateDisplay"], "—");
         assert_eq!(usage["requestCount"], 1);
         assert_eq!(usage["totalTokens"], 120);
-        if authentication_kind == "oauth" {
+        if authentication_kind == "oauth" && provider_kind != "antigravity" {
             let window = &value["data"]["items"][0]["quota"]["windows"][0];
             assert_eq!(window["group"], "shortTerm");
             assert_eq!(window["localUsage"]["requestCount"], 1);

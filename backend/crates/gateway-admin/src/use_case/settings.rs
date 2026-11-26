@@ -142,7 +142,9 @@ impl SettingsService for DefaultSettingsService {
     async fn preview_pricing_sync(
         &self,
     ) -> Result<crate::model::pricing::PricingSyncPreview, AdminError> {
-        self.pricing_source.fetch().await
+        let scope = self.providers.pricing_source_scope();
+        let raw = self.pricing_source.fetch(&scope).await?;
+        Ok(scope.project(raw))
     }
 
     async fn sync_pricing(
@@ -172,7 +174,9 @@ impl SettingsService for DefaultSettingsService {
         {
             return Err(AdminError::invalid("该服务商不支持价目管理"));
         }
-        let mut current = self.pricing_source.fetch().await?;
+        let scope = self.providers.pricing_source_scope();
+        let raw = self.pricing_source.fetch(&scope).await?;
+        let mut current = scope.project(raw);
         if current != command.preview {
             return Err(AdminError::invalid(
                 "models.dev 价目已变化，请重新预览后确认",
@@ -268,6 +272,14 @@ impl SettingsService for DefaultSettingsService {
                     })
                 {
                     return Err(AdminError::invalid("xAI 不支持此价格档位"));
+                }
+                if let Some(supported) = self.providers.supported_pricing_bands(&command.provider)
+                    && pricing
+                        .bands
+                        .keys()
+                        .any(|band| !supported.contains(&band.as_str()))
+                {
+                    return Err(AdminError::invalid("该服务商不支持此价格档位"));
                 }
                 if !pricing.bands.contains_key("standard")
                     && command

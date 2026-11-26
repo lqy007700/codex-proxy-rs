@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import type { ClientProfileSelection, ProviderRequestProfile, ProviderRequestProfiles, ProviderRequestProfileUpdates, XaiClientProfileSelection } from '@/api/modules/settings/profiles'
+import type { AntigravityClientProfileSelection, ClientProfileSelection, ProviderRequestProfile, ProviderRequestProfiles, ProviderRequestProfileUpdates, XaiClientProfileSelection } from '@/api/modules/settings/profiles'
 import { ZSegmented } from '@codex-proxy/ui'
 import { isEqual } from 'es-toolkit'
 import { computed, shallowRef } from 'vue'
 import { formatProviderLabel, PROVIDER_IDS, providerIcon } from '@/utils/providers'
+import AntigravityClientProfileEditor from './AntigravityClientProfileEditor.vue'
 import ClientProfileEditor from './ClientProfileEditor.vue'
 import XaiClientProfileEditor from './XaiClientProfileEditor.vue'
 
@@ -31,6 +32,7 @@ const providerOptions = PROVIDER_IDS.map(value => ({
 const providerSelectorStyle = { width: `${providerOptions.length * 40}px` }
 const openai = profileModel<ClientProfileSelection>('openai')
 const xai = profileModel<XaiClientProfileSelection>('xai')
+const antigravity = profileModel<AntigravityClientProfileSelection>('antigravity')
 
 function profileModel<T extends object>(providerId: string) {
   return computed<T | null | undefined>({
@@ -98,7 +100,7 @@ function profileModel<T extends object>(providerId: string) {
       </template>
     </ClientProfileEditor>
     <XaiClientProfileEditor
-      v-else
+      v-else-if="provider === 'xai'"
       v-model="xai"
       :allow-inherit="allowInherit"
       :allow-preserve="updates !== undefined && initialProfiles?.[provider] === undefined"
@@ -117,5 +119,25 @@ function profileModel<T extends object>(providerId: string) {
         />
       </template>
     </XaiClientProfileEditor>
+    <AntigravityClientProfileEditor
+      v-else
+      v-model="antigravity"
+      :allow-inherit="allowInherit"
+      :allow-preserve="updates !== undefined && initialProfiles?.[provider] === undefined"
+      :active="active"
+      :disabled="disabled"
+    >
+      <template #source-extra>
+        <ZSegmented
+          v-model="provider"
+          class="max-w-full shrink-0"
+          aria-label="上游身份平台"
+          :options="providerOptions"
+          :disabled="disabled"
+          :style="providerSelectorStyle"
+          display="icon"
+        />
+      </template>
+    </AntigravityClientProfileEditor>
   </div>
 </template>

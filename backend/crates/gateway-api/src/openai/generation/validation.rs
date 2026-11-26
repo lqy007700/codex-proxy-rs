@@ -1,7 +1,7 @@
 //! 出口校验按协议维护边界事实，不在流式路径保存生成正文
 
 use gateway_core::event::ProviderEvent;
-use gateway_protocol::openai::sse::parse_sse_events;
+use gateway_protocol::{genai::GenerateContentObservation, openai::sse::parse_sse_events};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
@@ -14,7 +14,8 @@ use crate::openai::responses::validation::{
 pub(super) enum GenerationValidationFacts {
     Responses(ResponseValidationFacts),
     Messages(Arc<Mutex<Option<String>>>),
-    Count,
+    GenAi,
+    Count(&'static str),
 }
 
 impl GenerationValidationFacts {
@@ -22,7 +23,9 @@ impl GenerationValidationFacts {
         match protocol {
             GenerationProtocol::Responses => Self::Responses(ResponseValidationFacts::default()),
             GenerationProtocol::Messages => Self::Messages(Arc::default()),
-            GenerationProtocol::MessageTokenCount => Self::Count,
+            GenerationProtocol::GenAi => Self::GenAi,
+            GenerationProtocol::MessageTokenCount => Self::Count("input_tokens"),
+            GenerationProtocol::GenAiTokenCount => Self::Count("totalTokens"),
         }
     }
 
@@ -43,7 +46,7 @@ impl GenerationValidationFacts {
                     *id = Some(value.to_owned());
                 }
             }
-            Self::Count => {}
+            Self::GenAi | Self::Count(_) => {}
         }
     }
 
@@ -68,7 +71,7 @@ impl GenerationValidationFacts {
         match self {
             Self::Responses(facts) => facts.response_id(),
             Self::Messages(id) => id.lock().ok().and_then(|id| id.clone()),
-            Self::Count => None,
+            Self::GenAi | Self::Count(_) => None,
         }
     }
 
@@ -86,9 +89,21 @@ impl GenerationValidationFacts {
                 }
                 Ok(())
             }
-            Self::Count => serde_json::from_slice::<Value>(bytes)
+            Self::GenAi => {
+                let value: Value = serde_json::from_slice(bytes).map_err(|_| ())?;
+                let mut observation = GenerateContentObservation::default();
+                observation.observe(&value);
+                if value.get("error").is_some_and(Value::is_object)
+                    || observation.finish().is_some()
+                {
+                    Ok(())
+                } else {
+                    Err(())
+                }
+            }
+            Self::Count(field) => serde_json::from_slice::<Value>(bytes)
                 .ok()
-                .and_then(|value| value.get("input_tokens").and_then(Value::as_u64))
+                .and_then(|value| value.get(*field).and_then(Value::as_u64))
                 .map(|_| ())
                 .ok_or(()),
         }
@@ -97,13 +112,24 @@ impl GenerationValidationFacts {
 
 pub(super) enum GenerationDeliveryValidator {
     Responses(ResponsesDeliveryValidator),
-    Messages { id: Option<String>, finished: bool },
+    Messages {
+        id: Option<String>,
+        finished: bool,
+    },
+    GenAi {
+        observation: GenerateContentObservation,
+        failed: bool,
+    },
 }
 
 impl GenerationDeliveryValidator {
     pub(super) fn new(protocol: GenerationProtocol) -> Self {
         match protocol {
             GenerationProtocol::Responses => Self::Responses(ResponsesDeliveryValidator::default()),
+            GenerationProtocol::GenAi => Self::GenAi {
+                observation: GenerateContentObservation::default(),
+                failed: false,
+            },
             _ => Self::Messages {
                 id: None,
                 finished: false,
@@ -115,6 +141,7 @@ impl GenerationDeliveryValidator {
         match self {
             Self::Responses(validator) => validator.response_id(),
             Self::Messages { id, .. } => id.as_deref(),
+            Self::GenAi { .. } => None,
         }
     }
 
@@ -128,6 +155,32 @@ impl GenerationDeliveryValidator {
             (Self::Responses(validator), GenerationValidationFacts::Responses(facts)) => validator
                 .validate_frame(bytes, transformed, facts)
                 .map_err(|_| ()),
+            (
+                Self::GenAi {
+                    observation,
+                    failed,
+                },
+                GenerationValidationFacts::GenAi,
+            ) => {
+                if bytes.is_empty() {
+                    return if *failed || observation.finish().is_some() {
+                        Ok(())
+                    } else {
+                        Err(())
+                    };
+                }
+                for event in
+                    parse_sse_events(std::str::from_utf8(bytes).map_err(|_| ())?).map_err(|_| ())?
+                {
+                    let value: Value = serde_json::from_str(&event.data).map_err(|_| ())?;
+                    if !value.is_object() {
+                        return Err(());
+                    }
+                    *failed |= value.get("error").is_some_and(Value::is_object);
+                    observation.observe(&value);
+                }
+                Ok(())
+            }
             (Self::Messages { id, finished }, GenerationValidationFacts::Messages(_)) => {
                 if bytes.is_empty() {
                     return if *finished { Ok(()) } else { Err(()) };
@@ -181,6 +234,10 @@ impl GenerationDeliveryValidator {
         match self {
             Self::Responses(validator) => validator.finish_delivery().map_err(|_| ()),
             Self::Messages { finished: true, .. } => Ok(()),
+            Self::GenAi {
+                observation,
+                failed,
+            } if *failed || observation.finish().is_some() => Ok(()),
             _ => Err(()),
         }
     }

@@ -39,6 +39,7 @@ pub(crate) fn router() -> Router<ApiState> {
         .method_not_allowed_fallback(super::messages::method_not_allowed);
     Router::new()
         .merge(messages_router)
+        .merge(super::genai::router())
         .route(CHAT_COMPLETIONS_PATH, post(chat_completions))
         .route(IMAGE_GENERATIONS_PATH, post(image_generations))
         .route(IMAGE_EDITS_PATH, post(image_edits))
@@ -52,4 +53,49 @@ pub(crate) fn router() -> Router<ApiState> {
         // OpenAI 数据面正文属于客户端/上游协议；代理不能用私有大小上限提前拒绝
         // 上游本可接受的未来 payload
         .layer(DefaultBodyLimit::disable())
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum DataPlaneNamespace {
+    V1,
+    GenAi,
+}
+
+impl DataPlaneNamespace {
+    pub(crate) fn for_path(path: &str) -> Option<Self> {
+        if path == "/v1" || path.starts_with("/v1/") {
+            Some(Self::V1)
+        } else if path == "/v1beta" || path.starts_with("/v1beta/") || path.starts_with("/v1beta:")
+        {
+            Some(Self::GenAi)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) const fn unmatched_path(self) -> &'static str {
+        match self {
+            Self::V1 => "/v1/<unmatched>",
+            Self::GenAi => "/v1beta/<unmatched>",
+        }
+    }
+
+    pub(crate) async fn unmatched_response(self) -> axum::response::Response {
+        use crate::client_error::{ProtocolError, ProtocolErrorBody};
+        let response = super::error::protocol_error_response(
+            axum::http::StatusCode::NOT_FOUND,
+            ProtocolErrorBody {
+                error: ProtocolError {
+                    kind: "invalid_request_error",
+                    code: "unknown_endpoint",
+                    message: "The requested API endpoint does not exist.".into(),
+                    param: None,
+                },
+            },
+        );
+        match self {
+            Self::V1 => response,
+            Self::GenAi => super::genai::project_error_response(response).await,
+        }
+    }
 }

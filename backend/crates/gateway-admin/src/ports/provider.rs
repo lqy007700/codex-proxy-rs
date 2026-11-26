@@ -165,9 +165,34 @@ pub trait ProviderAdmin: Send + Sync {
         })
     }
 
+    /// 独立本地统计不借用模型分组额度的重置时间
+    fn account_usage_lookback(&self) -> crate::model::provider_credentials::AccountUsageLookback {
+        Default::default()
+    }
+
     /// 只读内置价目；没有本地计价能力的 Provider 返回空目录
     fn pricing_catalog(&self) -> crate::model::pricing::ProviderPricingCatalog {
         Default::default()
+    }
+
+    /// 外部价目同步来源；跨平台代理模型需显式声明上游参考映射
+    fn pricing_source(&self) -> crate::ports::pricing::PricingCatalogSource {
+        crate::ports::pricing::PricingCatalogSource::Direct
+    }
+
+    /// 该 Provider 允许编辑的价格档位，未覆盖时默认支持全部通用档位
+    fn supported_pricing_bands(&self) -> &'static [&'static str] {
+        &[
+            "standard",
+            "long_standard",
+            "flex",
+            "long_flex",
+            "priority",
+            "long_priority",
+            "ultrafast",
+            "long_ultrafast",
+            "image",
+        ]
     }
 
     fn evaluate_usage_pricing(
@@ -445,6 +470,26 @@ impl ProviderAdminRegistry {
             .iter()
             .map(|(kind, provider)| (kind.as_str().to_owned(), provider.pricing_catalog()))
             .collect()
+    }
+
+    pub(crate) fn pricing_source_scope(&self) -> crate::ports::pricing::PricingSourceScope {
+        crate::ports::pricing::PricingSourceScope {
+            catalogs: self
+                .providers
+                .iter()
+                .map(|(kind, provider)| (kind.as_str().to_owned(), provider.pricing_source()))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn supported_pricing_bands(
+        &self,
+        provider: &str,
+    ) -> Option<&'static [&'static str]> {
+        self.providers
+            .iter()
+            .find(|(kind, _)| kind.as_str() == provider)
+            .map(|(_, admin)| admin.supported_pricing_bands())
     }
 
     /// 创建无重复 ProviderKind 的注册表

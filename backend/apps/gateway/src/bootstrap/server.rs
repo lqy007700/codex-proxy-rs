@@ -61,6 +61,7 @@ pub async fn run() -> Result<(), BootstrapError> {
     plan.extend(core.take_worker_contributions());
     plan.extend(providers.openai.take_worker_contributions());
     plan.extend(providers.xai.take_worker_contributions());
+    plan.extend(providers.antigravity.take_worker_contributions());
     plan.extend(admin.take_worker_contributions());
     host.start_workers(plan, store.worker_leader_lease(), store.diagnostics())?;
     host.report_startup_ready("Workers");

@@ -29,7 +29,8 @@ pub use codex::{
     CodexResponsesRequestSemantics, codex_account_session_id, codex_account_thread_id,
     codex_responses_request_semantics, codex_responses_request_semantics_with_turn_metadata,
     codex_session_id, codex_thread_id, codex_turn_id, collaboration_subagent_requested,
-    turn_metadata_session_id, turn_metadata_thread_id, turn_metadata_turn_id,
+    context_turn_metadata, turn_metadata_session_id, turn_metadata_thread_id,
+    turn_metadata_turn_id,
 };
 pub use guardian::{
     CODEX_AUTO_REVIEW_MODEL, CodexGuardianRole, capture_codex_guardian_identity,

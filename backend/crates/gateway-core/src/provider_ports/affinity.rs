@@ -146,6 +146,27 @@ pub struct ProviderRoundRobinAdmission<'a> {
     pub claims: &'a [ProviderSessionClaim<'a>],
 }
 
+/// 账号选择后的原子认领请求，按是否推进轮询游标分派
+#[derive(Clone, Copy)]
+pub enum ProviderAccountAdmission<'a> {
+    Session(ProviderSessionClaim<'a>),
+    RoundRobin {
+        client_key: &'a crate::policy::ClientApiKeyId,
+        cursor: u64,
+        session: Option<ProviderSessionClaim<'a>>,
+    },
+}
+
+impl<'a> ProviderAccountAdmission<'a> {
+    #[must_use]
+    pub const fn session(self) -> Option<ProviderSessionClaim<'a>> {
+        match self {
+            Self::Session(claim) => Some(claim),
+            Self::RoundRobin { session, .. } => session,
+        }
+    }
+}
+
 /// 客户端作用域内的会话账号绑定，原始会话身份由 Provider 哈希后传入
 pub trait ProviderSessionAffinityPort: Send + Sync {
     fn observe<'a>(
@@ -188,6 +209,44 @@ pub trait ProviderSessionAffinityPort: Send + Sync {
         provider: &'a ProviderKind,
         admission: ProviderRoundRobinAdmission<'a>,
     ) -> BoxFuture<'a, Result<bool, ProviderStoreError>>;
+
+    /// 统一会话认领与轮询提交入口，冲突返回 false 供调用方释放租约重选
+    fn admit_account<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        admission: ProviderAccountAdmission<'a>,
+    ) -> BoxFuture<'a, Result<bool, ProviderStoreError>> {
+        Box::pin(async move {
+            match admission {
+                ProviderAccountAdmission::Session(claim) => Ok(self
+                    .compare_and_bind(
+                        provider,
+                        claim.key,
+                        claim.expected,
+                        claim.account,
+                        claim.ttl,
+                    )
+                    .await?
+                    .is_some()),
+                ProviderAccountAdmission::RoundRobin {
+                    client_key,
+                    cursor,
+                    session,
+                } => {
+                    let claims: Vec<_> = session.into_iter().collect();
+                    self.admit_round_robin(
+                        provider,
+                        ProviderRoundRobinAdmission {
+                            client_key,
+                            cursor,
+                            claims: &claims,
+                        },
+                    )
+                    .await
+                }
+            }
+        })
+    }
 
     /// 显式观测到的请求关联只指向会话键，不缓存账号，迁移后仍读取当前绑定
     fn load_alias<'a>(

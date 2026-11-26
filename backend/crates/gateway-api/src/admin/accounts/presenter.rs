@@ -80,6 +80,7 @@ pub(super) fn account_view(
         plan_type_display,
         projection,
         usage,
+        usage_period,
         quota,
         protection_rules,
     } = item;
@@ -91,7 +92,7 @@ pub(super) fn account_view(
         .map(|value| time.rfc3339(value));
     let added_at = time.rfc3339(&account.created_at);
     let updated_at = time.rfc3339(&account.updated_at);
-    let usage_period = quota.usage_window().map(|(_, period)| period);
+    let usage_period = usage_period.or_else(|| quota.usage_window().map(|(_, period)| period));
     let mut usage = account_usage_view(usage, usage_period, now, time);
     if account.authentication_kind == "api_key" {
         usage.window_label_display = "通用额度".to_owned();
@@ -183,6 +184,7 @@ fn quota_forecast_view(
             AccountUsagePeriod::Weekly => "weekly",
             AccountUsagePeriod::Monthly => "monthly",
             AccountUsagePeriod::Daily => "daily",
+            AccountUsagePeriod::RecentWeek => "recent_week",
         },
         target_days: forecast.target_seconds as f64 / 86_400.0,
         extrapolated: forecast.extrapolated,
@@ -369,6 +371,7 @@ pub(super) fn account_usage_view(
     AccountUsageView {
         window_label_display: match period {
             Some(AccountUsagePeriod::Daily) => "近 24 小时",
+            Some(AccountUsagePeriod::RecentWeek) => "近一周",
             Some(AccountUsagePeriod::Weekly) => "周额度窗口",
             Some(AccountUsagePeriod::Monthly) => "月额度窗口",
             None => "周/月额度窗口",

@@ -101,5 +101,11 @@ export function accountImportModes(provider: string | undefined) {
       { label: '账号文件', value: 'json' as const },
     ]
   }
+  if (provider === 'antigravity') {
+    return [
+      { label: 'OAuth', value: 'oauth' as const },
+      { label: '账号文件', value: 'json' as const },
+    ]
+  }
   return []
 }

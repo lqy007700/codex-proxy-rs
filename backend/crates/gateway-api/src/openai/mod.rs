@@ -4,6 +4,7 @@ pub mod auth;
 mod chat;
 mod endpoint;
 pub mod error;
+mod genai;
 pub mod generation;
 pub mod images;
 pub(crate) mod live;

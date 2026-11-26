@@ -20,6 +20,9 @@ use crate::openai::{
 
 pub(super) enum GenerationEncoder {
     Responses(OpenAiResponsesEncoder),
+    GenAi {
+        failed: bool,
+    },
     Messages {
         requested_model: Option<ClientResponseModel>,
         completed: bool,
@@ -31,6 +34,9 @@ impl GenerationEncoder {
     pub(super) fn new(protocol: GenerationProtocol) -> Self {
         match protocol {
             GenerationProtocol::Responses => Self::Responses(OpenAiResponsesEncoder::new()),
+            GenerationProtocol::GenAi | GenerationProtocol::GenAiTokenCount => {
+                Self::GenAi { failed: false }
+            }
             GenerationProtocol::Messages | GenerationProtocol::MessageTokenCount => {
                 Self::Messages {
                     requested_model: None,
@@ -49,12 +55,34 @@ impl GenerationEncoder {
             Self::Messages {
                 requested_model, ..
             } => *requested_model = Some(ClientResponseModel::new(model)),
+            Self::GenAi { .. } => {}
         }
     }
 
     pub(super) fn push_sse(&mut self, event: &ProviderEvent) -> Vec<Bytes> {
         match self {
             Self::Responses(encoder) => encoder.push_sse(event),
+            Self::GenAi { failed } => {
+                let Some(wire) = event
+                    .wire_event()
+                    .filter(|wire| wire.protocol() == gateway_protocol::genai::GENAI_PROTOCOL)
+                else {
+                    return Vec::new();
+                };
+                *failed |= wire.data().get("error").is_some_and(Value::is_object);
+                if let Some(raw) = wire.raw_sse_frame() {
+                    return vec![raw.clone()];
+                }
+                if !wire.has_json_data() {
+                    return Vec::new();
+                }
+                vec![Bytes::from(encode_sse_event_with_metadata(
+                    wire.event_type().unwrap_or_default(),
+                    &wire.data().to_string(),
+                    wire.sse_id(),
+                    wire.sse_retry(),
+                ))]
+            }
             Self::Messages {
                 requested_model,
                 completed,
@@ -128,6 +156,8 @@ impl GenerationEncoder {
     pub(super) fn is_completed(&self) -> bool {
         match self {
             Self::Responses(encoder) => encoder.is_completed(),
+            // 原生 GenAI 以 EOF 结束，finishReason 后仍可收到独立用量帧
+            Self::GenAi { .. } => false,
             Self::Messages { completed, .. } => *completed,
         }
     }
@@ -135,7 +165,7 @@ impl GenerationEncoder {
     pub(super) fn has_wire_failure(&self) -> bool {
         match self {
             Self::Responses(encoder) => encoder.has_wire_failure(),
-            Self::Messages { failed, .. } => *failed,
+            Self::Messages { failed, .. } | Self::GenAi { failed } => *failed,
         }
     }
 
@@ -148,6 +178,7 @@ impl GenerationEncoder {
                 crate::client_error::client_error_code(error.client_error_code().unwrap_or(code)),
                 error.client_message(),
             )),
+            Self::GenAi { .. } => crate::openai::genai::error_frame(status, error.client_message()),
             Self::Messages { .. } => {
                 let value = messages::error_payload(
                     &json!({"error":{"message":error.client_message(), "code":crate::client_error::client_error_code(error.client_error_code().unwrap_or(code))}}),
@@ -164,7 +195,9 @@ impl GenerationProtocol {
         match self {
             Self::Responses => Bytes::from_static(DONE_SSE_FRAME.as_bytes()),
             // Messages 的 message_stop 已在 wire 中交付，空帧只确认宿主交付终结
-            Self::Messages | Self::MessageTokenCount => Bytes::new(),
+            Self::Messages | Self::MessageTokenCount | Self::GenAi | Self::GenAiTokenCount => {
+                Bytes::new()
+            }
         }
     }
 
@@ -173,6 +206,36 @@ impl GenerationProtocol {
         events: &[ProviderEvent],
         client_model: Option<&ClientResponseModel>,
     ) -> Result<Vec<u8>, ResponseEncodeError> {
+        if matches!(self, Self::GenAi | Self::GenAiTokenCount) {
+            let mut wires = events
+                .iter()
+                .filter_map(ProviderEvent::wire_event)
+                .filter(|wire| wire.protocol() == self.wire());
+            let wire = wires
+                .next()
+                .ok_or(ResponseEncodeError::MissingWireTerminal)?;
+            if wires.next().is_some() {
+                return Err(ResponseEncodeError::InvalidOutputItems);
+            }
+            if let Some(raw) = wire.raw_json_body() {
+                if self == Self::GenAiTokenCount {
+                    super::validation::GenerationValidationFacts::new(self)
+                        .validate_buffered(raw)
+                        .map_err(|_| ResponseEncodeError::InvalidOutputItems)?;
+                }
+                return Ok(raw.to_vec());
+            }
+            if self == Self::GenAiTokenCount
+                && wire
+                    .data()
+                    .get("totalTokens")
+                    .and_then(Value::as_u64)
+                    .is_none()
+            {
+                return Err(ResponseEncodeError::InvalidOutputItems);
+            }
+            return serde_json::to_vec(wire.data()).map_err(|_| ResponseEncodeError::Serialization);
+        }
         let mut response = if self == Self::Responses {
             crate::openai::responses::response::collect_response(events)?
         } else {
@@ -214,7 +277,7 @@ impl GenerationProtocol {
             match self {
                 Self::Responses => model.project_response(&mut response),
                 Self::Messages => model.project_message(&mut response),
-                Self::MessageTokenCount => {}
+                Self::MessageTokenCount | Self::GenAi | Self::GenAiTokenCount => {}
             }
         }
         serde_json::to_vec(&response).map_err(|_| ResponseEncodeError::Serialization)

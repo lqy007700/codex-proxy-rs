@@ -150,6 +150,18 @@ impl AccountSelectionPolicy {
         self.openai_account_affinity
     }
 
+    /// 通用会话亲和策略，复用既有亲和运行设置供多 Provider 共用
+    #[must_use]
+    pub const fn with_account_affinity(self, affinity: AccountAffinity) -> Self {
+        self.with_openai_account_affinity(affinity)
+    }
+
+    /// 通用会话亲和策略，复用既有亲和运行设置供多 Provider 共用
+    #[must_use]
+    pub const fn account_affinity(self) -> AccountAffinity {
+        self.openai_account_affinity
+    }
+
     #[must_use]
     pub const fn with_max_account_rotations(mut self, rotations: u32) -> Self {
         self.max_account_rotations = rotations;
@@ -191,6 +203,18 @@ impl AccountSelectionPolicy {
 
     #[must_use]
     pub const fn openai_session_affinity_ttl(self) -> Duration {
+        self.openai_session_affinity_ttl
+    }
+
+    /// 通用会话亲和有效期，复用既有亲和运行设置供多 Provider 共用
+    #[must_use]
+    pub const fn with_session_affinity_ttl(self, ttl: Duration) -> Self {
+        self.with_openai_session_affinity_ttl(ttl)
+    }
+
+    /// 通用会话亲和有效期，复用既有亲和运行设置供多 Provider 共用
+    #[must_use]
+    pub const fn session_affinity_ttl(self) -> Duration {
         self.openai_session_affinity_ttl
     }
 
