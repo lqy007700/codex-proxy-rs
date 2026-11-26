@@ -11,63 +11,137 @@ pub(super) fn normalize_non_codex_request_body(body: &mut Map<String, Value>) {
     let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
         return;
     };
-    let mut messages = Vec::new();
+    for item in input {
+        let Some(item) = item.as_object_mut() else {
+            continue;
+        };
+        if item.get("type").and_then(Value::as_str) == Some("reasoning") {
+            normalize_replayed_reasoning(item);
+        }
+    }
+}
+
+/// 清理 Responses 输入历史中不符合类型前缀的可选内联条目 ID
+/// 保留合法前缀、被 item_reference 引用的条目以及绑定密文的条目
+pub(super) fn normalize_replayed_responses_input_ids(body: &mut Map<String, Value>) {
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let mut candidates = Vec::new();
     let mut referenced_ids = HashSet::new();
     for item in input {
         let Some(item) = item.as_object_mut() else {
             continue;
         };
         let kind = item.get("type").and_then(Value::as_str);
-        match kind {
-            Some("reasoning") => normalize_replayed_reasoning(item),
-            Some("message") => {
-                if generic_item_id(item).is_some() && has_inline_text_content(item) {
-                    messages.push(item);
-                }
+        let is_reference = kind == Some("item_reference")
+            || (item.get("type").is_none_or(Value::is_null)
+                && !item.contains_key("role")
+                && !item.contains_key("content"));
+        if is_reference {
+            if let Some(id) = item.get("id").and_then(Value::as_str) {
+                referenced_ids.insert(id.to_owned());
             }
-            _ => {
-                let is_reference = kind == Some("item_reference")
-                    || (item.get("type").is_none_or(Value::is_null)
-                        && !item.contains_key("role")
-                        && !item.contains_key("content"));
-                if is_reference && let Some(id) = generic_item_id(item) {
-                    referenced_ids.insert(id.to_owned());
-                }
-            }
+            continue;
+        }
+        if invalid_inline_item_id(item, kind).is_some() {
+            candidates.push(item);
         }
     }
-    // Codex 要求消息 ID 以 msg 开头；引用可以出现在消息前后，收齐后才能省略可选 ID
-    for message in messages {
-        if generic_item_id(message).is_some_and(|id| !referenced_ids.contains(id)) {
-            message.shift_remove("id");
+    // 引用可以出现在目标条目前后，收齐后才能省略未被引用的可选 ID
+    for item in candidates {
+        let kind = item.get("type").and_then(Value::as_str);
+        if invalid_inline_item_id(item, kind).is_some_and(|id| !referenced_ids.contains(id)) {
+            item.shift_remove("id");
         }
     }
 }
 
-fn generic_item_id(item: &Map<String, Value>) -> Option<&str> {
-    item.get("id")
-        .and_then(Value::as_str)
-        .filter(|id| id.starts_with("item_"))
+fn invalid_inline_item_id<'a>(item: &'a Map<String, Value>, kind: Option<&str>) -> Option<&'a str> {
+    let id = item.get("id")?.as_str()?;
+    let expected_prefix = match kind {
+        Some("message") | None if has_inline_message_content(item) => "msg_",
+        Some("reasoning") if has_plaintext_reasoning_shape(item) => "rs_",
+        Some("function_call") if has_plaintext_tool_call_shape(item) => "fc_",
+        Some("function_call_output") if has_plaintext_tool_call_shape(item) => "fco_",
+        Some("custom_tool_call") if has_plaintext_tool_call_shape(item) => "ctc_",
+        Some("custom_tool_call_output") if has_plaintext_tool_call_shape(item) => "ctco_",
+        _ => return None,
+    };
+    (!has_expected_id_prefix(id, expected_prefix)).then_some(id)
 }
 
-fn has_inline_text_content(item: &Map<String, Value>) -> bool {
+fn has_expected_id_prefix(id: &str, prefix: &str) -> bool {
+    id.strip_prefix(prefix)
+        .is_some_and(|suffix| !suffix.is_empty())
+}
+
+fn has_non_empty_encrypted_value(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => false,
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        Some(_) => true,
+    }
+}
+
+fn has_encrypted_fields(item: &Map<String, Value>) -> bool {
+    has_non_empty_encrypted_value(item.get("encrypted_content"))
+        || has_non_empty_encrypted_value(item.get("encrypted_function_args"))
+}
+
+fn is_inline_message_part(part: &Value) -> bool {
+    let Some(part) = part.as_object() else {
+        return false;
+    };
+    if has_encrypted_fields(part) {
+        return false;
+    }
+    match part.get("type").and_then(Value::as_str) {
+        Some("input_text" | "output_text") => part.get("text").is_some_and(Value::is_string),
+        Some("refusal") => part.get("refusal").is_some_and(Value::is_string),
+        Some("input_image" | "input_file" | "input_audio") => true,
+        _ => false,
+    }
+}
+
+fn has_inline_message_content(item: &Map<String, Value>) -> bool {
     matches!(
         item.get("role").and_then(Value::as_str),
         Some("user" | "assistant" | "developer" | "system")
-    ) && !item.contains_key("encrypted_content")
+    ) && !has_encrypted_fields(item)
         && match item.get("content") {
             Some(Value::String(text)) => !text.is_empty(),
             Some(Value::Array(parts)) => {
-                !parts.is_empty()
-                    && parts.iter().all(|part| {
-                        matches!(
-                            part.get("type").and_then(Value::as_str),
-                            Some("input_text" | "output_text")
-                        ) && part.get("text").is_some_and(Value::is_string)
-                    })
+                !parts.is_empty() && parts.iter().all(is_inline_message_part)
             }
             _ => false,
         }
+}
+
+fn has_plaintext_reasoning_shape(item: &Map<String, Value>) -> bool {
+    !has_encrypted_fields(item)
+        && (item.contains_key("summary")
+            || item.contains_key("content")
+            || item.contains_key("encrypted_content"))
+        && item
+            .get("content")
+            .and_then(Value::as_array)
+            .is_none_or(|parts| {
+                !parts.iter().any(|part| {
+                    part.as_object().is_some_and(|part| {
+                        part.get("type").and_then(Value::as_str) == Some("encrypted_content")
+                            || has_encrypted_fields(part)
+                    })
+                })
+            })
+}
+
+fn has_plaintext_tool_call_shape(item: &Map<String, Value>) -> bool {
+    !has_encrypted_fields(item)
+        && item
+            .get("call_id")
+            .and_then(Value::as_str)
+            .is_some_and(|id| !id.trim().is_empty())
 }
 
 fn normalize_replayed_reasoning(item: &mut Map<String, Value>) {

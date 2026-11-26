@@ -104,7 +104,7 @@ use crate::transport::{
     CodexBackendTransport, CodexClientError, CodexRateLimitUpdates, CodexRequestContext,
     CodexResponseMetadata, CodexResponseMetadataUpdates, CodexTransportMetrics,
     CodexUpstreamDiagnostics, CodexWebSocketPool, endpoint_url,
-    normalize_selected_codex_downstream_body,
+    normalize_selected_codex_downstream_body, normalize_selected_responses_input_ids,
 };
 
 mod execution;
@@ -1256,6 +1256,7 @@ impl CodexProvider {
                 context.openai_request_country(),
             );
         }
+        normalize_selected_responses_input_ids(&mut upstream_request);
         align_structured_location_fields(upstream_request.body_mut(), location);
         let history_thread = crate::request_identity::account_thread_with_headers(
             generate.protocol_payload().body(),

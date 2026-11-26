@@ -1046,6 +1046,52 @@ async fn replay_compatibility_should_not_apply_codex_rules_to_api_key_accounts()
 }
 
 #[tokio::test]
+async fn replay_compatibility_should_strip_invalid_prefixed_inline_item_ids_for_oauth_and_api_key()
+{
+    let input = json!([
+        {"type":"item_reference","id":"resp_msg_referenced_before"},
+        {"type":"message","id":"resp_msg_referenced_before","role":"assistant","content":[{"type":"output_text","text":"referenced before"}]},
+        {"type":"message","id":"resp_msg_b20c988ce5bd4fbdbce1893dae306895_msg","role":"assistant","encrypted_content":null,"content":[{"type":"output_text","text":"inline bridge message"}]},
+        {"type":"message","id":"item_multimodal","role":"user","content":[{"type":"input_text","text":"look"},{"type":"input_image","image_url":"data:image/png;base64,AA=="}]},
+        {"id":"review_rollout_user","role":"user","content":"shorthand message"},
+        {"type":"message","id":"msg_valid","role":"assistant","content":[{"type":"output_text","text":"keep valid"}]},
+        {"type":"message","id":"resp_msg_referenced_after","role":"assistant","content":[{"type":"output_text","text":"referenced after"}]},
+        {"id":"resp_msg_referenced_after"},
+        {"type":"reasoning","id":"resp_msg_b20c988ce5bd4fbdbce1893dae306895_rs","summary":[],"encrypted_content":null},
+        {"type":"reasoning","id":"rs_valid","summary":[],"encrypted_content":null},
+        {"type":"reasoning","id":"foreign_bound_reasoning","summary":[],"encrypted_content":"bound-ciphertext"},
+        {"type":"function_call","id":"fco_wrong_prefix","call_id":"call_fn","name":"echo","arguments":"{}"},
+        {"type":"function_call_output","id":"resp_fco_1","call_id":"call_fn","output":"ok"},
+        {"type":"function_call","id":"fc_valid","call_id":"call_valid_fn","name":"echo","arguments":"{}"},
+        {"type":"function_call_output","id":"fco_valid","call_id":"call_valid_fn","output":"ok"},
+        {"type":"function_call","id":"foreign_bound_fc","call_id":"call_enc_fn","name":"echo","arguments":"{}","encrypted_function_args":"bound-args"},
+        {"type":"custom_tool_call","id":"fc_wrong_prefix","call_id":"call_custom","name":"patch","input":"diff"},
+        {"type":"custom_tool_call_output","id":"resp_ctco_1","call_id":"call_custom","output":"applied"},
+        {"type":"custom_tool_call","id":"ctc_valid","call_id":"call_valid_custom","name":"patch","input":"diff"},
+        {"type":"custom_tool_call_output","id":"ctco_valid","call_id":"call_valid_custom","output":"applied"},
+        {"type":"compaction_trigger"}
+    ]);
+    let mut expected = input.clone();
+    for stripped in [2, 3, 4, 8, 11, 12, 16, 17] {
+        expected[stripped]
+            .as_object_mut()
+            .unwrap()
+            .shift_remove("id");
+    }
+    for api_key in [false, true] {
+        for websocket in [false, true] {
+            let actual =
+                capture_replay_compatibility_request(input.clone(), api_key, websocket).await;
+            assert_eq!(
+                actual["input"].to_string(),
+                expected.to_string(),
+                "api_key={api_key}, websocket={websocket}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn replay_compatibility_should_preserve_non_array_input_without_guessing() {
     for input in [
         Value::Null,

@@ -26,7 +26,9 @@ mod response_meta;
 pub(crate) mod routing_affinity;
 pub(crate) mod session;
 pub mod subscription;
-pub(crate) use downstream::normalize_selected_codex_downstream_body;
+pub(crate) use downstream::{
+    normalize_selected_codex_downstream_body, normalize_selected_responses_input_ids,
+};
 pub(crate) use endpoints::parse_upstream_base_url;
 pub mod tls;
 pub mod usage;

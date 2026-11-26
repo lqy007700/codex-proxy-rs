@@ -27,6 +27,10 @@ pub(crate) fn normalize_selected_codex_downstream_body(
     search_history::normalize_search_history(request, middleware_headers, request_id);
 }
 
+pub(crate) fn normalize_selected_responses_input_ids(request: &mut CodexResponsesRequest) {
+    body::normalize_replayed_responses_input_ids(request.body_mut());
+}
+
 pub(super) fn is_non_codex_request_header(name: &str) -> bool {
     headers::is_non_codex_request_header(name) || grok::is_client_header(name)
 }
