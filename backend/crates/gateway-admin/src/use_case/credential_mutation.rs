@@ -64,8 +64,7 @@ pub(super) fn observe_account_quotas(
                     continue;
                 }
             };
-            if !account.enabled
-                || &account.provider_kind != provider.provider_kind()
+            if &account.provider_kind != provider.provider_kind()
                 || !provider
                     .account_capabilities(&account_id, &account.authentication_kind)
                     .quota_refresh

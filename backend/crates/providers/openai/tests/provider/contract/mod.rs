@@ -8336,6 +8336,38 @@ async fn completed_response_persists_session_affinity_before_stream_consumer_sto
     assert_eq!(upstream_service_tier.as_deref(), Some("default"));
 }
 
+async fn seed_service_tiers(store: &MemoryAccountStore, id: &str, model: &str, tiers: &[&str]) {
+    use gateway_core::account::AccountCatalogObservation;
+    let account = store.account(id).unwrap();
+    let tiers: Vec<_> = tiers
+        .iter()
+        .map(|id| json!({"id": id, "name": id, "description": ""}))
+        .collect();
+    let mut document = vec![0];
+    serde_json::to_writer(
+        &mut document,
+        &json!({"models": [{
+            "slug": model, "display_name": model, "service_tiers": tiers,
+        }]}),
+    )
+    .unwrap();
+    assert!(
+        store
+            .save_account_catalog(
+                &AccountCatalogObservation {
+                    account_id: account.id().clone(),
+                    revision: account.revision(),
+                    plan: account.plan_type().map(str::to_owned),
+                    etag: None,
+                    observed_at: SystemTime::now(),
+                },
+                &document
+            )
+            .await
+            .unwrap()
+    );
+}
+
 #[tokio::test]
 async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_transports() {
     for use_websocket in [false, true] {
@@ -8433,8 +8465,8 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 false,
                 Some(json!("ultrafast")),
                 None,
-                Some("ultrafast"),
-                None,
+                Some("default"),
+                Some(3_437_500),
             ),
             (
                 FastMode::Enabled,
@@ -8473,24 +8505,24 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 true,
                 Some(json!("flex")),
                 None,
-                Some("flex"),
-                Some(1_720_000),
+                Some("priority"),
+                Some(6_875_000),
             ),
             (
                 FastMode::Enabled,
                 true,
                 Some(json!("ultrafast")),
                 None,
-                Some("ultrafast"),
-                None,
+                Some("priority"),
+                Some(6_875_000),
             ),
             (
                 FastMode::Enabled,
                 true,
                 Some(json!("auto")),
                 None,
-                Some("auto"),
-                None,
+                Some("priority"),
+                Some(6_875_000),
             ),
             (FastMode::Enabled, false, None, None, None, Some(3_437_500)),
             (
@@ -8504,6 +8536,17 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
         ] {
             let store = Arc::new(MemoryAccountStore::default());
             create_account(&store, "acct_provider_contract").await;
+            seed_service_tiers(
+                &store,
+                "acct_provider_contract",
+                "gpt-5.4",
+                if supports_priority {
+                    &["priority"]
+                } else {
+                    &[]
+                },
+            )
+            .await;
             let mut created =
                 json!({"type":"response.created","response":{"id":"resp_tier","model":"gpt-5.4"}});
             let mut completed = json!({
@@ -8593,7 +8636,9 @@ async fn responses_should_observe_and_bill_the_outbound_service_tier_on_both_tra
                 )]))),
                 ClientRoutingScope::all_accounts(),
             ));
-            let mut stream = provider_with_base_url(&store, base_url)
+            let provider = provider_with_catalog_and_base_url(&store, base_url).await;
+            let _ = provider.query_model_capabilities().await.unwrap();
+            let mut stream = provider
                 .execute(
                     planned_request_with_presentation(
                         "openai",
@@ -12817,6 +12862,7 @@ async fn fast_policy_changes_preserve_the_websocket_continuation_and_meter_each_
     const ACCOUNT: &str = "acct_provider_contract";
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, ACCOUNT).await;
+    seed_service_tiers(&store, ACCOUNT, "gpt-5.4", &["priority"]).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base_url = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
@@ -12868,7 +12914,8 @@ async fn fast_policy_changes_preserve_the_websocket_continuation_and_meter_each_
             "all four turns must use the same upstream connection"
         );
     });
-    let provider = provider_with_base_url(&store, base_url);
+    let provider = provider_with_catalog_and_base_url(&store, base_url).await;
+    let _ = provider.query_model_capabilities().await.unwrap();
     let mut session_state = ProviderSessionState::new(
         "openai",
         Map::from_iter([
@@ -13499,7 +13546,11 @@ async fn grok_unrelated_text_and_unmarked_requests_are_preserved() {
         .as_object()
         .expect("request object")
         .clone();
-        let original_body = body.clone();
+        let mut original_body = body.clone();
+        original_body.insert(
+            "request_country".to_owned(),
+            json!(global_request_location().country),
+        );
         body = capture_grok_request(body, context, false).await;
         assert_eq!(body, original_body);
     }

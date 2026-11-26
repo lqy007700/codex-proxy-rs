@@ -116,7 +116,7 @@ const columns = defineTableColumns<PrivacyRule>([
     key: 'action',
     label: '处理方式',
     kind: 'meta',
-    size: 'md',
+    size: '2xl',
   },
   {
     key: 'actions',

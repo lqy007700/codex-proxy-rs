@@ -23,8 +23,8 @@ use crate::model::{
     },
     auth::{AdminAuditEvent, AuthSession},
     client_keys::{
-        ClientKeyListQuery, ClientKeyPage, ClientKeyRecord, ClientKeySecret, DeleteClientKey,
-        NewClientKey, ResetClientKeyBudget, SetClientKeyEnabled, UpdateClientKey,
+        BatchUpdateClientKeys, ClientKeyListQuery, ClientKeyPage, ClientKeyRecord, ClientKeySecret,
+        DeleteClientKey, NewClientKey, ResetClientKeyBudget, SetClientKeyEnabled, UpdateClientKey,
         UpdateClientKeyBudgetLimits,
     },
     observability::{
@@ -106,6 +106,13 @@ impl AdminStoreError {
 }
 
 pub type AdminStoreResult<T> = Result<T, AdminStoreError>;
+
+/// 在持有密钥行锁时用 Provider 准备好的纯合并操作更新原有画像
+pub type BatchClientKeyProfileMerger = Box<
+    dyn Fn(&mut crate::model::client_keys::ProviderRequestProfileOverrides) -> AdminStoreResult<()>
+        + Send
+        + Sync,
+>;
 
 fn model_tests_unavailable() -> AdminStoreError {
     AdminStoreError::new(
@@ -392,6 +399,12 @@ pub trait ClientKeyStore: Send + Sync {
         command: UpdateClientKey,
         context: &MutationContext,
     ) -> AdminStoreResult<(Revision, ClientKeyRecord)>;
+    async fn batch_update_client_keys(
+        &self,
+        command: BatchUpdateClientKeys,
+        merge_profiles: BatchClientKeyProfileMerger,
+        context: &MutationContext,
+    ) -> AdminStoreResult<Revision>;
     async fn set_client_key_enabled(
         &self,
         command: SetClientKeyEnabled,
@@ -488,6 +501,19 @@ pub trait ObservabilityStore: Send + Sync {
         range: TimeRange,
         granularity: Granularity,
     ) -> AdminStoreResult<Vec<RequestMetricPoint>>;
+
+    async fn client_key_statistics(
+        &self,
+        range: TimeRange,
+        id: &gateway_core::policy::ClientApiKeyId,
+        query: crate::model::observability::KeyUsageMetric,
+    ) -> AdminStoreResult<crate::model::observability::KeyStatisticsOverview>;
+
+    async fn client_key_models(
+        &self,
+        range: TimeRange,
+        id: &gateway_core::policy::ClientApiKeyId,
+    ) -> AdminStoreResult<Vec<crate::model::observability::KeyModelRow>>;
 
     async fn usage_trend(
         &self,

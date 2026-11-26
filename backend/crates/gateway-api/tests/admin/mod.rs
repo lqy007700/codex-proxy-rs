@@ -240,6 +240,7 @@ impl AdminTestFixture {
                 providers: gateway_admin::ports::provider::ProviderAdminRegistry::new(providers)
                     .unwrap(),
                 snapshot: Arc::new(NoopSnapshot),
+                published_snapshot: Default::default(),
                 account_probe: Arc::new(NoopProbe),
                 proxy_probe: Arc::new(proxies::SuccessfulProbe),
                 client_distribution: Arc::new(StaticClientDistribution),
@@ -643,6 +644,10 @@ impl SettingsStore for MemorySettingsStore {
                 codex_privacy_policy: command.values.codex_privacy_policy,
                 request_location_enabled: command.values.request_location_enabled,
                 request_location: command.values.request_location,
+                openai_request_country: command.values.openai_request_country,
+                openai_oauth_guardian_review_model: command
+                    .values
+                    .openai_oauth_guardian_review_model,
                 refresh_margin_seconds: command.values.refresh_margin_seconds,
                 refresh_concurrency: command.values.refresh_concurrency,
                 max_concurrent_per_account: command.values.max_concurrent_per_account,
@@ -745,6 +750,8 @@ impl MemoryAccountGroupStore {
                 primary_id.clone(),
                 AccountGroupRecord {
                     allow_image_generation: true,
+                    allow_subagents: true,
+                    model_access: Default::default(),
                     id: primary_id,
                     name: "Alpha routing".to_owned(),
                     description: Some("Primary traffic".to_owned()),
@@ -767,6 +774,8 @@ impl MemoryAccountGroupStore {
                 secondary_id.clone(),
                 AccountGroupRecord {
                     allow_image_generation: true,
+                    allow_subagents: true,
+                    model_access: Default::default(),
                     id: secondary_id,
                     name: "Beta routing".to_owned(),
                     description: None,
@@ -927,6 +936,8 @@ impl AccountGroupStore for MemoryAccountGroupStore {
         let now = Utc::now();
         let record = AccountGroupRecord {
             allow_image_generation: command.allow_image_generation,
+            allow_subagents: command.allow_subagents,
+            model_access: command.model_access,
             id: command.id.clone(),
             name: command.name,
             description: command.description,
@@ -960,6 +971,12 @@ impl AccountGroupStore for MemoryAccountGroupStore {
         record.color = command.color;
         if let Some(allowed) = command.allow_image_generation {
             record.allow_image_generation = allowed;
+        }
+        if let Some(allowed) = command.allow_subagents {
+            record.allow_subagents = allowed;
+        }
+        if let Some(model_access) = command.model_access {
+            record.model_access = model_access;
         }
         record.updated_at = Utc::now();
         mutation(&mut state, command.id, true)
@@ -1021,6 +1038,19 @@ impl ClientKeyStore for MemoryClientKeyStore {
             AdminStoreErrorKind::Unavailable,
             "client key",
             "unused budget update",
+        ))
+    }
+
+    async fn batch_update_client_keys(
+        &self,
+        _: gateway_admin::model::client_keys::BatchUpdateClientKeys,
+        _: gateway_admin::ports::store::BatchClientKeyProfileMerger,
+        _: &MutationContext,
+    ) -> AdminStoreResult<Revision> {
+        Err(AdminStoreError::new(
+            AdminStoreErrorKind::Unavailable,
+            "client key",
+            "unused batch update",
         ))
     }
 
@@ -1483,6 +1513,23 @@ impl ObservabilityStore for UnusedStore {
         Err(unavailable("dashboard trend"))
     }
 
+    async fn client_key_statistics(
+        &self,
+        _: TimeRange,
+        _: &gateway_core::policy::ClientApiKeyId,
+        _: gateway_admin::model::observability::KeyUsageMetric,
+    ) -> AdminStoreResult<gateway_admin::model::observability::KeyStatisticsOverview> {
+        Err(unavailable("client key statistics"))
+    }
+
+    async fn client_key_models(
+        &self,
+        _: TimeRange,
+        _: &gateway_core::policy::ClientApiKeyId,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::observability::KeyModelRow>> {
+        Err(unavailable("client key models"))
+    }
+
     async fn usage_trend(
         &self,
         range: TimeRange,
@@ -1841,6 +1888,8 @@ fn test_runtime_settings() -> RuntimeSettings {
             codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: Default::default(),
+            openai_request_country: Default::default(),
+            openai_oauth_guardian_review_model: true,
             refresh_margin_seconds: 3_600,
             refresh_concurrency: 2,
             max_concurrent_per_account: 3,

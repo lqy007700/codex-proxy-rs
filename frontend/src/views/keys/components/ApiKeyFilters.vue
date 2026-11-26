@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ZButton, ZInput } from '@codex-proxy/ui'
 
-import { Plus, Search, Trash2 } from '@lucide/vue'
+import { Pencil, Plus, Search, Trash2 } from '@lucide/vue'
 
 defineProps<{
   batchDeleting: boolean
@@ -10,6 +10,7 @@ defineProps<{
 
 const emit = defineEmits<{
   create: []
+  editSelected: []
   deleteSelected: []
 }>()
 
@@ -31,6 +32,17 @@ const search = defineModel<string>('search', { required: true })
     </div>
 
     <div class="flex shrink-0 items-center justify-end gap-2 md:ml-auto">
+      <ZButton
+        v-if="selectedCount > 0"
+        variant="plain"
+        :disabled="batchDeleting"
+        @click="emit('editSelected')"
+      >
+        <template #icon>
+          <Pencil class="size-4" />
+        </template>
+        批量编辑 ({{ selectedCount }})
+      </ZButton>
       <ZButton
         v-if="selectedCount > 0"
         type="danger" variant="plain"

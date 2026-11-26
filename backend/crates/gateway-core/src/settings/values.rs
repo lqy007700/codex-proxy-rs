@@ -14,6 +14,10 @@ pub struct SettingsValues {
     pub(crate) account_error_protection_revision: u64,
     pub(crate) pricing: Arc<crate::metering::PricingOverrides>,
     pub(crate) request_profiles: Arc<BTreeMap<ProviderKind, crate::account::OpaqueProviderData>>,
+    #[serde(default = "default_openai_oauth_guardian_review_model")]
+    pub(crate) openai_oauth_guardian_review_model: bool,
+    #[serde(default)]
+    pub(crate) openai_request_country: crate::account::OpenAiRequestCountry,
     pub(crate) codex_privacy_policy: super::privacy::CodexPrivacyPolicy,
     pub(crate) request_location_enabled: bool,
     pub(crate) request_location: crate::account::RequestLocation,
@@ -44,7 +48,35 @@ fn initial_protection_revision() -> u64 {
     1
 }
 
+const fn default_openai_oauth_guardian_review_model() -> bool {
+    true
+}
+
 impl SettingsValues {
+    #[must_use]
+    pub const fn with_openai_oauth_guardian_review_model(mut self, enabled: bool) -> Self {
+        self.openai_oauth_guardian_review_model = enabled;
+        self
+    }
+
+    #[must_use]
+    pub const fn openai_oauth_guardian_review_model(&self) -> bool {
+        self.openai_oauth_guardian_review_model
+    }
+
+    #[must_use]
+    pub fn with_openai_request_country(
+        mut self,
+        country: crate::account::OpenAiRequestCountry,
+    ) -> Self {
+        self.openai_request_country = country;
+        self
+    }
+
+    #[must_use]
+    pub const fn openai_request_country(&self) -> &crate::account::OpenAiRequestCountry {
+        &self.openai_request_country
+    }
     #[must_use]
     pub const fn with_account_error_protection_revision(mut self, revision: u64) -> Self {
         self.account_error_protection_revision = revision;
@@ -206,6 +238,8 @@ impl SettingsValues {
             account_error_protection_revision: 1,
             request_profiles: Arc::default(),
             pricing: Arc::default(),
+            openai_oauth_guardian_review_model: true,
+            openai_request_country: crate::account::OpenAiRequestCountry::default(),
             codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: crate::account::RequestLocation::default(),

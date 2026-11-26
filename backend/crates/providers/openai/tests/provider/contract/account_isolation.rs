@@ -628,11 +628,9 @@ async fn guardian_ignores_expired_ambiguous_and_wrong_path_routing_cookies() {
         }
         let requests = server.requests.lock().unwrap();
         assert!(!requests[1].1.contains_key("cookie"));
-        assert!(
-            requests[1]
-                .2
-                .pointer("/client_metadata/parent_response_id")
-                .is_none()
+        assert_eq!(
+            requests[1].2["client_metadata"]["parent_response_id"],
+            "parent"
         );
     }
 }

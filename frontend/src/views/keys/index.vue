@@ -9,6 +9,7 @@ import LastUsedAtCell from '@/components/LastUsedAtCell.vue'
 import { useAccountGroupCatalog } from '@/composables/useAccountGroupCatalog'
 import { usePageSelection } from '@/composables/usePageSelection'
 import ApiKeyActions from './components/ApiKeyActions.vue'
+import ApiKeyBatchEditModal from './components/ApiKeyBatchEditModal.vue'
 import ApiKeyBudgetCell from './components/ApiKeyBudgetCell.vue'
 import ApiKeyBudgetResetModal from './components/ApiKeyBudgetResetModal.vue'
 import ApiKeyCreatedModal from './components/ApiKeyCreatedModal.vue'
@@ -17,6 +18,7 @@ import ApiKeyFormModal from './components/ApiKeyFormModal.vue'
 import ApiKeyIdentityCell from './components/ApiKeyIdentityCell.vue'
 import ApiKeyPrefixCell from './components/ApiKeyPrefixCell.vue'
 import ApiKeyScopeCell from './components/ApiKeyScopeCell.vue'
+import ApiKeyStatisticsModal from './components/ApiKeyStatisticsModal.vue'
 import ApiKeyStatusBadge from './components/ApiKeyStatusBadge.vue'
 import { useApiKeyEditor } from './composables/useApiKeyEditor'
 import { useApiKeyMutations } from './composables/useApiKeyMutations'
@@ -25,13 +27,17 @@ import { useApiKeyUse } from './composables/useApiKeyUse'
 import { apiKeyColumns } from './constants'
 
 const selectedIds = ref<Set<string>>(new Set())
+const showBatchEdit = shallowRef(false)
+const batchKeys = shallowRef<ApiKey[]>([])
 const showBudgetResetModal = shallowRef(false)
+const statisticsKey = shallowRef<ApiKey | null>(null)
 const resettingKey = shallowRef<ApiKey | null>(null)
 
 function openBudgetReset(key: ApiKey) {
   resettingKey.value = key
   showBudgetResetModal.value = true
 }
+
 const {
   loading,
   apiKeys,
@@ -43,6 +49,22 @@ const {
   handlePageSizeChange,
   handleSortChange,
 } = useApiKeysQuery()
+
+function openBatchEdit() {
+  const keys = apiKeys.value.filter(key => selectedIds.value.has(key.id))
+  if (keys.length === 0)
+    return
+  batchKeys.value = keys
+  showBatchEdit.value = true
+}
+
+function handleBatchSaved(ids: string[]) {
+  const remaining = new Set(selectedIds.value)
+  for (const id of ids)
+    remaining.delete(id)
+  selectedIds.value = remaining
+  void loadApiKeys()
+}
 
 const {
   groups,
@@ -99,8 +121,8 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
 )
 
 watch(
-  showFormModal,
-  open => open && void loadGroups(),
+  [showFormModal, showBatchEdit],
+  ([editor, batch]) => (editor || batch) && void loadGroups(),
 )
 </script>
 
@@ -120,6 +142,7 @@ watch(
           :batch-deleting="batchDeleting"
           :selected-count="selectedIds.size"
           @create="openCreate"
+          @edit-selected="openBatchEdit"
           @delete-selected="showDeleteModal = true"
         />
       </template>
@@ -198,6 +221,7 @@ watch(
                 :configuring="revealingKeys.get(row.id) === 'use'"
                 :updating-status="updatingStatusKeyIds.has(row.id)"
                 @edit="openEdit"
+                @statistics="statisticsKey = $event"
                 @reset-budget="openBudgetReset"
                 @delete="requestDeleteKey"
                 @import-ccs="importToCcs"
@@ -227,6 +251,14 @@ watch(
       @after-leave="clearCustomKey"
     />
 
+    <ApiKeyBatchEditModal
+      v-model="showBatchEdit"
+      :keys="batchKeys"
+      :groups="groups"
+      :group-loading="loadingGroups"
+      @saved="handleBatchSaved"
+    />
+
     <ApiKeyCreatedModal
       v-model="showCreatedKeyModal"
       :created-key="createdKey"
@@ -234,6 +266,8 @@ watch(
       @import-ccs="importCreatedKeyToCcs"
       @after-leave="clearCreatedKey"
     />
+
+    <ApiKeyStatisticsModal v-if="statisticsKey" :api-key="statisticsKey" @close="statisticsKey = null" />
 
     <ApiKeyBudgetResetModal
       v-model="showBudgetResetModal"

@@ -16,10 +16,10 @@ use crate::settings::{SettingsValues, compiled::CompiledSettings};
 use crate::validation::RoutingError;
 
 use super::{
-    AccountGroupId, ClientRoutingScope, ConfigRevision, FrozenAccountScope, ModelCapabilities,
-    ProviderCandidate, ProviderCatalogGeneration, ProviderCatalogPort, ProviderKind, ProviderModel,
-    ProviderModelRoute, PublicModelId, RoutingContext, RoutingGroupSnapshot, RoutingPlan,
-    RuntimeAccount, RuntimeAccountDirectory, UpstreamModelId,
+    AccountGroupId, ClientRoutingScope, ConfigRevision, DirectAccountModel, FrozenAccountScope,
+    ModelCapabilities, ProviderCandidate, ProviderCatalogGeneration, ProviderCatalogPort,
+    ProviderKind, ProviderModel, ProviderModelRoute, PublicModelId, RoutingContext,
+    RoutingGroupSnapshot, RoutingPlan, RuntimeAccount, RuntimeAccountDirectory, UpstreamModelId,
 };
 
 const MAXIMUM_SNAPSHOT_STABILITY_ATTEMPTS: usize = 4;
@@ -90,7 +90,9 @@ impl SnapshotClientPolicyFacts {
 /// Store 读取到的账号分组事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotAccountGroupFacts {
+    model_access: crate::account::AccountModelAccess,
     allow_image_generation: bool,
+    allow_subagents: bool,
     id: AccountGroupId,
     name: String,
     enabled: bool,
@@ -98,18 +100,32 @@ pub struct SnapshotAccountGroupFacts {
 
 impl SnapshotAccountGroupFacts {
     #[must_use]
+    pub fn with_model_access(mut self, model_access: crate::account::AccountModelAccess) -> Self {
+        self.model_access = model_access;
+        self
+    }
+
+    #[must_use]
     pub const fn with_image_generation(mut self, allowed: bool) -> Self {
         self.allow_image_generation = allowed;
         self
     }
 
     #[must_use]
+    pub const fn with_subagents(mut self, allowed: bool) -> Self {
+        self.allow_subagents = allowed;
+        self
+    }
+
+    #[must_use]
     pub fn new(id: AccountGroupId, name: String, enabled: bool) -> Self {
         Self {
+            model_access: crate::account::AccountModelAccess::all(),
             id,
             name,
             enabled,
             allow_image_generation: true,
+            allow_subagents: true,
         }
     }
 }
@@ -118,6 +134,7 @@ impl SnapshotAccountGroupFacts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotProviderAccountFacts {
     fast_mode: FastMode,
+    direct_account: bool,
     account_id: ProviderAccountId,
     provider_kind: String,
     model_access: crate::account::AccountModelAccess,
@@ -126,6 +143,12 @@ pub struct SnapshotProviderAccountFacts {
 }
 
 impl SnapshotProviderAccountFacts {
+    #[must_use]
+    pub const fn with_direct_account(mut self, direct: bool) -> Self {
+        self.direct_account = direct;
+        self
+    }
+
     #[must_use]
     pub const fn with_fast_mode(mut self, fast_mode: FastMode) -> Self {
         self.fast_mode = fast_mode;
@@ -151,6 +174,7 @@ impl SnapshotProviderAccountFacts {
         Self {
             account_id,
             fast_mode: FastMode::Default,
+            direct_account: false,
             provider_kind: provider_kind.into(),
             scheduling_role: crate::account::AccountSchedulingRole::Regular,
             model_access: crate::account::AccountModelAccess::all(),
@@ -536,6 +560,7 @@ async fn compile_runtime_snapshot(
             .insert(
                 account.account_id.clone(),
                 RuntimeAccount::new(provider_kind, BTreeSet::new())
+                    .with_direct_account(account.direct_account)
                     .with_scheduling_role(account.scheduling_role)
                     .with_model_access(account.model_access)
                     .with_fast_mode(account.fast_mode)
@@ -565,16 +590,29 @@ async fn compile_runtime_snapshot(
             .get_mut(&account_id)
             .ok_or(RuntimeSnapshotCompileError::InvalidData)?;
         *account = RuntimeAccount::new(account.provider_kind().clone(), group_ids)
+            .with_direct_account(account.is_direct_account())
             .with_scheduling_role(account.scheduling_role())
             .with_model_access(account.model_access().clone())
             .with_fast_mode(account.fast_mode())
             .with_model_mappings(account.model_mappings().clone());
     }
-    let account_directory = Arc::new(RuntimeAccountDirectory::new(accounts));
+    // 整份快照共享分组模型政策；默认规则无需为每个 Key 或成员复制
+    let group_model_access = groups
+        .values_mut()
+        .filter(|group| {
+            group.enabled
+                && group.model_access.mode() != crate::account::AccountModelAccessMode::All
+        })
+        .map(|group| (group.id.clone(), std::mem::take(&mut group.model_access)))
+        .collect();
+    let account_directory = Arc::new(
+        RuntimeAccountDirectory::new(accounts).with_group_model_access(group_model_access),
+    );
 
     let mut client_policies = Vec::with_capacity(facts.client_policies.len());
     for policy in facts.client_policies {
         let mut allow_image_generation = true;
+        let mut allow_subagents = true;
         let account_scope = if policy.group_ids.is_empty() {
             FrozenAccountScope::new(
                 Arc::clone(&account_directory),
@@ -593,6 +631,7 @@ async fn compile_runtime_snapshot(
                     .ok_or(RuntimeSnapshotCompileError::InvalidData)?;
                 // 停用只影响选号，仍绑定的分组继续贡献请求策略
                 allow_image_generation &= group.allow_image_generation;
+                allow_subagents &= group.allow_subagents;
                 bound_groups.push(RoutingGroupSnapshot::new(
                     group.id.clone(),
                     group.name.clone(),
@@ -617,6 +656,7 @@ async fn compile_runtime_snapshot(
                     account_scope
                         .with_portable_history(policy.portable_history)
                         .with_image_generation(allow_image_generation)
+                        .with_subagents(allow_subagents)
                         .with_request_profiles(policy.request_profiles),
                 ),
                 true,
@@ -1049,6 +1089,54 @@ impl RuntimeSnapshot {
             .collect()
     }
 
+    /// 分组编辑器使用成员账号的实际模型，可编辑已停用或已限制模型的分组
+    #[must_use]
+    pub fn upstream_models_for_group(&self, group: &AccountGroupId) -> Vec<UpstreamModelId> {
+        let mut models = BTreeSet::new();
+        for (account_id, account) in self.account_directory.accounts_in_group(group) {
+            let provider = account.provider_kind();
+            if !self.providers.contains(provider) {
+                continue;
+            }
+            let access = account.model_access();
+            if access.mode() == crate::account::AccountModelAccessMode::Allowlist {
+                // 原生图片、Search 和透传模型可能只有账号白名单明确声明了 ID
+                models.extend(
+                    access
+                        .models()
+                        .iter()
+                        .filter_map(|id| UpstreamModelId::new(id.clone()).ok()),
+                );
+            }
+            let sources = self.model_catalog_accounts.get(provider);
+            if let Some(catalog) = self.provider_models.get(provider) {
+                models.extend(
+                    catalog
+                        .keys()
+                        .filter(|model| {
+                            access.allows(model.as_str())
+                                && sources
+                                    .and_then(|sources| sources.get(model.as_str()))
+                                    .is_none_or(|sources| sources.contains(account_id))
+                        })
+                        .cloned(),
+                );
+            }
+            for contribution in self.contributed_models() {
+                if &contribution.provider == provider && contribution.accounts.contains(account_id)
+                {
+                    let target = self.mapped_model(contribution.id.as_str());
+                    if access.allows(&target)
+                        && let Ok(model) = UpstreamModelId::new(target)
+                    {
+                        models.insert(model);
+                    }
+                }
+            }
+        }
+        models.into_iter().collect()
+    }
+
     /// 合并冻结账号范围内实际存在 Provider 的公开模型
     #[must_use]
     pub fn public_models_for_scope(&self, scope: &FrozenAccountScope) -> Vec<PublicModelId> {
@@ -1419,19 +1507,24 @@ impl RuntimeSnapshot {
         account_scope: &FrozenAccountScope,
         context: &RoutingContext,
     ) -> BTreeSet<ProviderKind> {
-        account_scope
-            .provider_kinds()
-            .iter()
-            .filter(|provider| {
-                self.providers.contains(*provider)
-                    && context
-                        .required_provider
-                        .as_ref()
-                        .is_none_or(|required| required == *provider)
-                    && !context.blocked_providers.contains(*provider)
-            })
+        self.available_provider_kinds(account_scope, context)
             .cloned()
             .collect()
+    }
+
+    pub(crate) fn available_provider_kinds<'a>(
+        &'a self,
+        account_scope: &'a FrozenAccountScope,
+        context: &'a RoutingContext,
+    ) -> impl Iterator<Item = &'a ProviderKind> {
+        account_scope.provider_kinds().iter().filter(|provider| {
+            self.providers.contains(*provider)
+                && context
+                    .required_provider
+                    .as_ref()
+                    .is_none_or(|required| required == *provider)
+                && !context.blocked_providers.contains(*provider)
+        })
     }
 
     #[must_use]
@@ -1460,7 +1553,84 @@ impl RuntimeSnapshot {
         {
             return self.plan_account_mappings(public_model, operation, account_scope, context);
         }
-        self.plan_inner(public_model, operation, account_scope, context, true, true)
+        self.plan_inner(
+            public_model,
+            operation,
+            account_scope,
+            context,
+            true,
+            true,
+            false,
+            None,
+        )
+    }
+
+    /// 按实际目标分别校验目录、分组和账号；选中直连或常规路径后，重试沿用同一份计划
+    pub fn plan_with_direct_account_model(
+        &self,
+        public_model: &PublicModelId,
+        operation: &Operation,
+        scope: Arc<FrozenAccountScope>,
+        context: &RoutingContext,
+        direct: DirectAccountModel<'_>,
+        uses_native_upstream: impl Fn(&ProviderAccountId) -> bool,
+    ) -> Result<RoutingPlan, RoutingError> {
+        let DirectAccountModel {
+            provider,
+            model: target,
+            continuation_owner,
+        } = direct;
+        if self.model_alias(public_model.as_str()).is_some()
+            || self
+                .settings
+                .values
+                .model_mappings
+                .contains_key(public_model.as_str())
+            || (scope.directory().has_model_mapping(public_model.as_str())
+                && scope.allowed_account_ids().any(|account| {
+                    scope
+                        .model_override(account, public_model.as_str())
+                        .is_some()
+                }))
+        {
+            return self.plan(public_model, operation, scope, context);
+        }
+        // 自动替换必须有原生目录依据；未替换的账号仍使用普通请求的路由合同
+        let sources = self
+            .model_catalog_accounts
+            .get(provider)
+            .and_then(|models| models.get(target.as_str()));
+        let direct_accounts = scope
+            .allowed_account_ids()
+            .filter(|id| {
+                scope.directory().account(id).is_some_and(|account| {
+                    account.provider_kind() == provider && account.is_direct_account()
+                }) && scope.allows_model(id, target.as_str())
+                    && sources.is_none_or(|accounts| accounts.contains(*id))
+                    && uses_native_upstream(id)
+            })
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        // 原生续接先用原账号，容量恢复仍可在同模型的授权账号间换号
+        if !direct_accounts.is_empty()
+            && continuation_owner.is_none_or(|owner| direct_accounts.contains(owner))
+            && let Ok(plan) = self.plan_inner(
+                public_model,
+                operation,
+                Arc::new(
+                    scope.restricted_to(&BTreeSet::from([provider.clone()]), &direct_accounts),
+                ),
+                context,
+                true,
+                true,
+                false,
+                Some(target),
+            )
+        {
+            return Ok(plan);
+        }
+        // 只有尚未开始任何 attempt 的请求才可保留原模型；两个模型从不进入同一重试计划
+        self.plan(public_model, operation, scope, context)
     }
 
     /// 管理探测已固定目标账号，不使用数据面 Key 的账号模型政策裁决探测资格
@@ -1483,6 +1653,8 @@ impl RuntimeSnapshot {
             context,
             false,
             true,
+            true,
+            None,
         )
     }
 
@@ -1503,7 +1675,7 @@ impl RuntimeSnapshot {
         if matches!(operation, Operation::GenerateImage(_)) {
             self.plan_provider_endpoint(provider, None, operation, scope, context)
         } else {
-            self.plan_inner(model, operation, scope, context, false, false)
+            self.plan_inner(model, operation, scope, context, false, false, true, None)
         }
     }
 
@@ -1538,10 +1710,22 @@ impl RuntimeSnapshot {
             }
         }
         let mut plans = Vec::new();
+        let mut group_model_denied = false;
         if !inherited.is_empty() {
             let scope = Arc::new(account_scope.restricted_to(&Default::default(), &inherited));
-            if let Ok(plan) = self.plan_inner(public_model, operation, scope, context, true, true) {
-                plans.push((plan, false));
+            match self.plan_inner(
+                public_model,
+                operation,
+                scope,
+                context,
+                true,
+                true,
+                false,
+                None,
+            ) {
+                Ok(plan) => plans.push((plan, false)),
+                Err(RoutingError::GroupModelDenied) => group_model_denied = true,
+                Err(_) => {}
             }
         }
         for ((provider, target), accounts) in groups {
@@ -1558,10 +1742,19 @@ impl RuntimeSnapshot {
             let mut target_context = context.clone();
             target_context.required_provider = Some(provider);
             // 账号已按左侧请求名通过政策检查，目标仅参与归属和能力编译
-            if let Ok(plan) =
-                self.plan_inner(&target, operation, scope, &target_context, false, false)
-            {
-                plans.push((plan, true));
+            match self.plan_inner(
+                &target,
+                operation,
+                scope,
+                &target_context,
+                false,
+                false,
+                false,
+                None,
+            ) {
+                Ok(plan) => plans.push((plan, true)),
+                Err(RoutingError::GroupModelDenied) => group_model_denied = true,
+                Err(_) => {}
             }
         }
         let mut candidates = BTreeMap::<ProviderKind, ProviderCandidate>::new();
@@ -1592,6 +1785,9 @@ impl RuntimeSnapshot {
                 Arc::new(account_scope.restricted_to(&Default::default(), &accounts));
         }
         let Some((mut plan, _)) = plans.into_iter().next() else {
+            if group_model_denied {
+                return Err(RoutingError::GroupModelDenied);
+            }
             return Err(RoutingError::NoCapableProvider {
                 model: public_model.as_str().to_owned(),
             });
@@ -1601,6 +1797,7 @@ impl RuntimeSnapshot {
         Ok(plan)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn plan_inner(
         &self,
         public_model: &PublicModelId,
@@ -1609,6 +1806,8 @@ impl RuntimeSnapshot {
         context: &RoutingContext,
         enforce_account_model_policy: bool,
         resolve_global: bool,
+        allow_unknown_model: bool,
+        direct_model: Option<&UpstreamModelId>,
     ) -> Result<RoutingPlan, RoutingError> {
         let requirements = operation.capability_requirements();
         let mut candidates = Vec::new();
@@ -1618,24 +1817,33 @@ impl RuntimeSnapshot {
         }
 
         let requested_model = public_model.as_str();
-        let mapped_model = if resolve_global {
-            self.mapped_model(requested_model)
+        let upstream_model = if let Some(direct) = direct_model {
+            direct.clone()
         } else {
-            requested_model.to_owned()
+            let mapped_model = if resolve_global {
+                self.mapped_model(requested_model)
+            } else {
+                requested_model.to_owned()
+            };
+            if !resolve_global
+                || self
+                    .settings
+                    .values
+                    .model_mappings
+                    .contains_key(requested_model)
+                || self.model_alias(requested_model).is_some()
+            {
+                UpstreamModelId::new(mapped_model)
+            } else {
+                UpstreamModelId::from_client_wire(mapped_model)
+            }
+            .map_err(|_| RoutingError::InvalidIdentifier)?
         };
-        let upstream_model = if !resolve_global
-            || self
-                .settings
-                .values
-                .model_mappings
-                .contains_key(requested_model)
-            || self.model_alias(requested_model).is_some()
+        if enforce_account_model_policy
+            && account_scope.groups_deny_model(Some(upstream_model.as_str()))
         {
-            UpstreamModelId::new(mapped_model)
-        } else {
-            UpstreamModelId::from_client_wire(mapped_model)
+            return Err(RoutingError::GroupModelDenied);
         }
-        .map_err(|_| RoutingError::InvalidIdentifier)?;
         // 归属先于账号范围、能力与路由约束判定，原 Provider 被排除不能变成跨平台透传
         let known_model = self.is_known_upstream_model(&upstream_model)
             || self
@@ -1651,7 +1859,8 @@ impl RuntimeSnapshot {
             if !self.providers.contains(provider) {
                 continue;
             }
-            if resolve_global
+            if direct_model.is_none()
+                && resolve_global
                 && self
                     .model_alias(public_model.as_str())
                     .is_some_and(|alias| &alias.provider != provider)
@@ -1676,10 +1885,18 @@ impl RuntimeSnapshot {
                 .provider_models
                 .get(provider)
                 .and_then(|models| models.get(&upstream_model));
+            // 直连模型需要原生能力，不能借用插件为同名模型声明的账号与能力
+            if direct_model.is_some() && capabilities.is_none() {
+                continue;
+            }
             let contributions: Vec<_> = self
                 .contributed_models()
                 .iter()
-                .filter(|model| &model.provider == provider && &model.id == public_model)
+                .filter(|model| {
+                    direct_model.is_none()
+                        && &model.provider == provider
+                        && &model.id == public_model
+                })
                 .collect();
             let mut candidate_scope = Arc::clone(&account_scope);
             let emulated_features = if contributions.is_empty() {
@@ -1690,7 +1907,11 @@ impl RuntimeSnapshot {
                         };
                         emulated
                     }
-                    None if known_model || self.exhaustive_provider_catalogs.contains(provider) => {
+                    // 固定账号诊断由指定 Provider 向上游核实，停用账号可能从未出现在公开目录
+                    None if !allow_unknown_model
+                        && (known_model
+                            || self.exhaustive_provider_catalogs.contains(provider)) =>
+                    {
                         continue;
                     }
                     None => BTreeSet::new(),
@@ -1740,6 +1961,7 @@ impl RuntimeSnapshot {
                 native.unwrap_or_default()
             };
             candidates.push(ProviderCandidate {
+                requires_direct_authentication: direct_model.is_some(),
                 provider: provider.clone(),
                 model_presentation: self
                     .provider_model_presentations
@@ -1791,6 +2013,7 @@ impl RuntimeSnapshot {
             )),
             config_revision: self.revision,
             pricing: Arc::clone(&self.settings.values.pricing),
+            openai_request_country: self.settings.values.openai_request_country().clone(),
             request_location: self.settings.request_location.clone(),
             privacy: self.settings.privacy.clone(),
             account_error_protection: Arc::clone(&self.settings.account_error_protection),
@@ -1828,6 +2051,12 @@ impl RuntimeSnapshot {
                 .as_ref()
                 .is_none_or(|required| required == provider)
             && !context.blocked_providers.contains(provider);
+        if available
+            && upstream_model
+                .is_some_and(|model| account_scope.groups_deny_model(Some(model.as_str())))
+        {
+            return Err(RoutingError::GroupModelDenied);
+        }
         if !available
             || upstream_model
                 .is_some_and(|model| !account_scope.allows_provider_model(provider, model.as_str()))
@@ -1862,6 +2091,7 @@ impl RuntimeSnapshot {
             });
         }
         let candidate = ProviderCandidate {
+            requires_direct_authentication: false,
             provider: provider.clone(),
             model_presentation: upstream_model
                 .and_then(|model| {
@@ -1882,6 +2112,7 @@ impl RuntimeSnapshot {
             )),
             config_revision: self.revision,
             pricing: Arc::clone(&self.settings.values.pricing),
+            openai_request_country: self.settings.values.openai_request_country().clone(),
             request_location: self.settings.request_location.clone(),
             privacy: self.settings.privacy.clone(),
             account_error_protection: Arc::clone(&self.settings.account_error_protection),

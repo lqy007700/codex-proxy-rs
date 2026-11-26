@@ -24,13 +24,15 @@ fn encoder_should_preserve_lite_input_without_top_level_instructions_or_tools() 
     });
     let encoded = encode_downstream_request(body.clone());
 
-    assert_eq!(Value::Object(encoded.body().clone()), body);
+    let mut expected_encoded = body;
+    expected_encoded["request_country"] = Value::Null;
+    assert_eq!(Value::Object(encoded.body().clone()), expected_encoded);
     let websocket =
         provider_openai::transport::protocol::websocket::websocket_response_create_payload_text(
             &encoded,
         )
         .expect("encode Lite WebSocket request");
-    let mut expected = body;
+    let mut expected = expected_encoded;
     expected["type"] = json!("response.create");
     assert_eq!(serde_json::from_str::<Value>(&websocket).unwrap(), expected);
 }
@@ -70,7 +72,8 @@ fn encoder_should_adapt_pi_responses_parameters_without_losing_codex_fields() {
             "store": false,
             "prompt_cache_key": "client-session",
             "reasoning": {"effort": "high", "summary": "auto"},
-            "include": ["reasoning.encrypted_content"]
+            "include": ["reasoning.encrypted_content"],
+            "request_country": null
         })
     );
 }
@@ -103,7 +106,8 @@ fn encoder_should_expand_string_input_into_user_message_item() {
                 "role": "user",
                 "content": [{"type": "input_text", "text": "hello"}]
             }],
-            "store": false
+            "store": false,
+            "request_country": null
         })
     );
     assert_eq!(encoded.input().len(), 1);
@@ -120,8 +124,10 @@ fn encoder_should_keep_non_string_input_shapes_untouched() {
     for input in [items, Value::Null, json!({"text": "hello"}), json!(42)] {
         let body = json!({"model": "gpt-test", "input": input, "store": false});
         let encoded = encode_downstream_request(body.clone());
+        let mut expected = body;
+        expected["request_country"] = Value::Null;
 
-        assert_eq!(Value::Object(encoded.body().clone()), body);
+        assert_eq!(Value::Object(encoded.body().clone()), expected);
     }
 
     let encoded = encode_downstream_request(json!({"model": "gpt-test", "input": ""}));
@@ -164,6 +170,7 @@ fn encoder_should_default_missing_store_without_changing_unknown_or_nested_field
     .expect("encode business parameters");
 
     body["store"] = json!(false);
+    body["request_country"] = Value::Null;
     assert_eq!(Value::Object(encoded.body().clone()), body);
 }
 
@@ -176,8 +183,10 @@ fn encoder_should_preserve_explicit_store_values() {
             "store": store
         });
         let encoded = encode_downstream_request(body.clone());
+        let mut expected = body;
+        expected["request_country"] = Value::Null;
 
-        assert_eq!(Value::Object(encoded.body().clone()), body);
+        assert_eq!(Value::Object(encoded.body().clone()), expected);
     }
 }
 
@@ -240,7 +249,8 @@ fn encoder_should_convert_system_messages_to_developer_without_changing_content(
                 "opaque-item"
             ],
             "store": false,
-            "future_top_level_field": {"keep": true}
+            "future_top_level_field": {"keep": true},
+            "request_country": null
         })
     );
 }
@@ -291,6 +301,7 @@ async fn backend_http_should_send_default_store_and_normalized_system_role() {
             "model": "gpt-test",
             "input": [{"type": "message", "role": "developer", "content": "Be concise."}],
             "store": false,
+            "request_country": null,
             "stream": true
         })
     );

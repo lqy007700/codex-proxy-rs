@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { RequestLocation } from '@/api'
 import { ZFormItem, ZInput } from '@codex-proxy/ui'
+import CountryCodeField from '@/components/CountryCodeField.vue'
 
 defineProps<{ disabled?: boolean }>()
 const location = defineModel<RequestLocation>({ required: true })
@@ -12,9 +13,12 @@ function update(field: keyof RequestLocation, value: string) {
 
 <template>
   <div class="grid gap-4 sm:grid-cols-2">
-    <ZFormItem label="国家代码" required>
-      <ZInput :model-value="location.country" :disabled="disabled" aria-label="国家代码" placeholder="请输入两位国家代码" maxlength="2" @update:model-value="update('country', $event)" />
-    </ZFormItem>
+    <CountryCodeField
+      :model-value="location.country"
+      :show-message="Boolean(location.country.trim())"
+      :disabled="disabled"
+      @update:model-value="update('country', $event)"
+    />
     <ZFormItem label="地区" required>
       <ZInput :model-value="location.region" :disabled="disabled" aria-label="地区" placeholder="请输入地区" maxlength="128" @update:model-value="update('region', $event)" />
     </ZFormItem>

@@ -15,7 +15,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use filetime::FileTime;
 use flate2::{Compression, write::GzEncoder};
 use futures::StreamExt as _;
 use gateway_admin::model::system::{

@@ -323,6 +323,7 @@ pub struct AdminRuntimePorts {
     pub email_sender: Arc<dyn ports::alerts::EmailSender>,
     pub providers: ProviderAdminRegistry,
     pub snapshot: Arc<dyn SnapshotControl>,
+    pub published_snapshot: gateway_core::runtime::RuntimeSnapshotHandle,
     pub account_probe: Arc<dyn AccountProbe>,
     pub proxy_probe: Arc<dyn ports::proxy::ProxyProbe>,
     pub client_distribution: Arc<dyn ClientDistributionResolver>,

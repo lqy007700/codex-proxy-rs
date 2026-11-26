@@ -489,6 +489,8 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: Default::default(),
+            openai_request_country: Default::default(),
+            openai_oauth_guardian_review_model: true,
             refresh_margin_seconds: 1800,
             refresh_concurrency: 4,
             max_concurrent_per_account: 5,
@@ -571,6 +573,8 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
     expected["recoveryAttempts"] = json!(4);
     expected["recoveryRotationAttempts"] = json!(1);
     expected["maxRetryAfterSeconds"] = json!(240);
+    expected["openaiOauthGuardianReviewModel"] = json!(true);
+    expected["openaiRequestCountry"] = json!({"mode": "follow_location"});
     assert_eq!(value, expected);
 }
 

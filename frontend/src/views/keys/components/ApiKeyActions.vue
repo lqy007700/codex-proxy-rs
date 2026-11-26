@@ -3,7 +3,7 @@ import type { ApiKey } from '@/api'
 
 import { ZIconButton, ZMenuItem, ZPopover } from '@codex-proxy/ui'
 
-import { MoreHorizontal, Network, Pencil, Power, RotateCcw, Terminal, Trash2, Upload } from '@lucide/vue'
+import { ChartColumn, MoreHorizontal, Network, Pencil, Power, RotateCcw, Terminal, Trash2, Upload } from '@lucide/vue'
 import { useRouter } from 'vue-router'
 
 defineProps<{
@@ -20,6 +20,7 @@ const emit = defineEmits<{
   toggle: [apiKey: ApiKey]
   delete: [apiKey: ApiKey]
   edit: [apiKey: ApiKey]
+  statistics: [apiKey: ApiKey]
   resetBudget: [apiKey: ApiKey]
 }>()
 
@@ -43,6 +44,13 @@ const router = useRouter()
       @click.stop="emit('use', apiKey)"
     >
       <Terminal class="size-3.5 text-z-primary-text" />
+    </ZIconButton>
+    <ZIconButton
+      size="small"
+      aria-label="用量统计"
+      @click.stop="emit('statistics', apiKey)"
+    >
+      <ChartColumn class="size-3.5 text-z-text-secondary" />
     </ZIconButton>
 
     <ZPopover placement="bottom-end">

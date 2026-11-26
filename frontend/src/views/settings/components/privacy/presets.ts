@@ -9,6 +9,7 @@ export const scopes: { value: PrivacyScope, label: string }[] = [
   { value: 'request_header', label: '指定请求头' },
 ]
 export const actions: { value: PrivacyAction, label: string }[] = [
+  { value: 'anonymize_project', label: '按账号与会话匿名化项目名' },
   { value: 'regex_replace', label: '正则替换' },
   { value: 'set_value', label: '固定值' },
   { value: 'rename_key', label: '字段名替换' },
@@ -17,6 +18,7 @@ export const actions: { value: PrivacyAction, label: string }[] = [
 export const fieldsByScope: Partial<Record<PrivacyScope, { value: string, label: string }[]>> = {
   turn_metadata: [
     { value: '', label: '自定义字段路径' },
+    { value: '$.workspaces.*.associated_remote_urls', label: 'Git 远端集合' },
     { value: '$.workspaces.*.associated_remote_urls.*', label: 'Git 远端地址' },
     { value: '$.workspaces', label: '工作区路径键' },
     { value: '$.workspaces.*.latest_git_commit_hash', label: 'Git 提交标识' },
@@ -55,7 +57,41 @@ export function newRule(): PrivacyRule {
   }
 }
 
+// 化名从原始路径派生，用户名替换不能改变其身份输入
+const workspaceSteps: Partial<PrivacyStep>[] = [
+  {
+    scope: 'turn_metadata',
+    selector: '$.workspaces',
+    action: 'anonymize_project',
+    pattern: null,
+  },
+  {
+    scope: 'turn_metadata',
+    selector: '$.workspaces',
+    action: 'rename_key',
+    pattern: String.raw`(?i)^((?:[a-z]:)?[/\\](?:home|users)[/\\])[^/\\]+([/\\])`,
+    replacement: `\${1}user\${2}`,
+  },
+  {
+    scope: 'turn_metadata',
+    selector: '$.workspaces.*.associated_remote_urls',
+    action: 'remove_field',
+    pattern: null,
+  },
+  {
+    scope: 'turn_metadata',
+    selector: '$.workspaces.*.latest_git_commit_hash',
+    action: 'remove_field',
+    pattern: null,
+  },
+]
+
 export const presets: { key: string, name: string, steps: Partial<PrivacyStep>[] }[] = [
+  {
+    key: 'session-workspace',
+    name: '按账号与会话匿名化工作区',
+    steps: workspaceSteps,
+  },
   {
     key: 'workspace',
     name: '统一工作区信息',
@@ -153,6 +189,7 @@ export function exampleRequest(): PrivacySample {
       },
     },
     headers: {
+      'session-id': ['example-session'],
       'x-codex-turn-metadata': [
         JSON.stringify(metadata),
       ],

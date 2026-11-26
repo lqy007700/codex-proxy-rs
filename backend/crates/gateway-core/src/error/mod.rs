@@ -517,6 +517,7 @@ impl fmt::Debug for ClientVisibleUpstreamResponse {
 /// Core 会在任何持久化或日志记录前取走
 /// 这些事件，不能把它们当作诊断上下文使用
 pub struct ProviderError {
+    denied_group_feature: Option<DeniedGroupFeature>,
     kind: ProviderErrorKind,
     send_state: UpstreamSendState,
     upstream_status: Option<u16>,
@@ -575,6 +576,7 @@ impl ProviderError {
     #[must_use]
     pub const fn new(kind: ProviderErrorKind, send_state: UpstreamSendState) -> Self {
         Self {
+            denied_group_feature: None,
             kind,
             send_state,
             upstream_status: None,
@@ -598,6 +600,16 @@ impl ProviderError {
             client_visible_upstream_response: None,
             atomic_client_events: None,
         }
+    }
+
+    pub(crate) fn group_feature_denied(feature: DeniedGroupFeature) -> Self {
+        let mut error = Self::new(
+            ProviderErrorKind::RequestPolicyDenied,
+            UpstreamSendState::NotSent,
+        )
+        .with_retry_prohibited();
+        error.denied_group_feature = Some(feature);
+        error
     }
 
     /// 附加合法上游状态码
@@ -1066,6 +1078,9 @@ impl ProviderError {
 
     /// 绑定迁移完成后仅替换客户端恢复投影，保留原始失败的诊断与计费事实
     pub(crate) fn with_client_recovery_from(mut self, recovery: Self) -> Self {
+        if let Some(reason) = recovery.continuation_unavailable_reason() {
+            self = self.with_continuation_unavailable_reason(reason);
+        }
         self.client_visible_upstream_error = recovery.client_visible_upstream_error;
         self.client_visible_upstream_response = recovery.client_visible_upstream_response;
         self.continuation_failure = recovery.continuation_failure;
@@ -1096,6 +1111,7 @@ impl ProviderError {
     #[must_use]
     pub fn stable_snapshot(&self) -> Self {
         Self {
+            denied_group_feature: self.denied_group_feature,
             kind: self.kind,
             send_state: self.send_state,
             upstream_status: self.upstream_status,
@@ -1278,6 +1294,28 @@ impl GatewayErrorKind {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum DeniedGroupFeature {
+    ImageGeneration,
+    CollaborativeSubagents,
+}
+
+impl From<DeniedGroupFeature> for GatewayError {
+    fn from(feature: DeniedGroupFeature) -> Self {
+        let (code, message) = match feature {
+            DeniedGroupFeature::ImageGeneration => (
+                "image_generation_disabled",
+                "Image generation is not allowed by the API key's account groups.",
+            ),
+            DeniedGroupFeature::CollaborativeSubagents => (
+                "subagents_disabled",
+                "Collaborative subagents are not allowed by the API key's account groups.",
+            ),
+        };
+        Self::new(GatewayErrorKind::PolicyDenied, message).with_client_code(code)
+    }
+}
+
 /// 协议无关、可安全暴露的网关错误
 #[derive(Clone, Error)]
 #[error("{message}")]
@@ -1368,9 +1406,14 @@ impl GatewayError {
                 GatewayErrorKind::UpstreamUnavailable,
                 "The upstream account cannot access the service.",
             ),
-            ProviderErrorKind::RequestPolicyDenied => Self::new(
-                GatewayErrorKind::PolicyDenied,
-                "Request policy rejected the request.",
+            ProviderErrorKind::RequestPolicyDenied => error.denied_group_feature.map_or_else(
+                || {
+                    Self::new(
+                        GatewayErrorKind::PolicyDenied,
+                        "Request policy rejected the request.",
+                    )
+                },
+                Self::from,
             ),
             ProviderErrorKind::RateLimited | ProviderErrorKind::QuotaExhausted => Self::new(
                 GatewayErrorKind::RateLimited,

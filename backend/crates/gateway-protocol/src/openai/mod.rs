@@ -1,5 +1,7 @@
 //! 共享的 OpenAI 线协议类型、解析与编码入口
 
+/// OpenAI 协议标识
+pub const OPENAI_PROTOCOL: &str = "openai";
 /// 原生 Responses 客户端入口
 pub const RESPONSES_PATH: &str = "/v1/responses";
 
@@ -18,6 +20,7 @@ pub mod chat;
 pub mod codex;
 /// OpenAI/Codex 事件语义、用量与限流字段编解码
 pub mod events;
+mod guardian;
 mod headers;
 /// Server-Sent Events 帧的解析与编码
 pub mod sse;
@@ -25,8 +28,12 @@ pub mod sse;
 pub use codex::{
     CodexResponsesRequestSemantics, codex_account_session_id, codex_account_thread_id,
     codex_responses_request_semantics, codex_responses_request_semantics_with_turn_metadata,
-    codex_session_id, codex_thread_id, codex_turn_id, turn_metadata_session_id,
-    turn_metadata_thread_id, turn_metadata_turn_id,
+    codex_session_id, codex_thread_id, codex_turn_id, collaboration_subagent_requested,
+    turn_metadata_session_id, turn_metadata_thread_id, turn_metadata_turn_id,
+};
+pub use guardian::{
+    CODEX_AUTO_REVIEW_MODEL, CodexGuardianRole, capture_codex_guardian_identity,
+    codex_guardian_role,
 };
 pub use headers::{
     is_transport_managed_request_header, parse_retry_after_seconds, response_header_is_forwardable,

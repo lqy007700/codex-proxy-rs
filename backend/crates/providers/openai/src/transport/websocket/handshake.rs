@@ -28,8 +28,11 @@ use crate::{
 };
 
 use super::{
-    error::CodexWebSocketExchangeError,
-    model::{CodexWebSocketConnection, CodexWebSocketRequest, WebSocketContinuationRequirement},
+    error::{CodexWebSocketExchangeError, CodexWebSocketUpstreamError},
+    model::{
+        CodexWebSocketConnection, CodexWebSocketRequest, ResponseCreateOpening,
+        WebSocketContinuationRequirement,
+    },
     pool::CodexWebSocketConnectionMetadata,
     pump::{PumpLogContext, PumpedWebSocket, RawWsStream},
 };
@@ -102,34 +105,34 @@ impl CodexWebSocketConnection {
         business_headers: Vec<(String, String)>,
         request: &CodexResponsesRequest,
     ) -> Result<CodexWebSocketRequest, serde_json::Error> {
-        Self::responses_create_request_for_path(
+        Ok(Self::response_create_opening_for_path(
             base_url,
             CODEX_RESPONSES_PATH,
             websocket_key,
             business_headers,
             request,
         )
+        .with_payload(websocket_response_create_payload_text(request)?))
     }
 
-    pub(crate) fn responses_create_request_for_path(
+    pub(crate) fn response_create_opening_for_path(
         base_url: &str,
         path: &str,
         websocket_key: &str,
         business_headers: Vec<(String, String)>,
         request: &CodexResponsesRequest,
-    ) -> Result<CodexWebSocketRequest, serde_json::Error> {
+    ) -> ResponseCreateOpening {
         let mut connection = Self::responses(base_url, websocket_key, business_headers);
         let endpoint = crate::transport::endpoint_url(base_url, path);
         connection.endpoint = endpoint
             .replacen("https://", "wss://", 1)
             .replacen("http://", "ws://", 1);
-        Ok(CodexWebSocketRequest {
+        ResponseCreateOpening {
             connection,
-            payload_text: websocket_response_create_payload_text(request)?,
             continuation: WebSocketContinuationRequirement::from_request(request),
             codex_search_declared: (path == CODEX_RESPONSES_PATH)
                 .then(|| crate::transport::downstream::declares_hosted_search(request.body())),
-        })
+        }
     }
 }
 
@@ -432,11 +435,11 @@ fn websocket_opening_error(
         .and_then(|value| value.to_str().ok())
         .and_then(gateway_protocol::openai::parse_retry_after_seconds)
         .or_else(|| events::retry_after_seconds_from_body(&body));
-    CodexWebSocketExchangeError::upstream(
+    CodexWebSocketExchangeError::Upstream(Box::new(CodexWebSocketUpstreamError {
         status_code,
         retry_after_seconds,
         body,
-        reqwest::StatusCode::from_u16(status_code)
+        client_response: reqwest::StatusCode::from_u16(status_code)
             .ok()
             .map(|status| {
                 Box::new(CodexClientVisibleUpstreamResponse::new(
@@ -446,11 +449,12 @@ fn websocket_opening_error(
                     raw_body,
                 ))
             }),
-        response_meta::set_cookie_headers(response.headers()),
-        response_meta::diagnostics(Some(status_code), response.headers())
+        set_cookie_headers: response_meta::set_cookie_headers(response.headers()),
+        rate_limit_headers: response_meta::rate_limit_headers(response.headers()),
+        diagnostics: response_meta::diagnostics(Some(status_code), response.headers())
             .with_response_origin(websocket_response_origin(connection)),
-        CodexUpstreamSendPhase::BeforePayload,
-    )
+        send_phase: CodexUpstreamSendPhase::BeforePayload,
+    }))
 }
 
 fn websocket_response_origin(connection: &CodexWebSocketConnection) -> Option<reqwest::Url> {

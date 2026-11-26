@@ -1,4 +1,4 @@
-import type { AccountGroup, ApiKey } from '@/api'
+import type { AccountGroup, AccountModelAccess, ApiKey } from '@/api'
 import { normalizeRgbaHexColor } from '@codex-proxy/ui'
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 
@@ -17,10 +17,13 @@ import { usePagedQuery } from '@/composables/usePagedQuery'
 import { useRequestState } from '@/composables/useRequestState'
 import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
+import { accountModelAccessError } from '@/views/accounts/utils/modelAccess'
 import { DEFAULT_ACCOUNT_GROUP_COLOR } from '../constants'
 
 export interface AccountGroupFormValue {
   allowImageGeneration: boolean
+  allowSubagents: boolean
+  modelAccess: AccountModelAccess
   name: string
   description: string
   color: string
@@ -121,6 +124,11 @@ export function useAccountGroups() {
       description: group.description ?? '',
       color: group.color,
       allowImageGeneration: group.allowImageGeneration,
+      allowSubagents: group.allowSubagents,
+      modelAccess: {
+        mode: group.modelAccess.mode,
+        models: [...group.modelAccess.models],
+      },
     }
     showFormModal.value = true
   }
@@ -138,11 +146,23 @@ export function useAccountGroups() {
       ZNotification.warning({ message: '请选择有效的分组颜色' })
       return
     }
+    const modelError = accountModelAccessError(form.value.modelAccess)
+    if (modelError) {
+      ZNotification.warning({ message: modelError })
+      return
+    }
 
     await savingAction.run(async () => {
       const updating = Boolean(editingGroup.value)
       const description = form.value.description.trim() || null
       const allowImageGeneration = form.value.allowImageGeneration
+      const allowSubagents = form.value.allowSubagents
+      const modelAccess: AccountModelAccess = {
+        mode: form.value.modelAccess.mode,
+        models: form.value.modelAccess.mode === 'all'
+          ? []
+          : [...form.value.modelAccess.models],
+      }
       if (editingGroup.value) {
         await updateAccountGroup({
           id: editingGroup.value.id,
@@ -150,6 +170,8 @@ export function useAccountGroups() {
           description,
           color,
           allowImageGeneration,
+          allowSubagents,
+          modelAccess,
         })
       }
       else {
@@ -158,6 +180,8 @@ export function useAccountGroups() {
           description,
           color,
           allowImageGeneration,
+          allowSubagents,
+          modelAccess,
         })
       }
       showFormModal.value = false
@@ -328,5 +352,7 @@ function emptyForm(): AccountGroupFormValue {
     description: '',
     color: DEFAULT_ACCOUNT_GROUP_COLOR,
     allowImageGeneration: true,
+    allowSubagents: true,
+    modelAccess: { mode: 'all', models: [] },
   }
 }

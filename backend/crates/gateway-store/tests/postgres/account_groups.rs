@@ -63,6 +63,8 @@ async fn groups_aggregate_cross_provider_members_and_key_bindings_without_multip
         .create_account_group(
             NewAccountGroup {
                 allow_image_generation: true,
+                allow_subagents: true,
+                model_access: Default::default(),
                 id: mixed_group.clone(),
                 name: "Mixed Production".to_owned(),
                 description: Some("cross-provider".to_owned()),
@@ -76,6 +78,8 @@ async fn groups_aggregate_cross_provider_members_and_key_bindings_without_multip
         .create_account_group(
             NewAccountGroup {
                 allow_image_generation: true,
+                allow_subagents: true,
+                model_access: Default::default(),
                 id: empty_group.clone(),
                 name: "Empty Pool".to_owned(),
                 description: None,
@@ -382,6 +386,8 @@ async fn group_costs_should_include_statusless_websocket_but_reject_statusless_h
         .create_account_group(
             NewAccountGroup {
                 allow_image_generation: true,
+                allow_subagents: true,
+                model_access: Default::default(),
                 id: group_id(EMPTY_GROUP),
                 name: "Statusless Costs".to_owned(),
                 description: None,
@@ -587,6 +593,8 @@ async fn group_costs_follow_current_members_and_pending_source_replacements() {
             .create_account_group(
                 NewAccountGroup {
                     allow_image_generation: true,
+                    allow_subagents: true,
+                    model_access: Default::default(),
                     id: group_id(id),
                     name: id.to_owned(),
                     description: None,
@@ -698,6 +706,8 @@ async fn image_generation_group_updates_preserve_omitted_values_and_publish_snap
         .create_account_group(
             NewAccountGroup {
                 allow_image_generation: false,
+                allow_subagents: true,
+                model_access: Default::default(),
                 id: id.clone(),
                 name: "Image generation policy".to_owned(),
                 description: None,
@@ -717,6 +727,8 @@ async fn image_generation_group_updates_preserve_omitted_values_and_publish_snap
             .update_account_group(
                 UpdateAccountGroup {
                     allow_image_generation: value,
+                    allow_subagents: None,
+                    model_access: None,
                     id: id.clone(),
                     name: "Renamed policy".to_owned(),
                     description: None,

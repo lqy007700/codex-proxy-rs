@@ -104,7 +104,7 @@ impl PgProviderAccountRepository {
                     upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
                     access_token_expires_at, next_refresh_at, enabled, quota_limits, quota_paused, concurrency_limit, weight, scheduling_role, model_access_json, model_mappings_json, allow_credits, credential_state,
                     credential_observed_at, quota_access_state, quota_evidence,
-                    quota_access_observed_at, quota_reset_at,
+                    quota_access_observed_at, quota_reset_at, quota_limit_window_minutes,
                     quota_observed_at, last_error_reason, last_error_message, created_at, updated_at
              from provider_accounts
              left join (select id as location_proxy_id, enabled as proxy_enabled, max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone from outbound_proxies) proxy_location
@@ -582,6 +582,7 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
                      quota_evidence = null,
                      quota_access_observed_at = now(),
                      quota_reset_at = null,
+                     quota_limit_window_minutes = null,
                      last_error_reason = null,
                      last_error_message = null,
                      updated_at = greatest(now(), updated_at)
@@ -757,6 +758,7 @@ pub(crate) async fn upsert_provider_account_in_transaction(
            quota_evidence = null,
            quota_access_observed_at = null,
            quota_reset_at = null,
+           quota_limit_window_minutes = null,
            credential_observed_at = excluded.credential_observed_at,
            quota_observed_at = case when provider_accounts.quota_paused then provider_accounts.quota_observed_at else null end,
            last_error_reason = null,
@@ -816,9 +818,11 @@ pub(crate) async fn rotate_provider_account_in_transaction(
     profile: &UpdateProviderAccount,
     replacement_identity: Option<&ProviderAccountIdentity>,
     update: &ProviderCredentialUpdate,
-    preserve_name: bool,
+    reauthorization: bool,
 ) -> StoreResult<Revision> {
     let replace_identity = replacement_identity.is_some();
+    // 同身份重新授权会更新账号资料，额度观测仍属于该身份；已触发额度暂停时同样保留观测
+    let preserve_quota = !replace_identity && (reauthorization || update.preserve_profile);
     let upstream_user_id = replacement_identity.map(ProviderAccountIdentity::upstream_user_id);
     let upstream_account_id =
         replacement_identity.and_then(ProviderAccountIdentity::upstream_account_id);
@@ -828,12 +832,13 @@ pub(crate) async fn rotate_provider_account_in_transaction(
          set name = case when $14 or $16 then name else $4 end,
              email = case when $14 then email else $5 end,
              plan_type = case when $14 then plan_type else $6 end,
-             provider_quota_json = case when $14 or quota_paused then provider_quota_json else null end,
-             quota_observed_at = case when $14 or quota_paused then quota_observed_at else null end,
+             provider_quota_json = case when $18 or quota_paused then provider_quota_json else null end,
+             quota_observed_at = case when $18 or quota_paused then quota_observed_at else null end,
              quota_access_state = case when $11 then 'unknown' else quota_access_state end,
              quota_evidence = case when $11 then null else quota_evidence end,
              quota_access_observed_at = case when $11 then null else quota_access_observed_at end,
              quota_reset_at = case when $11 then null else quota_reset_at end,
+             quota_limit_window_minutes = case when $11 then null else quota_limit_window_minutes end,
              provider_credentials_json = $7,
              credential_revision = credential_revision + 1,
              has_refresh_token = $8,
@@ -872,8 +877,9 @@ pub(crate) async fn rotate_provider_account_in_transaction(
     .bind(upstream_account_id)
     .bind(update.preserve_profile)
     .bind(update.preserve_credential_state)
-    .bind(preserve_name)
+    .bind(reauthorization)
     .bind(update.preserve_access_token_expiry)
+    .bind(preserve_quota)
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|error| {
@@ -1253,7 +1259,7 @@ where
     let result = sqlx::query(
         "update provider_accounts
              set quota_access_observed_at = $3, quota_access_state = $4,
-                 quota_evidence = $5, quota_reset_at = $6,
+                 quota_evidence = $5, quota_reset_at = $6, quota_limit_window_minutes = $7,
                  updated_at = greatest(now(), updated_at, $3)
              where id = $1 and credential_revision = $2
                and (quota_access_observed_at is null or quota_access_observed_at <= $3)",
@@ -1264,6 +1270,7 @@ where
     .bind(state.access().as_str())
     .bind(state.evidence().map(QuotaEvidence::as_str))
     .bind(state.reset_at().map(DateTime::<Utc>::from))
+    .bind(state.limit_window_minutes().map(i32::from))
     .execute(executor)
     .await
     .map_err(|source| postgres_unavailable("apply provider quota access", source))?;
@@ -1312,6 +1319,10 @@ where
                    when $7::timestamptz is not null
                      and (quota_access_observed_at is null or quota_access_observed_at <= $7)
                    then $8 else quota_reset_at end,
+                 quota_limit_window_minutes = case
+                   when $7::timestamptz is not null
+                     and (quota_access_observed_at is null or quota_access_observed_at <= $7)
+                   then $14 else quota_limit_window_minutes end,
                  updated_at = greatest(now(), updated_at, $4, $7)
              where id = $1 and credential_revision = $2
                and (quota_observed_at is null or quota_observed_at <= $4)
@@ -1346,6 +1357,7 @@ where
             .and_then(|base| base.observed_at)
             .map(DateTime::<Utc>::from),
     )
+    .bind(state.limit_window_minutes().map(i32::from))
     .execute(executor)
     .await
     .map_err(|source| postgres_unavailable("compare and swap provider quota", source))?;

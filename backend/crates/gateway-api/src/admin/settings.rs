@@ -32,10 +32,18 @@ pub type ProviderRequestProfiles = BTreeMap<String, serde_json::Map<String, serd
 pub type ProviderRequestProfileUpdates =
     BTreeMap<String, Option<serde_json::Map<String, serde_json::Value>>>;
 
+const fn default_openai_oauth_guardian_review_model() -> bool {
+    true
+}
+
 /// HTTP 读写共用的设置字段；仅保留 wire 数值类型与命名
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSettingsFields {
+    #[serde(default = "default_openai_oauth_guardian_review_model")]
+    pub openai_oauth_guardian_review_model: bool,
+    #[serde(default)]
+    pub openai_request_country: gateway_core::account::OpenAiRequestCountry,
     pub codex_privacy_policy: gateway_core::settings::privacy::CodexPrivacyPolicy,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
@@ -122,10 +130,10 @@ pub struct UpdateRuntimeSettingsRequest {
     #[serde(default)]
     pub provider_request_profiles: ProviderRequestProfileUpdates,
     /// 兼容既有 wire；与泛化字段冲突时拒绝整个请求
-    #[serde(default, deserialize_with = "deserialize_profile_update")]
+    #[serde(default, deserialize_with = "deserialize_present_update")]
     pub openai_client_profile: Option<serde_json::Map<String, serde_json::Value>>,
     /// 兼容既有 wire；与泛化字段冲突时拒绝整个请求
-    #[serde(default, deserialize_with = "deserialize_profile_update")]
+    #[serde(default, deserialize_with = "deserialize_present_update")]
     pub xai_client_profile: Option<serde_json::Map<String, serde_json::Value>>,
     pub model_mappings: ModelMappings,
     pub rotation_strategy: String,
@@ -617,6 +625,7 @@ fn map_wire_error(error: WireValidationError) -> AdminError {
         "settingsUsageRetentionOverflow" => "用量记录保留天数不合法".to_owned(),
         "settingsOpsRetentionOverflow" => "运维事件保留天数不合法".to_owned(),
         "settingsAuditRetentionOverflow" => "审计记录保留天数不合法".to_owned(),
+        "openaiRequestCountry" => "自定义请求国家必须是两位大写 ASCII 字母".to_owned(),
         "requestLocation" => "请求位置的国家代码、地区或城市不合法".to_owned(),
         "providerRequestProfiles" => "服务商客户端身份配置无效或字段冲突".to_owned(),
         "minCodexDesktopVersion" => "Codex Desktop 最低版本格式不合法".to_owned(),
@@ -667,11 +676,11 @@ fn normalize_request_profile_updates(
     Ok(normalized)
 }
 
-// 字段省略时保留已有配置；显式 null 不能清空唯一的通用默认
-fn deserialize_profile_update<'de, D: serde::Deserializer<'de>>(
+// 字段省略时保留已有配置；显式 null 不能清空设置
+fn deserialize_present_update<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
-) -> Result<Option<serde_json::Map<String, serde_json::Value>>, D::Error> {
-    serde_json::Map::<String, serde_json::Value>::deserialize(deserializer).map(Some)
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
 }
 
 async fn detect_location<S>(
@@ -767,7 +776,12 @@ impl RuntimeSettingsFields {
     fn into_values(
         self,
     ) -> Result<gateway_admin::model::settings::RuntimeSettingsValues, WireValidationError> {
+        self.openai_request_country
+            .validate()
+            .map_err(|_| WireValidationError::new("openaiRequestCountry"))?;
         let values = gateway_admin::model::settings::RuntimeSettingsValues {
+            openai_oauth_guardian_review_model: self.openai_oauth_guardian_review_model,
+            openai_request_country: self.openai_request_country,
             codex_privacy_policy: self.codex_privacy_policy,
             request_location_enabled: self.request_location_enabled,
             request_location: self
@@ -816,6 +830,8 @@ impl RuntimeSettingsFields {
 impl From<gateway_admin::model::settings::RuntimeSettingsValues> for RuntimeSettingsFields {
     fn from(settings: gateway_admin::model::settings::RuntimeSettingsValues) -> Self {
         crate::admin::settings::RuntimeSettingsFields {
+            openai_oauth_guardian_review_model: settings.openai_oauth_guardian_review_model,
+            openai_request_country: settings.openai_request_country,
             codex_privacy_policy: settings.codex_privacy_policy,
             request_location_enabled: settings.request_location_enabled,
             request_location: settings.request_location,

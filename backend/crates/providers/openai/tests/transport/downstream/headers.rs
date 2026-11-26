@@ -483,5 +483,6 @@ async fn backend_websocket_should_preserve_business_headers_without_downstream_t
     assert_eq!(values("x-openai-fedramp"), vec![b"true".to_vec()]);
     let session = values("session-id");
     assert!(uuid::Uuid::parse_str(std::str::from_utf8(&session[0]).unwrap()).is_ok());
-    assert_eq!(values("x-codex-turn-state"), vec![b"turn-ascii".to_vec()]);
+    // WebSocket 逐帧通过 client_metadata 携带轮次状态，握手不绑定 x-codex-turn-state
+    assert!(values("x-codex-turn-state").is_empty());
 }

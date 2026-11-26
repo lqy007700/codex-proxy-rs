@@ -21,6 +21,8 @@ const {
   loaded,
   hasChanges,
   verified,
+  storageDirty,
+  secretConfigured,
   storage,
   schedule,
   load: loadSettings,
@@ -66,7 +68,7 @@ const storageConfigured = computed(
       && storage.value.region.trim()
       && storage.value.bucket.trim()
       && storage.value.accessKeyId.trim()
-      && storage.value.secretAccessKey.trim(),
+      && (secretConfigured.value || storage.value.secretAccessKey.trim()),
     ),
 )
 
@@ -105,6 +107,8 @@ watch(
       :saving="savingStorage"
       :testing="testing"
       :verified="verified"
+      :storage-dirty="storageDirty"
+      :secret-configured="secretConfigured"
       @save="saveStorage()"
       @test="runTest()"
       @open-r2-guide="showR2Guide = true"

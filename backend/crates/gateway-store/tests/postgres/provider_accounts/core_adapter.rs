@@ -62,7 +62,7 @@ async fn scoped_account_list_filters_ids_provider_and_live_enabled_state() {
         ["acct_scope_a", "acct_scope_z"]
     );
     let full_pool = repository
-        .list_for_provider(&provider)
+        .list_for_provider(&provider, false)
         .await
         .expect("load full provider pool");
     assert_eq!(

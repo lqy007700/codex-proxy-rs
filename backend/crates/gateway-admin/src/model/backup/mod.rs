@@ -156,6 +156,7 @@ impl BackupStatusTransition {
 /// S3 存储配置更新命令；`secret_access_key` 为 `None` 表示保留旧值
 #[derive(Clone)]
 pub struct UpdateBackupStorageCommand {
+    pub storage_revision: u64,
     pub endpoint: String,
     pub region: String,
     pub bucket: String,
@@ -169,6 +170,7 @@ impl fmt::Debug for UpdateBackupStorageCommand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("UpdateBackupStorageCommand")
+            .field("storage_revision", &self.storage_revision)
             .field("endpoint", &self.endpoint)
             .field("region", &self.region)
             .field("bucket", &self.bucket)
@@ -183,6 +185,7 @@ impl fmt::Debug for UpdateBackupStorageCommand {
 /// 调度配置更新命令
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateBackupScheduleCommand {
+    pub storage_revision: u64,
     pub schedule_enabled: bool,
     pub cron_expression: String,
     pub retention_days: u32,

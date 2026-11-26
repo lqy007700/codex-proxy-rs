@@ -105,12 +105,7 @@ impl<'a> CodexSelectionModel<'a> {
                 scope.allows_model(account, model)
             }
             // 缺失、重复或不可解析的模型不能绕过黑白名单；不猜上游默认值
-            Self::Image(None) | Self::Search(None) => {
-                scope.allows(account)
-                    && scope.directory().account(account).is_some_and(|account| {
-                        account.model_access().mode() == AccountModelAccessMode::All
-                    })
-            }
+            Self::Image(None) | Self::Search(None) => scope.allows_unidentified_model(account),
         }
     }
 }

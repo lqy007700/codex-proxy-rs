@@ -36,6 +36,8 @@ fn runtime_settings(enabled: bool, probe_enabled: bool) -> RuntimeSettings {
             codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: Default::default(),
+            openai_request_country: Default::default(),
+            openai_oauth_guardian_review_model: true,
             refresh_margin_seconds: 300,
             refresh_concurrency: 2,
             max_concurrent_per_account: 5,

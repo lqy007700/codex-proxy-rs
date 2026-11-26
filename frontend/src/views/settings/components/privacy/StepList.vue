@@ -21,13 +21,15 @@ const items = computed(() => props.steps.map((step, index) => {
       : step.selector.trim() || '未选择字段')
   const scope = scopes.find(scope => scope.value === step.scope)?.label
   const action = actions.find(action => action.value === step.action)?.label
-  const effect = step.action === 'set_value'
-    ? `→ ${props.fixedValues[index] ?? '""'}`
-    : step.action === 'remove_field'
-      ? (step.pattern === null
-          ? '删除匹配的字段或数组项'
-          : `匹配后删除：${step.pattern || '未填写表达式'}`)
-      : `→ ${step.replacement || '清空匹配内容'}`
+  const effect = step.action === 'anonymize_project'
+    ? '同账号同会话项目化名固定'
+    : step.action === 'set_value'
+      ? `→ ${props.fixedValues[index] ?? '""'}`
+      : step.action === 'remove_field'
+        ? (step.pattern === null
+            ? '删除匹配的字段或数组项'
+            : `匹配后删除：${step.pattern || '未填写表达式'}`)
+        : `→ ${step.replacement || '清空匹配内容'}`
   return { step, field, scope, action, effect }
 }))
 

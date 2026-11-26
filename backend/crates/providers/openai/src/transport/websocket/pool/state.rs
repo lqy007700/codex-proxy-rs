@@ -27,6 +27,7 @@ pub struct CodexWebSocketPoolKey {
     response_exclusions: Vec<String>,
     installation_id: Option<String>,
     routing_affinity_id: Option<Uuid>,
+    fedramp_routing: bool,
     pub(super) downstream_connection_id: String,
     egress_key: String,
     pub(super) proxy_capacity_key: String,
@@ -47,6 +48,7 @@ impl CodexWebSocketPoolKey {
             response_exclusions: Vec::new(),
             installation_id: None,
             routing_affinity_id: None,
+            fedramp_routing: false,
             downstream_connection_id: String::new(),
             egress_key: String::new(),
             proxy_capacity_key: String::new(),
@@ -93,6 +95,12 @@ impl CodexWebSocketPoolKey {
         self
     }
 
+    /// 凭据声明的 FedRAMP 路由也是精确续接的边界，不能把旧响应交给另一条路由
+    pub(crate) fn with_fedramp_routing(mut self, enabled: bool) -> Self {
+        self.fedramp_routing = enabled;
+        self
+    }
+
     pub(crate) fn with_egress_key(mut self, key: &str) -> Self {
         self.egress_key = key.to_owned();
         self
@@ -120,6 +128,7 @@ impl CodexWebSocketPoolKey {
             self.account_id.as_str(),
             self.conversation_id.as_str(),
             self.connection_profile.as_str(),
+            if self.fedramp_routing { "fedramp" } else { "" },
             self.installation_id.as_deref().unwrap_or_default(),
             self.downstream_connection_id.as_str(),
             self.egress_key.as_str(),
@@ -139,6 +148,7 @@ impl CodexWebSocketPoolKey {
             && self.conversation_id == other.conversation_id
             && self.egress_key == other.egress_key
             && self.routing_affinity_id == other.routing_affinity_id
+            && self.fedramp_routing == other.fedramp_routing
             && self.response_exclusions == other.response_exclusions
     }
 }

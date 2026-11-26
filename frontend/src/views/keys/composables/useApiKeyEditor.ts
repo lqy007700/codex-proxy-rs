@@ -43,38 +43,7 @@ export function useApiKeyEditor(options: {
 
   function openEdit(key: ApiKey) {
     editingKey.value = key
-    const profiles = cloneDeep(key.providerRequestProfileOverrides)
-    const openai = profiles.openai
-    const identity = (openai?.inherit as Record<string, unknown> | undefined) ?? openai
-    const installationSeed = typeof identity?.installationSeed === 'string'
-      ? identity.installationSeed
-      : ''
-    const installationId = typeof identity?.installationId === 'string'
-      ? identity.installationId
-      : ''
-    if (openai?.inherit) {
-      delete profiles.openai
-    }
-    else if (openai) {
-      delete openai.installationId
-      delete openai.installationSeed
-    }
-    form.value = {
-      identityPolicy: cloneDeep(key.identityPolicy ?? { mode: 'direct' }),
-      providerRequestProfileOverrides: profiles,
-      installationSeedEnabled: !!installationSeed,
-      installationSeed,
-      installationId,
-      portableHistory: key.portableHistory,
-      customKey: '',
-      name: key.name,
-      label: key.label ?? '',
-      groupIds: key.groups.map(group => group.id),
-      maxConcurrency: limitInputValue(key.maxConcurrency),
-      requestsPerMinute: limitInputValue(key.requestsPerMinute),
-      dailyLimitUsd: limitInputValue(key.dailyLimitUsd),
-      weeklyLimitUsd: limitInputValue(key.weeklyLimitUsd),
-    }
+    form.value = apiKeyFormValue(key)
     showFormModal.value = true
   }
 
@@ -202,6 +171,41 @@ export function useApiKeyEditor(options: {
     clearCustomKey,
     requestSave,
     confirmAllAccountsScope,
+  }
+}
+
+export function apiKeyFormValue(key: ApiKey): ApiKeyFormValue {
+  const profiles = cloneDeep(key.providerRequestProfileOverrides)
+  const openai = profiles.openai
+  const identity = (openai?.inherit as Record<string, unknown> | undefined) ?? openai
+  const installationSeed = typeof identity?.installationSeed === 'string'
+    ? identity.installationSeed
+    : ''
+  const installationId = typeof identity?.installationId === 'string'
+    ? identity.installationId
+    : ''
+  if (openai?.inherit) {
+    delete profiles.openai
+  }
+  else if (openai) {
+    delete openai.installationId
+    delete openai.installationSeed
+  }
+  return {
+    identityPolicy: cloneDeep(key.identityPolicy ?? { mode: 'direct' }),
+    providerRequestProfileOverrides: profiles,
+    installationSeedEnabled: !!installationSeed,
+    installationSeed,
+    installationId,
+    portableHistory: key.portableHistory,
+    customKey: '',
+    name: key.name,
+    label: key.label ?? '',
+    groupIds: key.groups.map(group => group.id),
+    maxConcurrency: limitInputValue(key.maxConcurrency),
+    requestsPerMinute: limitInputValue(key.requestsPerMinute),
+    dailyLimitUsd: limitInputValue(key.dailyLimitUsd),
+    weeklyLimitUsd: limitInputValue(key.weeklyLimitUsd),
   }
 }
 

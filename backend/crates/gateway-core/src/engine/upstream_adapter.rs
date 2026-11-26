@@ -33,6 +33,16 @@ pub trait UpstreamAdapterPlan: fmt::Debug + Send + Sync {
         model: &UpstreamModelId,
         account: Option<&ProviderAccountId>,
     ) -> Result<UpstreamAdapterSelection, ProviderError>;
+
+    /// 只有已确认为原生执行的账号可用于原生模型替换；命中但不可用的适配器保留其拒绝语义
+    fn uses_native_upstream(
+        &self,
+        _route: super::ModelRouteScope<'_>,
+        _provider: &ProviderKind,
+        _account: &ProviderAccountId,
+    ) -> bool {
+        true
+    }
 }
 
 /// 未确定账号时不能把账号范围声明视为原生执行或继续命中后置兜底
@@ -60,6 +70,16 @@ impl FrozenUpstreamAdapterPlan {
             plan,
             _generation: generation,
         }
+    }
+
+    #[must_use]
+    pub fn uses_native_upstream(
+        &self,
+        route: super::ModelRouteScope<'_>,
+        provider: &ProviderKind,
+        account: &ProviderAccountId,
+    ) -> bool {
+        self.plan.uses_native_upstream(route, provider, account)
     }
 
     pub(super) fn select(

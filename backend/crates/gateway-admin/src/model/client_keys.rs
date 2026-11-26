@@ -218,6 +218,34 @@ pub struct UpdateClientKey {
     pub weekly_limit_usd: Option<gateway_core::metering::Decimal>,
 }
 
+/// 对各个密钥独立应用同一份局部设置
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BatchUpdateClientKeys {
+    pub ids: Vec<ClientApiKeyId>,
+    pub group_ids: Option<Vec<AccountGroupId>>,
+    pub enabled: Option<bool>,
+    pub max_concurrency: Option<u64>,
+    pub requests_per_minute: Option<u64>,
+    pub daily_limit_usd: Option<gateway_core::metering::Decimal>,
+    pub weekly_limit_usd: Option<gateway_core::metering::Decimal>,
+    pub request_profile_override_updates: ProviderRequestProfileOverrideUpdates,
+    pub installation_seed: Option<uuid::Uuid>,
+}
+
+impl BatchUpdateClientKeys {
+    #[must_use]
+    pub fn has_changes(&self) -> bool {
+        self.group_ids.is_some()
+            || self.enabled.is_some()
+            || self.max_concurrency.is_some()
+            || self.requests_per_minute.is_some()
+            || self.daily_limit_usd.is_some()
+            || self.weekly_limit_usd.is_some()
+            || !self.request_profile_override_updates.is_empty()
+            || self.installation_seed.is_some()
+    }
+}
+
 /// 修改 Client Key 启用状态
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetClientKeyEnabled {

@@ -3,11 +3,11 @@ import type { AccountModelAccess } from '@/api'
 
 import { ZButton, ZEmpty, ZFormItem, ZIconButton, ZInput, ZScrollbar, ZTag } from '@codex-proxy/ui'
 
-import { ListChecks, ListMinus, Plus, RefreshCw, Search } from '@lucide/vue'
+import { ImagePlus, ListChecks, ListMinus, Plus, RefreshCw, Search } from '@lucide/vue'
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { getAccountModels, refreshAccountModels } from '@/api'
 import { useRequestState } from '@/composables/useRequestState'
-import { accountModelAccessError, accountModelIdError } from '../utils/modelAccess'
+import { accountModelAccessError, accountModelIdError, commonImageModels } from '../utils/modelAccess'
 import AccountModelCleanupPopover from './AccountModelCleanupPopover.vue'
 import AccountModelOption from './AccountModelOption.vue'
 
@@ -50,6 +50,7 @@ const selectedModelIds = computed(() => {
     .filter(id => !blocked.has(id))
 })
 const selectedIds = computed(() => new Set(selectedModelIds.value))
+const allImageModelsSelected = computed(() => commonImageModels.every(id => selectedIds.value.has(id)))
 const selectedCount = computed(() => selectedModelIds.value.length)
 const selectionLimitReached = computed(() => selectedCount.value >= MODEL_LIMIT)
 const selectedModels = computed(() => {
@@ -273,6 +274,15 @@ watch(search, () => {
               <Plus class="size-4" aria-hidden="true" />
               添加模型
             </ZButton>
+            <ZIconButton
+              variant="plain"
+              aria-label="添加常用生图模型"
+              title="添加常用生图模型"
+              :disabled="disabled || !canEdit || allImageModelsSelected || selectionLimitReached"
+              @click="select(commonImageModels, true)"
+            >
+              <ImagePlus class="size-4" aria-hidden="true" />
+            </ZIconButton>
           </div>
           <p v-if="inputError" class="m-0 text-z-xs text-z-error-text" role="alert">
             {{ inputError }}

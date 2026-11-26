@@ -6,6 +6,7 @@ import type { Account, AccountGroupRef, AccountModelAccess } from '@/api'
 
 import { ZButton, ZDialog, ZEmpty, ZFormItem, ZInput, ZSegmented, ZTextarea } from '@codex-proxy/ui'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
+import HelpPopover from '@/components/HelpPopover.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { isOpenAiApiKeyAccount, isOpenAiOAuthAccount, isXaiApiKeyAccount } from '../utils/upstreamApiKey'
 import AccountApiKeyFields from './AccountApiKeyFields.vue'
@@ -98,14 +99,21 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
       </section>
 
       <ZFormItem v-if="account.provider === 'openai'" label="快速模式">
+        <template #label-extra>
+          <HelpPopover
+            label="快速模式说明"
+            content="默认跟随客户端。关闭会将加速请求降为标准档。选择快速或超快速时，若模型支持该档位，账号设置会覆盖客户端选择"
+          />
+        </template>
         <ZSegmented
           v-model="fastMode"
-          class="w-64 max-w-full"
+          class="w-80 max-w-full"
           aria-label="快速模式"
           :options="[
             { label: '跟随客户端', value: 'default' },
-            { label: '开启', value: 'enabled' },
             { label: '关闭', value: 'disabled' },
+            { label: '快速', value: 'enabled' },
+            { label: '超快速', value: 'ultrafast' },
           ]"
           :disabled="saving"
         />

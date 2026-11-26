@@ -48,6 +48,7 @@ pub enum PrivacyAction {
     SetValue,
     RenameKey,
     RemoveField,
+    AnonymizeProject,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,6 +118,7 @@ pub trait CompiledPrivacyPolicy: fmt::Debug + Send + Sync {
         body: &mut Value,
         headers: &mut http::HeaderMap,
         turn_metadata: &mut Option<String>,
+        session_scope: Option<&str>,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<PrivacyRuleOutcome>, PrivacyError>;
 }

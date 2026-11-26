@@ -18,6 +18,8 @@ defineProps<{
   saving: boolean
   testing: boolean
   verified: boolean
+  storageDirty: boolean
+  secretConfigured: boolean
 }>()
 
 const emit = defineEmits<{
@@ -53,8 +55,8 @@ function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageFo
       <div class="flex flex-wrap items-center gap-2">
         <ZButton
           :loading="testing"
-          :disabled="disabled"
-          :title="verified ? '已通过连接测试' : '尚未通过连接测试'"
+          :disabled="disabled || storageDirty"
+          :title="storageDirty ? '请先保存修改后再测试连接' : verified ? '已通过连接测试' : '尚未通过连接测试'"
           @click="emit('test')"
         >
           <template #icon>
@@ -113,6 +115,7 @@ function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageFo
           <ZInput
             :model-value="storage.secretAccessKey" :disabled="disabled"
             aria-label="Secret Access Key"
+            :placeholder="secretConfigured ? '留空保留已保存的密钥' : ''"
             show-password
             autocomplete="new-password"
             @update:model-value="updateStorage('secretAccessKey', $event)"

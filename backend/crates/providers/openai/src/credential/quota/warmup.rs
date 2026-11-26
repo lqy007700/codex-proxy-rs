@@ -110,7 +110,7 @@ impl CodexCredentialQuotaService {
         &self,
         model: &str,
     ) -> Result<CodexWarmupSummary, CodexCredentialQuotaError> {
-        let mut accounts = self.repository.list_for_provider().await?;
+        let mut accounts = self.repository.list_for_provider(false).await?;
         accounts.retain(|account| {
             account.authentication_kind() == crate::credential::CODEX_AUTHENTICATION_KIND_OAUTH
                 && account.enabled()
@@ -226,7 +226,10 @@ impl CodexCredentialQuotaService {
 
             let upstream_request = CodexResponsesRequest::from_body(body);
             let request_id = format!("warmup_{}", Uuid::now_v7().simple());
-            let client_for_account = match client.for_account(&account) {
+            let client_for_account = match credential
+                .authentication
+                .model_client_for_account(&client, &account)
+            {
                 Ok(c) => c,
                 Err(error) => {
                     tracing::warn!(account_id = %account.id(), error = %error, "warmup client for account failed");

@@ -23,6 +23,10 @@ export function detectRequestLocation(options: RequestOptions = {}) {
 
 export type AccountAffinity = 'relaxed' | 'preferred' | 'strict'
 
+export type OpenAiRequestCountry
+  = | { mode: 'default' | 'passthrough' | 'follow_location' }
+    | { mode: 'custom', country: string }
+
 export type RotationStrategy = 'smart' | 'quota_reset_priority' | 'round_robin' | 'sticky'
 
 export interface ResetWindowWeights { fiveHour: number, weekly: number, monthly: number }
@@ -50,6 +54,8 @@ export interface RuntimeSettings {
   codexPrivacyPolicy: CodexPrivacyPolicy
   requestLocationEnabled: boolean
   requestLocation: RequestLocation
+  openaiRequestCountry: OpenAiRequestCountry
+  openaiOauthGuardianReviewModel: boolean
   modelMappings: Record<string, string>
   refreshMarginSeconds: number
   refreshConcurrency: number

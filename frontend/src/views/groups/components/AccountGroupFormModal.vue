@@ -4,7 +4,9 @@ import type { AccountGroup } from '@/api'
 import { ZButton, ZColorPicker, ZDialog, ZForm, ZFormItem, ZInput, ZSegmented, ZTextarea } from '@codex-proxy/ui'
 
 import { computed } from 'vue'
+import HelpPopover from '@/components/HelpPopover.vue'
 import { ACCOUNT_GROUP_COLOR_PRESETS } from '../constants'
+import GroupModelAccessField from './GroupModelAccessField.vue'
 
 const props = defineProps<{
   group: AccountGroup | null
@@ -60,7 +62,31 @@ const description = computed(() => props.group
             @update:model-value="form.allowImageGeneration = $event === 'enabled'"
           />
         </ZFormItem>
+        <ZFormItem label="协作子代理" class="min-w-0">
+          <template #label-extra>
+            <HelpPopover
+              label="协作子代理说明"
+              content="启用后由客户端决定是否启动协作子代理。禁用会拒绝可识别的协作子代理请求"
+            />
+          </template>
+          <ZSegmented
+            :model-value="form.allowSubagents ? 'enabled' : 'disabled'"
+            class="w-40 max-w-full"
+            aria-label="协作子代理"
+            :options="[
+              { label: '开启', value: 'enabled' },
+              { label: '关闭', value: 'disabled' },
+            ]"
+            :disabled="saving"
+            @update:model-value="form.allowSubagents = $event === 'enabled'"
+          />
+        </ZFormItem>
       </div>
+      <GroupModelAccessField
+        v-model="form.modelAccess"
+        :group-id="group?.id ?? null"
+        :disabled="saving"
+      />
       <ZFormItem label="描述（可选）">
         <ZTextarea
           v-model="form.description"

@@ -39,6 +39,15 @@ impl ClientKeyStore for TestClientKeyStore {
         Err(unused())
     }
 
+    async fn batch_update_client_keys(
+        &self,
+        _: gateway_admin::model::client_keys::BatchUpdateClientKeys,
+        _: gateway_admin::ports::store::BatchClientKeyProfileMerger,
+        _: &MutationContext,
+    ) -> AdminStoreResult<Revision> {
+        Err(unused())
+    }
+
     async fn reset_client_key_budget(
         &self,
         command: gateway_admin::model::client_keys::ResetClientKeyBudget,

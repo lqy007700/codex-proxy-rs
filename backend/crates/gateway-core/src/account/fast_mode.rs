@@ -1,4 +1,4 @@
-//! Fast 三态策略
+//! 账号 Fast 四态策略
 
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +10,7 @@ pub enum FastMode {
     Default,
     Enabled,
     Disabled,
+    Ultrafast,
 }
 
 impl FastMode {
@@ -18,6 +19,7 @@ impl FastMode {
         match self {
             Self::Default => "default",
             Self::Enabled => "enabled",
+            Self::Ultrafast => "ultrafast",
             Self::Disabled => "disabled",
         }
     }
@@ -27,6 +29,7 @@ impl FastMode {
         match value {
             "default" => Some(Self::Default),
             "enabled" => Some(Self::Enabled),
+            "ultrafast" => Some(Self::Ultrafast),
             "disabled" => Some(Self::Disabled),
             _ => None,
         }

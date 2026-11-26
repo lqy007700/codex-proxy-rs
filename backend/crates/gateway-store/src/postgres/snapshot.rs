@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use gateway_core::account::{FastMode, ProviderAccountId};
+use gateway_core::account::{AccountModelAccess, FastMode, ProviderAccountId};
 use gateway_core::routing::{
     AccountGroupId, ConfigRevision,
     snapshot::{
@@ -32,6 +32,8 @@ pub struct RuntimeSnapshotData {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotAccountGroupData {
     pub allow_image_generation: bool,
+    pub allow_subagents: bool,
+    pub model_access: AccountModelAccess,
     pub id: AccountGroupId,
     pub name: String,
     pub enabled: bool,
@@ -42,6 +44,7 @@ pub struct SnapshotProviderAccountData {
     pub fast_mode: FastMode,
     pub id: String,
     pub provider_kind: String,
+    pub authentication_kind: String,
     pub model_access: gateway_core::account::AccountModelAccess,
     pub model_mappings: gateway_core::account::AccountModelMappings,
     pub scheduling_role: gateway_core::account::AccountSchedulingRole,
@@ -159,6 +162,8 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                 .map(|group| {
                     SnapshotAccountGroupFacts::new(group.id, group.name, group.enabled)
                         .with_image_generation(group.allow_image_generation)
+                        .with_subagents(group.allow_subagents)
+                        .with_model_access(group.model_access)
                 })
                 .collect();
             let provider_accounts = data
@@ -167,7 +172,9 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                 .map(|account| {
                     ProviderAccountId::new(account.id)
                         .map(|id| {
+                            let direct_account = account.authentication_kind == "oauth";
                             SnapshotProviderAccountFacts::new(id, account.provider_kind)
+                                .with_direct_account(direct_account)
                                 .with_scheduling_role(account.scheduling_role)
                                 .with_model_access(account.model_access)
                                 .with_fast_mode(account.fast_mode)
@@ -234,6 +241,8 @@ struct SnapshotSettingsRow {
     concurrency_wait_timeout_seconds: i64,
     max_retry_after_seconds: i64,
     openai_guardian_reserved_concurrency: i64,
+    openai_oauth_guardian_review_model: bool,
+    openai_request_country_json: sqlx::types::Json<gateway_core::account::OpenAiRequestCountry>,
     openai_account_affinity: String,
     max_account_rotations: i64,
     recovery_attempts: i64,
@@ -252,7 +261,7 @@ async fn load_settings(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<(Revision, SettingsValues)> {
     let row = sqlx::query_as::<_, SnapshotSettingsRow>(
-        "select config_revision, account_error_protection_revision, account_error_protection_json, max_concurrent_per_account, rotation_strategy, smart_scheduling_json, quota_reset_window_weights_json, model_mappings_json, min_codex_desktop_version, min_codex_cli_version, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours, request_location_json, request_location_enabled, codex_privacy_policy_json, responses_max_decompressed_body_bytes, provider_request_profiles_json, pricing_overrides_json, pricing_synced_json from runtime_settings where id = 1",
+        "select config_revision, account_error_protection_revision, account_error_protection_json, max_concurrent_per_account, rotation_strategy, smart_scheduling_json, quota_reset_window_weights_json, model_mappings_json, min_codex_desktop_version, min_codex_cli_version, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_oauth_guardian_review_model, openai_request_country_json, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours, request_location_json, request_location_enabled, codex_privacy_policy_json, responses_max_decompressed_body_bytes, provider_request_profiles_json, pricing_overrides_json, pricing_synced_json from runtime_settings where id = 1",
     )
     .fetch_optional(&mut **transaction)
     .await
@@ -277,6 +286,8 @@ async fn load_settings(
         .with_openai_guardian_reserved_concurrency(to_u32(
             row.openai_guardian_reserved_concurrency,
         )?)
+        .with_openai_oauth_guardian_review_model(row.openai_oauth_guardian_review_model)
+        .with_openai_request_country(row.openai_request_country_json.0)
         .with_openai_account_affinity(
             gateway_core::account::AccountAffinity::parse(&row.openai_account_affinity)
                 .ok_or_else(|| invalid("invalid account affinity"))?,
@@ -356,42 +367,77 @@ async fn load_client_keys(
 async fn load_account_groups(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<Vec<SnapshotAccountGroupData>> {
-    let rows = sqlx::query_as::<_, (String, String, bool, bool)>(
-        "select id, name, enabled, allow_image_generation from account_groups order by id",
+    let rows = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            bool,
+            bool,
+            bool,
+            sqlx::types::Json<AccountModelAccess>,
+        ),
+    >(
+        "select id, name, enabled, allow_image_generation, allow_subagents, model_access_json from account_groups order by id",
     )
     .fetch_all(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("load snapshot account groups", source))?;
     rows.into_iter()
-        .map(|(id, name, enabled, allow_image_generation)| {
-            Ok(SnapshotAccountGroupData {
-                allow_image_generation,
-                id: AccountGroupId::new(id)
-                    .map_err(|source| invalid("invalid account group id").with_source(source))?,
-                name,
-                enabled,
-            })
-        })
+        .map(
+            |(id, name, enabled, allow_image_generation, allow_subagents, model_access)| {
+                Ok(SnapshotAccountGroupData {
+                    allow_image_generation,
+                    allow_subagents,
+                    model_access: model_access.0,
+                    id: AccountGroupId::new(id).map_err(|source| {
+                        invalid("invalid account group id").with_source(source)
+                    })?,
+                    name,
+                    enabled,
+                })
+            },
+        )
         .collect()
 }
 
 async fn load_provider_accounts(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<Vec<SnapshotProviderAccountData>> {
-    let rows = sqlx::query_as::<_, (String, String, sqlx::types::Json<gateway_core::account::AccountModelAccess>, sqlx::types::Json<gateway_core::account::AccountModelMappings>, String, String)>(
-        "select id, provider_kind, model_access_json, model_mappings_json, scheduling_role, fast_mode from provider_accounts order by id",
+    let rows = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            String,
+            sqlx::types::Json<gateway_core::account::AccountModelAccess>,
+            sqlx::types::Json<gateway_core::account::AccountModelMappings>,
+            String,
+            String,
+        ),
+    >(
+        "select id, provider_kind, authentication_kind, model_access_json, model_mappings_json, scheduling_role, fast_mode from provider_accounts order by id",
     )
     .fetch_all(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("load snapshot provider accounts", source))?;
     rows.into_iter()
         .map(
-            |(id, provider_kind, model_access, model_mappings, role, fast_mode)| {
+            |(
+                id,
+                provider_kind,
+                authentication_kind,
+                model_access,
+                model_mappings,
+                role,
+                fast_mode,
+            )| {
                 let scheduling_role = gateway_core::account::AccountSchedulingRole::parse(&role)
                     .ok_or_else(|| invalid("invalid scheduling_role"))?;
                 Ok(SnapshotProviderAccountData {
                     id,
                     provider_kind,
+                    authentication_kind,
                     model_access: model_access.0,
                     fast_mode: FastMode::parse(&fast_mode)
                         .ok_or_else(|| invalid("invalid fast_mode"))?,

@@ -135,14 +135,24 @@ pub(crate) fn derive_codex_session_affinity(
     request: &CodexResponsesRequest,
     client_api_key_id: &(impl AsRef<str> + ?Sized),
 ) -> Option<CodexSessionAffinity> {
-    let session_id = non_empty(request.client_account_session_id.as_deref())?;
+    root_session_affinity(
+        request.client_account_session_id.as_deref(),
+        client_api_key_id,
+    )
+    .map(|affinity| affinity.with_follow_only(request.client_account_follow_only))
+}
+
+pub(crate) fn root_session_affinity(
+    session_id: Option<&str>,
+    client_api_key_id: &(impl AsRef<str> + ?Sized),
+) -> Option<CodexSessionAffinity> {
+    let session_id = non_empty(session_id)?;
     session_affinity(
         "root-session",
         session_id.to_owned(),
         Some(session_id.to_owned()),
         client_api_key_id,
     )
-    .map(|affinity| affinity.with_follow_only(request.client_account_follow_only))
 }
 
 /// Messages 会话只参与账号绑定，不作为 OpenAI 轮次或续接身份

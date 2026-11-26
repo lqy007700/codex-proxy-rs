@@ -1,6 +1,6 @@
 import type { ProtectionDraft } from '../components/error-protection/form'
 import type { rotationOptions } from '../constants'
-import type { AccountAffinity, CodexPrivacyPolicy, ResetWindowWeights, SmartSchedulingConfig } from '@/api'
+import type { AccountAffinity, CodexPrivacyPolicy, OpenAiRequestCountry, ResetWindowWeights, SmartSchedulingConfig } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
 import { cloneDeep, isEqual } from 'es-toolkit'
 import { computed, onScopeDispose, reactive, ref, shallowRef } from 'vue'
@@ -42,6 +42,8 @@ export function useSettingsForm() {
       city: '',
       timezone: '',
     },
+    openaiRequestCountry: { mode: 'follow_location' } as OpenAiRequestCountry,
+    openaiOauthGuardianReviewModel: true,
     refreshMarginSeconds: null as number | null,
     refreshConcurrency: null as number | null,
     maxConcurrentPerAccount: null as number | null,
@@ -146,6 +148,8 @@ export function useSettingsForm() {
     form.configRevision = data.configRevision
     form.requestLocationEnabled = data.requestLocationEnabled
     form.requestLocation = { ...data.requestLocation }
+    form.openaiRequestCountry = { ...data.openaiRequestCountry }
+    form.openaiOauthGuardianReviewModel = data.openaiOauthGuardianReviewModel
     form.refreshMarginSeconds = data.refreshMarginSeconds
     form.refreshConcurrency = data.refreshConcurrency
     form.maxConcurrentPerAccount = data.maxConcurrentPerAccount
@@ -351,6 +355,16 @@ export function useSettingsForm() {
       ZNotification.warning({ message: locationError })
       return
     }
+    const openaiRequestCountry: OpenAiRequestCountry = form.openaiRequestCountry.mode === 'custom'
+      ? {
+          mode: 'custom',
+          country: form.openaiRequestCountry.country.trim().toUpperCase(),
+        }
+      : { mode: form.openaiRequestCountry.mode }
+    if (openaiRequestCountry.mode === 'custom' && !/^[A-Z]{2}$/.test(openaiRequestCountry.country)) {
+      ZNotification.warning({ message: '自定义国家代码需为两位字母，例如 US' })
+      return
+    }
     const protectionError = protectionSettingsError(form.accountErrorProtection)
     if (protectionError) {
       ZNotification.warning({ message: protectionError })
@@ -363,16 +377,16 @@ export function useSettingsForm() {
       return
     }
     if (new TextEncoder().encode(cron).length > 255) {
-      ZNotification.warning({ message: '预激活规则总长度不能超过 255 字节' })
+      ZNotification.warning({ message: '定时预热规则总长度不能超过 255 字节' })
       return
     }
     const warmupModel = form.accountWarmupModel.trim()
     if (form.accountWarmupEnabled && !warmupModel) {
-      ZNotification.warning({ message: '启用预激活时请选择模型' })
+      ZNotification.warning({ message: '启用定时预热时请选择模型' })
       return
     }
     if (warmupModel.length > 128) {
-      ZNotification.warning({ message: '预激活模型名称不能超过 128 个字符' })
+      ZNotification.warning({ message: '预热模型名称不能超过 128 个字符' })
       return
     }
     await saveAction.run(async () => {
@@ -385,6 +399,8 @@ export function useSettingsForm() {
         codexPrivacyPolicy: cloneDeep(form.codexPrivacyPolicy),
         requestLocationEnabled: form.requestLocationEnabled,
         requestLocation,
+        openaiRequestCountry,
+        openaiOauthGuardianReviewModel: form.openaiOauthGuardianReviewModel,
         modelMappings: mappingPayload(),
         refreshMarginSeconds,
         refreshConcurrency,

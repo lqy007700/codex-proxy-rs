@@ -40,6 +40,7 @@ pub async fn initialize(
         pricing_source,
         providers,
         snapshot,
+        published_snapshot,
         account_probe: probe,
         proxy_probe,
         client_distribution,
@@ -136,6 +137,7 @@ pub async fn initialize(
             store.account_groups(),
             store.account_runtime(),
             snapshot.clone(),
+            published_snapshot,
         )),
         affinity,
         client_keys: Arc::new(DefaultClientKeyService::new(

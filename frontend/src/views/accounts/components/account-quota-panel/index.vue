@@ -26,13 +26,13 @@ const emit = defineEmits<{
 }>()
 
 const quotaEntries = computed(() => groupedAccountQuotaWindows(
-  orderedPanelQuotaWindows(props.account.quota.windows),
+  orderedPanelQuotaWindows(props.account.quota.windows.filter(window => window.accountWide)),
 ))
 const profileOpen = shallowRef(false)
 const forecastOpen = shallowRef(false)
 const hasForecast = computed(() => props.account.authenticationKind !== 'api_key')
 const hasPersonalInfo = computed(() => props.account.capabilities.profile || props.account.capabilities.subscription)
-const canRefresh = computed(() => props.account.enabled && props.account.capabilities.quotaRefresh)
+const canRefresh = computed(() => props.account.capabilities.quotaRefresh)
 const hasActions = computed(() => hasPersonalInfo.value || hasForecast.value || canRefresh.value || props.account.capabilities.resetCredits || props.account.capabilities.quotaLimitsSupported)
 watch(hasPersonalInfo, (available) => {
   if (!available)

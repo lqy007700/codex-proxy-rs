@@ -134,7 +134,7 @@ export interface AccountModelAccess {
   models: string[]
 }
 
-export type FastMode = 'default' | 'enabled' | 'disabled'
+export type FastMode = 'default' | 'enabled' | 'disabled' | 'ultrafast'
 
 export interface Account {
   quotaLimits: Record<string, number>

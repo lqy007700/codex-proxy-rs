@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ZCard, ZCheckbox, ZConfirmDialog, ZPagination, ZTable } from '@codex-proxy/ui'
-import { ImageOff } from '@lucide/vue'
+import { BotOff, Filter, ImageOff } from '@lucide/vue'
 import AppPageHeader from '@/components/AppPageHeader.vue'
 import { usePageSelection } from '@/composables/usePageSelection'
 import AccountGroupActions from './components/AccountGroupActions.vue'
@@ -106,6 +106,24 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
                     aria-label="生图已关闭"
                   >
                     <ImageOff class="size-3" stroke-width="2.2" aria-hidden="true" />
+                  </span>
+                  <span
+                    v-if="!row.allowSubagents"
+                    class="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-z-fill-tertiary text-z-text-tertiary"
+                    title="协作子代理已关闭"
+                    role="img"
+                    aria-label="协作子代理已关闭"
+                  >
+                    <BotOff class="size-3" stroke-width="2.2" aria-hidden="true" />
+                  </span>
+                  <span
+                    v-if="row.modelAccess.mode !== 'all'"
+                    class="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-z-fill-tertiary text-z-text-tertiary"
+                    :title="row.modelAccess.mode === 'allowlist' ? '已配置模型白名单' : '已配置模型黑名单'"
+                    role="img"
+                    :aria-label="row.modelAccess.mode === 'allowlist' ? '已配置模型白名单' : '已配置模型黑名单'"
+                  >
+                    <Filter class="size-3" stroke-width="2.2" aria-hidden="true" />
                   </span>
                 </div>
                 <span v-if="row.description" class="truncate text-z-xs font-emphasis text-z-text-quaternary">

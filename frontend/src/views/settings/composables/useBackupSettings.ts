@@ -20,9 +20,10 @@ export function useBackupSettings() {
   const loaded = shallowRef(false)
 
   let storageRevision = 0
-  const verified = shallowRef(false)
+  const savedVerified = shallowRef(false)
+  const secretConfigured = shallowRef(false)
 
-  // 存储表单；secretAccessKey 由 GET 回填，保存时始终整体提交。
+  // 存储表单；secretAccessKey 不回填明文，留空保存时保留已存密钥。
   const storage = ref({
     endpoint: '',
     region: 'auto',
@@ -42,7 +43,9 @@ export function useBackupSettings() {
 
   const savedStorage = shallowRef({ ...storage.value })
   const savedSchedule = shallowRef({ ...schedule.value })
-  const hasChanges = computed(() => loaded.value && (!isEqual(storage.value, savedStorage.value) || !isEqual(schedule.value, savedSchedule.value)))
+  const storageDirty = computed(() => !isEqual(storage.value, savedStorage.value))
+  const verified = computed(() => !storageDirty.value && savedVerified.value)
+  const hasChanges = computed(() => loaded.value && (storageDirty.value || !isEqual(schedule.value, savedSchedule.value)))
 
   async function load(): Promise<void> {
     if (loaded.value || busy.value)
@@ -62,13 +65,14 @@ export function useBackupSettings() {
 
   function applyStorage(data: BackupSettingsView): void {
     storageRevision = data.storageRevision
-    verified.value = data.verified
+    savedVerified.value = data.verified
+    secretConfigured.value = data.secretConfigured
     storage.value = {
       endpoint: data.endpoint ?? '',
       region: data.region ?? 'auto',
       bucket: data.bucket ?? '',
       accessKeyId: data.accessKeyId ?? '',
-      secretAccessKey: data.secretAccessKey ?? '',
+      secretAccessKey: '',
       prefix: data.prefix ?? 'backups/',
       forcePathStyle: data.forcePathStyle,
     }
@@ -87,11 +91,12 @@ export function useBackupSettings() {
 
   function storagePayload(): UpdateBackupStoragePayload {
     return {
+      storageRevision,
       endpoint: storage.value.endpoint.trim(),
       region: storage.value.region.trim(),
       bucket: storage.value.bucket.trim(),
       accessKeyId: storage.value.accessKeyId.trim(),
-      secretAccessKey: storage.value.secretAccessKey.trim(),
+      secretAccessKey: storage.value.secretAccessKey.trim() || undefined,
       prefix: storage.value.prefix.trim(),
       forcePathStyle: storage.value.forcePathStyle,
     }
@@ -125,22 +130,21 @@ export function useBackupSettings() {
   }
 
   async function runTest(): Promise<void> {
-    if (busy.value || !loaded.value)
+    if (busy.value || !loaded.value || storageDirty.value)
       return
     testing.value = true
     try {
-      const result = await testBackupStorage()
-      if (result.ok) {
-        verified.value = true
+      const result = await testBackupStorage(storageRevision)
+      savedVerified.value = result.ok && result.storageRevision === storageRevision
+      if (savedVerified.value) {
         ZNotification.success({ message: '连接测试通过' })
       }
       else {
-        verified.value = false
         ZNotification.error({ message: `${result.stage}: ${result.message}` })
       }
     }
     catch {
-      verified.value = false
+      savedVerified.value = false
     }
     finally {
       testing.value = false
@@ -153,6 +157,7 @@ export function useBackupSettings() {
     savingSchedule.value = true
     try {
       const data = await updateBackupSchedule({
+        storageRevision,
         scheduleEnabled: schedule.value.scheduleEnabled,
         cronExpression: schedule.value.cronExpression.trim(),
         retentionDays: Number(schedule.value.retentionDays) || 0,
@@ -179,6 +184,8 @@ export function useBackupSettings() {
     loaded,
     hasChanges,
     verified,
+    storageDirty,
+    secretConfigured,
     storage,
     schedule,
     load,

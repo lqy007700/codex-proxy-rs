@@ -154,7 +154,7 @@ pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResul
                     refresh_concurrency, max_concurrent_per_account,
                     rotation_strategy, smart_scheduling_json, quota_reset_window_weights_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                     audit_retention_days, min_codex_desktop_version,
-                    min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
+                    min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_oauth_guardian_review_model, openai_request_country_json, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
                     account_error_protection_json, account_error_protection_revision,
                     account_warmup_enabled, account_warmup_cron, account_warmup_model, reset_credit_lead_minutes, reset_credit_max_weekly_remaining_percent
              from runtime_settings where id = 1",
@@ -231,6 +231,7 @@ impl ProviderRuntimePolicyPort for PgRuntimeSettingsRepository {
                 "update runtime_settings set
                     provider_request_profiles_json = case when provider_request_profiles_json ? $1 then provider_request_profiles_json
                         else jsonb_set(provider_request_profiles_json, array[$1], $2) end,
+                    settings_revision = case when provider_request_profiles_json ? $1 then settings_revision else config_revision + 1 end,
                     config_revision = config_revision + case when provider_request_profiles_json ? $1 then 0 else 1 end
                  where id = 1 returning provider_request_profiles_json -> $1"
             )
@@ -334,7 +335,7 @@ pub(crate) async fn load_runtime_settings_in_transaction(
                 refresh_concurrency, max_concurrent_per_account,
                 rotation_strategy, smart_scheduling_json, quota_reset_window_weights_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                 audit_retention_days, min_codex_desktop_version,
-                min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
+                min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_oauth_guardian_review_model, openai_request_country_json, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
                 account_error_protection_json, account_error_protection_revision,
                 account_warmup_enabled, account_warmup_cron, account_warmup_model, reset_credit_lead_minutes, reset_credit_max_weekly_remaining_percent
          from runtime_settings where id = 1",
@@ -384,6 +385,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     let next = sqlx::query_scalar::<_, i64>(
         "update runtime_settings
              set config_revision = config_revision + 1,
+                 settings_revision = config_revision + 1,
 	                 refresh_margin_seconds = $1,
 	                 refresh_concurrency = $2,
 	                 max_concurrent_per_account = $3,
@@ -418,6 +420,8 @@ pub(crate) async fn update_runtime_settings_in_transaction(
                      max_retry_after_seconds = $32,
                      recovery_rotation_attempts = coalesce($33, recovery_rotation_attempts),
                      quota_reset_window_weights_json = coalesce($34, quota_reset_window_weights_json),
+                     openai_oauth_guardian_review_model = $35,
+                     openai_request_country_json = $36,
 	                 updated_at = now()
 	             where id = 1
 	             returning config_revision",
@@ -464,6 +468,8 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     .bind(i64::from(update.values.max_retry_after_seconds))
     .bind(update.values.recovery_rotation_attempts.map(i64::from))
     .bind(update.values.quota_reset_window_weights.map(sqlx::types::Json))
+    .bind(update.values.openai_oauth_guardian_review_model)
+    .bind(sqlx::types::Json(&update.values.openai_request_country))
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("update runtime settings in transaction", source))?
@@ -554,6 +560,8 @@ struct RuntimeSettingsRow {
     concurrency_wait_timeout_seconds: i64,
     max_retry_after_seconds: i64,
     openai_guardian_reserved_concurrency: i64,
+    openai_oauth_guardian_review_model: bool,
+    openai_request_country_json: sqlx::types::Json<gateway_core::account::OpenAiRequestCountry>,
     openai_account_affinity: String,
     max_account_rotations: i64,
     recovery_attempts: i64,
@@ -594,6 +602,8 @@ fn runtime_settings_from_row(row: RuntimeSettingsRow) -> StoreResult<RuntimeSett
         model_mappings: row.model_mappings_json.0,
         updated_at: row.updated_at,
         values: gateway_admin::model::settings::RuntimeSettingsValues {
+            openai_oauth_guardian_review_model: row.openai_oauth_guardian_review_model,
+            openai_request_country: row.openai_request_country_json.0,
             refresh_margin_seconds: to_u64(row.refresh_margin_seconds)?,
             refresh_concurrency: to_u32(row.refresh_concurrency)?,
             max_concurrent_per_account: to_u32(row.max_concurrent_per_account)?,

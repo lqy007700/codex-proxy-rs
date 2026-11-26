@@ -175,9 +175,10 @@ async fn failed_delete_probe_does_not_refresh_verification() {
             ))
             .build()
             .await;
+        let revision = repository.load_settings().await.unwrap().storage_revision;
         let result = services
             .backups()
-            .test_connection(&system_context())
+            .test_connection(&system_context(), revision)
             .await
             .unwrap();
         assert_eq!(result.ok, succeeds);

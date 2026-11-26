@@ -324,6 +324,8 @@ fn group_record() -> AccountGroupRecord {
     let now = Utc::now();
     AccountGroupRecord {
         allow_image_generation: true,
+        allow_subagents: true,
+        model_access: Default::default(),
         id: group_id(),
         name: "Primary".to_owned(),
         description: None,
@@ -398,6 +400,8 @@ async fn invalid_group_fields_are_rejected_before_store_mutations() {
             &context,
             CreateAccountGroup {
                 allow_image_generation: true,
+                allow_subagents: true,
+                model_access: Default::default(),
                 name: " invalid".to_owned(),
                 description: None,
                 color: record.color.clone(),
@@ -411,6 +415,8 @@ async fn invalid_group_fields_are_rejected_before_store_mutations() {
             &context,
             UpdateAccountGroup {
                 allow_image_generation: None,
+                allow_subagents: None,
+                model_access: None,
                 id: record.id,
                 name: "valid".to_owned(),
                 description: Some("invalid\n".to_owned()),

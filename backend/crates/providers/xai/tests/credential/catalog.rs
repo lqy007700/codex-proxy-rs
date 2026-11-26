@@ -142,7 +142,7 @@ async fn catalog_query_caches_each_plan_and_returns_strict_union() {
     assert_eq!(service.catalog_generation().get(), 1);
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].request_model().as_str(), "grok-4.5");
+    assert_eq!(models[0].0.request_model().as_str(), "grok-4.5");
     let account = store
         .account(&account_id("catalog-a"))
         .expect("created account");
@@ -467,7 +467,7 @@ async fn failed_plan_scope_is_skipped_and_surviving_plans_still_cache() {
         .expect("surviving plan still refreshes the catalog");
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].request_model().as_str(), "grok-4.5");
+    assert_eq!(models[0].0.request_model().as_str(), "grok-4.5");
     assert_eq!(transport.calls(), 2);
     let standard = store
         .account(&account_id("plan-standard"))

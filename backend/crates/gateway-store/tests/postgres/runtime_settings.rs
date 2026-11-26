@@ -25,6 +25,8 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
             codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: Default::default(),
+            openai_request_country: Default::default(),
+            openai_oauth_guardian_review_model: true,
             refresh_margin_seconds,
             refresh_concurrency: 2,
             max_concurrent_per_account: 3,

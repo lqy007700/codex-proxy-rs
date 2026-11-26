@@ -11,7 +11,7 @@ pub mod coordinator;
 pub mod effects;
 pub mod execution;
 pub mod extensions;
-mod image_generation;
+mod group_permissions;
 pub mod middleware;
 pub mod observation;
 pub mod policy;
@@ -308,6 +308,15 @@ impl ContinuationAttempt {
     }
 }
 
+/// 插件模型绑定使用同一组 Key、分组、调用链与模型事实
+#[derive(Clone, Copy)]
+pub struct ModelRouteScope<'a> {
+    pub client_api_key: &'a crate::policy::ClientApiKeyId,
+    pub account_groups: &'a [crate::routing::AccountGroupId],
+    pub extensions: &'a extensions::ExtensionCallScope,
+    pub model: &'a str,
+}
+
 /// Provider 每次执行可见的 request-local context
 #[derive(Debug, Clone)]
 pub struct RequestAttemptContext {
@@ -318,6 +327,7 @@ pub struct RequestAttemptContext {
     pricing: Arc<crate::metering::PricingOverrides>,
     request_profile: Option<crate::account::OpaqueProviderData>,
     fast_mode: FastMode,
+    openai_request_country: crate::account::OpenAiRequestCountry,
     request_location: Option<crate::account::RequestLocation>,
     privacy: Option<Arc<dyn crate::settings::privacy::CompiledPrivacyPolicy>>,
     request_id: ModelRequestId,
@@ -430,6 +440,15 @@ impl RequestAttemptContext {
     }
 
     #[must_use]
+    pub fn with_openai_request_country(
+        mut self,
+        country: crate::account::OpenAiRequestCountry,
+    ) -> Self {
+        self.openai_request_country = country;
+        self
+    }
+
+    #[must_use]
     pub fn with_request_location(
         mut self,
         location: Option<crate::account::RequestLocation>,
@@ -452,6 +471,7 @@ impl RequestAttemptContext {
             request_profile: None,
             pricing: Arc::default(),
             fast_mode: FastMode::Default,
+            openai_request_country: Default::default(),
             request_location: None,
             privacy: None,
             timing_started_at: Instant::now(),
@@ -793,6 +813,11 @@ impl AttemptContext {
         self.request.request_location.as_ref()
     }
 
+    #[must_use]
+    pub const fn openai_request_country(&self) -> &crate::account::OpenAiRequestCountry {
+        &self.request.openai_request_country
+    }
+
     /// 当前 attempt 的诊断关联；克隆后可传给后台 transport 任务
     #[must_use]
     pub fn trace(&self) -> crate::diagnostics::TraceContext {
@@ -901,19 +926,15 @@ impl AttemptContext {
         terminal: provider::ProviderMiddlewareTerminal,
     ) -> Result<provider::ProviderStream, ProviderError> {
         // 入口已校验原请求，此处复查中间件最终提交的 operation，每次重试均生效
-        let terminal: provider::ProviderMiddlewareTerminal = if self
+        let terminal: provider::ProviderMiddlewareTerminal = if let Some(scope) = self
             .account_scope()
-            .is_some_and(|scope| !scope.allows_image_generation())
+            .filter(|scope| !scope.allows_image_generation() || !scope.allows_subagents())
         {
+            let scope = Arc::clone(scope);
             Box::new(move |operation, headers| {
                 Box::pin(async move {
-                    image_generation::check_image_generation(false, &operation).map_err(|_| {
-                        ProviderError::new(
-                            ProviderErrorKind::RequestPolicyDenied,
-                            UpstreamSendState::NotSent,
-                        )
-                        .with_retry_prohibited()
-                    })?;
+                    group_permissions::check_group_permissions(&scope, &operation, &headers)
+                        .map_err(ProviderError::group_feature_denied)?;
                     terminal(operation, headers).await
                 })
             })

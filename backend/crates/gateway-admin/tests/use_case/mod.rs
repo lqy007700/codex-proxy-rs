@@ -264,6 +264,7 @@ impl AdminHarness {
                 )
                 .unwrap(),
                 snapshot: Arc::new(NoopSnapshot),
+                published_snapshot: Default::default(),
                 account_probe: self.probe,
                 proxy_probe: self.proxy_probe,
                 client_distribution: Arc::new(NoopClientDistribution),
@@ -697,6 +698,15 @@ impl ClientKeyStore for UnavailableStore {
         Err(unavailable("client key update"))
     }
 
+    async fn batch_update_client_keys(
+        &self,
+        _: gateway_admin::model::client_keys::BatchUpdateClientKeys,
+        _: gateway_admin::ports::store::BatchClientKeyProfileMerger,
+        _: &MutationContext,
+    ) -> AdminStoreResult<Revision> {
+        Err(unavailable("client key batch update"))
+    }
+
     async fn set_client_key_enabled(
         &self,
         _: SetClientKeyEnabled,
@@ -742,6 +752,23 @@ impl ObservabilityStore for UnavailableStore {
         _: Granularity,
     ) -> AdminStoreResult<Vec<RequestMetricPoint>> {
         Err(unavailable("dashboard trend"))
+    }
+
+    async fn client_key_statistics(
+        &self,
+        _: TimeRange,
+        _: &ClientApiKeyId,
+        _: gateway_admin::model::observability::KeyUsageMetric,
+    ) -> AdminStoreResult<gateway_admin::model::observability::KeyStatisticsOverview> {
+        Err(unavailable("client key statistics"))
+    }
+
+    async fn client_key_models(
+        &self,
+        _: TimeRange,
+        _: &ClientApiKeyId,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::observability::KeyModelRow>> {
+        Err(unavailable("client key models"))
     }
 
     async fn usage_trend(

@@ -8,6 +8,7 @@ import { actions, fieldsByScope, scopes } from './presets'
 const step = defineModel<PrivacyStep>({ required: true })
 const fixedValue = defineModel<string>('fixedValue', { required: true })
 const fieldPresetId = useId()
+const anonymizesProject = computed(() => step.value.action === 'anonymize_project')
 const usesPattern = computed(() => ['regex_replace', 'rename_key'].includes(step.value.action) || (step.value.action === 'remove_field' && step.value.pattern !== null))
 const pattern = computed({
   get: () => step.value.pattern ?? '',
@@ -39,17 +40,24 @@ const selectorPlaceholder = computed(() => ({
 })[step.value.scope])
 
 watch(() => step.value.action, (action) => {
-  if (action === 'set_value')
+  if (action === 'anonymize_project') {
+    step.value.scope = 'turn_metadata'
+    step.value.selector = '$.workspaces'
     step.value.pattern = null
-  else if (action !== 'remove_field' && step.value.pattern === null)
+  }
+  else if (action === 'set_value') {
+    step.value.pattern = null
+  }
+  else if (action !== 'remove_field' && step.value.pattern === null) {
     step.value.pattern = ''
+  }
 })
 </script>
 
 <template>
   <ZForm class="sm:grid-cols-2">
     <ZFormItem class="md:[&>div:first-child]:min-h-8" label="作用范围">
-      <ZSelect v-model="step.scope" class="w-full" :options="scopes" aria-label="作用范围" />
+      <ZSelect v-model="step.scope" class="w-full" :options="scopes" :disabled="anonymizesProject" aria-label="作用范围" />
     </ZFormItem>
     <ZFormItem class="md:[&>div:first-child]:min-h-8" label="处理方式">
       <ZSelect v-model="step.action" class="w-full" :options="actions" aria-label="处理方式" />
@@ -68,8 +76,8 @@ watch(() => step.value.action, (action) => {
         </ZPopover>
       </template>
       <div class="flex flex-wrap items-center gap-2 sm:flex-nowrap">
-        <ZInput v-model="step.selector" :placeholder="selectorPlaceholder" aria-label="字段路径" maxlength="1024" class="min-w-0 flex-1 font-mono" :class="fields.length ? 'basis-full sm:basis-auto' : undefined" spellcheck="false" />
-        <ZSelect v-if="fields.length" :id="fieldPresetId" v-model="fieldChoice" class="min-w-0 flex-1 sm:w-40 sm:flex-none" :options="fields" aria-label="常用字段" />
+        <ZInput v-model="step.selector" :disabled="anonymizesProject" :placeholder="selectorPlaceholder" aria-label="字段路径" maxlength="1024" class="min-w-0 flex-1 font-mono" :class="fields.length ? 'basis-full sm:basis-auto' : undefined" spellcheck="false" />
+        <ZSelect v-if="fields.length" :id="fieldPresetId" v-model="fieldChoice" :disabled="anonymizesProject" class="min-w-0 flex-1 sm:w-40 sm:flex-none" :options="fields" aria-label="常用字段" />
       </div>
     </ZFormItem>
     <ZCheckbox v-if="step.action === 'remove_field'" v-model="conditional" class="sm:col-span-2" label="仅删除值匹配正则的字段或数组项" />

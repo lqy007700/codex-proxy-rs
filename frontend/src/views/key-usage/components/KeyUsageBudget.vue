@@ -5,7 +5,7 @@ import { Clock3, Gauge, Network } from '@lucide/vue'
 import { computed } from 'vue'
 import { money } from '../utils/format'
 
-const props = defineProps<{ budget: KeyUsageBudget }>()
+const props = defineProps<{ budget: KeyUsageBudget, compact?: boolean }>()
 const windows = computed(() => [
   {
     label: '今日额度',
@@ -32,7 +32,7 @@ const windows = computed(() => [
 </script>
 
 <template>
-  <ZCard title="额度概览">
+  <component :is="compact ? 'div' : ZCard" v-bind="compact ? { class: 'flex flex-1 flex-col' } : { title: '额度概览' }">
     <div class="flex flex-1 flex-col justify-between gap-6">
       <div class="grid flex-1 gap-6 sm:grid-cols-2">
         <div v-for="window in windows" :key="window.label" class="flex min-w-0 flex-col justify-between gap-4">
@@ -60,13 +60,13 @@ const windows = computed(() => [
         </div>
       </div>
       <div class="grid grid-cols-2 gap-3">
-        <div class="flex items-center justify-between gap-2 rounded-z bg-z-fill-quaternary p-3 text-z-xs text-z-text-secondary">
+        <div class="flex items-center justify-between gap-2 text-z-xs text-z-text-secondary" :class="{ 'rounded-z bg-z-fill-quaternary p-3': !compact }">
           <span class="flex items-center gap-1.5 leading-none"><Network class="size-3.5 shrink-0 -translate-y-px" />并发上限</span><strong class="font-mono">{{ budget.maxConcurrency || '∞' }}</strong>
         </div>
-        <div class="flex items-center justify-between gap-2 rounded-z bg-z-fill-quaternary p-3 text-z-xs text-z-text-secondary">
+        <div class="flex items-center justify-between gap-2 text-z-xs text-z-text-secondary" :class="{ 'rounded-z bg-z-fill-quaternary p-3': !compact }">
           <span class="flex items-center gap-1.5 leading-none"><Gauge class="size-3.5 shrink-0 -translate-y-px" />每分钟请求</span><strong class="font-mono">{{ budget.requestsPerMinute || '∞' }}</strong>
         </div>
       </div>
     </div>
-  </ZCard>
+  </component>
 </template>

@@ -1172,6 +1172,28 @@ impl fmt::Debug for ProviderRequest {
 /// 新的 attempt 再次调用
 #[async_trait]
 pub trait Provider: Send + Sync {
+    /// 请求身份明确时，Provider 可以为自身直连账号声明实际模型；Core 按该模型鉴权并冻结重试范围
+    fn direct_account_model(
+        &self,
+        _model: &PublicModelId,
+        _operation: &Operation,
+        _previous: Option<&crate::operation::ProviderSessionState>,
+        _settings: &crate::settings::SettingsValues,
+    ) -> Option<UpstreamModelId> {
+        None
+    }
+
+    /// 自动替换模型前校验必须跟随的会话账号是否在候选范围内
+    async fn allows_direct_model_scope(
+        &self,
+        _operation: &Operation,
+        _caller: &crate::policy::CallerIdentity,
+        _scope: &crate::routing::FrozenAccountScope,
+        _policy: crate::account::AccountSelectionPolicy,
+    ) -> Result<bool, ProviderError> {
+        Ok(true)
+    }
+
     /// Provider 解释自己的隐私规则，Core 仅冻结编译结果
     fn compile_privacy_policy(
         &self,

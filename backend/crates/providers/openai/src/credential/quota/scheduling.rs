@@ -340,7 +340,11 @@ fn quota_refresh_candidate(
         return None;
     }
     if account.quota().is_exhausted() {
-        let reset_at = account.quota().reset_at();
+        let state = account.quota();
+        let reset_at = state.reset_at().or_else(|| {
+            let at = SystemTime::from(snapshot?.denied_window(state)?.reset_at()?);
+            (at > state.observed_at()?).then_some(at)
+        });
         return Some((account, reset_at));
     }
     // 正常账号首次进入周期候选也要等待宽限期，不能由“无刷新历史”绕过
@@ -429,7 +433,7 @@ fn insert_projection_entry(
 }
 
 fn eligible_periodic_quota_refresh(account: &ProviderAccount, now: SystemTime) -> bool {
-    account.enabled() && access_token_is_current(account, now)
+    access_token_is_current(account, now)
 }
 
 fn eligible_initial_quota_sync(account: &ProviderAccount, now: SystemTime) -> bool {

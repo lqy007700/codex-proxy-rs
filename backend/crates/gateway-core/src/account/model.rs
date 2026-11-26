@@ -429,6 +429,7 @@ pub struct QuotaState {
     evidence: Option<QuotaEvidence>,
     observed_at: Option<SystemTime>,
     reset_at: Option<SystemTime>,
+    limit_window_minutes: Option<u16>,
 }
 
 impl Default for QuotaState {
@@ -445,6 +446,7 @@ impl QuotaState {
             evidence: None,
             observed_at: None,
             reset_at: None,
+            limit_window_minutes: None,
         }
     }
 
@@ -455,6 +457,7 @@ impl QuotaState {
             evidence: None,
             observed_at: Some(observed_at),
             reset_at: None,
+            limit_window_minutes: None,
         }
     }
 
@@ -465,6 +468,7 @@ impl QuotaState {
             evidence: None,
             observed_at: Some(observed_at),
             reset_at: None,
+            limit_window_minutes: None,
         }
     }
 
@@ -479,6 +483,7 @@ impl QuotaState {
             evidence: Some(evidence),
             observed_at: Some(observed_at),
             reset_at,
+            limit_window_minutes: None,
         }
     }
 
@@ -490,6 +495,7 @@ impl QuotaState {
             evidence: Some(QuotaEvidence::CreditsAvailable),
             observed_at: Some(observed_at),
             reset_at,
+            limit_window_minutes: None,
         }
     }
 
@@ -507,6 +513,7 @@ impl QuotaState {
                 evidence,
                 observed_at,
                 reset_at,
+                limit_window_minutes: None,
             }),
             QuotaAccessState::Allowed
                 if (evidence.is_none() && observed_at.is_some() && reset_at.is_none())
@@ -518,6 +525,7 @@ impl QuotaState {
                     evidence,
                     observed_at,
                     reset_at,
+                    limit_window_minutes: None,
                 })
             }
             QuotaAccessState::Exhausted if evidence.is_some() && observed_at.is_some() => {
@@ -526,6 +534,7 @@ impl QuotaState {
                     evidence,
                     observed_at,
                     reset_at,
+                    limit_window_minutes: None,
                 })
             }
             _ => None,
@@ -550,6 +559,20 @@ impl QuotaState {
     #[must_use]
     pub const fn reset_at(self) -> Option<SystemTime> {
         self.reset_at
+    }
+
+    /// 本次上游用量拒绝明确指出的窗口时长
+    #[must_use]
+    pub const fn limit_window_minutes(self) -> Option<u16> {
+        self.limit_window_minutes
+    }
+
+    #[must_use]
+    pub fn with_limit_window_minutes(mut self, minutes: Option<u16>) -> Self {
+        if self.evidence == Some(QuotaEvidence::UsageLimitReached) {
+            self.limit_window_minutes = minutes.filter(|minutes| *minutes > 0);
+        }
+        self
     }
 
     /// 返回当前已确认的额度耗尽结论

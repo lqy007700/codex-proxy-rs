@@ -11,12 +11,13 @@ import { errorMessage } from '@/utils/operation'
 import ClientProfilePresetFields from './ClientProfilePresetFields.vue'
 import ClientProfilePreviewPanel from './ClientProfilePreviewPanel.vue'
 
-const props = withDefaults(defineProps<{ active?: boolean, disabled?: boolean, allowInherit?: boolean }>(), {
+const props = withDefaults(defineProps<{ active?: boolean, disabled?: boolean, allowInherit?: boolean, allowPreserve?: boolean }>(), {
   active: true,
   disabled: false,
   allowInherit: false,
+  allowPreserve: false,
 })
-const model = defineModel<ClientProfileSelection | null>({ required: true })
+const model = defineModel<ClientProfileSelection | null | undefined>({ required: true })
 const options = shallowRef<ClientProfileOptions>()
 const preview = shallowRef<ClientProfilePreview>()
 const loading = shallowRef(true)
@@ -25,6 +26,7 @@ const previewError = shallowRef('')
 const previewing = shallowRef(false)
 const independentDraft = shallowRef<ClientProfileSelection>()
 const effective = computed(() => model.value ?? options.value?.globalConfiguration)
+const preserved = computed(() => props.allowPreserve && model.value === undefined)
 const inherited = computed(() => props.allowInherit && model.value === null)
 const preset = computed(() => effective.value && !effective.value.mode
   ? effective.value
@@ -35,10 +37,18 @@ const needsInput = computed(() => effective.value?.mode === 'custom'
   : preset.value?.versionMode === 'fixed'
     && (!preset.value.codexVersion || (preset.value.client === 'desktop' && (!preset.value.desktopVersion || !preset.value.desktopBuild))))
 const profileSource = computed({
-  get: () => model.value === null
-    ? 'global'
-    : 'independent',
+  get: () => model.value === undefined
+    ? 'keep'
+    : model.value === null
+      ? 'global'
+      : 'independent',
   set: (value: string) => {
+    if (value === 'keep') {
+      if (model.value)
+        independentDraft.value = { ...model.value }
+      model.value = undefined
+      return
+    }
     if (value === 'global') {
       if (model.value)
         independentDraft.value = { ...model.value }
@@ -69,7 +79,7 @@ watch([
   model,
   () => props.active,
 ], ([configuration, active], _, onCleanup) => {
-  if (!active)
+  if (!active || configuration === undefined)
     return
   let cancelled = false
   preview.value = undefined
@@ -109,6 +119,7 @@ onMounted(() => load())
         aria-label="客户端身份来源"
         class="shrink-0"
         :options="[
+          ...(allowPreserve ? [{ label: '保持原值', value: 'keep' }] : []),
           { label: '全局配置', value: 'global' },
           { label: '独立配置', value: 'independent' },
         ]"
@@ -124,7 +135,7 @@ onMounted(() => load())
       </template>
     </ZEmpty>
     <ClientProfilePresetFields
-      v-if="!loadError && !inherited"
+      v-if="!loadError && !preserved && !inherited"
       :model-value="effective ?? null"
       :presets="options?.presets ?? []"
       :preview="preview"
@@ -136,7 +147,7 @@ onMounted(() => load())
       @update:model-value="model = $event"
     />
     <ClientProfilePreviewPanel
-      v-if="!loadError && (inherited || !custom)"
+      v-if="!loadError && !preserved && (inherited || !custom)"
       :preview="preview"
       :previewing="previewing"
       :needs-version-input="!!needsInput"

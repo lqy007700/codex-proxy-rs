@@ -210,9 +210,15 @@ async fn retention_cleans_expired_scheduled_backups() {
         .insert(new_seed.object_key.clone(), DUMP_CONTENT.to_vec());
 
     // 设置 retention_days = 30
+    let storage_revision = repository
+        .load_settings()
+        .await
+        .expect("load settings")
+        .storage_revision;
     repository
         .update_schedule_settings(
             UpdateBackupScheduleCommand {
+                storage_revision,
                 schedule_enabled: false,
                 cron_expression: "0 2 * * *".to_owned(),
 
