@@ -58,6 +58,13 @@ pub(crate) struct MemoryPorts {
     pub(crate) reject_next_claim: std::sync::atomic::AtomicBool,
     pub(crate) claims: AtomicUsize,
     pub(crate) scheduling_reads: AtomicUsize,
+    pub(crate) quota_used: std::sync::atomic::AtomicBool,
+    pub(crate) quota_write_gate: Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
     pub(crate) assignment_cursors: Mutex<BTreeMap<ClientApiKeyId, u64>>,
     pub(crate) admission_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
     pub(crate) request_profile: Mutex<Option<OpaqueProviderData>>,
@@ -191,6 +198,8 @@ impl Fixture {
             reject_next_claim: Default::default(),
             claims: AtomicUsize::new(0),
             scheduling_reads: AtomicUsize::new(0),
+            quota_used: Default::default(),
+            quota_write_gate: Mutex::new(None),
             assignment_cursors: Mutex::new(BTreeMap::new()),
             admission_barrier: Mutex::new(None),
             request_profile: Mutex::new(None),

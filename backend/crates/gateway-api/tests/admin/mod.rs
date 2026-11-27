@@ -1707,6 +1707,7 @@ impl ProviderAdmin for UnusedProvider {
         gateway_admin::model::accounts::ProviderAccountCapabilities {
             quota_limits_supported: self.kind.as_str() == "openai"
                 && authentication_kind != "api_key",
+            quota_credits: self.kind.as_str() == "openai" && authentication_kind == "oauth",
             ..Default::default()
         }
     }

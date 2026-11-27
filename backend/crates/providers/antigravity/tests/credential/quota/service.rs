@@ -10,9 +10,77 @@ use std::time::{Duration, SystemTime};
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
 
 async fn upstream(server: &MockServer, remaining: serde_json::Value, delay: Duration) {
-    Mock::given(path("/v1internal:loadCodeAssist")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"cloudaicompanionProject":"p","currentTier":{"id":"free-tier","name":"Antigravity"},"paidTier":{"id":"g1-pro-tier","name":"Google AI Pro"}}))).mount(server).await;
+    Mock::given(path("/v1internal:loadCodeAssist")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"cloudaicompanionProject":"p","currentTier":{"id":"free-tier","name":"Antigravity"},"paidTier":{"id":"g1-pro-tier","name":"Google AI Pro","description":"Google AI Pro subscription"}}))).mount(server).await;
     Mock::given(path("/v1internal:fetchAvailableModels")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"models":{"fixture-model":{"displayName":"Gemini","quotaInfo":{"remainingFraction":remaining,"resetTime":"2099-01-01T00:00:00Z"}},"other-model":{"displayName":"Claude","quotaInfo":{"remainingFraction":0.8,"resetTime":"2099-01-01T00:00:00Z"}}}}))).mount(server).await;
     Mock::given(path("/v1internal:retrieveUserQuotaSummary")).respond_with(ResponseTemplate::new(200).set_delay(delay).set_body_json(json!({"groups":[{"displayName":"Gemini Models","buckets":[{"bucketId":"gemini-weekly","displayName":"Weekly","window":"weekly","remainingFraction":0.9,"resetTime":"2099-01-01T00:00:00Z"},{"bucketId":"gemini-5h","displayName":"Five hour","window":"5h","remainingFraction":remaining,"resetTime":"2099-01-01T00:00:00Z"}]},{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-weekly","displayName":"Weekly","window":"weekly","remainingFraction":0.8,"resetTime":"2099-01-01T00:00:00Z"}]}]}))).mount(server).await;
+}
+
+#[tokio::test]
+async fn window_usage_requires_every_named_member_to_resolve_in_the_observed_catalog() {
+    use gateway_admin::model::provider_credentials::QuotaLocalUsageAttribution::{
+        Models, Unavailable,
+    };
+    let server = MockServer::start().await;
+    Mock::given(path("/v1internal:loadCodeAssist"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"cloudaicompanionProject":"p"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(path("/v1internal:fetchAvailableModels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"models":{
+            "gemini-4-neon-high":{"displayName":"Gemini 4 Neon (High)"},
+            "gemini-4-neon-low":{"displayName":"Gemini 4 Neon (Low)"},
+            "orchestrator-alias":{"displayName":"Orchestrator (Neon)"},
+            "gemini-lite":{"displayName":"Gemini Lite"},
+            "gpt-oss-medium":{"displayName":"GPT-OSS (Medium)"}
+        }})))
+        .mount(&server)
+        .await;
+    let group = |description: Option<&str>, name: &str| {
+        json!({
+            "displayName":name, "description":description,
+            "buckets":(["5h", "weekly"].map(|window| json!({
+                "bucketId":format!("{name}-{window}"), "displayName":window, "window":window
+            })))
+        })
+    };
+    Mock::given(path("/v1internal:retrieveUserQuotaSummary"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"groups":[
+            group(Some("Models within this group: Gemini 4 Neon, Orchestrator (Neon)"), "gemini"),
+            group(Some("Models within this group: GPT-OSS"), "3p"),
+            group(Some("Models within this group: Gemini Lite, Missing Model"), "partial"),
+            group(None, "unknown")
+        ]})))
+        .mount(&server)
+        .await;
+    let f = Fixture::new(&server.uri());
+    let account = f.store.primary().loaded.lock().unwrap().account.clone();
+    f.quota.refresh(account.id()).await.unwrap();
+    let view = f.quota.read(account.id()).await.unwrap();
+    for (group, attribution) in [
+        (
+            "gemini",
+            Models(
+                [
+                    "gemini-4-neon-high",
+                    "gemini-4-neon-low",
+                    "orchestrator-alias",
+                ]
+                .map(str::to_owned)
+                .into(),
+            ),
+        ),
+        ("3p", Models(["gpt-oss-medium".to_owned()].into())),
+        ("partial", Unavailable),
+        ("unknown", Unavailable),
+    ] {
+        for window in ["5h", "weekly"] {
+            let key = format!("{group}-{window}");
+            let observed = view.windows.iter().find(|w| w.key == key).unwrap();
+            assert_eq!(observed.local_usage_attribution, attribution);
+        }
+    }
 }
 
 #[tokio::test]
@@ -54,7 +122,25 @@ async fn quota_refresh_projects_paid_plan_without_exhausting_other_models() {
     let account = f.store.primary().loaded.lock().unwrap().account.clone();
     f.quota.refresh(account.id()).await.unwrap();
     let view = f.quota.read(account.id()).await.unwrap();
+    assert!(view.credits.is_none());
     assert_eq!(view.plan_type.as_deref(), Some("g1-pro-tier"));
+    assert_eq!(
+        view.plan_type_display.as_deref(),
+        Some("Google AI Pro subscription")
+    );
+    assert_eq!(
+        f.quota.plan_type_display(&account).await.as_deref(),
+        Some("Google AI Pro subscription")
+    );
+    {
+        let mut quota = f.store.primary().quota.lock().unwrap();
+        quota.as_mut().unwrap().expected_revision = CredentialRevision::new(2).unwrap();
+    }
+    assert_eq!(f.quota.plan_type_display(&account).await, None);
+    {
+        let mut quota = f.store.primary().quota.lock().unwrap();
+        quota.as_mut().unwrap().expected_revision = account.revision();
+    }
     assert_eq!(view.windows.len(), 3);
     assert!(
         view.windows
@@ -223,4 +309,165 @@ async fn exhausted_model_quota_blocks_execution_for_that_model() {
         )
         .await;
     assert!(matches!(result, Err(e) if e.kind() == ProviderErrorKind::QuotaExhausted));
+}
+
+#[tokio::test]
+async fn periodic_refresh_requires_five_minutes_and_usage_after_snapshot() {
+    use std::sync::atomic::Ordering;
+    let server = MockServer::start().await;
+    upstream(&server, json!(0.5), Duration::ZERO).await;
+    let f = Fixture::new(&server.uri());
+    let id = f
+        .store
+        .primary()
+        .loaded
+        .lock()
+        .unwrap()
+        .account
+        .id()
+        .clone();
+    let cancel = CancellationToken::new();
+    f.quota.reconcile(&cancel).await.unwrap();
+    let initial = f.store.primary().quota.lock().unwrap().clone().unwrap();
+    f.store.quota_used.store(true, Ordering::SeqCst);
+    f.quota.reconcile(&cancel).await.unwrap();
+    assert_eq!(
+        f.store
+            .primary()
+            .quota
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .observed_at,
+        initial.observed_at
+    );
+    f.store
+        .primary()
+        .quota
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .observed_at = SystemTime::now() - Duration::from_secs(301);
+    f.store.quota_used.store(false, Ordering::SeqCst);
+    f.quota.reconcile(&cancel).await.unwrap();
+    let stale = f.store.primary().quota.lock().unwrap().clone().unwrap();
+    f.store.quota_used.store(true, Ordering::SeqCst);
+    f.quota.reconcile(&cancel).await.unwrap();
+    assert!(
+        f.store
+            .primary()
+            .quota
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .observed_at
+            > stale.observed_at
+    );
+    assert_eq!(
+        f.store
+            .primary()
+            .quota
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .account_id,
+        id
+    );
+}
+
+#[tokio::test]
+async fn older_inflight_refresh_cannot_overwrite_newer_manual_snapshot() {
+    let server = MockServer::start().await;
+    upstream(&server, json!(0.0), Duration::ZERO).await;
+    let f = Fixture::new(&server.uri());
+    let id = f
+        .store
+        .primary()
+        .loaded
+        .lock()
+        .unwrap()
+        .account
+        .id()
+        .clone();
+    let (arrived_tx, arrived_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    *f.store.quota_write_gate.lock().unwrap() = Some((arrived_tx, release_rx));
+    let service = f.quota.clone();
+    let old_id = id.clone();
+    let older = tokio::spawn(async move { service.refresh(&old_id).await });
+    tokio::time::timeout(Duration::from_secs(10), arrived_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    server.reset().await;
+    upstream(&server, json!(0.8), Duration::ZERO).await;
+    let newer_result = f.quota.refresh(&id).await;
+    let newer = f.store.primary().quota.lock().unwrap().clone();
+    let _ = release_tx.send(());
+    newer_result.unwrap();
+    let newer = newer.unwrap();
+    assert!(older.await.unwrap().is_err());
+    assert_eq!(
+        f.store.primary().quota.lock().unwrap().as_ref().unwrap(),
+        &newer
+    );
+    let view = f.quota.read(&id).await.unwrap();
+    let window = view
+        .windows
+        .iter()
+        .find(|window| window.key == "gemini-5h")
+        .unwrap();
+    assert!((window.used_percent.unwrap() - 20.0).abs() < 0.001);
+}
+
+#[tokio::test]
+async fn credits_project_and_only_bypass_exhaustion_when_usable_and_enabled() {
+    for (amount, usable) in [
+        (json!("12"), true),
+        (json!("9"), false),
+        (json!(null), false),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1internal:loadCodeAssist"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"cloudaicompanionProject":"p", "paidTier":{"availableCredits":[{"creditType":"GOOGLE_ONE_AI","creditAmount":amount,"minimumCreditAmountForUsage":"10"}]}})))
+            .mount(&server).await;
+        Mock::given(path("/v1internal:fetchAvailableModels"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"models":{"m":{"quotaInfo":{"remainingFraction":0,"resetTime":null}}}}),
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1internal:retrieveUserQuotaSummary"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"groups":[]})))
+            .mount(&server)
+            .await;
+        let f = Fixture::new(&server.uri());
+        let account = f.store.primary().loaded.lock().unwrap().account.clone();
+        f.quota.refresh(account.id()).await.unwrap();
+        assert_eq!(
+            f.quota
+                .read(account.id())
+                .await
+                .unwrap()
+                .credits
+                .unwrap()
+                .has_credits,
+            usable
+        );
+        let snapshot = f.store.primary().quota.lock().unwrap().clone().unwrap();
+        assert!(snapshot.state.with_credits_policy(false).is_exhausted());
+        assert_eq!(
+            snapshot.state.with_credits_policy(true).is_exhausted(),
+            !usable
+        );
+        for enabled in [false, true] {
+            let scoped = account.clone().with_allow_credits(enabled);
+            let signals = f.quota.scheduling(&[scoped], "m").await.unwrap();
+            assert_eq!(signals[account.id()].0, !(enabled && usable));
+        }
+    }
 }

@@ -53,7 +53,7 @@ async function toggle(allowCredits: boolean) {
           </template>
           <div class="grid max-w-64 gap-2 p-3 text-z-xs leading-relaxed text-z-text-secondary">
             <p>默认关闭，套餐额度耗尽后暂停使用此账号</p>
-            <p>开启后可继续使用上游可用点数，与自动使用重置卡独立</p>
+            <p>开启后可继续使用上游可用点数<span v-if="account.provider === 'openai'">，与自动使用重置卡独立</span></p>
             <p>额度信息可能延迟，已发出的请求仍可能消耗点数</p>
           </div>
         </ZPopover>

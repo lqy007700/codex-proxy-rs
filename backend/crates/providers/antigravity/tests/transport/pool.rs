@@ -142,13 +142,14 @@ async fn generate(
     let client = pool.client(origin, account, profile).unwrap();
     tokio::time::timeout(Duration::from_secs(3), async {
         client
-            .generate(
+            .generate_with_credits(
                 project,
                 "fixture-model",
                 token,
                 br#"{"contents":[{"parts":[{"text":"ping","thoughtSignature":"fixture-signature"}]}]}"#,
-                false,
+                false.into(),
                 &[],
+                false,
             )
             .await
             .unwrap()

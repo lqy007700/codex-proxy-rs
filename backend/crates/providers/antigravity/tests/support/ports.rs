@@ -568,6 +568,16 @@ impl ProviderAccountStore for MemoryPorts {
     ) -> Result<CredentialCasOutcome, StoreError> {
         unreachable!("unused fixture port: ProviderAccountStore::compare_and_swap_credential")
     }
+    async fn accounts_used_since_quota(
+        &self,
+        snapshots: &[QuotaObservation],
+    ) -> Result<Vec<ProviderAccountId>, StoreError> {
+        Ok(if self.quota_used.load(Ordering::SeqCst) {
+            snapshots.iter().map(|s| s.account_id.clone()).collect()
+        } else {
+            Vec::new()
+        })
+    }
     async fn get_quotas(
         &self,
         accounts: &[ProviderAccountId],
@@ -581,6 +591,11 @@ impl ProviderAccountStore for MemoryPorts {
         &self,
         observation: QuotaObservation,
     ) -> Result<QuotaWriteOutcome, StoreError> {
+        let gate = self.quota_write_gate.lock().unwrap().take();
+        if let Some((arrived, release)) = gate {
+            let _ = arrived.send(());
+            let _ = release.await;
+        }
         let Some(account) = self.accounts.get(&observation.account_id) else {
             return Ok(QuotaWriteOutcome::Conflict);
         };

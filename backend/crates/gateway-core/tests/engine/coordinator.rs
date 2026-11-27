@@ -725,7 +725,7 @@ impl ExecutionStore for FakeStore {
     }
 }
 
-enum Script {
+pub(super) enum Script {
     ProtectedStream {
         account_id: &'static str,
         items: Vec<Result<GatewayEvent, ProviderError>>,
@@ -747,14 +747,15 @@ enum Script {
     Pending,
 }
 
-struct ScriptedProvider {
+pub(super) struct ScriptedProvider {
     provider_name: &'static str,
+    pub(super) local_prewarm: bool,
     profile_generation: AtomicUsize,
     default_profile_calls: AtomicUsize,
     default_profile: Mutex<Option<gateway_core::account::OpaqueProviderData>>,
     default_profile_error: Mutex<Option<ProviderError>>,
     scripts: Mutex<VecDeque<Script>>,
-    contexts: Mutex<Vec<AttemptContext>>,
+    pub(super) contexts: Mutex<Vec<AttemptContext>>,
     operations: Mutex<Vec<Operation>>,
     released_leases: Arc<AtomicUsize>,
 }
@@ -768,7 +769,7 @@ impl Drop for TrackedLease {
 }
 
 impl ScriptedProvider {
-    fn new(scripts: Vec<Script>) -> Self {
+    pub(super) fn new(scripts: Vec<Script>) -> Self {
         Self::named("openai", scripts)
     }
 
@@ -776,6 +777,7 @@ impl ScriptedProvider {
     fn named(provider_name: &'static str, scripts: Vec<Script>) -> Self {
         Self {
             provider_name,
+            local_prewarm: false,
             profile_generation: AtomicUsize::new(1),
             default_profile_calls: AtomicUsize::new(0),
             default_profile: Mutex::new(None),
@@ -790,6 +792,28 @@ impl ScriptedProvider {
 
 #[async_trait]
 impl Provider for ScriptedProvider {
+    fn local_websocket_prewarm(
+        &self,
+        _operation: &Operation,
+        _request_id: &ModelRequestId,
+    ) -> Option<gateway_core::engine::provider::LocalWebSocketPrewarm> {
+        self.local_prewarm
+            .then(|| gateway_core::engine::provider::LocalWebSocketPrewarm {
+                response_id: "resp_local".to_owned(),
+                created: ProtocolWireEvent::json(
+                    "openai",
+                    Some("response.created".to_owned()),
+                    json!({"type": "response.created"}),
+                )
+                .unwrap(),
+                completed: ProtocolWireEvent::json(
+                    "openai",
+                    Some("response.completed".to_owned()),
+                    json!({"type": "response.completed"}),
+                )
+                .unwrap(),
+            })
+    }
     fn resolve_request_profile(
         &self,
         configuration: &gateway_core::account::OpaqueProviderData,

@@ -25,6 +25,7 @@ Authorization: Bearer sk_...
 无论格式如何，只有已保存且启用的 Client Key 能通过鉴权
 
 `/v1/messages`、`/v1/messages/count_tokens`、`/v1/models` 和 `/v1/models/{model_id}` 也接受 `x-api-key: <Client Key>`。
+`/v1beta` GenAI 入口也接受 `x-goog-api-key: <Client Key>`。
 同时提供两个认证头时优先使用 `Authorization`，不会在 Bearer 认证失败后改用另一把 Key。
 客户端提供网关 Client Key，上游密钥只由服务端选中的账号提供
 
@@ -264,9 +265,12 @@ WebSocket message 和 frame 不设置网关私有长度上限；协议可接受�
 
 ### Antigravity 原生生成
 
-GenAI 短路径使用 `Authorization: Bearer <Client Key>`。模型名取自 URL，入口只在当前 Key 的账号范围内选择声明 GenAI 协议的原生模型，目前由 Antigravity OAuth 账号承接；Responses、Chat Completions 与 Messages 也可转换到 Antigravity 目录中声明接受转换的模型
+GenAI 短路径使用 `Authorization: Bearer <Client Key>` 或 `x-goog-api-key: <Client Key>`。模型名取自 URL，入口只在当前 Key 的账号范围内选择声明 GenAI 协议的原生模型，目前由 Antigravity OAuth 账号承接；Responses、Chat Completions 与 Messages 也可转换到 Antigravity 目录中声明接受转换的模型
 
 - 上游目录声明的模型分组可使用基础模型名，并通过 `generationConfig.thinkingConfig.thinkingLevel` 指定档位；缺少或不支持的档位返回 400，完整型号与指向完整型号的模型映射保持原目标
+- GenAI 模型列表按当前 Key 可调用的上游目录顺序展示。原生 SSE 在两帧之间保持静默，首帧前失败沿用 HTTP 错误状态
+- Responses 显式选择联网搜索时，使用当前 Key 与账号均可调用的搜索模型。正文引用可随 JSON 或 SSE 返回，`include` 可请求完整来源列表
+- Antigravity 的 Responses WebSocket 预热在网关内完成。生成成功后客户端重连，并在下一轮携带完整上下文
 - 会话亲和使用 `X-Http-Session-Id`，缺失时使用 `X-Session-Id`；转换入口沿用 Codex 与 Claude Code 会话解析，绑定按 Client Key、模型和入站协议隔离，共用 `openaiAccountAffinity` 设置
 - 账号列表的本地用量按部署时区汇总今天及前 6 天，`usage.windowLabelDisplay` 为 `近一周`
 - 价格档位支持 `standard`、`long_standard` 与 `image`；全局客户端画像保存在 `providerRequestProfiles.antigravity`，Key 可用 `providerRequestProfileOverrides.antigravity` 覆盖

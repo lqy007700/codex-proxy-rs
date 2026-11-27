@@ -204,6 +204,7 @@ impl ProviderAdmin for OpenAiAdminProvider {
             quota_limits_supported: oauth,
             quota: oauth,
             quota_refresh: oauth,
+            quota_credits: oauth,
             profile: oauth,
             subscription: oauth,
             avatar: oauth,
@@ -1308,6 +1309,7 @@ fn empty_quota() -> ProviderQuota {
         paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
+        plan_type_display: None,
         observed_at: None,
         refresh_token_expires_at: None,
         windows: Vec::new(),
@@ -1378,6 +1380,7 @@ fn project_quota_snapshot(
             .map(|(key, _)| key.to_owned())
             .collect(),
         plan_type: snapshot.plan_type().map(str::to_owned),
+        plan_type_display: None,
         observed_at: Some(DateTime::<Utc>::from(snapshot.observed_at())),
         refresh_token_expires_at: None,
         windows,

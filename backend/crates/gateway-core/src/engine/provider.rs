@@ -40,6 +40,13 @@ use crate::upstream::{UpstreamSendState, UpstreamTransport};
 pub type EventStream =
     Pin<Box<dyn Stream<Item = Result<ProviderEvent, ProviderError>> + Send + 'static>>;
 
+/// 本地预热响应不包含账号或可续接的上游状态
+pub struct LocalWebSocketPrewarm {
+    pub response_id: String,
+    pub created: ProtocolWireEvent,
+    pub completed: ProtocolWireEvent,
+}
+
 /// Provider 选定单个 credential 后返回的调用事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderCallMetadata {
@@ -247,7 +254,8 @@ pub trait NativeResponseTranslator: Send + 'static {
     }
 }
 
-const MAX_NATIVE_RESPONSE_EVENTS_PER_INPUT: usize = 64;
+/// 单个原生输入帧允许展开的 wire 事件数
+pub const MAX_NATIVE_RESPONSE_EVENTS_PER_INPUT: usize = 64;
 
 /// Metadata、canonical event stream 与 owned lease 的统一返回值
 ///
@@ -1181,6 +1189,15 @@ impl fmt::Debug for ProviderRequest {
 /// 新的 attempt 再次调用
 #[async_trait]
 pub trait Provider: Send + Sync {
+    /// 返回本地预热响应；默认沿用原有上游路径
+    fn local_websocket_prewarm(
+        &self,
+        _operation: &Operation,
+        _request_id: &crate::engine::ModelRequestId,
+    ) -> Option<LocalWebSocketPrewarm> {
+        None
+    }
+
     /// 请求身份明确时，Provider 可以为自身直连账号声明实际模型；Core 按该模型鉴权并冻结重试范围
     fn direct_account_model(
         &self,

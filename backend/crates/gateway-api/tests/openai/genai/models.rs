@@ -123,3 +123,119 @@ async fn directory_errors_follow_google_rpc_and_require_authentication() {
         assert_eq!(body["error"]["code"], status.as_u16(), "{path}");
     }
 }
+
+#[tokio::test]
+async fn google_api_key_reads_the_same_authorized_catalog() {
+    let router = api_router(Arc::new(Execution {
+        client: Some(client()),
+        ..Default::default()
+    }))
+    .await;
+    for path in ["/v1beta/models", "/v1beta/models/model-a"] {
+        let (expected_status, expected) = query(&router, path, true).await;
+        let request = Request::get(path)
+            .header("x-goog-api-key", KEY)
+            .body(Body::empty())
+            .unwrap();
+        let response = router.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), expected_status);
+        let actual: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 8192).await.unwrap()).unwrap();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[tokio::test]
+async fn google_key_pagination_preserves_authorized_rank_and_legacy_order() {
+    use gateway_core::{account::ProviderAccountId, routing::AccountModelMetadata};
+    use std::collections::BTreeMap;
+
+    let source = authenticated_client(KEY);
+    let provider = ProviderKind::new("openai").unwrap();
+    let allowed = ProviderAccountId::new("acct_api_test").unwrap();
+    let other = ProviderAccountId::new("acct_other").unwrap();
+    let caps = ModelCapabilities::new([OperationKind::Generate].into(), None)
+        .with_generation_protocol(GENAI_PROTOCOL);
+    let models = [
+        ("z-ranked", Some(0)),
+        ("b-ranked", Some(1)),
+        ("a-legacy", None),
+        ("c-legacy", None),
+    ]
+    .into_iter()
+    .map(|(name, rank)| {
+        ProviderModel::new(
+            provider.clone(),
+            UpstreamModelId::new(name).unwrap(),
+            caps.clone().with_account_metadata(BTreeMap::from([
+                (
+                    allowed.clone(),
+                    AccountModelMetadata {
+                        catalog_order: rank,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    other.clone(),
+                    AccountModelMetadata {
+                        catalog_order: Some(if name == "a-legacy" { 0 } else { 99 }),
+                        ..Default::default()
+                    },
+                ),
+            ])),
+        )
+    })
+    .collect();
+    let snapshot = RuntimeSnapshot::new(
+        ConfigRevision::new(1).unwrap(),
+        source.snapshot().settings().clone(),
+        vec![provider],
+        models,
+        vec![source.policy().clone()],
+    )
+    .unwrap();
+    let router = api_router(Arc::new(Execution {
+        client: Some(super::super::authenticated_client_from_snapshot(
+            KEY, snapshot,
+        )),
+        ..Default::default()
+    }))
+    .await;
+    let mut path = "/v1beta/models?pageSize=2".to_string();
+    let mut names = Vec::new();
+    loop {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::get(&path)
+                    .header("x-goog-api-key", KEY)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 8192).await.unwrap()).unwrap();
+        names.extend(
+            body["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|model| model["name"].as_str().unwrap().to_string()),
+        );
+        match body["nextPageToken"].as_str() {
+            Some(token) => path = format!("/v1beta/models?pageSize=2&pageToken={token}"),
+            None => break,
+        }
+    }
+    assert_eq!(
+        names,
+        [
+            "models/z-ranked",
+            "models/b-ranked",
+            "models/a-legacy",
+            "models/c-legacy"
+        ]
+    );
+}

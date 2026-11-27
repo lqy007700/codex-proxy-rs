@@ -22,6 +22,7 @@ pub(crate) fn completed_usage_fact_predicate(alias: &str) -> String {
          and {alias}.downstream_committed_at is not null
          and ({alias}.provider_kind is distinct from 'openai'
               or {alias}.request_kind is distinct from 'prewarm')
+         and ({alias}.attempt_count > 0 or {alias}.request_kind is distinct from 'prewarm')
          and (({alias}.client_transport = 'websocket' and {alias}.client_status_code is null)
               or {alias}.client_status_code between 200 and 399)
          and ({evidence})"

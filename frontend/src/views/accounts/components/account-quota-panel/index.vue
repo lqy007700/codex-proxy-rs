@@ -10,6 +10,7 @@ import { formatProviderLabel } from '@/utils/providers'
 import { groupedAccountQuotaWindows, orderedPanelQuotaWindows } from '../../constants'
 import AccountProfileModal from '../account-profile-modal/index.vue'
 import AccountQuotaForecastModal from '../account-quota-forecast-modal/index.vue'
+import AccountCreditsPanel from './CreditsPanel.vue'
 import AccountQuotaPanelEntry from './Entry.vue'
 import AccountQuotaLimits from './QuotaLimits.vue'
 import AccountResetCredits from './ResetCredits.vue'
@@ -25,15 +26,20 @@ const emit = defineEmits<{
   quotaReset: [accountId: string]
 }>()
 
-const quotaEntries = computed(() => groupedAccountQuotaWindows(
-  orderedPanelQuotaWindows(props.account.quota.windows.filter(window => window.accountWide)),
-))
+const quotaEntries = computed(() => {
+  const { provider, quota } = props.account
+  const windows = provider === 'antigravity'
+    ? quota.windows
+    : quota.windows.filter(window => window.accountWide)
+  return groupedAccountQuotaWindows(orderedPanelQuotaWindows(windows))
+})
 const profileOpen = shallowRef(false)
 const forecastOpen = shallowRef(false)
 const hasForecast = computed(() => props.account.authenticationKind !== 'api_key')
 const hasPersonalInfo = computed(() => props.account.capabilities.profile || props.account.capabilities.subscription)
 const canRefresh = computed(() => props.account.capabilities.quotaRefresh)
-const hasActions = computed(() => hasPersonalInfo.value || hasForecast.value || canRefresh.value || props.account.capabilities.resetCredits || props.account.capabilities.quotaLimitsSupported)
+const hasQuotaCredits = computed(() => props.account.provider === 'antigravity' && props.account.capabilities.quotaCredits)
+const hasActions = computed(() => hasPersonalInfo.value || hasForecast.value || canRefresh.value || props.account.capabilities.resetCredits || hasQuotaCredits.value || props.account.capabilities.quotaLimitsSupported)
 watch(hasPersonalInfo, (available) => {
   if (!available)
     profileOpen.value = false
@@ -72,6 +78,12 @@ watch(hasPersonalInfo, (available) => {
         </ZIconButton>
         <AccountQuotaLimits
           v-if="account.capabilities.quotaLimitsSupported"
+          :account="account"
+          @account-updated="emit('accountUpdated', $event)"
+        />
+        <AccountCreditsPanel
+          v-if="hasQuotaCredits"
+          :key="account.id"
           :account="account"
           @account-updated="emit('accountUpdated', $event)"
         />

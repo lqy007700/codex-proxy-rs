@@ -109,13 +109,14 @@ async fn oauth_refresh_and_native_generate_preserve_grant_profile_and_wire_paylo
         .await;
     for stream in [false, true] {
         let res = client
-            .generate(
+            .generate_with_credits(
                 &catalog.project,
                 "fixture-model",
                 &access_token,
                 body,
-                stream,
+                stream.into(),
                 &[],
+                false,
             )
             .await
             .unwrap();
@@ -192,7 +193,7 @@ async fn streamed_text_is_projected_once_across_native_frames() {
         .mount(&server)
         .await;
     let response = client
-        .generate("p", "m", "fixture", b"{}", true, &[])
+        .generate_with_credits("p", "m", "fixture", b"{}", true.into(), &[], false)
         .await
         .unwrap();
     let events = transport::events(
@@ -255,7 +256,7 @@ async fn incomplete_native_stream_and_redirect_are_rejected() {
     let client = CloudCodeClient::new(&server.uri().parse().unwrap(), None, &profile).unwrap();
     Mock::given(path("/v1internal:streamGenerateContent")).respond_with(ResponseTemplate::new(200).set_body_raw("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}}\n\n","text/event-stream")).mount(&server).await;
     let res = client
-        .generate("p", "m", "fixture", b"{}", true, &[])
+        .generate_with_credits("p", "m", "fixture", b"{}", true.into(), &[], false)
         .await
         .unwrap();
     let result = transport::events(
@@ -283,7 +284,7 @@ async fn incomplete_native_stream_and_redirect_are_rejected() {
         .await;
     assert!(
         client
-            .generate("p", "m", "fixture", b"{}", false, &[])
+            .generate_with_credits("p", "m", "fixture", b"{}", false.into(), &[], false)
             .await
             .is_err()
     );
@@ -388,4 +389,59 @@ async fn compressed_control_responses_keep_errors_and_decoded_size_limits() {
         .await;
     let error = client.catalog("fixture").await.err().unwrap();
     assert_eq!(error.kind(), ProviderErrorKind::Transport);
+}
+
+#[tokio::test]
+async fn credit_setting_controls_outbound_envelope() {
+    let server = MockServer::start().await;
+    let origin = url::Url::parse(&server.uri()).unwrap();
+    let profile =
+        profile::default_profile(&ReleaseService::new(crate::support::profile::cache()).unwrap());
+    let client = CloudCodeClient::new(&origin, None, &profile).unwrap();
+    Mock::given(method("POST"))
+        .and(path("/v1internal:generateContent"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(2)
+        .mount(&server)
+        .await;
+    for enabled in [false, true] {
+        client
+            .generate_with_credits("p", "m", "fixture", b"{}", false.into(), &[], enabled)
+            .await
+            .unwrap();
+    }
+    let requests = server.received_requests().await.unwrap();
+    let first: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let second: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+    assert!(first.get("enabledCreditTypes").is_none());
+    assert_eq!(second["enabledCreditTypes"], json!(["GOOGLE_ONE_AI"]));
+}
+
+#[tokio::test]
+async fn catalog_preserves_first_model_order_and_reads_old_catalogs() {
+    let server = MockServer::start().await;
+    Mock::given(path("/v1internal:loadCodeAssist"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"cloudaicompanionProject":"p"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(path("/v1internal:fetchAvailableModels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "models": {},
+            "agentModelSorts": [{"groups": [{"modelIds": ["z", "a"]}, {"modelIds": ["z", "b"]}]}]
+        })))
+        .mount(&server)
+        .await;
+    let profile =
+        profile::default_profile(&ReleaseService::new(crate::support::profile::cache()).unwrap());
+    let client = CloudCodeClient::new(&server.uri().parse().unwrap(), None, &profile).unwrap();
+    let catalog = client.catalog("fixture").await.unwrap();
+    assert_eq!(
+        catalog.agent_model_order.unwrap(),
+        std::collections::BTreeMap::from([("z".into(), 0), ("a".into(), 1), ("b".into(), 2)])
+    );
+    let old: transport::Catalog =
+        serde_json::from_value(json!({"project":"p", "models":{}})).unwrap();
+    assert!(old.agent_model_order.is_none());
 }

@@ -40,6 +40,7 @@ async fn quota_windows_reconcile_moved_requests_and_pending_deletions_without_wa
     drain_analytics(&database.pool).await;
     let windows = [
         AccountUsageWindowQuery {
+            models: None,
             account_id: "acct_usage_before".to_owned(),
             key: "old".to_owned(),
             range: TimeRange {
@@ -48,6 +49,7 @@ async fn quota_windows_reconcile_moved_requests_and_pending_deletions_without_wa
             },
         },
         AccountUsageWindowQuery {
+            models: None,
             account_id: "acct_usage_after".to_owned(),
             key: "new".to_owned(),
             range: TimeRange {
@@ -208,6 +210,7 @@ async fn model_success_rates_preserve_usage_across_source_summary_and_pending_re
         .execute(&database.pool).await.unwrap();
     let windows = [
         AccountUsageWindowQuery {
+            models: None,
             account_id: "acct_health".to_owned(),
             key: "whole".to_owned(),
             range: TimeRange {
@@ -216,6 +219,7 @@ async fn model_success_rates_preserve_usage_across_source_summary_and_pending_re
             },
         },
         AccountUsageWindowQuery {
+            models: None,
             account_id: "acct_health".to_owned(),
             key: "boundary".to_owned(),
             range: TimeRange {
@@ -331,4 +335,49 @@ async fn model_success_rates_preserve_usage_across_source_summary_and_pending_re
         pending
     );
     database.close().await;
+}
+
+#[tokio::test]
+async fn quota_window_filters_usage_by_upstream_model() {
+    let Some(database) = TestDatabase::create("quota_window_models").await else {
+        return;
+    };
+    let repository = PgProviderAccountRepository::new(database.pool.clone());
+    repository
+        .insert_provider_account(account("acct_models", "models"))
+        .await
+        .unwrap();
+    let start = Utc::now() - TimeDelta::minutes(10);
+    for (id, model, tokens) in [("model_one", "one", 11), ("model_two", "two", 23)] {
+        seed_model_request(
+            &database.pool,
+            ModelRequestSeed {
+                request_id: id,
+                account_id: "acct_models",
+                provider_kind: "antigravity",
+                model,
+                total_tokens: tokens,
+                cost_amount: "0",
+                started_at: start + TimeDelta::minutes(1),
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let window = AccountUsageWindowQuery {
+        models: Some(["one".to_owned()].into()),
+        account_id: "acct_models".to_owned(),
+        key: "group".to_owned(),
+        range: TimeRange {
+            start,
+            end: start + TimeDelta::minutes(5),
+        },
+    };
+    let usage = admin_account_store(&database.pool)
+        .load_account_usage_by_windows(&[window])
+        .await
+        .unwrap();
+    assert_eq!(usage[0].usage.request_count, 1);
+    assert_eq!(usage[0].usage.total_tokens, Some(11));
+    assert_eq!(usage[0].usage.models[0].model, "one");
 }

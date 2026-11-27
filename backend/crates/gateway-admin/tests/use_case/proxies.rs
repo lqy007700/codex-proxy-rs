@@ -228,6 +228,7 @@ async fn linked_accounts_share_plan_resolution_and_only_read_cached_quota() {
     ] {
         let provider = FakeProviderAdmin::new("openai", events());
         provider.set_quota(ProviderQuota {
+            plan_type_display: None,
             paused_windows: Vec::new(),
             credits: None,
             plan_type: cached.map(str::to_owned),

@@ -52,6 +52,7 @@ impl ProviderAdmin for AntigravityAdmin {
         gateway_admin::model::accounts::ProviderAccountCapabilities {
             quota: oauth,
             quota_refresh: oauth,
+            quota_credits: oauth,
             ..Default::default()
         }
     }

@@ -627,3 +627,61 @@ async fn credential_and_identity_revisions_preserve_confirmed_pause_snapshots() 
     );
     database.close().await;
 }
+
+#[tokio::test]
+async fn active_accounts_require_successful_generate_after_each_snapshot_without_projection() {
+    let Some(database) = TestDatabase::create("quota_active_source").await else {
+        return;
+    };
+    let repository = PgProviderAccountRepository::new(database.pool.clone());
+    let now = chrono::DateTime::from_timestamp(Utc::now().timestamp(), 0).unwrap();
+    for (id, operation, outcome, offset) in [
+        ("before", "generate", "succeeded", -1),
+        ("equal", "generate", "succeeded", 0),
+        ("failed", "generate", "failed", 1),
+        ("other", "generate_image", "succeeded", 1),
+        ("success", "generate", "succeeded", 1),
+    ] {
+        let account_id = format!("acct_{id}");
+        repository
+            .insert_provider_account(account(&account_id, &account_id))
+            .await
+            .unwrap();
+        seed_model_request(
+            &database.pool,
+            ModelRequestSeed {
+                request_id: id,
+                account_id: &account_id,
+                provider_kind: "antigravity",
+                model: "model",
+                total_tokens: 1,
+                cost_amount: "0",
+                started_at: now - TimeDelta::seconds(2),
+            },
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "update model_requests set operation=$2, outcome=$3, completed_at=$4 where id=$1",
+        )
+        .bind(id)
+        .bind(operation)
+        .bind(outcome)
+        .bind(now + TimeDelta::seconds(offset))
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    }
+    let snapshots: Vec<_> = ["before", "equal", "failed", "other", "success"]
+        .iter()
+        .map(|id| observation(&format!("acct_{id}"), 1, SystemTime::from(now)))
+        .collect();
+    let active = repository
+        .accounts_used_since_quota(&snapshots)
+        .await
+        .unwrap();
+    assert_eq!(
+        active,
+        vec![ProviderAccountId::new("acct_success").unwrap()]
+    );
+}

@@ -17,8 +17,8 @@ use gateway_core::{
     account::{AccountFeedbackStats, ProviderAccountId, ProviderAccountStore},
     concurrency::ConcurrencyWaitQueue,
     engine::{
-        AttemptContext,
-        provider::{Provider, ProviderRequest, ProviderStream},
+        AttemptContext, ModelRequestId,
+        provider::{LocalWebSocketPrewarm, Provider, ProviderRequest, ProviderStream},
     },
     error::{ErrorSource, ProviderError, ProviderErrorKind},
     provider_ports::{
@@ -74,6 +74,14 @@ impl AntigravityProvider {
 
 #[async_trait]
 impl Provider for AntigravityProvider {
+    fn local_websocket_prewarm(
+        &self,
+        operation: &gateway_core::operation::Operation,
+        request_id: &ModelRequestId,
+    ) -> Option<LocalWebSocketPrewarm> {
+        translation::websocket_prewarm(operation, request_id)
+    }
+
     fn default_request_profile(
         &self,
     ) -> Result<Option<gateway_core::account::OpaqueProviderData>, ProviderError> {
@@ -124,3 +132,5 @@ fn unavailable(error: impl Into<ErrorSource>) -> ProviderError {
     crate::transport::unsent(ProviderErrorKind::ProviderInfrastructureUnavailable)
         .with_source(error)
 }
+
+mod web_search;

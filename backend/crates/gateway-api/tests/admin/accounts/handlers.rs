@@ -815,6 +815,7 @@ async fn quota_paused_accounts_expose_local_policy_without_faking_exhaustion() {
     assert_eq!(account["status"], "quota_paused");
     assert_eq!(account["quotaLimits"], json!({"week": 80}));
     assert_eq!(account["capabilities"]["quotaLimitsSupported"], true);
+    assert_eq!(account["capabilities"]["quotaCredits"], true);
     assert_eq!(account["allowCredits"], false);
     assert_eq!(account["quota"]["pausedWindows"], json!(["week"]));
     assert_eq!(account["quota"]["limitReached"], false);

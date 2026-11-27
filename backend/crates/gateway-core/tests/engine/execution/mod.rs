@@ -4906,3 +4906,44 @@ impl Provider for LiteralModelProbeProvider {
         ))
     }
 }
+
+#[test]
+fn local_websocket_prewarm_finishes_without_an_attempt() {
+    let store = Arc::new(TrackingExecutionStore::default());
+    let mut fake = super::coordinator::ScriptedProvider::new(vec![]);
+    fake.local_prewarm = true;
+    let provider = Arc::new(fake);
+    let mut registry = ProviderRegistry::builder();
+    registry.register(provider.clone()).unwrap();
+    let service = DefaultExecutionService::new(
+        RuntimeSnapshotHandle::new(start_snapshot()),
+        store.clone(),
+        registry.build(),
+        Arc::new(UnusedAdmissions),
+        Arc::new(UnusedContinuation),
+        Arc::new(RecordingClientApiKeyUsage::default()),
+        Arc::new(crate::RecordingDiagnostics::default()),
+    );
+    let mut input = request(&service, ClientTransport::WebSocket);
+    let body = json!({"model":"gpt-start", "input":[], "generate":false});
+    input.operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+        ProtocolPayload::json_object("openai", body.as_object().unwrap().clone()).unwrap(),
+    ));
+    let mut started = block_on(service.start(input)).unwrap();
+    let events = block_on(started.session.collect_uncommitted()).unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(!events[0].prefers_websocket_reconnect());
+    assert!(events[1].prefers_websocket_reconnect());
+    block_on(started.session.commit_downstream(None)).unwrap();
+    assert_eq!(store.creates.load(Ordering::SeqCst), 1);
+    assert!(store.attempts.lock().unwrap().is_empty());
+    assert!(provider.contexts.lock().unwrap().is_empty());
+    let finalizations = store.finalizations.lock().unwrap();
+    assert_eq!(finalizations[0].outcome, ExecutionOutcome::Succeeded);
+    assert_eq!(finalizations[0].send_state, UpstreamSendState::NotSent);
+    assert_eq!(finalizations[0].attempt_count, 0);
+    assert_eq!(
+        finalizations[0].client_response_id.as_deref(),
+        Some("resp_local")
+    );
+}

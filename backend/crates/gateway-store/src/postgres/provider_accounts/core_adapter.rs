@@ -14,6 +14,33 @@ fn loaded_credential_from_record(
 
 #[async_trait]
 impl ProviderAccountStore for PgProviderAccountRepository {
+    async fn accounts_used_since_quota(
+        &self,
+        snapshots: &[QuotaObservation],
+    ) -> Result<Vec<CoreProviderAccountId>, CoreStoreError> {
+        let (ids, times): (Vec<_>, Vec<_>) = snapshots
+            .iter()
+            .map(|s| (s.account_id.as_str(), DateTime::<Utc>::from(s.observed_at)))
+            .unzip();
+        let active: Vec<String> = sqlx::query_scalar(
+            "select s.id from unnest($1::text[], $2::timestamptz[]) as s(id, observed_at)
+             where exists (select 1 from model_requests r
+             where r.provider_account_ref = s.id and r.completed_at > s.observed_at
+             and r.outcome = 'succeeded' and r.operation = 'generate')",
+        )
+        .bind(ids)
+        .bind(times)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| CoreStoreError::caused_by(CoreStoreErrorKind::Unavailable, e))?;
+        active
+            .into_iter()
+            .map(|id| {
+                CoreProviderAccountId::new(id)
+                    .map_err(|e| CoreStoreError::caused_by(CoreStoreErrorKind::InvalidData, e))
+            })
+            .collect()
+    }
     async fn load_account_catalogs(
         &self,
         provider: &ProviderKind,

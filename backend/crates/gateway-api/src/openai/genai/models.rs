@@ -128,7 +128,7 @@ fn catalog(client: &AuthenticatedClient) -> Result<Vec<Value>, ()> {
     let scope = client.policy().account_scope();
     let counted = snapshot.public_models_for_operation(scope, &count);
     Ok(snapshot
-        .public_models_for_operation(scope, &generate)
+        .ordered_public_models_for_operation(scope, &generate)
         .into_iter()
         .filter(|model| super::valid_segment(model.as_str()))
         .map(|model| {

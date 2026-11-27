@@ -1080,6 +1080,7 @@ async fn terminal_admin_quota_window_usage_prefers_provider_total_and_falls_back
     let mut usage = admin_account_store(&database.pool)
         .load_account_usage_by_windows(&[
             AccountUsageWindowQuery {
+                models: None,
                 account_id: "acct_quota_window".to_owned(),
                 key: "short".to_owned(),
                 range: TimeRange {
@@ -1088,6 +1089,7 @@ async fn terminal_admin_quota_window_usage_prefers_provider_total_and_falls_back
                 },
             },
             AccountUsageWindowQuery {
+                models: None,
                 account_id: "acct_quota_window".to_owned(),
                 key: "long".to_owned(),
                 range: TimeRange {
@@ -1183,6 +1185,7 @@ async fn terminal_admin_quota_window_usage_should_include_only_statusless_websoc
     .expect("make quota window requests statusless");
     let usage = admin_account_store(&database.pool)
         .load_account_usage_by_windows(&[AccountUsageWindowQuery {
+            models: None,
             account_id: "acct_quota_window_websocket".to_owned(),
             key: "statusless".to_owned(),
             range: TimeRange {

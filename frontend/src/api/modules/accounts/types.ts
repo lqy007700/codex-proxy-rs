@@ -192,6 +192,7 @@ export interface AccountCapabilities {
   profile: boolean
   subscription: boolean
   avatar: boolean
+  quotaCredits: boolean
   resetCredits: boolean
   consumeResetCredit: boolean
 }

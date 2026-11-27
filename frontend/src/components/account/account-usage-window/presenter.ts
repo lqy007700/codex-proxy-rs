@@ -236,6 +236,8 @@ function localTokenDisplay(localUsage: AccountLocalUsage | null) {
 
 export function quotaWindowLocalUsageDisplay(window: AccountQuotaWindow) {
   const localUsage = accountLocalUsage(window.localUsage)
+  if (localUsage?.totalTokens === 0)
+    return '0'
   return localTokenDisplay(localUsage) || null
 }
 

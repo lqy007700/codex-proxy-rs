@@ -1050,32 +1050,35 @@ impl RuntimeSnapshot {
         let mut profiles = BTreeMap::new();
         for (model, presentation) in presentations {
             if let Ok(public_model) = PublicModelId::new(model.as_str().to_owned()) {
-                profiles.insert(public_model, presentation.clone());
+                profiles.insert(public_model, presentation);
             }
         }
+        // 映射覆盖同名模型时，只展示目标画像，包括目标没有画像的情况
         for alias in self.settings.values.model_mappings.keys() {
-            let target = self.mapped_model(alias);
-            let Some(presentation) = presentations.iter().find_map(|(model, presentation)| {
-                (model.as_str() == target).then_some(presentation)
-            }) else {
+            let Ok(public_model) = PublicModelId::new(alias.clone()) else {
                 continue;
             };
-            if let Ok(public_model) = PublicModelId::new(alias.clone()) {
-                profiles.insert(public_model, presentation.clone());
+            let target = self.mapped_model(alias);
+            if let Some(presentation) = presentations.get(target.as_str()) {
+                profiles.insert(public_model, presentation);
+            } else {
+                profiles.remove(&public_model);
             }
         }
-        for alias in self
-            .model_aliases()
-            .iter()
-            .filter(|alias| &alias.provider == provider)
-        {
-            if let Some(presentation) = presentations.get(&alias.target) {
-                profiles.insert(alias.id.clone(), presentation.clone());
+        for alias in self.model_aliases() {
+            if &alias.provider == provider
+                && let Some(presentation) = presentations.get(&alias.target)
+            {
+                profiles.insert(alias.id.clone(), presentation);
+            } else {
+                profiles.remove(&alias.id);
             }
         }
         profiles
             .into_iter()
-            .map(|(model, presentation)| super::PublicModelProfile::new(model, presentation))
+            .map(|(model, presentation)| {
+                super::PublicModelProfile::new(model, presentation.clone())
+            })
             .collect()
     }
 
@@ -1203,6 +1206,72 @@ impl RuntimeSnapshot {
             .collect()
     }
 
+    /// 对已通过操作过滤的目录按授权账号的目录顺序排序
+    #[must_use]
+    pub fn ordered_public_models_for_operation(
+        &self,
+        scope: &Arc<FrozenAccountScope>,
+        operation: &Operation,
+    ) -> Vec<PublicModelId> {
+        let mut models = self.public_models_for_operation(scope, operation);
+        let requirements = operation.capability_requirements();
+        models.sort_by_cached_key(|public| {
+            let rank = scope
+                .allowed_account_ids()
+                .filter_map(|account| {
+                    let provider = scope.account_provider(account)?;
+                    if !self.contains_public_model_for_provider(public, provider) {
+                        return None;
+                    }
+                    let target = self.upstream_model_for_account(public, scope, account);
+                    let capabilities = self.provider_models.get(provider)?.get(target.as_str())?;
+                    capabilities.match_operation(operation, &requirements)?;
+                    if let Some(group) = self.model_group(provider, &target) {
+                        let variants = group.reasoning_variants.values().filter(|variant| {
+                            variant.accounts.contains(account)
+                                && scope.allows_model(account, variant.model.as_str())
+                                && self
+                                    .provider_models
+                                    .get(provider)
+                                    .and_then(|models| models.get(&variant.model))
+                                    .is_some_and(|model| {
+                                        model.match_operation(operation, &requirements).is_some()
+                                    })
+                        });
+                        let variant_rank = variants
+                            .map(|variant| {
+                                self.provider_models
+                                    .get(provider)
+                                    .and_then(|models| models.get(&variant.model))
+                                    .and_then(|model| model.account_metadata.get(account))
+                                    .and_then(|metadata| metadata.catalog_order)
+                            })
+                            .collect::<Vec<_>>();
+                        if variant_rank.is_empty() {
+                            return None;
+                        }
+                        capabilities
+                            .account_metadata
+                            .get(account)
+                            .and_then(|metadata| metadata.catalog_order)
+                            .or_else(|| variant_rank.into_iter().flatten().min())
+                    } else if self
+                        .native_catalog_model_allowed_for_account(provider, public, scope, account)
+                    {
+                        capabilities
+                            .account_metadata
+                            .get(account)
+                            .and_then(|metadata| metadata.catalog_order)
+                    } else {
+                        None
+                    }
+                })
+                .min();
+            (rank.is_none(), rank, public.clone())
+        });
+        models
+    }
+
     /// 合并冻结账号范围内实际存在 Provider 的公开模型画像
     #[must_use]
     pub fn public_model_profiles_for_scope(
@@ -1228,15 +1297,14 @@ impl RuntimeSnapshot {
         provider: &ProviderKind,
         scope: &FrozenAccountScope,
     ) -> Vec<super::PublicModelProfile> {
-        if scope.allowed_account_ids().any(|account| {
+        let mut profiles: Vec<_> = if scope.allowed_account_ids().any(|account| {
             scope.account_provider(account) == Some(provider)
                 && scope
                     .directory()
                     .account(account)
                     .is_some_and(|facts| facts.model_mappings().iter().next().is_some())
         }) {
-            return self
-                .public_models_for_provider(provider)
+            self.public_models_for_provider(provider)
                 .into_iter()
                 .filter_map(|model| {
                     scope
@@ -1270,15 +1338,85 @@ impl RuntimeSnapshot {
                             ))
                         })
                 })
+                .collect()
+        } else {
+            self.public_model_profiles_for_provider(provider)
+                .into_iter()
+                .filter(|profile| {
+                    self.native_catalog_model_allowed_for_scope(provider, profile.model(), scope)
+                })
+                .chain(self.contributed_profiles_for_scope(provider, scope))
+                .collect()
+        };
+        profiles.retain_mut(|profile| {
+            let mut available = BTreeSet::new();
+            let mut members = Vec::new();
+            let mut grouped = false;
+            let mut ungrouped = false;
+            let mut ordered_efforts = Vec::new();
+            for id in scope
+                .allowed_account_ids()
+                .filter(|id| scope.account_provider(id) == Some(provider))
+            {
+                if !self.allows_public_model_for_account(profile.model(), scope, id) {
+                    continue;
+                }
+                let target = self.upstream_model_for_account(profile.model(), scope, id);
+                let Some(group) = self.model_group(provider, &target) else {
+                    ungrouped = true;
+                    continue;
+                };
+                grouped = true;
+                if let Some(presentation) = self
+                    .provider_model_presentations
+                    .get(provider)
+                    .and_then(|models| models.iter().find(|(model, _)| model.as_str() == target))
+                    .map(|(_, presentation)| presentation)
+                {
+                    for effort in &presentation.supported_reasoning_efforts {
+                        if !ordered_efforts.contains(effort) {
+                            ordered_efforts.push(effort.clone());
+                        }
+                    }
+                }
+                for (effort, variant) in &group.reasoning_variants {
+                    if variant.accounts.contains(id)
+                        && scope.allows_model(id, variant.model.as_str())
+                    {
+                        available.insert(effort.clone());
+                        let model = self
+                            .provider_models
+                            .get(provider)
+                            .and_then(|models| models.get(&variant.model));
+                        members.push(model.and_then(|m| m.account_metadata.get(id)));
+                    }
+                }
+            }
+            if !grouped || ungrouped {
+                return true;
+            }
+            for effort in &available {
+                if !ordered_efforts.contains(effort) {
+                    ordered_efforts.push(effort.clone());
+                }
+            }
+            let presentation = &mut profile.presentation;
+            presentation.apply_member_metadata(members.into_iter());
+            presentation.supported_reasoning_efforts = ordered_efforts
+                .into_iter()
+                .filter(|effort| available.contains(effort))
                 .collect();
-        }
-        self.public_model_profiles_for_provider(provider)
-            .into_iter()
-            .filter(|profile| {
-                self.native_catalog_model_allowed_for_scope(provider, profile.model(), scope)
-            })
-            .chain(self.contributed_profiles_for_scope(provider, scope))
-            .collect()
+            if !presentation
+                .default_reasoning_effort
+                .as_ref()
+                .is_some_and(|default| presentation.supported_reasoning_efforts.contains(default))
+            {
+                presentation.default_reasoning_effort =
+                    presentation.supported_reasoning_efforts.first().cloned();
+            }
+            !presentation.supported_reasoning_efforts.is_empty()
+        });
+        profiles
     }
 
     /// 已知模型只属于明确声明它的 Provider；未知模型仍可由非完整目录透传
@@ -1470,7 +1608,17 @@ impl RuntimeSnapshot {
         variant: &super::ReasoningModelVariant,
         scope: &FrozenAccountScope,
     ) -> bool {
-        variant.accounts.iter().any(|account| {
+        Self::variant_accounts(provider, variant, scope)
+            .next()
+            .is_some()
+    }
+
+    fn variant_accounts<'a>(
+        provider: &'a ProviderKind,
+        variant: &'a super::ReasoningModelVariant,
+        scope: &'a FrozenAccountScope,
+    ) -> impl Iterator<Item = &'a ProviderAccountId> {
+        variant.accounts.iter().filter(move |account| {
             scope.account_provider(account) == Some(provider)
                 && scope.allows_model(account, variant.model.as_str())
         })
@@ -1794,6 +1942,7 @@ impl RuntimeSnapshot {
         }
         let mut plans = Vec::new();
         let mut group_model_denied = false;
+        let mut search_unavailable = false;
         if !inherited.is_empty() {
             let scope = Arc::new(account_scope.restricted_to(&Default::default(), &inherited));
             match self.plan_inner(
@@ -1808,6 +1957,7 @@ impl RuntimeSnapshot {
             ) {
                 Ok(plan) => plans.push((plan, false)),
                 Err(RoutingError::GroupModelDenied) => group_model_denied = true,
+                Err(RoutingError::WebSearchUnavailable) => search_unavailable = true,
                 Err(_) => {}
             }
         }
@@ -1837,6 +1987,7 @@ impl RuntimeSnapshot {
             ) {
                 Ok(plan) => plans.push((plan, true)),
                 Err(RoutingError::GroupModelDenied) => group_model_denied = true,
+                Err(RoutingError::WebSearchUnavailable) => search_unavailable = true,
                 Err(_) => {}
             }
         }
@@ -1870,6 +2021,9 @@ impl RuntimeSnapshot {
         let Some((mut plan, _)) = plans.into_iter().next() else {
             if group_model_denied {
                 return Err(RoutingError::GroupModelDenied);
+            }
+            if search_unavailable {
+                return Err(RoutingError::WebSearchUnavailable);
             }
             return Err(RoutingError::NoCapableProvider {
                 model: public_model.as_str().to_owned(),
@@ -1945,6 +2099,7 @@ impl RuntimeSnapshot {
         );
         let mut invalid_variant = false;
         let mut group_model_denied = false;
+        let mut search_unavailable = false;
         for provider in &providers {
             if !self.providers.contains(provider) {
                 continue;
@@ -2090,6 +2245,88 @@ impl RuntimeSnapshot {
                 }
                 native.unwrap_or_default()
             };
+            // 原生输出上限属于具体型号与账号，适配器账号沿用自己的能力合同
+            if let (Some(requested), Some(model)) =
+                (requirements.requested_output_tokens(), capabilities)
+            {
+                let mut excluded = model
+                    .account_metadata
+                    .iter()
+                    .filter_map(|(id, metadata)| {
+                        (metadata
+                            .max_output_tokens
+                            .is_some_and(|limit| requested > limit)
+                            && !contributions
+                                .iter()
+                                .any(|adapter| adapter.accounts.contains(id))
+                            && candidate_scope.allows(id))
+                        .then_some(id)
+                    })
+                    .peekable();
+                if excluded.peek().is_some() {
+                    let mut narrowed = candidate_scope.as_ref().clone();
+                    narrowed.exclude_accounts(excluded.cloned());
+                    if !narrowed.allows_provider_model(provider, upstream_model.as_str()) {
+                        continue;
+                    }
+                    candidate_scope = Arc::new(narrowed);
+                }
+            }
+            if operation.requires_web_search()
+                && let Some(model) = capabilities
+                && let Some(search_models) = &model.dedicated_web_search
+            {
+                // 仅目录中同时拥有请求型号和搜索目标的账号可执行本次搜索
+                let mut targets = BTreeMap::<_, BTreeSet<_>>::new();
+                for account in model.account_metadata.keys() {
+                    if !candidate_scope.allows_model(account, upstream_model.as_str()) {
+                        continue;
+                    }
+                    let Some(target) = search_models.get(account) else {
+                        search_unavailable = true;
+                        continue;
+                    };
+                    if !candidate_scope.allows_model_pair(
+                        account,
+                        upstream_model.as_str(),
+                        target.as_str(),
+                    ) {
+                        group_model_denied |=
+                            candidate_scope.groups_deny_model(Some(target.as_str()));
+                        continue;
+                    }
+                    let limit = self
+                        .provider_models
+                        .get(provider)
+                        .and_then(|models| models.get(target))
+                        .and_then(|model| model.account_metadata.get(account))
+                        .and_then(|meta| meta.max_output_tokens);
+                    if requirements
+                        .requested_output_tokens()
+                        .zip(limit)
+                        .is_some_and(|(requested, limit)| requested > limit)
+                    {
+                        continue;
+                    }
+                    targets.entry(target).or_default().insert(account.clone());
+                }
+                for (target, accounts) in targets {
+                    candidates.push(ProviderCandidate {
+                        requires_direct_authentication: direct_model.is_some(),
+                        provider: provider.clone(),
+                        model_presentation: contributions
+                            .first()
+                            .map(|model| model.presentation.clone()),
+                        account_models: Arc::default(),
+                        upstream_model: Some(target.clone()),
+                        emulated_features: emulated_features.clone(),
+                        account_scope: Arc::new(
+                            candidate_scope.restricted_to(&Default::default(), &accounts),
+                        ),
+                    });
+                }
+                continue;
+            }
             candidates.push(ProviderCandidate {
                 requires_direct_authentication: direct_model.is_some(),
                 provider: provider.clone(),
@@ -2123,6 +2360,9 @@ impl RuntimeSnapshot {
             }
             if group_model_denied {
                 return Err(RoutingError::GroupModelDenied);
+            }
+            if search_unavailable {
+                return Err(RoutingError::WebSearchUnavailable);
             }
             // 模型存在性必须包含被请求路由限制排除的 Provider；目录未知时不能断言模型不存在
             let mut scoped_providers = providers.intersection(&self.providers).peekable();

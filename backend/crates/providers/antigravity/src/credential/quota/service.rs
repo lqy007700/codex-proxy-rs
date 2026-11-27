@@ -104,6 +104,7 @@ impl QuotaService {
         .map_err(upstream)?;
         let doc = Document {
             tier: info.paid_tier.or(info.current_tier),
+            bucket_models: super::document::bucket_models(&summary, &catalog),
             summary,
             models: catalog
                 .models
@@ -139,7 +140,7 @@ impl QuotaService {
             ),
             plan_type: plan.clone(),
             observed_at,
-            state: doc.access(observed_at),
+            state: doc.access_with_credits(doc.access(observed_at), observed_at),
         };
         if self
             .accounts
@@ -170,16 +171,27 @@ impl QuotaService {
     {
         let revisions: BTreeMap<_, _> = accounts
             .iter()
-            .map(|a| (a.id().clone(), a.revision()))
+            .map(|a| (a.id().clone(), (a.revision(), a.allow_credits())))
             .collect();
         let ids: Vec<_> = revisions.keys().cloned().collect();
         let observations = self.accounts.get_quotas(&ids).await.map_err(unavailable)?;
         let now = SystemTime::now();
         observations
             .into_iter()
-            .filter(|o| revisions.get(&o.account_id) == Some(&o.expected_revision))
+            .filter(|o| {
+                revisions
+                    .get(&o.account_id)
+                    .is_some_and(|(revision, _)| *revision == o.expected_revision)
+            })
             .map(|o| {
-                let result = parse(&o)?.model_signals(model, o.observed_at, now);
+                let result = parse(&o)?.model_signals(
+                    model,
+                    revisions
+                        .get(&o.account_id)
+                        .is_some_and(|(_, enabled)| *enabled),
+                    o.observed_at,
+                    now,
+                );
                 Ok((o.account_id, result))
             })
             .collect()
@@ -189,13 +201,13 @@ impl QuotaService {
         &self,
         cancel: &CancellationToken,
     ) -> Result<(), WorkerTaskError> {
-        let mut accounts = self
+        let accounts = self
             .accounts
             .list_for_provider(&self.kind, false)
             .await
             .map_err(|e| WorkerTaskError::safe("读取 Antigravity 账号失败").with_source(e))?;
         let ids: Vec<_> = accounts.iter().map(|a| a.id().clone()).collect();
-        let observations: BTreeMap<_, _> = self
+        let mut observations: BTreeMap<_, _> = self
             .accounts
             .get_quotas(&ids)
             .await
@@ -203,37 +215,58 @@ impl QuotaService {
             .into_iter()
             .map(|o| (o.account_id.clone(), o))
             .collect();
-        accounts.retain(|a| {
-            a.enabled()
-                && a.authentication_kind() == "oauth"
-                && observations.get(a.id()).is_none_or(|o| {
-                    o.expected_revision != a.revision()
-                        || o.observed_at.elapsed().unwrap_or_default() >= Duration::from_secs(300)
-                        || (a.quota().is_exhausted()
-                            && a.quota()
-                                .reset_at()
-                                .is_some_and(|reset| reset <= SystemTime::now()))
-                })
-        });
-        if accounts.is_empty() {
-            return Ok(());
+        let now = SystemTime::now();
+        let interval = Duration::from_secs(300);
+        let mut due = Vec::new();
+        let mut stale = Vec::new();
+        for account in accounts
+            .iter()
+            .filter(|a| a.enabled() && a.authentication_kind() == "oauth")
+        {
+            let snapshot = observations
+                .remove(account.id())
+                .filter(|s| s.expected_revision == account.revision());
+            match snapshot {
+                None => due.push(account.id().clone()),
+                Some(_) if account.quota().exhaustion_refresh_due(now, interval) => {
+                    due.push(account.id().clone())
+                }
+                Some(s) if !account.quota().is_exhausted() && s.observed_at <= now - interval => {
+                    stale.push(s)
+                }
+                Some(_) => {}
+            }
         }
-        accounts.sort_by(|a, b| a.id().cmp(b.id()));
-        let offset = self.cursor.fetch_add(32, Ordering::Relaxed) % accounts.len();
-        accounts.rotate_left(offset);
-        accounts.truncate(32);
-        let mut results = stream::iter(accounts).map(|a| async move { tokio::select! { biased; _ = cancel.cancelled() => Ok(()), result = self.refresh(a.id()) => result } }).buffer_unordered(4);
-        let mut failure = None;
+        let mut outcome = Ok(());
+        if !stale.is_empty() {
+            match self.accounts.accounts_used_since_quota(&stale).await {
+                Ok(active) => due.extend(active),
+                Err(e) => {
+                    outcome =
+                        Err(WorkerTaskError::safe("读取 Antigravity 账号使用记录失败")
+                            .with_source(e))
+                }
+            }
+        }
+        if due.is_empty() {
+            return outcome;
+        }
+        due.sort_unstable();
+        due.dedup();
+        let offset = self.cursor.fetch_add(32, Ordering::Relaxed) % due.len();
+        due.rotate_left(offset);
+        due.truncate(32);
+        let mut results = stream::iter(due).map(|id| async move { tokio::select! { biased; _ = cancel.cancelled() => Ok(()), result = self.refresh(&id) => result } }).buffer_unordered(4);
         while let Some(result) = results.next().await {
             if let Err(e) = result
                 && !matches!(e.kind(), Kind::Conflict | Kind::CredentialRefreshRequired)
+                && outcome.is_ok()
             {
-                failure.get_or_insert(e);
+                outcome =
+                    Err(WorkerTaskError::safe("部分 Antigravity 额度刷新失败").with_source(e));
             }
         }
-        failure.map_or(Ok(()), |e| {
-            Err(WorkerTaskError::safe("部分 Antigravity 额度刷新失败").with_source(e))
-        })
+        outcome
     }
 }
 

@@ -110,3 +110,23 @@ fn probe_shows_visible_primary_text_without_leaking_thoughts_or_tool_payloads() 
     ]});
     assert_eq!(primary_text_parts(&response).collect::<String>(), "PONG");
 }
+
+#[test]
+fn grounded_search_without_sources_keeps_inline_citations() {
+    let native = json!({"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"answer"}]},"groundingMetadata":{
+        "webSearchQueries":["query"],
+        "groundingChunks":[{"web":{"uri":"https://example.com","title":"Example"}}],
+        "groundingSupports":[{"segment":{"startIndex":0,"endIndex":6,"text":"answer"},"groundingChunkIndices":[0]}]
+    }}]});
+    let events = vec![
+        json!({"type":"response.completed","response":{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"answer"}]}]}}),
+    ];
+    let events =
+        gateway_protocol::genai::grounded_search_events(&native, events, false, 100).unwrap();
+    let output = &events.last().unwrap()["response"]["output"];
+    assert!(output[0]["action"].get("sources").is_none());
+    assert_eq!(
+        output[1]["content"][0]["annotations"],
+        json!([{"type":"url_citation","url":"https://example.com","title":"Example","start_index":0,"end_index":6}])
+    );
+}

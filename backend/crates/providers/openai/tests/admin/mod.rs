@@ -115,6 +115,7 @@ async fn account_capabilities_distinguish_oauth_from_api_key_and_unknown_credent
         oauth.quota
             && oauth.quota_limits_supported
             && oauth.quota_refresh
+            && oauth.quota_credits
             && oauth.profile
             && oauth.subscription
             && oauth.avatar
@@ -1775,14 +1776,14 @@ async fn openai_admin_provider_projects_official_codex_quota_and_independent_buc
         .expect("Spark quota");
     assert_eq!(
         (
-            monthly[0].local_usage_attribution,
-            review.local_usage_attribution,
-            spark.local_usage_attribution,
+            &monthly[0].local_usage_attribution,
+            &review.local_usage_attribution,
+            &spark.local_usage_attribution,
         ),
         (
-            QuotaLocalUsageAttribution::AccountWide,
-            QuotaLocalUsageAttribution::Unavailable,
-            QuotaLocalUsageAttribution::Unavailable,
+            &QuotaLocalUsageAttribution::AccountWide,
+            &QuotaLocalUsageAttribution::Unavailable,
+            &QuotaLocalUsageAttribution::Unavailable,
         ),
     );
 }

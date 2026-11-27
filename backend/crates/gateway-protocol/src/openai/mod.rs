@@ -24,6 +24,8 @@ mod guardian;
 mod headers;
 /// Server-Sent Events 帧的解析与编码
 pub mod sse;
+/// Responses 内置搜索工具语义
+pub mod web_search;
 
 pub use codex::{
     CodexResponsesRequestSemantics, codex_account_session_id, codex_account_thread_id,

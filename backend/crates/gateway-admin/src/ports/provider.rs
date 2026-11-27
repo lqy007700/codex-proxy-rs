@@ -532,7 +532,12 @@ impl ProviderAdminRegistry {
         if let Some(quota) = quota {
             quota.fill_missing_plan_type(plan_type);
         }
-        self.plan_type_display(provider_kind, plan_type.as_deref())
+        quota
+            .and_then(|quota| quota.plan_type_display.as_deref())
+            .map(str::trim)
+            .filter(|display| !display.is_empty())
+            .map(str::to_owned)
+            .or_else(|| self.plan_type_display(provider_kind, plan_type.as_deref()))
     }
 
     /// 账号页和 Dashboard 共用 Provider 的最终展示名称，不改写官方拼写或原始套餐值

@@ -7,11 +7,13 @@ use gateway_core::{
     account::AccountHistorySnapshot,
     engine::{
         AttemptContext,
+        execution::ClientTransport,
         provider::{
             ProviderCallMetadata, ProviderRequest, ProviderSelectionObservation, ProviderStream,
         },
     },
     error::{ProviderError, ProviderErrorKind as Kind},
+    event::GatewayEvent,
     operation::Operation,
     upstream::{UpstreamSendState, UpstreamTransport},
 };
@@ -33,6 +35,7 @@ impl AntigravityProvider {
         ) {
             return Err(unsent(Kind::Unsupported));
         }
+        super::translation::validate_request_mode(request.operation())?;
         let model = request
             .candidate()
             .upstream_model()
@@ -41,7 +44,10 @@ impl AntigravityProvider {
         let started = Instant::now();
         let affinity =
             super::affinity::session_key(request.operation(), ctx.client_api_key_ref(), &model);
-        let selected = self.select_account(&model, &ctx, affinity.as_ref()).await?;
+        let search = request.operation().requires_web_search();
+        let selected = self
+            .select_account(&model, &ctx, affinity.as_ref(), search)
+            .await?;
         let selection = ProviderSelectionObservation::new(
             u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             selected.capacity,
@@ -81,12 +87,17 @@ impl AntigravityProvider {
                 .get(self.kind.as_str())
                 .and_then(|models| models.get(model.as_str())),
         );
+        let reconnect_websocket = ctx.client_transport() == ClientTransport::WebSocket
+            && request.operation().protocol() == gateway_protocol::openai::OPENAI_PROTOCOL;
         ctx.execute_middleware(
             request.operation().clone(),
             self.kind.clone(),
             Some(model.as_str().to_owned()),
             selected.account.id().clone(),
             Box::new(move |operation, headers| Box::pin(async move {
+                if operation.requires_web_search() != search {
+                    return Err(ProviderError::invalid_request("Middleware changed the required web search after model selection."));
+                }
                 let (operation, translator) = super::translation::prepare(operation)?;
                 let headers = crate::transport::request_headers(&operation, headers, selected.account_switch);
                 if operation.protocol() != GENAI_PROTOCOL {
@@ -126,7 +137,8 @@ impl AntigravityProvider {
                                 // 固定探测使用该账号实际授权的项目，包括尚无公开目录的停用账号
                                 Project::Discover => resource.account_info(token).await?.project,
                             };
-                            resource.generate(&project, model.as_str(), token, &body, stream, &headers).await
+                            let mode = if search { crate::transport::GenerateMode::WebSearch } else { crate::transport::GenerateMode::from(stream) };
+                            resource.generate_with_credits(&project, model.as_str(), token, &body, mode, &headers, selected.account.allow_credits()).await
                         } => response,
                     };
                     let response = match response {
@@ -143,10 +155,14 @@ impl AntigravityProvider {
                         Box::pin(crate::transport::events(response, context))
                     };
                     while let Some(event) = events.next().await {
-                        match event {
-                            Ok(event) => yield event,
+                        let mut event = match event {
+                            Ok(event) => event,
                             Err(error) => Err(record_failure(error).await)?,
+                        };
+                        if reconnect_websocket && event.canonical_facts().iter().any(|fact| matches!(fact, GatewayEvent::Completed(_))) {
+                            event.request_websocket_reconnect();
                         }
+                        yield event;
                     }
                 };
                 let stream = ProviderStream::new(metadata, Box::pin(events), selected.lease);

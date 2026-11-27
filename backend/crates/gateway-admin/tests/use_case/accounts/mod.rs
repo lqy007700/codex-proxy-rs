@@ -1708,6 +1708,7 @@ async fn accounts_recover_disabled_should_only_enable_scheduling_and_preserve_qu
             );
         }
         let quota = ProviderQuota {
+            plan_type_display: None,
             paused_windows: Vec::new(),
             credits: None,
             observed_at: Some(Utc::now()),
@@ -2011,7 +2012,7 @@ async fn accounts_should_fill_missing_plan_from_quota_without_overriding_known_s
             Some("self_serve_business_prolite"),
             Some("team"),
             Some("self_serve_business_prolite"),
-            Some("openai display: self_serve_business_prolite"),
+            Some("Google subscription"),
         ),
         (Some("prolite"), None, Some("prolite"), Some("ProLite")),
         (Some("pro"), None, Some("pro"), Some("Pro")),
@@ -2020,6 +2021,8 @@ async fn accounts_should_fill_missing_plan_from_quota_without_overriding_known_s
     ] {
         let provider = FakeProviderAdmin::new("openai", events());
         provider.set_quota(ProviderQuota {
+            plan_type_display: (stored_plan == Some("self_serve_business_prolite"))
+                .then(|| "Google subscription".to_owned()),
             paused_windows: Vec::new(),
             plan_type: quota_plan.map(str::to_owned),
             ..empty_quota()
@@ -2064,6 +2067,7 @@ async fn accounts_list_should_degrade_quota_failure_to_empty_window_without_drop
     let events = events();
     let openai = FakeProviderAdmin::new("openai", events.clone());
     openai.set_quota(ProviderQuota {
+        plan_type_display: None,
         paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
@@ -2193,6 +2197,7 @@ async fn accounts_list_should_map_unknown_credential_to_error_not_normal() {
 async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view() {
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        plan_type_display: None,
         paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
@@ -2241,6 +2246,7 @@ async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view()
 async fn accounts_list_should_not_derive_exhaustion_from_provider_quota_view() {
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        plan_type_display: None,
         paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
@@ -2292,6 +2298,7 @@ async fn quota_forecast_reads_raw_snapshot_and_limits_usage_to_observation_time(
     let observed = now - TimeDelta::hours(1);
     let reset = now + TimeDelta::days(1);
     provider.set_quota(ProviderQuota {
+        plan_type_display: None,
         paused_windows: Vec::new(),
         credits: None,
         observed_at: Some(observed),
@@ -2406,6 +2413,7 @@ async fn quota_forecast_only_queries_the_two_selected_source_windows() {
         })
         .collect();
     provider.set_quota(ProviderQuota {
+        plan_type_display: None,
         paused_windows: Vec::new(),
         plan_type: Some("pro".to_owned()),
         observed_at: Some(observed),
@@ -2457,6 +2465,7 @@ async fn quota_forecast_same_window_reversal_keeps_recorded_usage_in_the_report(
         let reset = now + TimeDelta::days(1);
         let provider = FakeProviderAdmin::new("openai", events());
         provider.set_quota(ProviderQuota {
+            plan_type_display: None,
             paused_windows: Vec::new(),
             plan_type: Some("pro".to_owned()),
             observed_at: Some(observed),
@@ -2538,6 +2547,7 @@ async fn quota_forecast_keeps_cycle_totals_through_reset_jitter_and_restarts_aft
     let added = now - TimeDelta::hours(5);
     let provider = FakeProviderAdmin::new("openai", events());
     let mut quota = ProviderQuota {
+        plan_type_display: None,
         credits: None,
         plan_type: Some("pro".to_owned()),
         observed_at: Some(observed),
@@ -2747,6 +2757,7 @@ async fn accounts_list_should_attach_local_usage_to_quota_windows() {
     let provider = FakeProviderAdmin::new("openai", events());
     let reset_at = Utc::now() + TimeDelta::hours(1);
     provider.set_quota(ProviderQuota {
+        plan_type_display: None,
         paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
@@ -2847,6 +2858,7 @@ async fn accounts_list_and_quota_refresh_should_select_the_same_weekly_or_monthl
         (vec![short, month], "month", 3000, 30),
     ] {
         provider.set_quota(ProviderQuota {
+            plan_type_display: None,
             paused_windows: Vec::new(),
             windows,
             ..empty_quota()
@@ -2905,6 +2917,7 @@ async fn accounts_list_should_not_attach_account_usage_to_model_specific_quota_w
     let provider = FakeProviderAdmin::new("openai", events());
     let reset_at = Utc::now() + TimeDelta::days(7);
     provider.set_quota(ProviderQuota {
+        plan_type_display: None,
         paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
@@ -3196,6 +3209,7 @@ pub(super) fn document() -> ProviderDocument {
 
 fn empty_quota() -> ProviderQuota {
     ProviderQuota {
+        plan_type_display: None,
         paused_windows: Vec::new(),
         credits: None,
         plan_type: None,
@@ -3835,6 +3849,34 @@ fn quota_limit_window(
 }
 
 #[tokio::test]
+async fn credits_setting_requires_provider_capability_for_both_values() {
+    for (kind, supported, enabled) in [
+        ("openai", true, true),
+        ("antigravity", true, true),
+        ("antigravity", true, false),
+        ("xai", false, true),
+        ("openai", false, false),
+    ] {
+        let provider = FakeProviderAdmin::new(kind, events());
+        provider.capabilities.lock().unwrap().quota_credits = supported;
+        let store = FakeAccountStore::new(kind, events());
+        let services = accounts_service(provider, store.clone()).await;
+        let mut command = quota_limit_command(None);
+        command.allow_credits = Some(enabled);
+        let result = services
+            .accounts()
+            .batch_update(&context("credits-policy"), command)
+            .await;
+        assert_eq!(result.is_ok(), supported);
+        let updates = store.batch_updates.lock().unwrap();
+        assert_eq!(updates.len(), usize::from(supported));
+        if supported {
+            assert_eq!(updates[0].0.allow_credits, Some(enabled));
+        }
+    }
+}
+
+#[tokio::test]
 async fn quota_limits_reject_unsupported_accounts_before_reading_or_committing() {
     for (kind, authentication_kind, supported) in [
         ("xai", "oauth", true),
@@ -4060,6 +4102,7 @@ async fn accounts_list_and_detail_keep_recent_week_usage_separate_from_group_quo
     };
     for windows in [Vec::new(), vec![grouped_window]] {
         provider.set_quota(ProviderQuota {
+            plan_type_display: None,
             windows: windows.clone(),
             ..empty_quota()
         });
