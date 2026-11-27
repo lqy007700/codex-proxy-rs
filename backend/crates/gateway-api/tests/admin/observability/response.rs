@@ -680,6 +680,7 @@ async fn diagnostics_should_keep_stable_key_and_display_name_contract() {
             key: "acct_diag".to_owned(),
             account_provider_kind: Some("openai".to_owned()),
             account_plan_type: Some("pro".to_owned()),
+            account_plan_type_display: None,
             name: "diag@example.invalid".to_owned(),
             request_count: 2,
             success_count: 2,

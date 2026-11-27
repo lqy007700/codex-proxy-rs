@@ -39,6 +39,18 @@ pub(crate) struct QuotaService {
 }
 
 impl QuotaService {
+    pub(crate) async fn plan_type_display(&self, account: &ProviderAccount) -> Option<String> {
+        let observations = self
+            .accounts
+            .get_quotas(std::slice::from_ref(account.id()))
+            .await
+            .ok()?;
+        let observation = observations
+            .into_iter()
+            .find(|o| o.account_id == *account.id() && o.expected_revision == account.revision())?;
+        parse(&observation).ok()?.plan_type_display()
+    }
+
     pub(crate) fn new(
         kind: ProviderKind,
         accounts: Arc<dyn ProviderAccountStore>,

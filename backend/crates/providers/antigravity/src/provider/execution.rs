@@ -61,6 +61,8 @@ impl AntigravityProvider {
         let resource = self
             .clients
             .client(&self.origin, &selected.account, &profile)?;
+        let mut snapshot = AccountHistorySnapshot::from_account(&selected.account);
+        snapshot.plan_type_display_snapshot = self.quota.plan_type_display(&selected.account).await;
         let metadata = ProviderCallMetadata::new(
             self.kind.clone(),
             model.clone(),
@@ -70,9 +72,7 @@ impl AntigravityProvider {
         )
         .with_credential_revision(selected.account.revision())
         .with_selection_observation(selection)
-        .with_account_snapshot(Some(AccountHistorySnapshot::from_account(
-            &selected.account,
-        )));
+        .with_account_snapshot(Some(snapshot));
         let cancellation = ctx.cancellation().clone();
         let deadline = ctx.deadline();
         let started_at = ctx.timing_started_at();
