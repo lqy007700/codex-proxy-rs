@@ -53,6 +53,10 @@ pub struct RuntimeSettingsValues {
     pub openai_oauth_guardian_review_model: bool,
     #[serde(default)]
     pub openai_request_country: gateway_core::account::OpenAiRequestCountry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_request_settings: Option<gateway_core::settings::OpenAiRequestSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_websocket_pool: Option<gateway_core::settings::OpenAiWebSocketPoolSettings>,
     pub codex_privacy_policy: gateway_core::settings::privacy::CodexPrivacyPolicy,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
@@ -207,6 +211,12 @@ impl RuntimeSettingsValues {
             .is_some_and(|percent| percent > 100)
         {
             return Err("reset_credit_max_weekly_remaining_percent");
+        }
+        if let Some(settings) = &self.openai_request_settings {
+            settings.validate()?;
+        }
+        if let Some(settings) = self.openai_websocket_pool {
+            settings.validate()?;
         }
         self.openai_request_country
             .validate()

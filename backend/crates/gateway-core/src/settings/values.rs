@@ -18,6 +18,10 @@ pub struct SettingsValues {
     pub(crate) openai_oauth_guardian_review_model: bool,
     #[serde(default)]
     pub(crate) openai_request_country: crate::account::OpenAiRequestCountry,
+    #[serde(default)]
+    pub(crate) openai_request_settings: crate::settings::OpenAiRequestSettings,
+    #[serde(default)]
+    pub(crate) openai_websocket_pool: crate::settings::OpenAiWebSocketPoolSettings,
     pub(crate) codex_privacy_policy: super::privacy::CodexPrivacyPolicy,
     pub(crate) request_location_enabled: bool,
     pub(crate) request_location: crate::account::RequestLocation,
@@ -53,6 +57,17 @@ const fn default_openai_oauth_guardian_review_model() -> bool {
 }
 
 impl SettingsValues {
+    #[must_use]
+    pub fn with_openai_transport_settings(
+        mut self,
+        request: crate::settings::OpenAiRequestSettings,
+        pool: crate::settings::OpenAiWebSocketPoolSettings,
+    ) -> Self {
+        self.openai_request_settings = request;
+        self.openai_websocket_pool = pool;
+        self
+    }
+
     #[must_use]
     pub const fn with_openai_oauth_guardian_review_model(mut self, enabled: bool) -> Self {
         self.openai_oauth_guardian_review_model = enabled;
@@ -240,6 +255,8 @@ impl SettingsValues {
             pricing: Arc::default(),
             openai_oauth_guardian_review_model: true,
             openai_request_country: crate::account::OpenAiRequestCountry::default(),
+            openai_request_settings: Default::default(),
+            openai_websocket_pool: Default::default(),
             codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: crate::account::RequestLocation::default(),

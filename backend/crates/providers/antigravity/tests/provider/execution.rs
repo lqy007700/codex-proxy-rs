@@ -677,6 +677,11 @@ async fn translated_generation_delivers_terminal_wire_after_tail_usage() {
         event::GatewayEvent,
         operation::{GenerateRequest, Operation, ProtocolPayload},
     };
+    let chat = gateway_protocol::openai::chat::decode_chat_request(br#"{
+        "model":"fixture-model","stream":true,"max_completion_tokens":100,"reasoning_effort":"none",
+        "response_format":{"type":"json_schema","json_schema":{"name":"result","schema":{"type":"object"}}},
+        "messages":[{"role":"system","content":"Project rules"},{"role":"developer","content":"Tool instructions"},{"role":"user","content":"hello"}]
+    }"#).unwrap();
     let upstream = MockServer::start().await;
     Mock::given(method("POST")).and(path("/v1internal:streamGenerateContent"))
         .and(header("user-agent", "antigravity/cli/1.5.14 (aidev_client; os_type=linux; arch=amd64; auth_method=consumer)"))
@@ -689,17 +694,13 @@ async fn translated_generation_delivers_terminal_wire_after_tail_usage() {
         (
             "openai",
             ClientTransport::WebSocket,
-            json!({"model":"fixture-model","input":"hello","max_output_tokens":100,"reasoning":{"effort":"none"},"text":{"format":{"type":"json_schema","schema":{"type":"object"}}}}),
+            json!({"model":"fixture-model","instructions":"Project rules","input":[{"type":"message","role":"developer","content":"Tool instructions"},{"type":"message","role":"user","content":"hello"}],"max_output_tokens":100,"reasoning":{"effort":"none"},"text":{"format":{"type":"json_schema","schema":{"type":"object"}}}}),
         ),
-        (
-            "openai",
-            ClientTransport::HttpSse,
-            json!({"model":"fixture-model","input":"hello","max_output_tokens":100,"reasoning":{"effort":"none"},"text":{"format":{"type":"json_schema","schema":{"type":"object"}}}}),
-        ),
+        ("openai", ClientTransport::HttpSse, chat.responses.into()),
         (
             "anthropic",
             ClientTransport::HttpSse,
-            json!({"model":"fixture-model","messages":[{"role":"user","content":"hello"}],"max_tokens":100}),
+            json!({"model":"fixture-model","system":[{"type":"text","text":"Project rules"},{"type":"text","text":"Tool instructions"}],"messages":[{"role":"user","content":"hello"}],"max_tokens":100}),
         ),
     ] {
         let fixture = Fixture::new(&upstream.uri());
@@ -752,8 +753,12 @@ async fn translated_generation_delivers_terminal_wire_after_tail_usage() {
         let body: serde_json::Value = serde_json::from_slice(&sent.last().unwrap().body).unwrap();
         assert_eq!(body["request"]["generationConfig"]["maxOutputTokens"], 100);
         assert_eq!(
-            body["request"]["systemInstruction"]["parts"][0]["text"],
-            "Frozen AGY prompt"
+            body["request"]["systemInstruction"]["parts"],
+            json!([
+                {"text":"Frozen AGY prompt"},
+                {"text":"Project rules"},
+                {"text":"Tool instructions"},
+            ])
         );
         assert!(
             output
@@ -839,7 +844,7 @@ async fn required_search_uses_catalog_target_and_delivers_grounded_terminal() {
     .unwrap();
     let search = json!({"type":"web_search","filters":{"allowed_domains":["example.org"]}});
     let choice = json!({"type":"allowed_tools","mode":"required","tools":[{"type":"web_search"}]});
-    let body = json!({"model":"fixture-model","input":"你好","tool_choice":choice,"tools":[search,{"type":"function","name":"pwd"}],"include":["web_search_call.action.sources"]});
+    let body = json!({"model":"fixture-model","input":"你好","instructions":"Project rules","tool_choice":choice,"tools":[search,{"type":"function","name":"pwd"}],"include":["web_search_call.action.sources"]});
     let op = Operation::Generate(GenerateRequest::from_protocol_payload(
         ProtocolPayload::json_object("openai", body.as_object().unwrap().clone()).unwrap(),
     ));
@@ -882,6 +887,14 @@ async fn required_search_uses_catalog_target_and_delivers_grounded_terminal() {
             }
         }
     }
+    let sent = server.received_requests().await.unwrap();
+    let body: serde_json::Value = sent.last().unwrap().body_json().unwrap();
+    assert_eq!(
+        body["request"]["systemInstruction"],
+        json!({
+            "parts":[{"text":"Search the web for the query and return a concise answer grounded in the sources."}]
+        })
+    );
     for (i, event) in wire.iter().enumerate() {
         assert_eq!(event["sequence_number"], i)
     }

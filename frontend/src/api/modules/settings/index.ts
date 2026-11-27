@@ -27,6 +27,19 @@ export type OpenAiRequestCountry
   = | { mode: 'default' | 'passthrough' | 'follow_location' }
     | { mode: 'custom', country: string }
 
+export interface OpenAiRequestSettings {
+  residency?: string | null
+  accountRoutingOverride?: string | null
+}
+
+export interface OpenAiWebsocketPool {
+  maxAgeMs?: number
+  maxConnecting?: number
+  fastPathBudgetMs?: number
+  idleTimeoutMs?: number
+  streamIdleTimeoutMs?: number
+}
+
 export type RotationStrategy = 'smart' | 'quota_reset_priority' | 'round_robin' | 'sticky'
 
 export interface ResetWindowWeights { fiveHour: number, weekly: number, monthly: number }
@@ -55,6 +68,8 @@ export interface RuntimeSettings {
   requestLocationEnabled: boolean
   requestLocation: RequestLocation
   openaiRequestCountry: OpenAiRequestCountry
+  openaiRequestSettings?: OpenAiRequestSettings
+  openaiWebsocketPool?: OpenAiWebsocketPool
   openaiOauthGuardianReviewModel: boolean
   modelMappings: Record<string, string>
   refreshMarginSeconds: number

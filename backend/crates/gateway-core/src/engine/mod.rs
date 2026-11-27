@@ -328,6 +328,8 @@ pub struct RequestAttemptContext {
     request_profile: Option<crate::account::OpaqueProviderData>,
     fast_mode: FastMode,
     openai_request_country: crate::account::OpenAiRequestCountry,
+    openai_request_settings: crate::settings::OpenAiRequestSettings,
+    openai_websocket_pool: crate::settings::OpenAiWebSocketPoolSettings,
     request_location: Option<crate::account::RequestLocation>,
     privacy: Option<Arc<dyn crate::settings::privacy::CompiledPrivacyPolicy>>,
     request_id: ModelRequestId,
@@ -440,6 +442,17 @@ impl RequestAttemptContext {
     }
 
     #[must_use]
+    pub fn with_openai_transport_settings(
+        mut self,
+        request: crate::settings::OpenAiRequestSettings,
+        pool: crate::settings::OpenAiWebSocketPoolSettings,
+    ) -> Self {
+        self.openai_request_settings = request;
+        self.openai_websocket_pool = pool;
+        self
+    }
+
+    #[must_use]
     pub fn with_openai_request_country(
         mut self,
         country: crate::account::OpenAiRequestCountry,
@@ -472,6 +485,8 @@ impl RequestAttemptContext {
             pricing: Arc::default(),
             fast_mode: FastMode::Default,
             openai_request_country: Default::default(),
+            openai_request_settings: Default::default(),
+            openai_websocket_pool: Default::default(),
             request_location: None,
             privacy: None,
             timing_started_at: Instant::now(),
@@ -811,6 +826,16 @@ impl AttemptContext {
     #[must_use]
     pub const fn request_location(&self) -> Option<&crate::account::RequestLocation> {
         self.request.request_location.as_ref()
+    }
+
+    #[must_use]
+    pub const fn openai_request_settings(&self) -> &crate::settings::OpenAiRequestSettings {
+        &self.request.openai_request_settings
+    }
+
+    #[must_use]
+    pub const fn openai_websocket_pool(&self) -> crate::settings::OpenAiWebSocketPoolSettings {
+        self.request.openai_websocket_pool
     }
 
     #[must_use]

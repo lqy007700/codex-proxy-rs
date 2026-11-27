@@ -22,6 +22,8 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
             ("grok-latest".to_owned(), "grok-4.5".to_owned()),
         ]),
         values: gateway_admin::model::settings::RuntimeSettingsValues {
+            openai_request_settings: None,
+            openai_websocket_pool: None,
             codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: Default::default(),
@@ -227,6 +229,8 @@ fn runtime_settings_require_model_when_warmup_is_enabled() {
         let runtime_settings_base = settings_with_margin(3_600);
         RuntimeSettingsUpdate {
             values: gateway_admin::model::settings::RuntimeSettingsValues {
+                openai_request_settings: None,
+                openai_websocket_pool: None,
                 account_warmup_enabled: true,
                 account_warmup_cron: "0 8 * * *".to_owned(),
                 ..runtime_settings_base.values
@@ -384,6 +388,8 @@ fn runtime_settings_reject_out_of_range_error_protection() {
             let runtime_settings_base = settings_with_margin(3_600);
             RuntimeSettingsUpdate {
                 values: gateway_admin::model::settings::RuntimeSettingsValues {
+                    openai_request_settings: None,
+                    openai_websocket_pool: None,
                     account_error_protection: gateway_core::account::AccountErrorProtection {
                         threshold: 1,
                         ..enabled_protection()
@@ -397,6 +403,8 @@ fn runtime_settings_reject_out_of_range_error_protection() {
             let runtime_settings_base = settings_with_margin(3_600);
             RuntimeSettingsUpdate {
                 values: gateway_admin::model::settings::RuntimeSettingsValues {
+                    openai_request_settings: None,
+                    openai_websocket_pool: None,
                     account_error_protection: gateway_core::account::AccountErrorProtection {
                         window_seconds: 59,
                         ..enabled_protection()
@@ -410,6 +418,8 @@ fn runtime_settings_reject_out_of_range_error_protection() {
             let runtime_settings_base = settings_with_margin(3_600);
             RuntimeSettingsUpdate {
                 values: gateway_admin::model::settings::RuntimeSettingsValues {
+                    openai_request_settings: None,
+                    openai_websocket_pool: None,
                     account_error_protection: gateway_core::account::AccountErrorProtection {
                         duration_seconds: 299,
                         ..enabled_protection()
@@ -423,6 +433,8 @@ fn runtime_settings_reject_out_of_range_error_protection() {
             let runtime_settings_base = settings_with_margin(3_600);
             RuntimeSettingsUpdate {
                 values: gateway_admin::model::settings::RuntimeSettingsValues {
+                    openai_request_settings: None,
+                    openai_websocket_pool: None,
                     account_error_protection: gateway_core::account::AccountErrorProtection {
                         probe_model: Some(" pad ".to_owned()),
                         ..enabled_protection()
@@ -443,6 +455,8 @@ fn runtime_settings_reject_non_semver_client_min() {
         let runtime_settings_base = settings_with_margin(3_600);
         RuntimeSettingsUpdate {
             values: gateway_admin::model::settings::RuntimeSettingsValues {
+                openai_request_settings: None,
+                openai_websocket_pool: None,
                 min_codex_cli_version: Some("v0.40.0".to_owned()),
                 ..runtime_settings_base.values
             },
@@ -1553,4 +1567,58 @@ async fn rotation_migration_preserves_existing_settings_and_handles_maximum_init
         assert_eq!(after, before);
         database.close().await;
     }
+}
+
+#[tokio::test]
+async fn openai_transport_overrides_round_trip_and_omission_preserves_them() {
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    use serde_json::json;
+
+    let Some(database) = TestDatabase::create("openai_transport_overrides").await else {
+        return;
+    };
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    let initial = repository.load_runtime_settings().await.unwrap();
+    assert_eq!(initial.values.openai_request_settings, None);
+    assert_eq!(initial.values.openai_websocket_pool, None);
+
+    let request_settings = json!({"residency": null, "accountRoutingOverride": "us_cr"});
+    let pool_settings = json!({"maxConnecting": 2, "streamIdleTimeoutMs": 0});
+    let mut update = settings_with_margin(300);
+    update.values.openai_request_settings =
+        Some(serde_json::from_value(request_settings.clone()).unwrap());
+    update.values.openai_websocket_pool =
+        Some(serde_json::from_value(pool_settings.clone()).unwrap());
+    repository.update_runtime_settings(update).await.unwrap();
+    repository
+        .update_runtime_settings(settings_with_margin(400))
+        .await
+        .unwrap();
+
+    let saved = repository.load_runtime_settings().await.unwrap();
+    assert_eq!(saved.values.refresh_margin_seconds, 400);
+    assert_eq!(
+        serde_json::to_value(saved.values.openai_request_settings).unwrap(),
+        request_settings
+    );
+    assert_eq!(
+        serde_json::to_value(saved.values.openai_websocket_pool).unwrap(),
+        pool_settings
+    );
+
+    let snapshots = PgRuntimeSnapshotRepository::new(database.pool.clone());
+    let snapshot = snapshots.load_runtime_snapshot().await.unwrap();
+    let values = serde_json::to_value(&snapshot.settings).unwrap();
+    assert_eq!(values["openai_request_settings"], request_settings);
+    assert_eq!(values["openai_websocket_pool"], pool_settings);
+
+    let mut reset = settings_with_margin(400);
+    reset.values.openai_request_settings = Some(Default::default());
+    reset.values.openai_websocket_pool = Some(Default::default());
+    repository.update_runtime_settings(reset).await.unwrap();
+    let snapshot = snapshots.load_runtime_snapshot().await.unwrap();
+    let values = serde_json::to_value(&snapshot.settings).unwrap();
+    assert_eq!(values["openai_request_settings"], json!({}));
+    assert_eq!(values["openai_websocket_pool"], json!({}));
+    database.close().await;
 }

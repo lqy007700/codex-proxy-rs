@@ -1,6 +1,6 @@
 import type { ProtectionDraft } from '../components/error-protection/form'
 import type { rotationOptions } from '../constants'
-import type { AccountAffinity, CodexPrivacyPolicy, OpenAiRequestCountry, ResetWindowWeights, SmartSchedulingConfig } from '@/api'
+import type { AccountAffinity, CodexPrivacyPolicy, OpenAiRequestCountry, OpenAiRequestSettings, ResetWindowWeights, SmartSchedulingConfig } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
 import { cloneDeep, isEqual } from 'es-toolkit'
 import { computed, onScopeDispose, reactive, ref, shallowRef } from 'vue'
@@ -12,6 +12,7 @@ import { normalizeRequestLocation, requestLocationError } from '@/utils/location
 import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import { protectionSettingsError, trimProtectionText } from '../components/error-protection/form'
+import { parseWebsocketPool, routingFields, routingHeaderError, websocketPoolDraft, websocketPoolFields } from '../openaiOverrides'
 
 type RotationStrategy = (typeof rotationOptions)[number]['value']
 
@@ -43,6 +44,8 @@ export function useSettingsForm() {
       timezone: '',
     },
     openaiRequestCountry: { mode: 'follow_location' } as OpenAiRequestCountry,
+    openaiRequestSettings: {} as OpenAiRequestSettings,
+    openaiWebsocketPool: websocketPoolDraft(),
     openaiOauthGuardianReviewModel: true,
     refreshMarginSeconds: null as number | null,
     refreshConcurrency: null as number | null,
@@ -135,6 +138,8 @@ export function useSettingsForm() {
 
   const minCodexDesktopVersionError = computed(() => versionError(form.minCodexDesktopVersion))
   const minCodexCliVersionError = computed(() => versionError(form.minCodexCliVersion))
+  const parsedWebsocketPool = computed(() => parseWebsocketPool(form.openaiWebsocketPool))
+  const websocketPoolErrors = computed(() => parsedWebsocketPool.value.errors)
 
   function versionError(value: string): string {
     const normalized = value.trim()
@@ -149,6 +154,8 @@ export function useSettingsForm() {
     form.requestLocationEnabled = data.requestLocationEnabled
     form.requestLocation = { ...data.requestLocation }
     form.openaiRequestCountry = { ...data.openaiRequestCountry }
+    form.openaiRequestSettings = { ...data.openaiRequestSettings }
+    form.openaiWebsocketPool = websocketPoolDraft(data.openaiWebsocketPool)
     form.openaiOauthGuardianReviewModel = data.openaiOauthGuardianReviewModel
     form.refreshMarginSeconds = data.refreshMarginSeconds
     form.refreshConcurrency = data.refreshConcurrency
@@ -365,6 +372,24 @@ export function useSettingsForm() {
       ZNotification.warning({ message: '自定义国家代码需为两位字母，例如 US' })
       return
     }
+    const openaiRequestSettings = { ...form.openaiRequestSettings }
+    const requestSettingsChanged = !isEqual(openaiRequestSettings, savedSettings.form.openaiRequestSettings)
+    if (requestSettingsChanged) {
+      for (const { key, label } of routingFields) {
+        const message = routingHeaderError(openaiRequestSettings[key])
+        if (message) {
+          ZNotification.warning({ message: `${label}：${message}` })
+          return
+        }
+      }
+    }
+    const { overrides: openaiWebsocketPool, errors: poolErrors } = parsedWebsocketPool.value
+    const websocketPoolChanged = !isEqual(form.openaiWebsocketPool, savedSettings.form.openaiWebsocketPool)
+    const invalidPoolField = websocketPoolChanged && websocketPoolFields.find(({ key }) => poolErrors[key])
+    if (invalidPoolField) {
+      ZNotification.warning({ message: `${invalidPoolField.label}：${poolErrors[invalidPoolField.key]}` })
+      return
+    }
     const protectionError = protectionSettingsError(form.accountErrorProtection)
     if (protectionError) {
       ZNotification.warning({ message: protectionError })
@@ -400,6 +425,12 @@ export function useSettingsForm() {
         requestLocationEnabled: form.requestLocationEnabled,
         requestLocation,
         openaiRequestCountry,
+        ...(requestSettingsChanged
+          ? { openaiRequestSettings }
+          : {}),
+        ...(websocketPoolChanged
+          ? { openaiWebsocketPool }
+          : {}),
         openaiOauthGuardianReviewModel: form.openaiOauthGuardianReviewModel,
         modelMappings: mappingPayload(),
         refreshMarginSeconds,
@@ -483,6 +514,7 @@ export function useSettingsForm() {
     resetCreditMaxWeeklyRemainingPercentValue,
     minCodexDesktopVersionError,
     minCodexCliVersionError,
+    websocketPoolErrors,
     saveSettings,
     loadSettings,
   }

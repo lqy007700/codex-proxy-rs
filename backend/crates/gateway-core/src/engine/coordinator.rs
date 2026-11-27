@@ -1260,6 +1260,10 @@ where
                 .with_pricing(self.plan.pricing())
                 .with_request_location(self.plan.request_location().cloned())
                 .with_openai_request_country(self.plan.openai_request_country().clone())
+                .with_openai_transport_settings(
+                    self.plan.openai_request_settings().clone(),
+                    self.plan.openai_websocket_pool(),
+                )
                 .with_privacy(self.plan.privacy())
                 .with_request_body_limit(self.plan.request_body_limit())
                 .with_concurrency_wait_budget(self.concurrency_wait_budget.clone())

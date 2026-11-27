@@ -1,4 +1,4 @@
-//! 已注册资源服务的项目发现、模型查询和原生 HTTP 请求
+//! 已注册资源服务的项目发现、模型查询和 Cloud Code 请求封装
 
 use bytes::Bytes;
 use gateway_core::{
@@ -15,8 +15,8 @@ use super::failure::{network, sent, successful, unsent};
 use crate::profile::ClientProfile;
 use gateway_core::engine::middleware::MiddlewareHeader;
 // Desktop 独立搜索使用固定任务指令，常规生成与计数使用账号画像
-static SEARCH_INSTRUCTION: std::sync::LazyLock<&RawValue> = std::sync::LazyLock::new(|| {
-    serde_json::from_str(r#"{"parts":[{"text":"Search the web for the query and return a concise answer grounded in the sources."}]}"#).expect("valid static search instruction")
+static SEARCH_PROMPT_PART: std::sync::LazyLock<&RawValue> = std::sync::LazyLock::new(|| {
+    serde_json::from_str(r#"{"text":"Search the web for the query and return a concise answer grounded in the sources."}"#).expect("valid static search instruction")
 });
 
 const MAX_CONTROL_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
@@ -96,7 +96,22 @@ impl From<bool> for GenerateMode {
 pub(crate) struct CloudCodeClient {
     client: Client,
     origin: Url,
-    system_instruction: Box<RawValue>,
+    system_prompt_part: Box<RawValue>,
+}
+
+#[derive(Serialize)]
+struct RequestBody<'a> {
+    #[serde(flatten)]
+    fields: BTreeMap<String, &'a RawValue>,
+    #[serde(rename = "systemInstruction")]
+    system_instruction: SystemInstruction<'a>,
+}
+
+#[derive(Serialize)]
+struct SystemInstruction<'a> {
+    parts: Vec<&'a RawValue>,
+    #[serde(flatten)]
+    metadata: BTreeMap<String, &'a RawValue>,
 }
 
 impl CloudCodeClient {
@@ -141,8 +156,8 @@ impl CloudCodeClient {
         Ok(Self {
             client,
             origin: origin.clone(),
-            system_instruction: RawValue::from_string(
-                json!({"parts":[{"text":profile.system_prompt}]}).to_string(),
+            system_prompt_part: serde_json::value::to_raw_value(
+                &json!({"text":profile.system_prompt}),
             )
             .map_err(|e| unsent(Kind::ProviderInfrastructureUnavailable).with_source(e))?,
         })
@@ -218,14 +233,10 @@ impl CloudCodeClient {
             request_type: Option<&'static str>,
             #[serde(rename = "enabledCreditTypes", skip_serializing_if = "Option::is_none")]
             enabled_credit_types: Option<[&'static str; 1]>,
-            request: BTreeMap<String, &'a RawValue>,
+            request: RequestBody<'a>,
         }
-        let instruction = if mode == GenerateMode::WebSearch {
-            *SEARCH_INSTRUCTION
-        } else {
-            &self.system_instruction
-        };
-        let request = Self::request_body(body, instruction)?;
+        let web_search = mode == GenerateMode::WebSearch;
+        let request = self.request_body(body, web_search)?;
         let (send, media) = if mode == GenerateMode::Stream {
             (
                 self.post("streamGenerateContent", token)
@@ -239,7 +250,7 @@ impl CloudCodeClient {
             send.json(&Envelope {
                 project,
                 model,
-                request_type: (mode == GenerateMode::WebSearch).then_some("web_search"),
+                request_type: web_search.then_some("web_search"),
                 enabled_credit_types: allow_credits.then_some([super::account::GOOGLE_ONE_AI]),
                 request,
             }),
@@ -256,7 +267,7 @@ impl CloudCodeClient {
         body: &[u8],
         headers: &[MiddlewareHeader],
     ) -> Result<Response, ProviderError> {
-        let mut request = Self::request_body(body, &self.system_instruction)?;
+        let mut request = self.request_body(body, false)?;
         // Desktop 的计数封套只接受 Vertex CountTokensRequest，没有项目和生成控制字段
         for field in [
             "model",
@@ -268,11 +279,11 @@ impl CloudCodeClient {
             "sessionId",
             "session_id",
         ] {
-            request.remove(field);
+            request.fields.remove(field);
         }
         self.send(
             self.post("countTokens", token)
-                .json(&json!({"request":request})),
+                .json(&BTreeMap::from([("request", request)])),
             token,
             headers,
             "application/json",
@@ -281,15 +292,35 @@ impl CloudCodeClient {
     }
 
     fn request_body<'a>(
+        &'a self,
         body: &'a [u8],
-        instruction: &'a RawValue,
-    ) -> Result<BTreeMap<String, &'a RawValue>, ProviderError> {
-        let mut request: BTreeMap<String, &RawValue> = serde_json::from_slice(body)
-            .map_err(|e| unsent(Kind::InvalidRequest).with_source(e))?;
-        // 生成和计数共享同一身份策略，其他字段保留原始 JSON 表达
-        request.remove("system_instruction");
-        request.insert("systemInstruction".to_owned(), instruction);
-        Ok(request)
+        web_search: bool,
+    ) -> Result<RequestBody<'a>, ProviderError> {
+        let invalid = |error| unsent(Kind::InvalidRequest).with_source(error);
+        let mut fields: BTreeMap<String, &RawValue> =
+            serde_json::from_slice(body).map_err(invalid)?;
+        let alias = fields.remove("system_instruction");
+        let client = fields.remove("systemInstruction").or(alias);
+        let prompt = if web_search {
+            *SEARCH_PROMPT_PART
+        } else {
+            self.system_prompt_part.as_ref()
+        };
+        let mut parts = vec![prompt];
+        let mut metadata: BTreeMap<String, &RawValue> = BTreeMap::new();
+        // 客户端规则与工具说明跟在画像提示后，独立搜索只使用固定任务指令
+        if let Some(client) = client.filter(|value| !web_search && value.get() != "null") {
+            metadata = serde_json::from_str(client.get()).map_err(invalid)?;
+            if let Some(client_parts) = metadata.remove("parts") {
+                parts.extend(
+                    serde_json::from_str::<Vec<&RawValue>>(client_parts.get()).map_err(invalid)?,
+                );
+            }
+        }
+        Ok(RequestBody {
+            fields,
+            system_instruction: SystemInstruction { parts, metadata },
+        })
     }
 
     async fn send(

@@ -85,6 +85,8 @@ sha256sum --check --strict .frozen-sha256
 
 `0063_request_plan_display.sql` 增加请求和运维事件的套餐展示快照，既有记录继续使用保存的套餐代码
 
+`0064_openai_transport_settings.sql` 追加 OpenAI 路由头与 WebSocket 参数运行覆盖，既有部署无覆盖，继续使用 YAML 的启动值
+
 升级前停止写入并制作一致性备份。应用迁移后，旧二进制可能因迁移清单或数据合同拒绝启动，
 不能把替换二进制视为完整回退，也不能修改 checksum 或删除迁移记录绕过检查。
 需要回退时恢复匹配应用版本与数据库备份；恢复流量后产生的数据需另行处理，优先评估前向修复

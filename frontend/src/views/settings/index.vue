@@ -15,6 +15,8 @@ import ConcurrencyPolicyCard from './components/ConcurrencyPolicyCard.vue'
 import AccountErrorProtectionCard from './components/error-protection/AccountErrorProtectionCard.vue'
 import GuardianReviewCard from './components/GuardianReviewCard.vue'
 import ModelAliasesCard from './components/ModelAliasesCard.vue'
+import OpenAiRoutingCard from './components/OpenAiRoutingCard.vue'
+import OpenAiWebsocketPoolCard from './components/OpenAiWebsocketPoolCard.vue'
 import PrivacyPolicyCard from './components/privacy/PrivacyPolicyCard.vue'
 import RequestCountryCard from './components/RequestCountryCard.vue'
 import RequestHistoryCard from './components/RequestHistoryCard.vue'
@@ -91,6 +93,7 @@ const {
   resetCreditMaxWeeklyRemainingPercentValue,
   minCodexDesktopVersionError,
   minCodexCliVersionError,
+  websocketPoolErrors,
   saveSettings,
   loadSettings,
 } = useSettingsForm()
@@ -236,6 +239,8 @@ watch(section, (value) => {
             @detect-location="detectLocation"
           />
           <RequestCountryCard v-model="form.openaiRequestCountry" :disabled="disabled" />
+          <OpenAiRoutingCard v-model="form.openaiRequestSettings" :disabled="disabled" />
+          <OpenAiWebsocketPoolCard v-model="form.openaiWebsocketPool" :disabled="disabled" :errors="websocketPoolErrors" />
           <PrivacyPolicyCard v-model="form.codexPrivacyPolicy" :disabled="disabled" />
           <GuardianReviewCard v-model="form.openaiOauthGuardianReviewModel" :disabled="disabled" />
           <ModelAliasesCard

@@ -268,6 +268,7 @@ WebSocket message 和 frame 不设置网关私有长度上限；协议可接受�
 GenAI 短路径使用 `Authorization: Bearer <Client Key>` 或 `x-goog-api-key: <Client Key>`。模型名取自 URL，入口只在当前 Key 的账号范围内选择声明 GenAI 协议的原生模型，目前由 Antigravity OAuth 账号承接；Responses、Chat Completions 与 Messages 也可转换到 Antigravity 目录中声明接受转换的模型
 
 - 上游目录声明的模型分组可使用基础模型名，并通过 `generationConfig.thinkingConfig.thinkingLevel` 指定档位；缺少或不支持的档位返回 400，完整型号与指向完整型号的模型映射保持原目标
+- 常规生成与 Token 计数将 Antigravity 画像的系统提示放在客户端指令之前，保留客户端规则、工具说明和系统指令扩展字段。出站统一使用 `systemInstruction`，两种拼写同时出现时优先使用驼峰名称。独立联网搜索使用专用提示
 - GenAI 模型列表按当前 Key 可调用的上游目录顺序展示。原生 SSE 在两帧之间保持静默，首帧前失败沿用 HTTP 错误状态
 - Responses 显式选择联网搜索时，使用当前 Key 与账号均可调用的搜索模型。正文引用可随 JSON 或 SSE 返回，`include` 可请求完整来源列表
 - Antigravity 的 Responses WebSocket 预热在网关内完成。生成成功后客户端重连，并在下一轮携带完整上下文
@@ -541,9 +542,8 @@ API Key 与 OAuth 共用模拟客户端画像（`User-Agent`、`originator`、`v
 上游认证只来自选中的账号；API Key 不携带 OAuth Cookie、ChatGPT 账号身份或下游的
 `X-OpenAI-Actor-Authorization` 托管认证声明。
 `x-codex-installation-id` 默认使用选中账号已持久化的安装身份，Key 可显式固定安装 ID；请求头与正文 `client_metadata` 中的值一致。
-`x-openai-internal-codex-residency` 和 `x-openai-account-routing-override` 分别由部署配置
-`openai.residency`、`openai.account_routing_override` 控制，配置值覆盖客户端同名头，
-省略或 `null` 时不发送，配置说明见 [部署与运维](../deploy/README.md#启动后的运行设置)。
+`x-openai-internal-codex-residency` 和 `x-openai-account-routing-override` 使用冻结的运行覆盖值，未覆盖时沿用对应 YAML 配置。
+显式关闭或没有配置值时省略出站头。客户端提供的同名头由网关处理，配置说明见 [部署与运维](../deploy/README.md#启动后的运行设置)。
 `x-openai-fedramp` 按业务头透传，保留原始多值
 
 `x-codex-exclude` 决定上游省略哪些响应字段。上游 WebSocket 通过握手读取该头，连接池按最终握手的全部同名值区分连接。
@@ -2093,6 +2093,11 @@ Redis 操作回执保留 30 天；预览日志在到期 30 天后随新预览按
 并发修改导致版本过期时返回 `409`，不保存当前请求；读取最新设置并确认差异后再提交，不能静默重试覆盖。
 成功响应返回新版本，后续请求使用发布后的快照
 
+`openaiRequestSettings` 支持 `residency` 和 `accountRoutingOverride`，字段值为字符串或 `null`，`null` 表示省略请求头。
+`openaiWebsocketPool` 支持 `maxAgeMs`、`maxConnecting`、`fastPathBudgetMs`、`idleTimeoutMs` 和 `streamIdleTimeoutMs`。
+数值须为正整数，建连前台等待为 1–15000 毫秒，流式空闲超时可设 0 以使用默认值。
+更新时省略整个对象会保留当前覆盖。提交对象会替换该组，省略的成员沿用启动配置，空对象恢复整组继承。读取返回已保存的覆盖值
+
 位置检测返回 `status: detected` 与 `location`，双栈出口时区不一致时返回 `conflict`，
 无法获取出口或位置时返回 `failed` 与 `message`。检测忽略进程代理环境变量，复用代理探测的超时与并发限制；
 前端仅在成功时填入草稿，仍需保存设置才会生效
@@ -2104,6 +2109,7 @@ Redis 操作回执保留 30 天；预览日志在到期 30 天后随新预览按
 | 并发控制版本 | `configRevision` |
 | [客户端身份](#provider-客户端身份) | `providerRequestProfiles`、`openaiClientProfile`、`xaiClientProfile` |
 | [请求位置](#请求位置) | `requestLocationEnabled`、`requestLocation` |
+| OpenAI 路由与连接池 | `openaiRequestSettings`、`openaiWebsocketPool` |
 | [隐私策略](#隐私策略) | `codexPrivacyPolicy` |
 | 模型映射 | `modelMappings` |
 | 凭据刷新 | `refreshMarginSeconds`、`refreshConcurrency` |

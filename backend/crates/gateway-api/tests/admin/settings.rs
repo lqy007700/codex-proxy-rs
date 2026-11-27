@@ -486,6 +486,8 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             .single()
             .expect("timestamp"),
         values: gateway_admin::model::settings::RuntimeSettingsValues {
+            openai_request_settings: None,
+            openai_websocket_pool: None,
             codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: Default::default(),
@@ -1929,4 +1931,29 @@ async fn window_smart_settings_round_trip_and_reject_incomplete_windows() {
         response_json(response).await["data"]["smartScheduling"],
         custom
     );
+}
+
+#[test]
+fn openai_transport_settings_validate_the_optional_wire_fields() {
+    let mut body = update_body();
+    let legacy: UpdateRuntimeSettingsRequest = serde_json::from_value(body.clone()).unwrap();
+    assert!(legacy.validate().is_ok());
+    assert_eq!(legacy.values.openai_request_settings, None);
+    assert_eq!(legacy.values.openai_websocket_pool, None);
+
+    body["openaiRequestSettings"] = json!({"residency": null});
+    body["openaiWebsocketPool"] = json!({"fastPathBudgetMs": 15_000, "streamIdleTimeoutMs": 0});
+    let request: UpdateRuntimeSettingsRequest = serde_json::from_value(body.clone()).unwrap();
+    assert!(request.validate().is_ok());
+    let routing = request.values.openai_request_settings.unwrap();
+    assert_eq!(routing.residency, Some(None));
+    assert_eq!(routing.account_routing_override, None);
+
+    body["openaiRequestSettings"]["residency"] = json!("invalid\nvalue");
+    let request: UpdateRuntimeSettingsRequest = serde_json::from_value(body.clone()).unwrap();
+    assert!(request.validate().is_err());
+    body["openaiRequestSettings"] = json!({});
+    body["openaiWebsocketPool"]["fastPathBudgetMs"] = json!(15_001);
+    let request: UpdateRuntimeSettingsRequest = serde_json::from_value(body).unwrap();
+    assert!(request.validate().is_err());
 }

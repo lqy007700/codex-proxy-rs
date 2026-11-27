@@ -239,10 +239,9 @@ PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 | 上游重试等待上限 | “系统设置 → 运行设置 → 并发策略”；默认 240 秒，0 不接受正数等待，详见[重试合同](../docs/api.md#容量拒绝与重试) |
 
 位置覆盖只影响 OpenAI 请求中受支持的位置与时区信息，不改变上下文日期、真实出口 IP、epoch 时间戳或系统时区。
-`openai.residency` 和 `openai.account_routing_override` 是独立于客户端身份的启动配置，
-分别指定 `x-openai-internal-codex-residency` 和 `x-openai-account-routing-override` 请求头。
-两项均为可选字符串，填写值原样发送，不校验地域或路由枚举；省略或设为 `null` 时删除对应的下游请求头且不补发。
-示例配置均填写 `us`，修改后重启应用生效。身份与位置字段见 [运行设置 API](../docs/api.md#8-运行设置)
+OpenAI 平台设置可在线覆盖数据驻留和账号路由，分别对应 `x-openai-internal-codex-residency` 和 `x-openai-account-routing-override`。
+每项可继承 YAML 的 `openai.residency` 或 `openai.account_routing_override`、填写自定义值，或显式省略请求头。
+未保存覆盖的实例继续使用升级前的启动值。身份与位置字段见 [运行设置 API](../docs/api.md#8-运行设置)
 后台账号操作使用 Provider 自己的官方画像；发布资料刷新不改写用户选择或 `config.yaml`
 
 ### 邮件告警
@@ -326,10 +325,12 @@ OpenAI 上游池化 WebSocket 默认每 25 秒发送一次 Ping，并回应上�
 修改上限对后续请求生效，已存在的连接继续计数；调低上限不会强制中断在途或绑定下游 WS 的连接。
 预算仅覆盖宿主原生 OpenAI Responses 连接，其他 HTTP/WS 流量仍需预留容量
 
-允许回退 HTTP 的 Responses 新链和持久化续接，由 `openai.ws_pool.fast_path_budget_ms` 控制前台等待上游 WS 建连的时长，默认 800 毫秒，可设为 1–15000 毫秒，重启应用后生效。
+OpenAI 平台设置可在线调整连接池的建连上限、前台建连等待、连接寿命、空闲回收和流式空闲超时。
+空白项继承 `openai.ws_pool`，连接池启用状态仍由 `openai.ws_pool.enabled` 管理。
+允许回退 HTTP 的 Responses 新链和持久化续接使用冻结的前台建连等待设置，默认 800 毫秒，可设为 1–15000 毫秒。
 超出预算时，本次请求走 HTTP/SSE，已启动的池化建连在后台继续。高延迟出口可调大该值，代价是仍需回退的请求会等得更久
 
-有容量时继续复用，连接总寿命仍由 `max_age_ms` 控制，默认 55 分钟，不设置固定空闲回收时间。
+连接总寿命默认 55 分钟，无下游绑定的普通空闲连接默认 300 秒后回收。更新这两个设置只影响新建连接。
 满额时优先关闭同代理下最久未使用的普通空闲 WS；在途、建连中和绑定下游 WS 的连接不参与容量淘汰。
 没有可回收连接时等待容量，受原请求期限、客户端取消和连接池关闭约束；无显式请求期限时不会额外设置排队超时。
 被回收连接上的精确续接沿用既有客户端完整回放合同，可能多一次恢复往返

@@ -60,7 +60,7 @@ async fn oauth_refresh_and_native_generate_preserve_grant_profile_and_wire_paylo
         .await;
     let catalog = client.catalog(&access_token).await.unwrap();
     assert_eq!(catalog.models["fixture-model"].name, "Fixture Model");
-    let body=br#"{ "contents":[{"parts":[{"functionResponse":{"name":"lookup","response":{"x":1}},"thoughtSignature":"opaque"}]}],"unknown":98765432109876543210987654,"systemInstruction":{"parts":[{"text":"You are Claude Code."}]},"system_instruction":{"parts":[{"text":"old"}]} }"#;
+    let body=br#"{ "contents":[{"parts":[{"functionResponse":{"name":"lookup","response":{"x":1}},"thoughtSignature":"opaque"}]}],"unknown":98765432109876543210987654,"systemInstruction":{"role":"system","extension":98765432109876543210987654,"parts":[{ "text" : "Client tool instructions", "extension":1e+09 },{"text":"Project rules"}]},"system_instruction":{"parts":[{"text":"old"}]} }"#;
     let reply = r#"{ "responseId":"r","candidates":[{"content":{"parts":[{"text":"hidden","thought":true},{"text":"ok"},{"functionCall":{"name":"lookup","args":{"text":"not output"}}}]},"finishReason":"STOP"},{"index":1,"content":{"parts":[{"text":"other candidate"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2},"extra":98765432109876543210987654 }"#;
     let received_body = move |r: &wiremock::Request| {
         let envelope: std::collections::BTreeMap<String, &serde_json::value::RawValue> =
@@ -69,16 +69,23 @@ async fn oauth_refresh_and_native_generate_preserve_grant_profile_and_wire_paylo
             serde_json::from_str(envelope["request"].get()).unwrap();
         let original: std::collections::BTreeMap<String, &serde_json::value::RawValue> =
             serde_json::from_slice(body).unwrap();
-        let system: serde_json::Value =
+        let system: std::collections::BTreeMap<String, &serde_json::value::RawValue> =
             serde_json::from_str(request["systemInstruction"].get()).unwrap();
+        let parts: Vec<&serde_json::value::RawValue> =
+            serde_json::from_str(system["parts"].get()).unwrap();
+        let prompt: serde_json::Value = serde_json::from_str(parts[0].get()).unwrap();
         request["contents"].get() == original["contents"].get()
             && request["unknown"].get() == original["unknown"].get()
             && !request.contains_key("system_instruction")
-            && system["parts"][0]["text"]
+            && system["role"].get() == r#""system""#
+            && system["extension"].get() == "98765432109876543210987654"
+            && prompt["text"]
                 .as_str()
                 .unwrap()
                 .starts_with("You are Antigravity,")
-            && !system.to_string().contains("Claude Code")
+            && parts.len() == 3
+            && parts[1].get() == r#"{ "text" : "Client tool instructions", "extension":1e+09 }"#
+            && parts[2].get() == r#"{"text":"Project rules"}"#
     };
     post("/v1internal:generateContent")
         .and(received_body)

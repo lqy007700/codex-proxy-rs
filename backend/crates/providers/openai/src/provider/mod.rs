@@ -349,22 +349,35 @@ impl CodexProvider {
         &self,
         context: &AttemptContext,
     ) -> Result<CodexBackendClient, ProviderError> {
-        let Some(profile) = context.request_profile() else {
-            return Ok(self.client.clone());
-        };
-        let profile = serde_json::from_value(Value::Object(profile.expose_to_provider().clone()))
-            .map_err(|error: serde_json::Error| {
-            let diagnostic = ProviderDiagnostic::new(format!(
-                "OpenAI request profile decoding failed: {:?}, line={}, column={}",
-                error.classify(),
-                error.line(),
-                error.column(),
-            ))
-            .with_classification("prepare", "request_profile_decode_failed");
-            provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
-                .with_diagnostic(diagnostic)
-        })?;
-        Ok(self.client.clone().with_request_profile(profile))
+        let mut client = self.client.clone();
+        let settings = context.openai_request_settings();
+        if let Some(profile) = context.request_profile() {
+            let profile =
+                serde_json::from_value(Value::Object(profile.expose_to_provider().clone()))
+                    .map_err(|error: serde_json::Error| {
+                        let diagnostic = ProviderDiagnostic::new(format!(
+                            "OpenAI request profile decoding failed: {:?}, line={}, column={}",
+                            error.classify(),
+                            error.line(),
+                            error.column(),
+                        ))
+                        .with_classification("prepare", "request_profile_decode_failed");
+                        provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
+                            .with_diagnostic(diagnostic)
+                    })?;
+            client = client.with_request_profile(profile);
+        }
+        if settings.residency.is_some() || settings.account_routing_override.is_some() {
+            let mut profile = client.profile_state().snapshot();
+            if let Some(residency) = &settings.residency {
+                profile.residency.clone_from(residency);
+            }
+            if let Some(override_value) = &settings.account_routing_override {
+                profile.account_routing_override.clone_from(override_value);
+            }
+            client = client.with_request_profile(profile);
+        }
+        Ok(client.with_pool_settings(context.openai_websocket_pool()))
     }
 
     // Provider 构造集中装配独立领域服务和透明传输依赖，拆分参数会模糊所有权

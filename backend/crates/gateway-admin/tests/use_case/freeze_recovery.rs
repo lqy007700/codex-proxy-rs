@@ -33,6 +33,8 @@ fn runtime_settings(enabled: bool, probe_enabled: bool) -> RuntimeSettings {
         rotation_strategy: gateway_admin::model::settings::RotationStrategy::Smart,
         updated_at: Utc::now(),
         values: gateway_admin::model::settings::RuntimeSettingsValues {
+            openai_request_settings: None,
+            openai_websocket_pool: None,
             codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: Default::default(),

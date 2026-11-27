@@ -736,6 +736,19 @@ impl CodexBackendClient {
         self
     }
 
+    /// 每次请求只覆盖冻结参数，底层连接与并发计数仍由同一连接池持有
+    pub(crate) fn with_pool_settings(
+        mut self,
+        settings: gateway_core::settings::OpenAiWebSocketPoolSettings,
+    ) -> Self {
+        if settings != Default::default()
+            && let Some(pool) = &self.websocket_pool
+        {
+            self.websocket_pool = Some(Arc::new(pool.with_settings(settings)));
+        }
+        self
+    }
+
     /// 构造客户端
     pub fn new(
         client: Client,

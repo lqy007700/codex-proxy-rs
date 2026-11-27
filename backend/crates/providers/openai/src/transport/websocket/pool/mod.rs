@@ -9,11 +9,14 @@ mod supervisor;
 use std::{
     collections::HashMap,
     future::Future,
-    sync::{Arc, Mutex, MutexGuard, Weak, atomic::AtomicBool},
+    sync::{
+        Arc, Mutex, MutexGuard, Weak,
+        atomic::{AtomicBool, AtomicUsize},
+    },
     time::Duration,
 };
 
-use tokio::sync::{Notify, Semaphore};
+use tokio::sync::Notify;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use uuid::Uuid;
 
@@ -32,7 +35,8 @@ pub(crate) use self::{
         WebSocketPoolConnectWaiter, WebSocketPoolLease,
     },
     state::{
-        CodexWebSocketConnectionMetadata, PooledWebSocketConnection, WebSocketContinuationState,
+        CodexWebSocketConnectionMetadata, PooledWebSocketConnection, WebSocketConnectionLifetime,
+        WebSocketContinuationState,
     },
 };
 
@@ -50,7 +54,7 @@ pub struct CodexWebSocketPool {
     config: CodexWebSocketPoolConfig,
     tasks: TaskTracker,
     shutdown: CancellationToken,
-    connect_semaphore: Arc<Semaphore>,
+    connecting: Arc<AtomicUsize>,
     maintenance_started: Arc<AtomicBool>,
     proxy_capacities: Arc<Mutex<HashMap<String, Weak<ProxyCapacity>>>>,
     capacity_changed: Arc<Notify>,
@@ -112,13 +116,44 @@ impl CodexWebSocketPool {
             config,
             tasks: TaskTracker::new(),
             shutdown: CancellationToken::new(),
-            connect_semaphore: Arc::new(Semaphore::new(config.max_connecting)),
+            connecting: Arc::default(),
             maintenance_started: Arc::new(AtomicBool::new(false)),
             proxy_capacities: Arc::default(),
             capacity_changed: Arc::default(),
         };
         pool.spawn_maintenance_task();
         pool
+    }
+
+    /// 每轮请求冻结配置，连接、建连计数与维护任务仍由同一个池持有
+    pub fn with_settings(
+        &self,
+        settings: gateway_core::settings::OpenAiWebSocketPoolSettings,
+    ) -> Self {
+        let config = self.config;
+        Self {
+            config: CodexWebSocketPoolConfig {
+                max_age: settings
+                    .max_age_ms
+                    .map_or(config.max_age, Duration::from_millis),
+                max_connecting: settings
+                    .max_connecting
+                    .map_or(config.max_connecting, |value| value as usize),
+                fast_path_budget: settings
+                    .fast_path_budget_ms
+                    .map_or(config.fast_path_budget, Duration::from_millis),
+                idle_timeout: settings
+                    .idle_timeout_ms
+                    .map_or(config.idle_timeout, Duration::from_millis),
+                stream_idle_timeout: settings
+                    .stream_idle_timeout_ms
+                    .map_or(config.stream_idle_timeout, |ms| {
+                        (ms != 0).then(|| Duration::from_millis(ms))
+                    }),
+                ..config
+            },
+            ..self.clone()
+        }
     }
 
     pub(crate) fn fast_path_budget(&self) -> Duration {
@@ -204,7 +239,6 @@ impl CodexWebSocketPool {
                             &connection,
                             idle_since,
                             tokio::time::Instant::now(),
-                            &self.config,
                         )
                         .or_else(|| {
                             state.downstream_closed(&key).then(|| {
@@ -241,6 +275,7 @@ impl CodexWebSocketPool {
                                 self.clone(),
                                 key.clone(),
                                 connection.continuation.latest_response_id(),
+                                connection.lifetime.max_age,
                             );
                             state
                                 .slots
@@ -282,7 +317,10 @@ impl CodexWebSocketPool {
                 } else if proxy.is_some() && proxy_permit.is_none() {
                     None
                 } else {
-                    let connect_permit = self.connect_semaphore.clone().try_acquire_owned().ok();
+                    let connect_permit = capacity::ConnectPermit::try_acquire(
+                        &self.connecting,
+                        self.config.max_connecting,
+                    );
                     Some(match connect_permit {
                         Some(connect_permit) => {
                             let lease = WebSocketPoolConnectLease::reserve(
@@ -296,6 +334,7 @@ impl CodexWebSocketPool {
                                 WebSocketPoolSlot::Connecting(WebSocketPoolConnecting {
                                     id: lease.id,
                                     started_at: lease.started_at,
+                                    max_age: self.config.max_age,
                                     outcome: lease.outcome.clone(),
                                     cancellation: lease.cancellation.clone(),
                                 }),
@@ -340,9 +379,9 @@ impl CodexWebSocketPool {
         let mut connection = Some(connection);
         {
             let mut state = self.lock_state();
-            let expired = connection
-                .as_ref()
-                .is_some_and(|connection| connection.created_at.elapsed() >= self.config.max_age);
+            let expired = connection.as_ref().is_some_and(|connection| {
+                connection.created_at.elapsed() >= connection.lifetime.max_age
+            });
             let owns_reservation = matches!(
                 state.slots.get(key),
                 Some(WebSocketPoolSlot::Busy(reservation))
@@ -422,7 +461,12 @@ impl CodexWebSocketPool {
             Some(WebSocketPoolSlot::Connecting(connecting)) if connecting.id == connect_id
         );
         if owns_connect && !state.shutting_down && self.config.enabled {
-            let lease = WebSocketPoolLease::reserve(self.clone(), key.clone(), None);
+            let lease = WebSocketPoolLease::reserve(
+                self.clone(),
+                key.clone(),
+                None,
+                connection.lifetime.max_age,
+            );
             state.slots.insert(
                 key.clone(),
                 WebSocketPoolSlot::Busy(lease.reservation.clone()),

@@ -48,7 +48,7 @@ async fn native_and_messages_count_share_identity_and_never_generate_usage() {
     for (protocol, body, expected) in [
         (
             "genai",
-            json!({"generateContentRequest":{"model":"models/ignored","contents":[{"role":"user","parts":[{"text":"hello"}]}],"systemInstruction":{"parts":[{"text":"client identity"}]},"tools":[{"functionDeclarations":[{"name":"read"}]}],"toolConfig":{},"safetySettings":[]}}),
+            json!({"generateContentRequest":{"model":"models/ignored","contents":[{"role":"user","parts":[{"text":"hello"}]}],"system_instruction":{"role":"system","extension":{"key":"value"},"parts":[{"text":"client identity"}]},"tools":[{"functionDeclarations":[{"name":"read"}]}],"toolConfig":{},"safetySettings":[]}}),
             json!({"totalTokens":42}),
         ),
         (
@@ -110,10 +110,19 @@ async fn native_and_messages_count_share_identity_and_never_generate_usage() {
         let sent = upstream.received_requests().await.unwrap();
         let sent: Value = sent[0].body_json().unwrap();
         assert_eq!(sent.as_object().unwrap().len(), 1);
+        let instruction = &sent["request"]["systemInstruction"];
         assert_eq!(
-            sent["request"]["systemInstruction"]["parts"][0]["text"],
-            "count identity"
+            instruction["parts"],
+            json!([
+                {"text":"count identity"},
+                {"text":"client identity"},
+            ])
         );
+        if protocol == "genai" {
+            assert_eq!(instruction["role"], "system");
+            assert_eq!(instruction["extension"], json!({"key":"value"}));
+        }
+        assert!(sent["request"].get("system_instruction").is_none());
         assert_eq!(sent["request"]["contents"][0]["parts"][0]["text"], "hello");
         assert_eq!(
             sent["request"]["tools"][0]["functionDeclarations"][0]["name"],

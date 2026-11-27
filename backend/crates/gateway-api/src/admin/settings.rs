@@ -44,6 +44,11 @@ pub struct RuntimeSettingsFields {
     pub openai_oauth_guardian_review_model: bool,
     #[serde(default)]
     pub openai_request_country: gateway_core::account::OpenAiRequestCountry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_request_settings: Option<gateway_core::settings::OpenAiRequestSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "openaiWebsocketPool")]
+    pub openai_websocket_pool: Option<gateway_core::settings::OpenAiWebSocketPoolSettings>,
     pub codex_privacy_policy: gateway_core::settings::privacy::CodexPrivacyPolicy,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
@@ -782,6 +787,8 @@ impl RuntimeSettingsFields {
         let values = gateway_admin::model::settings::RuntimeSettingsValues {
             openai_oauth_guardian_review_model: self.openai_oauth_guardian_review_model,
             openai_request_country: self.openai_request_country,
+            openai_request_settings: self.openai_request_settings,
+            openai_websocket_pool: self.openai_websocket_pool,
             codex_privacy_policy: self.codex_privacy_policy,
             request_location_enabled: self.request_location_enabled,
             request_location: self
@@ -832,6 +839,8 @@ impl From<gateway_admin::model::settings::RuntimeSettingsValues> for RuntimeSett
         crate::admin::settings::RuntimeSettingsFields {
             openai_oauth_guardian_review_model: settings.openai_oauth_guardian_review_model,
             openai_request_country: settings.openai_request_country,
+            openai_request_settings: settings.openai_request_settings,
+            openai_websocket_pool: settings.openai_websocket_pool,
             codex_privacy_policy: settings.codex_privacy_policy,
             request_location_enabled: settings.request_location_enabled,
             request_location: settings.request_location,
@@ -885,6 +894,12 @@ fn settings_validation_error(field: &'static str) -> WireValidationError {
         "max_waiting_per_key" => "maxWaitingPerKey",
         "min_codex_cli_version" => "minCodexCliVersion",
         "min_codex_desktop_version" => "minCodexDesktopVersion",
+        field
+            if field.starts_with("openaiRequestSettings.")
+                || field.starts_with("openaiWebsocketPool.") =>
+        {
+            field
+        }
         "openai_account_affinity" => "openaiAccountAffinity",
         "openai_guardian_reserved_concurrency" => "openaiGuardianReservedConcurrency",
         "openai_session_affinity_ttl_hours" => "openaiSessionAffinityTtlHours",

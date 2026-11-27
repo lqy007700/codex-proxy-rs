@@ -154,7 +154,7 @@ pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResul
                     refresh_concurrency, max_concurrent_per_account,
                     rotation_strategy, smart_scheduling_json, quota_reset_window_weights_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                     audit_retention_days, min_codex_desktop_version,
-                    min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_oauth_guardian_review_model, openai_request_country_json, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
+                    min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_oauth_guardian_review_model, openai_request_country_json, openai_request_settings_json, openai_websocket_pool_json, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
                     account_error_protection_json, account_error_protection_revision,
                     account_warmup_enabled, account_warmup_cron, account_warmup_model, reset_credit_lead_minutes, reset_credit_max_weekly_remaining_percent
              from runtime_settings where id = 1",
@@ -335,7 +335,7 @@ pub(crate) async fn load_runtime_settings_in_transaction(
                 refresh_concurrency, max_concurrent_per_account,
                 rotation_strategy, smart_scheduling_json, quota_reset_window_weights_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                 audit_retention_days, min_codex_desktop_version,
-                min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_oauth_guardian_review_model, openai_request_country_json, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
+                min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_oauth_guardian_review_model, openai_request_country_json, openai_request_settings_json, openai_websocket_pool_json, openai_account_affinity, max_account_rotations, recovery_attempts, recovery_rotation_attempts, openai_session_affinity_ttl_hours,
                 account_error_protection_json, account_error_protection_revision,
                 account_warmup_enabled, account_warmup_cron, account_warmup_model, reset_credit_lead_minutes, reset_credit_max_weekly_remaining_percent
          from runtime_settings where id = 1",
@@ -422,6 +422,8 @@ pub(crate) async fn update_runtime_settings_in_transaction(
                      quota_reset_window_weights_json = coalesce($34, quota_reset_window_weights_json),
                      openai_oauth_guardian_review_model = $35,
                      openai_request_country_json = $36,
+                     openai_request_settings_json = coalesce($37, openai_request_settings_json),
+                     openai_websocket_pool_json = coalesce($38, openai_websocket_pool_json),
 	                 updated_at = now()
 	             where id = 1
 	             returning config_revision",
@@ -470,6 +472,8 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     .bind(update.values.quota_reset_window_weights.map(sqlx::types::Json))
     .bind(update.values.openai_oauth_guardian_review_model)
     .bind(sqlx::types::Json(&update.values.openai_request_country))
+    .bind(update.values.openai_request_settings.as_ref().map(sqlx::types::Json))
+    .bind(update.values.openai_websocket_pool.map(sqlx::types::Json))
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("update runtime settings in transaction", source))?
@@ -562,6 +566,10 @@ struct RuntimeSettingsRow {
     openai_guardian_reserved_concurrency: i64,
     openai_oauth_guardian_review_model: bool,
     openai_request_country_json: sqlx::types::Json<gateway_core::account::OpenAiRequestCountry>,
+    openai_request_settings_json:
+        Option<sqlx::types::Json<gateway_core::settings::OpenAiRequestSettings>>,
+    openai_websocket_pool_json:
+        Option<sqlx::types::Json<gateway_core::settings::OpenAiWebSocketPoolSettings>>,
     openai_account_affinity: String,
     max_account_rotations: i64,
     recovery_attempts: i64,
@@ -604,6 +612,8 @@ fn runtime_settings_from_row(row: RuntimeSettingsRow) -> StoreResult<RuntimeSett
         values: gateway_admin::model::settings::RuntimeSettingsValues {
             openai_oauth_guardian_review_model: row.openai_oauth_guardian_review_model,
             openai_request_country: row.openai_request_country_json.0,
+            openai_request_settings: row.openai_request_settings_json.map(|value| value.0),
+            openai_websocket_pool: row.openai_websocket_pool_json.map(|value| value.0),
             refresh_margin_seconds: to_u64(row.refresh_margin_seconds)?,
             refresh_concurrency: to_u32(row.refresh_concurrency)?,
             max_concurrent_per_account: to_u32(row.max_concurrent_per_account)?,
