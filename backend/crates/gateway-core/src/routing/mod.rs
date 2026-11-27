@@ -632,6 +632,7 @@ pub struct DirectAccountModel<'a> {
 /// 已绑定 Provider 的请求候选；模型端点携带真实上游模型，原生端点不虚构模型
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderCandidate {
+    dedicated_web_search: bool,
     provider: ProviderKind,
     requires_direct_authentication: bool,
     upstream_model: Option<UpstreamModelId>,
@@ -651,6 +652,12 @@ struct ProviderModelRoute {
 }
 
 impl ProviderCandidate {
+    /// 搜索型号和账号范围已由目录解析
+    #[must_use]
+    pub const fn uses_dedicated_web_search(&self) -> bool {
+        self.dedicated_web_search
+    }
+
     pub(crate) fn has_account_model_routes(&self) -> bool {
         !self.account_models.is_empty()
     }

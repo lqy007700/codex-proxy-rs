@@ -44,7 +44,9 @@ impl AntigravityProvider {
         let started = Instant::now();
         let affinity =
             super::affinity::session_key(request.operation(), ctx.client_api_key_ref(), &model);
-        let search = request.operation().requires_web_search();
+        // 保留 Responses 强制搜索在固定诊断和目录缺失时的原有错误路径
+        let required_search = request.operation().requires_web_search();
+        let search = request.candidate().uses_dedicated_web_search() || required_search;
         let selected = self
             .select_account(&model, &ctx, affinity.as_ref(), search)
             .await?;
@@ -95,7 +97,12 @@ impl AntigravityProvider {
             Some(model.as_str().to_owned()),
             selected.account.id().clone(),
             Box::new(move |operation, headers| Box::pin(async move {
-                if operation.requires_web_search() != search {
+                let search_preserved = if search && !required_search {
+                    operation.is_native_web_search()
+                } else {
+                    operation.requires_web_search() == required_search
+                };
+                if !search_preserved {
                     return Err(ProviderError::invalid_request("Middleware changed the required web search after model selection."));
                 }
                 let (operation, translator) = super::translation::prepare(operation)?;

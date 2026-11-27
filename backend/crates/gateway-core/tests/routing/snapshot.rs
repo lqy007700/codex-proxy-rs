@@ -28,7 +28,9 @@ use gateway_core::settings::SettingsValues;
 #[test]
 fn reasoning_groups_resolve_before_account_and_group_model_policies() {
     use gateway_core::{
-        account::{AccountModelAccess, AccountModelAccessMode, ProviderAccountId},
+        account::{
+            AccountModelAccess, AccountModelAccessMode, AccountModelMappings, ProviderAccountId,
+        },
         operation::{
             GenerateRequest, Operation, ProtocolPayload, RawJsonPayload, TokenCountRequest,
         },
@@ -112,7 +114,12 @@ fn reasoning_groups_resolve_before_account_and_group_model_policies() {
             ProviderModel::new(
                 provider.clone(),
                 UpstreamModelId::new("family").unwrap(),
-                caps().with_reasoning_variants(variants),
+                caps()
+                    .with_reasoning_variants(variants)
+                    .with_dedicated_web_search(BTreeMap::from([
+                        (declared.clone(), UpstreamModelId::new("search").unwrap()),
+                        (other.clone(), UpstreamModelId::new("search").unwrap()),
+                    ])),
             )
             .with_presentation(
                 ModelPresentation::default()
@@ -250,7 +257,7 @@ fn reasoning_groups_resolve_before_account_and_group_model_policies() {
             .plan(
                 &model,
                 &search,
-                pair_scope(vec!["family-medium"], both),
+                pair_scope(vec!["family-medium"], both.clone()),
                 &RoutingContext::default()
             )
             .is_err()
@@ -298,11 +305,103 @@ fn reasoning_groups_resolve_before_account_and_group_model_policies() {
             .plan(
                 &model,
                 &search,
-                split_group_scope,
+                split_group_scope.clone(),
                 &RoutingContext::default()
             )
             .is_err()
     );
+    let native_search = |tokens| {
+        let body = serde_json::json!({
+            "tools":[{"googleSearch":{"includedDomains":["example.org"]}}],
+            "generationConfig":{"maxOutputTokens":tokens}
+        });
+        Operation::Generate(
+            GenerateRequest::from_protocol_payload(
+                ProtocolPayload::json_object("genai", body.as_object().unwrap().clone())
+                    .unwrap()
+                    .with_context(serde_json::Map::from_iter([(
+                        "stream".into(),
+                        false.into(),
+                    )])),
+            )
+            .requiring_native_protocol(),
+        )
+    };
+    let group_model = PublicModelId::new("alias").unwrap();
+    let plan_search = |scope, tokens| {
+        snapshot.plan(
+            &group_model,
+            &native_search(tokens),
+            scope,
+            &RoutingContext::default(),
+        )
+    };
+    let plan = plan_search(pair_scope(both.clone(), both.clone()), 25).unwrap();
+    let [candidate] = plan.candidates() else {
+        panic!("one dedicated search candidate expected")
+    };
+    assert!(candidate.uses_dedicated_web_search());
+    assert_eq!(candidate.upstream_model().unwrap().as_str(), "search");
+    assert!(candidate.account_scope().allows(&declared));
+    assert!(plan_search(pair_scope(both.clone(), both.clone()), 26).is_err());
+    assert!(plan_search(pair_scope(vec!["search"], both.clone()), 25).is_err());
+    assert!(plan_search(pair_scope(vec!["family-medium"], both), 25).is_err());
+    assert!(matches!(
+        plan_search(scope.clone(), 25),
+        Err(RoutingError::GroupModelDenied)
+    ));
+    assert!(plan_search(split_group_scope, 25).is_err());
+    // 一个账号只有分组成员，另一个账号只有搜索目录，不能拼成候选
+    let split_account_scope = Arc::new(
+        FrozenAccountScope::new(
+            Arc::clone(scope.directory()),
+            ClientRoutingScope::all_accounts(),
+        )
+        .excluding_account(declared.clone()),
+    );
+    assert!(matches!(
+        plan_search(split_account_scope, 25),
+        Err(RoutingError::WebSearchUnavailable)
+    ));
+    let mapped_scope = Arc::new(FrozenAccountScope::new(
+        Arc::new(RuntimeAccountDirectory::new(BTreeMap::from([
+            (
+                declared.clone(),
+                RuntimeAccount::new(provider.clone(), BTreeSet::new()),
+            ),
+            (
+                other.clone(),
+                RuntimeAccount::new(provider.clone(), BTreeSet::new()).with_model_mappings(
+                    AccountModelMappings::new(BTreeMap::from([(
+                        "alias".into(),
+                        "family-medium".into(),
+                    )]))
+                    .unwrap(),
+                ),
+            ),
+        ]))),
+        ClientRoutingScope::all_accounts(),
+    ));
+    let plan = plan_search(mapped_scope, 25).unwrap();
+    assert_eq!(plan.candidates().len(), 2);
+    for (account, target, search) in [
+        (&declared, "search", true),
+        (&other, "family-medium", false),
+    ] {
+        let candidate = plan
+            .candidates()
+            .iter()
+            .find(|candidate| candidate.uses_dedicated_web_search() == search)
+            .unwrap();
+        assert_eq!(candidate.upstream_model().unwrap().as_str(), target);
+        assert_eq!(
+            candidate
+                .account_scope()
+                .allowed_account_ids()
+                .collect::<Vec<_>>(),
+            [account]
+        );
+    }
     let operation = |level: &str, count: bool| {
         let body = serde_json::json!({"contents":[], "generationConfig":{"thinkingConfig":{"thinkingLevel":level}}});
         if count {
@@ -432,6 +531,7 @@ fn reasoning_groups_resolve_before_account_and_group_model_policies() {
                     candidate.upstream_model().unwrap().as_str(),
                     "family-medium"
                 );
+                assert!(!candidate.uses_dedicated_web_search());
                 assert!(candidate.account_scope().allows(&declared));
                 assert!(!candidate.account_scope().allows(&other));
             }

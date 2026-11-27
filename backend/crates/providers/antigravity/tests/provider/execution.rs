@@ -214,6 +214,7 @@ async fn model_group_menu_routes_responses_and_native_generation_to_declared_mem
                 "gemini-4-hydrogen-high": {"displayName":"Hydrogen High","maxTokens":900000,"maxOutputTokens":262144,"supportsImages":true,"tagDescription":"Leaving on Nov 30."},
                 "gemini-4-hydrogen-sonar": {"displayName":"Hydrogen Sonar"}
             },
+            "webSearchModelIds": ["search-only"],
             "groupedModels": {
                 "gemini-4-hydrogen": {"displayName":"Gemini 4 Hydrogen","supportedThinkingLevels":[
                     {"thinkingSuffix":"MEDIUM"}, {"thinkingSuffix":"high"},
@@ -361,6 +362,187 @@ async fn model_group_menu_routes_responses_and_native_generation_to_declared_mem
             .any(|fact| matches!(fact, gateway_core::event::GatewayEvent::Completed(_)))
     );
     released(&fixture).await;
+
+    let body = json!({
+        "contents":[{"role":"user","parts":[{"text":"Find the source"}]}],
+        "tools":[{"googleSearch":{"enhancedContent":{"imageSearch":{"maxResultCount":5}}}}],
+        "generationConfig":{"candidateCount":1}
+    });
+    let native = |body: &serde_json::Value, stream| {
+        Operation::Generate(
+            GenerateRequest::from_protocol_payload(
+                ProtocolPayload::json_object("genai", body.as_object().unwrap().clone())
+                    .unwrap()
+                    .with_context(json!({"stream":stream}).as_object().unwrap().clone()),
+            )
+            .requiring_native_protocol(),
+        )
+    };
+    let route = |name, operation: &Operation| {
+        snapshot.plan(
+            &PublicModelId::new(name).unwrap(),
+            operation,
+            fixture.store.account_scope(),
+            &RoutingContext::default(),
+        )
+    };
+    let grounded = json!({"candidates":[{"content":{"parts":[{"text":"Found"}]},"finishReason":"STOP",
+        "groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://example.org/source"}}]}}]});
+    let group_name = group.upstream_model().as_str();
+    let explicit = "gemini-4-hydrogen-medium";
+    for (requested, target, search) in [
+        (group_name, "search-only", true),
+        (explicit, explicit, false),
+    ] {
+        let operation = native(&body, false);
+        let plan = route(requested, &operation).unwrap();
+        let [candidate] = plan.candidates() else {
+            panic!("one eligible model expected")
+        };
+        assert_eq!(candidate.uses_dedicated_web_search(), search);
+        assert_eq!(candidate.upstream_model().unwrap().as_str(), target);
+        Mock::given(path("/v1internal:generateContent"))
+            .and(body_partial_json(json!({"model":target,"request":body})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"response":grounded})))
+            .expect(1)
+            .mount(&upstream)
+            .await;
+        let events = fixture
+            .provider
+            .clone()
+            .execute(
+                ProviderRequest::new(operation, candidate.clone()),
+                context(frozen_profile(), CancellationToken::new()),
+            )
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        let wire = events
+            .iter()
+            .find_map(|event| event.wire_event()?.raw_json_body())
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(wire).unwrap(),
+            grounded
+        );
+        let requests = upstream.received_requests().await.unwrap();
+        let sent: serde_json::Value = requests.last().unwrap().body_json().unwrap();
+        assert_eq!(
+            sent.get("requestType").and_then(serde_json::Value::as_str),
+            search.then_some("web_search")
+        );
+        released(&fixture).await;
+    }
+    let mut mixed = body.clone();
+    mixed["tools"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"functionDeclarations":[{"name":"lookup"}]}));
+    let mut reasoning = body.clone();
+    reasoning["generationConfig"]["thinkingConfig"] = json!({"thinkingLevel":"UNSUPPORTED"});
+    for operation in [
+        native(&body, true),
+        native(&mixed, false),
+        native(&reasoning, false),
+    ] {
+        assert!(matches!(
+            route(group_name, &operation),
+            Err(gateway_core::validation::RoutingError::InvalidReasoningVariant)
+        ));
+    }
+    let operation = native(&body, false);
+    let plan = route(group_name, &operation).unwrap();
+    assert_search_middleware_cannot_remove_tool(
+        &fixture,
+        &upstream,
+        ProviderRequest::new(operation, plan.candidates()[0].clone()),
+    )
+    .await;
+    upstream.verify().await;
+}
+
+async fn assert_search_middleware_cannot_remove_tool(
+    fixture: &Fixture,
+    upstream: &MockServer,
+    request: gateway_core::engine::provider::ProviderRequest,
+) {
+    use gateway_core::{
+        engine::{
+            execution::ClientTransport,
+            middleware::{
+                FrozenMiddlewarePlan, MiddlewareContext, MiddlewareError, MiddlewareNext,
+                MiddlewarePlan, MiddlewareRequest, MiddlewareResponse,
+            },
+        },
+        routing::extensions::{ExtensionSetId, ExtensionSetLease, ExtensionSetReference},
+    };
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct RemoveSearchTool;
+
+    impl ExtensionSetLease for RemoveSearchTool {
+        fn is_ready(&self) -> bool {
+            true
+        }
+    }
+
+    impl MiddlewarePlan for RemoveSearchTool {
+        fn handle(
+            &self,
+            _: MiddlewareContext,
+            request: MiddlewareRequest,
+            next: MiddlewareNext,
+        ) -> futures::future::BoxFuture<'static, Result<MiddlewareResponse, MiddlewareError>>
+        {
+            let mut body: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_slice(request.body()).unwrap();
+            assert!(body.remove("tools").is_some());
+            let protocol = request.protocol().to_owned();
+            let headers = request.headers().to_vec();
+            let body = serde_json::to_vec(&body).unwrap().into();
+            next.run(
+                request
+                    .replace_parts(protocol, headers, body, None)
+                    .unwrap(),
+            )
+        }
+    }
+
+    let middleware = Arc::new(RemoveSearchTool);
+    let plan = FrozenMiddlewarePlan::new(
+        middleware.clone(),
+        ExtensionSetReference::new(ExtensionSetId::new("fixture".into()).unwrap(), middleware),
+    );
+    let context = RequestAttemptContext::new(
+        ModelRequestId::new("req_fixture").unwrap(),
+        ClientApiKeyId::new("key_fixture").unwrap(),
+    )
+    .with_request_profile(Some(frozen_profile()))
+    .with_middleware(
+        Some(plan),
+        Arc::from([]),
+        "/v1beta/models/gemini-4-hydrogen:generateContent".into(),
+        ClientTransport::HttpSse,
+    );
+    let sent = upstream.received_requests().await.unwrap().len();
+    let Err(error) = fixture
+        .provider
+        .clone()
+        .execute(
+            request,
+            crate::support::context_with_request(context, CancellationToken::new()),
+        )
+        .await
+    else {
+        panic!("removing the search tool must fail before sending")
+    };
+    assert_eq!(error.kind(), ProviderErrorKind::InvalidRequest);
+    assert_eq!(error.send_state(), UpstreamSendState::NotSent);
+    assert_eq!(upstream.received_requests().await.unwrap().len(), sent);
+    released(fixture).await;
 }
 
 #[tokio::test]
@@ -858,6 +1040,7 @@ async fn required_search_uses_catalog_target_and_delivers_grounded_terminal() {
         .unwrap();
     let candidate = &plan.candidates()[0];
     assert_eq!(candidate.upstream_model().unwrap().as_str(), "search-only");
+    assert!(candidate.uses_dedicated_web_search());
     Mock::given(path("/v1internal:generateContent")).and(body_partial_json(json!({
         "model":"search-only","requestType":"web_search","request":{"tools":[{"googleSearch":{"includedDomains":["example.org"]}}],"contents":[{"role":"user","parts":[{"text":"你好"}]}]}
     }))).respond_with(ResponseTemplate::new(200).set_body_json(json!({"response":{

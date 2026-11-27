@@ -267,7 +267,8 @@ WebSocket message 和 frame 不设置网关私有长度上限；协议可接受�
 
 GenAI 短路径使用 `Authorization: Bearer <Client Key>` 或 `x-goog-api-key: <Client Key>`。模型名取自 URL，入口只在当前 Key 的账号范围内选择声明 GenAI 协议的原生模型，目前由 Antigravity OAuth 账号承接；Responses、Chat Completions 与 Messages 也可转换到 Antigravity 目录中声明接受转换的模型
 
-- 上游目录声明的模型分组可使用基础模型名，并通过 `generationConfig.thinkingConfig.thinkingLevel` 指定档位；缺少或不支持的档位返回 400，完整型号与指向完整型号的模型映射保持原目标
+- 上游目录声明的模型分组可使用基础模型名，并通过 `generationConfig.thinkingConfig.thinkingLevel` 指定档位。普通生成与计数缺少或不支持的档位时返回 400，完整型号与指向完整型号的模型映射保持原目标
+- 使用基础模型名调用 `generateContent` 时，唯一工具为 `googleSearch`（兼容 `google_search`）且未提供 `thinkingConfig` 的请求可直接使用目录中的专用搜索型号，搜索选项随请求发送。同一个账号和授权该账号的同一个分组均须允许调用至少一个分组成员与专用搜索型号
 - 常规生成与 Token 计数将 Antigravity 画像的系统提示放在客户端指令之前，保留客户端规则、工具说明和系统指令扩展字段。出站统一使用 `systemInstruction`，两种拼写同时出现时优先使用驼峰名称。独立联网搜索使用专用提示
 - GenAI 模型列表按当前 Key 可调用的上游目录顺序展示。原生 SSE 在两帧之间保持静默，首帧前失败沿用 HTTP 错误状态
 - Responses 显式选择联网搜索时，使用当前 Key 与账号均可调用的搜索模型。正文引用可随 JSON 或 SSE 返回，`include` 可请求完整来源列表
@@ -546,8 +547,8 @@ API Key 与 OAuth 共用模拟客户端画像（`User-Agent`、`originator`、`v
 显式关闭或没有配置值时省略出站头。客户端提供的同名头由网关处理，配置说明见 [部署与运维](../deploy/README.md#启动后的运行设置)。
 `x-openai-fedramp` 按业务头透传，保留原始多值
 
-`x-codex-exclude` 决定上游省略哪些响应字段。上游 WebSocket 通过握手读取该头，连接池按最终握手的全部同名值区分连接。
-头值改变时，依赖旧连接的精确续接需要客户端重放完整历史
+`x-codex-exclude` 与 `x-codex-exclude-stream-fields` 分别决定上游省略的响应字段和流事件字段。
+上游 WebSocket 在握手时读取这两组头，复用连接要求各组的全部头值分别匹配。任一组值改变时，依赖旧连接的精确续接需要客户端重放完整历史
 
 Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和 `sec-fetch-*`
 携带的下游 SDK/浏览器环境或页面来源。过滤规则适用于所有下游客户端，与 User-Agent 无关；
