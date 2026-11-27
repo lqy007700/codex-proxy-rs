@@ -3,7 +3,7 @@
 mod error;
 mod models;
 
-pub(in crate::openai) use error::{error_frame, project_error_response, stream_failure};
+pub(in crate::openai) use error::{error_frame, project_error_response};
 
 use std::{borrow::Cow, net::SocketAddr};
 
@@ -182,7 +182,7 @@ async fn generate(
     body: Bytes,
 ) -> Response {
     let service = state.openai().clone();
-    let client = match authenticate_client(&service, &headers, ClientKeyHeaders::Bearer).await {
+    let client = match authenticate_client(&service, &headers, ClientKeyHeaders::GenAi).await {
         Ok(client) => client,
         Err(error) => return client_access_error_response(error),
     };
@@ -230,7 +230,7 @@ async fn generate(
 }
 
 async fn metric(State(state): State<ApiState>, headers: HeaderMap) -> Response {
-    match verify_client(state.openai(), &headers).await {
+    match verify_client(state.openai(), &headers, ClientKeyHeaders::GenAi).await {
         Ok(_) => Json(json!({})).into_response(),
         Err(error) => client_access_error_response(error.into()),
     }

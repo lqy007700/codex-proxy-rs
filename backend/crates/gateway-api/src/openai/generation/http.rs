@@ -87,7 +87,12 @@ pub(crate) async fn execute_prepared_generation(
     let terminal_entered = Arc::clone(&execution_entered);
     let started_request_id = Arc::new(OnceLock::new());
     let terminal_request_id = Arc::clone(&started_request_id);
-    let (admitted, keepalive) = tokio::sync::oneshot::channel();
+    let (admitted, keepalive) = (!matches!(
+        protocol,
+        GenerationProtocol::GenAi | GenerationProtocol::GenAiTokenCount
+    ) && stream)
+        .then(tokio::sync::oneshot::channel)
+        .unzip();
     let mut middleware_headers = headers.clone();
     // 中间件正文已经由入口按上限解压；传输编码和旧长度不能与改写后的正文混用
     middleware_headers.remove(CONTENT_ENCODING);
@@ -160,7 +165,9 @@ pub(crate) async fn execute_prepared_generation(
                     .session
                     .trace()
                     .capture("client.request.body", &request_body);
-                let _ = admitted.send(started.session.response_commit());
+                if let Some(admitted) = admitted {
+                    let _ = admitted.send(started.session.response_commit());
+                }
                 execution_middleware_response(
                     started,
                     connection_guard,
@@ -190,17 +197,12 @@ pub(crate) async fn execute_prepared_generation(
             Err(error) => error_response(error),
         }
     };
-    let response = if stream {
+    let response = if let Some(keepalive) = keepalive {
         match protocol {
             GenerationProtocol::Responses => {
                 crate::openai::responses::keepalive::response(response, keepalive).await
             }
-            GenerationProtocol::GenAi | GenerationProtocol::GenAiTokenCount => {
-                crate::openai::middleware::keepalive_response(response, keepalive, |response| {
-                    Box::pin(crate::openai::genai::stream_failure(response))
-                })
-                .await
-            }
+            GenerationProtocol::GenAi | GenerationProtocol::GenAiTokenCount => unreachable!(),
             GenerationProtocol::Messages | GenerationProtocol::MessageTokenCount => {
                 crate::openai::middleware::keepalive_response(response, keepalive, |response| {
                     Box::pin(crate::openai::messages::stream_failure(response))

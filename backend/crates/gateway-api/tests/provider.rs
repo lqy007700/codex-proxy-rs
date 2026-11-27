@@ -318,6 +318,7 @@ async fn provider_http_should_strip_sensitive_headers_and_preserve_opaque_bytes(
             Request::post("/v1/providers/local-echo/http/inspect?mode=future")
                 .header(AUTHORIZATION, "Bearer sk_provider_operation_test")
                 .header("x-api-key", "must-not-reach-plugin")
+                .header("x-goog-api-key", "must-not-reach-plugin")
                 .header("cookie", "must-not-reach-plugin=1")
                 .header("connection", "x-hop-client")
                 .header("x-hop-client", "must-not-reach-plugin")
@@ -348,7 +349,12 @@ async fn provider_http_should_strip_sensitive_headers_and_preserve_opaque_bytes(
     assert!(!headers.iter().any(|(name, _)| {
         matches!(
             name.as_str(),
-            "authorization" | "x-api-key" | "cookie" | "connection" | "x-hop-client"
+            "authorization"
+                | "x-api-key"
+                | "x-goog-api-key"
+                | "cookie"
+                | "connection"
+                | "x-hop-client"
         )
     }));
     assert_eq!(

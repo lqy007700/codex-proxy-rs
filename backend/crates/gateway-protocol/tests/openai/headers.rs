@@ -110,6 +110,7 @@ fn response_headers_should_reject_hop_identity_and_dynamic_connection_fields() {
         "x-hop",
         "content-length",
         "authorization",
+        "x-goog-api-key",
         "set-cookie",
         "chatgpt-account-id",
         "x-openai-project",

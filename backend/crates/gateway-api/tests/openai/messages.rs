@@ -51,6 +51,7 @@ pub(super) struct Session {
     pub trace: Arc<Trace>,
     pub finish: Finish,
     pub delay: Option<Duration>,
+    pub read_delay: Option<Duration>,
     pub fail_commit: bool,
     pub response_headers: Vec<ProviderResponseHeader>,
     committed: bool,
@@ -64,6 +65,7 @@ impl Session {
             trace: Arc::default(),
             finish: Finish::Success,
             delay: None,
+            read_delay: None,
             fail_commit: false,
             response_headers: Vec::new(),
             committed: false,
@@ -80,6 +82,9 @@ impl ExecutionSession for Session {
     fn next_event(&mut self) -> BoxFuture<'_, Result<Option<CoordinatedEvent>, EngineError>> {
         Box::pin(async move {
             if let Some(delay) = self.delay.take() {
+                tokio::time::sleep(delay).await;
+            }
+            if let Some(delay) = self.read_delay {
                 tokio::time::sleep(delay).await;
             }
             if let Some(event) = self.events.pop_front() {

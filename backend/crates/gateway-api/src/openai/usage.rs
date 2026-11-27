@@ -41,7 +41,13 @@ async fn usage(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response {
-    let client = match verify_client(state.openai(), &headers).await {
+    let client = match verify_client(
+        state.openai(),
+        &headers,
+        super::auth::ClientKeyHeaders::Bearer,
+    )
+    .await
+    {
         Ok(client) => client,
         Err(error) => return client_access_error_response(error.into()),
     };

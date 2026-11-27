@@ -405,6 +405,7 @@ fn request_header_is_forwardable(name: &HeaderName, connection_options: &[String
         "authorization"
             | "proxy-authorization"
             | "x-api-key"
+            | "x-goog-api-key"
             | "api-key"
             | "cookie"
             | "host"

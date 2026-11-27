@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 const REDACTED: &str = "<redacted>";
 static INLINE: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
     [
-        (r"(?i)\b((?:set-cookie|cookie2?|(?:proxy-)?authorization|x-api-key|x-oai-is(?:-update)?|x-oai-attestation)\s*:\s*)[^\r\n]+", "${1}<redacted>"),
+        (r"(?i)\b((?:set-cookie|cookie2?|(?:proxy-)?authorization|x-(?:goog-)?api-key|x-oai-is(?:-update)?|x-oai-attestation)\s*:\s*)[^\r\n]+", "${1}<redacted>"),
         (r#"(?i)\b(Bearer|Basic)\s+[^\s"'<>;,]+"#, "${1} <redacted>"),
         // 官方 TokenData 的 access_token / id_token 为 JWT，不按猜测的令牌前缀过滤普通文本
         (r"\beyJ[\w-]+\.[\w-]+\.[\w-]+\b", "<redacted>"),
@@ -59,6 +59,7 @@ fn secret(key: &str) -> bool {
             | "authorization"
             | "proxyauthorization"
             | "xapikey"
+            | "xgoogapikey"
             | "cookie"
             | "cookie2"
             | "setcookie"

@@ -1,7 +1,7 @@
 //! 验证诊断采集的敏感信息过滤与结构、大小边界
 
 use gateway_core::diagnostics::{
-    body_fingerprint, diagnostic_headers, diagnostic_json, json_fingerprint,
+    DiagnosticRedactor, body_fingerprint, diagnostic_headers, diagnostic_json, json_fingerprint,
 };
 use serde_json::{Value, json};
 
@@ -231,4 +231,15 @@ fn credentials_remain_redacted_at_nested_json_and_real_header_boundaries() {
         assert!(!headers.to_string().contains("PRIVATE_"));
         assert_eq!(headers[name.to_ascii_lowercase()][0], "<redacted>");
     }
+}
+
+#[test]
+fn genai_client_key_is_redacted_in_diagnostic_exports() {
+    let mut value = json!({
+        "headers": {"X-Goog-Api-Key": "private-structured-key"},
+        "message": "X-Goog-Api-Key: private-inline-key",
+    });
+    DiagnosticRedactor::new(1024, 512).redact(&mut value);
+    assert_eq!(value["headers"]["X-Goog-Api-Key"], "<redacted>");
+    assert_eq!(value["message"], "X-Goog-Api-Key: <redacted>");
 }

@@ -158,7 +158,9 @@ pub(crate) async fn into_http_response(
         exhausted,
         terminal_seen: empty,
     };
-    let keep_alive = matches!(expected, ExpectedBody::Sse);
+    // GenAI 原生客户端不接受网关插入的 SSE 注释
+    let keep_alive = matches!(expected, ExpectedBody::Sse)
+        && expected_protocol != gateway_protocol::genai::GENAI_PROTOCOL;
     let stream = Box::pin(futures::stream::try_unfold(delivery, HttpDelivery::next));
     // 固定同一条输出流；心跳不能取消并重建正在等待的 next_frame 或结算 future
     let stream = futures::stream::unfold(stream, move |mut stream| async move {

@@ -2,6 +2,117 @@
 
 use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use std::time::Duration;
+
+#[tokio::test]
+async fn google_api_key_authenticates_native_endpoints_without_changing_wire() {
+    for action in [
+        "generateContent",
+        "streamGenerateContent?alt=sse",
+        "countTokens",
+    ] {
+        let stream = action.starts_with("stream");
+        let raw = if action == "countTokens" {
+            Bytes::from_static(br#"{ "totalTokens":42 }"#)
+        } else {
+            Bytes::from_static(br#"{ "candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}] }"#)
+        };
+        let frame = "data: { \"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}] }\n\n";
+        let event = if stream {
+            wire_frame(frame)
+        } else {
+            ProviderEvent::wire(ProtocolWireEvent::raw_json(GENAI_PROTOCOL, raw.clone()).unwrap())
+        };
+        let execution = Arc::new(Execution {
+            session: Mutex::new(Some(Session::new(vec![event]))),
+            ..Default::default()
+        });
+        let mut req = request(&format!("{SHORT}:{action}"));
+        req.headers_mut().remove("authorization");
+        req.headers_mut()
+            .insert("x-goog-api-key", KEY.parse().unwrap());
+        let response = api_router(execution.clone())
+            .await
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{action}");
+        let expected = if stream { frame.as_bytes() } else { &raw };
+        assert_eq!(
+            to_bytes(response.into_body(), 2048).await.unwrap().as_ref(),
+            expected
+        );
+        let captured = execution.seen.lock().unwrap().take().unwrap();
+        assert_eq!(
+            captured.operation.middleware_body().unwrap().as_ref(),
+            BODY.as_bytes()
+        );
+    }
+}
+
+#[tokio::test]
+async fn google_api_key_reuses_validation_and_never_overrides_authorization() {
+    use axum::http::HeaderValue;
+
+    let execution = Arc::new(Execution::default());
+    let router = api_router(execution.clone()).await;
+    for (authorization, key, status) in [
+        (None, Some(HeaderValue::from_static(KEY)), StatusCode::OK),
+        (None, None, StatusCode::UNAUTHORIZED),
+        (
+            None,
+            Some(HeaderValue::from_static("invalid")),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            None,
+            Some(HeaderValue::from_static("")),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            None,
+            Some(HeaderValue::from_bytes(b"\xff").unwrap()),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            Some("Bearer invalid"),
+            Some(HeaderValue::from_static(KEY)),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            Some("Basic invalid"),
+            Some(HeaderValue::from_static(KEY)),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            Some("Bearer sk_genai_test"),
+            Some(HeaderValue::from_static("invalid")),
+            StatusCode::OK,
+        ),
+    ] {
+        let mut req = request("/v1beta:recordCodeAssistMetrics");
+        req.headers_mut().remove("authorization");
+        if let Some(value) = authorization {
+            req.headers_mut()
+                .insert("authorization", value.parse().unwrap());
+        }
+        if let Some(value) = key {
+            req.headers_mut().insert("x-goog-api-key", value);
+        }
+        assert_eq!(router.clone().oneshot(req).await.unwrap().status(), status);
+    }
+    for path in ["/v1/models", "/v1/usage"] {
+        let req = Request::get(path)
+            .header("x-goog-api-key", KEY)
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            router.clone().oneshot(req).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    assert!(execution.seen.lock().unwrap().is_none());
+}
 
 #[tokio::test]
 async fn session_headers_reach_provider_context_except_when_declared_hop_by_hop() {
@@ -183,15 +294,16 @@ async fn committed_stream_delivers_raw_error_once() {
     );
 }
 
-#[tokio::test]
-async fn stream_preserves_finish_and_later_usage_bytes_before_eof() {
+#[tokio::test(start_paused = true)]
+async fn silent_stream_delivers_only_native_finish_and_late_usage_frames() {
     let first = "data: { \"candidates\":[{\"finishReason\":\"STOP\"}], \"error\":null }\r\n\r\n";
     let last = "data: {\"usageMetadata\":{\"totalTokenCount\":7}}\r\n\r\n";
     let mut events = vec![wire_frame(first), wire_frame(last)];
     events.push(ProviderEvent::canonical(GatewayEvent::Completed(
         ResponseMeta::new("id", "model-a"),
     )));
-    let session = Session::new(events);
+    let mut session = Session::new(events);
+    session.read_delay = Some(Duration::from_secs(45));
     let trace = session.trace.clone();
     let execution = Arc::new(Execution {
         session: Mutex::new(Some(session)),
@@ -209,6 +321,27 @@ async fn stream_preserves_finish_and_later_usage_bytes_before_eof() {
     );
     assert_eq!(trace.commits.load(Ordering::SeqCst), 1);
     assert!(trace.finalized.load(Ordering::SeqCst));
+}
+
+#[tokio::test(start_paused = true)]
+async fn error_after_waiting_for_first_frame_preserves_http_status() {
+    let mut session = Session::new(Vec::new());
+    session.read_delay = Some(Duration::from_secs(45));
+    session.finish = Finish::Error;
+    let execution = Arc::new(Execution {
+        session: Mutex::new(Some(session)),
+        ..Default::default()
+    });
+    let response = api_router(execution)
+        .await
+        .oneshot(request(&format!("{SHORT}:streamGenerateContent?alt=sse")))
+        .await
+        .unwrap();
+    let status = response.status();
+    assert!(status.is_server_error());
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 2048).await.unwrap()).unwrap();
+    assert_eq!(body["error"]["code"], status.as_u16());
 }
 
 #[tokio::test]
