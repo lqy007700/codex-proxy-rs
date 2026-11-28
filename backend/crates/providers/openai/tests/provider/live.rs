@@ -440,6 +440,8 @@ fn live_protocol_headers() -> Vec<gateway_core::operation::ProviderHttpHeader> {
         ("x-openai-account-routing-override", "second-route"),
         ("x-openai-fedramp", "true"),
         ("x-codex-turn-state", "foreign-turn-state"),
+        ("x-codex-turn-id", "turn-first"),
+        ("x-codex-turn-id", "turn-second"),
         ("x-codex-routing-hint", "foreign-route"),
         ("openai-alpha", "live-test"),
         ("voice-session-id", "voice-product-session"),
@@ -464,6 +466,14 @@ fn assert_live_correlation(headers: &reqwest::header::HeaderMap) {
     assert_eq!(headers["thread-id"], session);
     assert_eq!(headers["openai-alpha"], "live-test");
     assert_eq!(headers["x-openai-fedramp"], "true");
+    assert_eq!(
+        headers
+            .get_all("x-codex-turn-id")
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["turn-first", "turn-second"]
+    );
     assert_eq!(
         headers
             .get_all("x-test-business")

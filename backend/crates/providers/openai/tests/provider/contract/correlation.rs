@@ -365,6 +365,10 @@ async fn image_generation_and_edit_preserve_the_client_turn_identity() {
                 .with_context(Map::from_iter([
                     ("image_turn_id".into(), json!("source-turn")),
                     ("turn_metadata".into(), json!(metadata(0).to_string())),
+                    (
+                        "opaque_request_headers".into(),
+                        json!([["x-codex-turn-id", STANDARD.encode("opening-turn")]]),
+                    ),
                 ])),
         ));
         let mut stream = provider
@@ -385,6 +389,7 @@ async fn image_generation_and_edit_preserve_the_client_turn_identity() {
     for request in &requests {
         assert_eq!(request.body.as_slice(), body.as_ref());
         assert_eq!(&request.headers["x-codex-image-turn-id"], first);
+        assert!(!request.headers.contains_key("x-codex-turn-id"));
         let metadata: Value =
             serde_json::from_str(request.headers["x-codex-turn-metadata"].to_str().unwrap())
                 .unwrap();

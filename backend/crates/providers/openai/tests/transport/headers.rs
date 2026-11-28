@@ -1,9 +1,36 @@
 //! 验证 Codex HTTP 与 WebSocket 的请求身份、头部顺序与脱敏
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use gateway_core::operation::{GenerateRequest, ProtocolPayload};
 use provider_openai::transport::websocket::CodexWebSocketConnection;
 use serde_json::Value;
 
 use super::*;
+
+fn request_with_turn_headers(
+    body: Map<String, Value>,
+    websocket_frame: bool,
+    turn: &str,
+) -> CodexResponsesRequest {
+    let payload = ProtocolPayload::json_object("openai", body)
+        .unwrap()
+        .with_context(Map::from_iter([
+            ("turn_id".to_owned(), json!(turn)),
+            ("websocket_frame".to_owned(), json!(websocket_frame)),
+            (
+                "opaque_request_headers".to_owned(),
+                json!([
+                    ["x-codex-turn-id", STANDARD.encode(turn)],
+                    ["x-codex-turn-id", STANDARD.encode(b"turn-second")],
+                    ["authorization", STANDARD.encode(b"Bearer downstream")]
+                ]),
+            ),
+        ]));
+    let request = GenerateRequest::from_protocol_payload(payload);
+    let encoded = provider_openai::encode_generate_request(&request, "gpt-test", None).unwrap();
+    assert_eq!(encoded.client_turn_id.as_deref(), Some(turn));
+    encoded
+}
 
 #[test]
 fn websocket_connection_should_preserve_endpoint_and_header_order() {
@@ -148,8 +175,9 @@ async fn backend_websocket_should_forward_context_headers_and_preserve_payload_f
             .expect("send terminal event");
         payload
     });
-    let mut request =
-        codex_request_with_prompt_cache_key("gpt-test", "be brief", Vec::new(), "client-thread");
+    let mut body = codex_request_body("gpt-test", "be brief", Vec::new());
+    body.insert("prompt_cache_key".to_owned(), json!("client-thread"));
+    let mut request = request_with_turn_headers(body, false, "turn-first");
     request.use_websocket = true;
     request.turn_state = Some("turn-state".to_owned());
     request.responses_lite = Some("true".to_owned());
@@ -253,6 +281,108 @@ async fn backend_websocket_should_forward_context_headers_and_preserve_payload_f
     ] {
         assert!(headers.iter().all(|(header, _)| header != forbidden));
     }
+}
+
+#[tokio::test]
+async fn backend_http_forwards_turn_headers_but_not_stale_websocket_opening_headers() {
+    for websocket_frame in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut stream).await;
+            write_completed_sse_response(&mut stream).await;
+            request
+        });
+        let mut request = request_with_turn_headers(
+            codex_request_body("gpt-test", "", Vec::new()),
+            websocket_frame,
+            "turn-first",
+        );
+        request.force_http_sse = true;
+        let client = CodexBackendClient::new(
+            reqwest::Client::builder().no_proxy().build().unwrap(),
+            format!("http://{address}"),
+            test_wire_profile(),
+        );
+        client
+            .create_response(
+                &request,
+                request_context("req_turn_header", Some("account")),
+            )
+            .await
+            .unwrap();
+        let raw = server.await.unwrap();
+        let values = raw
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .filter(|(name, _)| name.eq_ignore_ascii_case("x-codex-turn-id"))
+            .map(|(_, value)| value.trim())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            values,
+            if websocket_frame {
+                vec![]
+            } else {
+                vec!["turn-first", "turn-second"]
+            }
+        );
+        assert_eq!(
+            read_header_value(&raw, "authorization"),
+            Some("Bearer access-token")
+        );
+    }
+}
+
+#[tokio::test]
+async fn changing_turn_headers_does_not_split_websocket_connections() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut websocket = accept_codex_test_websocket_with(stream, |request, _| {
+            assert!(!request.headers().contains_key("x-codex-turn-id"));
+        })
+        .await;
+        for index in 0..2 {
+            websocket.next().await.unwrap().unwrap();
+            websocket
+                .send(Message::Text(
+                    completed_websocket_response(&format!("resp_turn_{index}"), 1, 1).into(),
+                ))
+                .await
+                .unwrap();
+        }
+    });
+    let pool = Arc::new(CodexWebSocketPool::new(Duration::from_mins(1)));
+    let client = CodexBackendClient::new(
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+        format!("http://{address}"),
+        test_wire_profile(),
+    )
+    .with_websocket_pool(Arc::clone(&pool));
+    for turn in ["turn-first", "turn-next"] {
+        let mut body = codex_request_body("gpt-test", "", Vec::new());
+        body.insert("store".to_owned(), json!(false));
+        let mut request = request_with_turn_headers(body, true, turn);
+        request.use_websocket = true;
+        request.local_conversation_id = Some("same-conversation".to_owned());
+        request.downstream_websocket_connection_id = Some("same-connection".to_owned());
+        let response = timeout(
+            Duration::from_secs(5),
+            client.create_response(&request, request_context("req_ws_turn", Some("account"))),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(response.transport, CodexBackendTransport::WebSocket);
+        assert_eq!(
+            response.websocket_pool_decision.unwrap().is_reuse(),
+            turn == "turn-next"
+        );
+    }
+    server.await.unwrap();
+    pool.shutdown().await;
 }
 
 #[tokio::test]

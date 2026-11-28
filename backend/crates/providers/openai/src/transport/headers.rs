@@ -169,6 +169,10 @@ impl CodexBackendClient {
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<HeaderMap> {
         let mut headers = self.response_headers(profile, request, context)?;
+        // 下游 WS 握手头属于连接而非当前帧，不能作为逐轮 HTTP 请求头转发
+        if request.websocket_frame {
+            headers.remove("x-codex-turn-id");
+        }
         self.append_middleware_headers(&mut headers)?;
         headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -189,6 +193,7 @@ impl CodexBackendClient {
         let mut headers = self.response_headers(profile, request, context)?;
         // WebSocket 逐帧回传轮次状态，握手不能把某一轮的 token 绑定到整条连接
         headers.remove("x-codex-turn-state");
+        headers.remove("x-codex-turn-id");
         self.append_middleware_headers(&mut headers)?;
         headers.insert(
             HeaderName::from_static("openai-beta"),
@@ -299,7 +304,6 @@ pub(super) fn append_passthrough_headers(
                     | "content-type"
                     | "content-encoding"
                     | "x-codex-routing-hint"
-                    | "x-codex-turn-id"
                     | X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER
             )
         {

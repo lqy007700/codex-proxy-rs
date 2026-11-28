@@ -347,6 +347,8 @@ fn decoder_should_preserve_ordinary_request_headers_as_opaque_multivalues() {
         "x-codex-turn-state",
         HeaderValue::from_static("same-account-turn"),
     );
+    headers.append("x-codex-turn-id", HeaderValue::from_static("turn-first"));
+    headers.append("x-codex-turn-id", HeaderValue::from_static("turn-second"));
 
     headers.insert(
         "connection",
@@ -431,6 +433,14 @@ fn decoder_should_preserve_ordinary_request_headers_as_opaque_multivalues() {
     assert_eq!(
         values("x-codex-installation-id"),
         vec![b"client-installation".to_vec()]
+    );
+    assert_eq!(
+        openai_protocol_context(&decoded).get("turn_id"),
+        Some(&json!("turn-first"))
+    );
+    assert_eq!(
+        values("x-codex-turn-id"),
+        vec![b"turn-first".to_vec(), b"turn-second".to_vec()]
     );
     for name in ["x-openai-account-routing-override", "x-openai-fedramp"] {
         assert_eq!(values(name), vec![b"first".to_vec(), b"second".to_vec()]);
