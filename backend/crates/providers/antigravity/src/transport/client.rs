@@ -49,12 +49,13 @@ struct AgentModelSortGroup {
     model_ids: Vec<String>,
 }
 
-fn agent_model_order(sorts: Vec<AgentModelSort>) -> BTreeMap<String, usize> {
+fn agent_model_order(sorts: Vec<AgentModelSort>, images: Vec<String>) -> BTreeMap<String, usize> {
     let mut order = BTreeMap::new();
     for id in sorts
         .into_iter()
         .flat_map(|sort| sort.groups)
         .flat_map(|group| group.model_ids)
+        .chain(images)
     {
         let index = order.len();
         order.entry(id).or_insert(index);
@@ -62,22 +63,35 @@ fn agent_model_order(sorts: Vec<AgentModelSort>) -> BTreeMap<String, usize> {
     order
 }
 
+/// 完整保留上游模型对象，能力投影只读取需要的字段
 #[derive(Serialize, Deserialize)]
-pub(crate) struct Model {
-    #[serde(rename = "displayName", default)]
-    pub(crate) name: String,
-    #[serde(rename = "quotaInfo", default)]
-    pub(crate) quota: Option<super::account::ModelQuota>,
-    #[serde(default)]
-    pub(crate) description: Option<String>,
-    #[serde(rename = "tagDescription", default)]
-    pub(crate) tag_description: Option<String>,
-    #[serde(rename = "maxTokens", default)]
-    pub(crate) context_window: Option<u64>,
-    #[serde(rename = "maxOutputTokens", default)]
-    pub(crate) max_output_tokens: Option<u64>,
-    #[serde(rename = "supportsImages", default)]
-    pub(crate) supports_images: Option<bool>,
+#[serde(transparent)]
+pub(crate) struct Model(pub(crate) serde_json::Map<String, serde_json::Value>);
+
+impl Model {
+    pub(crate) fn text(&self, key: &str) -> Option<&str> {
+        self.0.get(key).and_then(serde_json::Value::as_str)
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        self.text("displayName").unwrap_or_default()
+    }
+
+    pub(crate) fn positive_integer(&self, key: &str) -> Option<u64> {
+        self.0
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .filter(|n| *n > 0)
+    }
+
+    pub(crate) fn quota(&self) -> Result<Option<super::account::ModelQuota>, serde_json::Error> {
+        self.0
+            .get("quotaInfo")
+            .filter(|value| !value.is_null())
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -186,6 +200,8 @@ impl CloudCodeClient {
         struct Models {
             #[serde(rename = "agentModelSorts", default)]
             agent_model_sorts: Option<Vec<AgentModelSort>>,
+            #[serde(rename = "imageGenerationModelIds", default)]
+            image_generation_models: Vec<String>,
             #[serde(rename = "webSearchModelIds", default)]
             web_search_models: Vec<String>,
             models: BTreeMap<String, Model>,
@@ -207,7 +223,16 @@ impl CloudCodeClient {
         }
         Ok(Catalog {
             project,
-            agent_model_order: models.agent_model_sorts.map(agent_model_order),
+            agent_model_order: if models.agent_model_sorts.is_some()
+                || !models.image_generation_models.is_empty()
+            {
+                Some(agent_model_order(
+                    models.agent_model_sorts.unwrap_or_default(),
+                    models.image_generation_models,
+                ))
+            } else {
+                None
+            },
             models: models.models,
             grouped_models: models.grouped_models,
             web_search_models: models.web_search_models,

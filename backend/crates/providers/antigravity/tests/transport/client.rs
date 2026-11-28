@@ -59,7 +59,7 @@ async fn oauth_refresh_and_native_generate_preserve_grant_profile_and_wire_paylo
         .mount(&server)
         .await;
     let catalog = client.catalog(&access_token).await.unwrap();
-    assert_eq!(catalog.models["fixture-model"].name, "Fixture Model");
+    assert_eq!(catalog.models["fixture-model"].name(), "Fixture Model");
     let body=br#"{ "contents":[{"parts":[{"functionResponse":{"name":"lookup","response":{"x":1}},"thoughtSignature":"opaque"}]}],"unknown":98765432109876543210987654,"systemInstruction":{"role":"system","extension":98765432109876543210987654,"parts":[{ "text" : "Client tool instructions", "extension":1e+09 },{"text":"Project rules"}]},"system_instruction":{"parts":[{"text":"old"}]} }"#;
     let reply = r#"{ "responseId":"r","candidates":[{"content":{"parts":[{"text":"hidden","thought":true},{"text":"ok"},{"functionCall":{"name":"lookup","args":{"text":"not output"}}}]},"finishReason":"STOP"},{"index":1,"content":{"parts":[{"text":"other candidate"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2},"extra":98765432109876543210987654 }"#;
     let received_body = move |r: &wiremock::Request| {
@@ -436,7 +436,8 @@ async fn catalog_preserves_first_model_order_and_reads_old_catalogs() {
     Mock::given(path("/v1internal:fetchAvailableModels"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "models": {},
-            "agentModelSorts": [{"groups": [{"modelIds": ["z", "a"]}, {"modelIds": ["z", "b"]}]}]
+            "agentModelSorts": [{"groups": [{"modelIds": ["z", "a"]}, {"modelIds": ["z", "b"]}]}],
+            "imageGenerationModelIds": ["image", "a"]
         })))
         .mount(&server)
         .await;
@@ -446,9 +447,19 @@ async fn catalog_preserves_first_model_order_and_reads_old_catalogs() {
     let catalog = client.catalog("fixture").await.unwrap();
     assert_eq!(
         catalog.agent_model_order.unwrap(),
-        std::collections::BTreeMap::from([("z".into(), 0), ("a".into(), 1), ("b".into(), 2)])
+        std::collections::BTreeMap::from([
+            ("z".into(), 0),
+            ("a".into(), 1),
+            ("b".into(), 2),
+            ("image".into(), 3)
+        ])
     );
     let old: transport::Catalog =
         serde_json::from_value(json!({"project":"p", "models":{}})).unwrap();
     assert!(old.agent_model_order.is_none());
+    let old: transport::Catalog = serde_json::from_value(json!({
+        "project":"p", "models":{}, "agentModelOrder":{"z":0,"a":1}
+    }))
+    .unwrap();
+    assert_eq!(old.agent_model_order.unwrap()["z"], 0);
 }

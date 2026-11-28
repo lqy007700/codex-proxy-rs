@@ -146,6 +146,209 @@ async fn google_api_key_reads_the_same_authorized_catalog() {
 }
 
 #[tokio::test]
+async fn native_metadata_keeps_snapshot_order_and_missing_public_models() {
+    use gateway_core::{operation::RawJsonPayload, routing::PublicModelDescriptor};
+    let source = client();
+    let settings =
+        source
+            .snapshot()
+            .settings()
+            .clone()
+            .with_model_mappings(std::collections::BTreeMap::from([(
+                "alias-a".into(),
+                "model-a".into(),
+            )]));
+    let client = super::super::authenticated_client_from_snapshot(
+        KEY,
+        source.snapshot().with_settings(&settings).unwrap(),
+    );
+    let document = json!({
+        "displayName":"Upstream", "description":"Description", "maxTokens":1048576,
+        "maxOutputTokens":65536, "future":{"capability":true},
+        "name":"upstream-name", "supportedGenerationMethods":["unsupported"]
+    });
+    let payload = RawJsonPayload::new(
+        GENAI_PROTOCOL,
+        serde_json::to_vec(&document).unwrap().into(),
+    )
+    .unwrap();
+    let router = api_router(Arc::new(Execution {
+        client: Some(client),
+        catalog: Some(Ok(["model-a", "alias-a", "not-authorized"]
+            .into_iter()
+            .map(|id| PublicModelDescriptor::Native {
+                model: PublicModelId::new(id).unwrap(),
+                payload: payload.clone(),
+            })
+            .collect())),
+        ..Default::default()
+    }))
+    .await;
+    let (_, first) = query(&router, "/v1beta/models?pageSize=2", true).await;
+    let token = first["nextPageToken"].as_str().unwrap();
+    let (_, second) = query(
+        &router,
+        &format!("/v1beta/models?pageSize=2&pageToken={token}"),
+        true,
+    )
+    .await;
+    let entries: Vec<_> = first["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(second["models"].as_array().unwrap())
+        .collect();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "models/alias-a",
+            "models/model-a",
+            "models/model-b",
+            "models/model-c"
+        ]
+    );
+    for entry in &entries[..2] {
+        assert_eq!(entry["displayName"], "Upstream");
+        assert_eq!(entry["description"], "Description");
+        assert_eq!(entry["maxTokens"], 1048576);
+        assert_eq!(entry["maxOutputTokens"], 65536);
+        assert_eq!(entry["future"], json!({"capability":true}));
+        assert_eq!(
+            entry["supportedGenerationMethods"],
+            json!(["generateContent", "streamGenerateContent", "countTokens"])
+        );
+    }
+    assert_eq!(entries[2]["displayName"], "model-b");
+    for entry in entries {
+        let (_, detail) = query(
+            &router,
+            &format!("/v1beta/{}", entry["name"].as_str().unwrap()),
+            true,
+        )
+        .await;
+        assert_eq!(entry, &detail);
+    }
+}
+
+#[tokio::test]
+async fn grouped_models_and_image_remain_discoverable_when_native_group_is_missing() {
+    use gateway_core::{
+        account::ProviderAccountId,
+        operation::RawJsonPayload,
+        routing::{PublicModelDescriptor, ReasoningModelVariant},
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    let source = authenticated_client(KEY);
+    let provider = ProviderKind::new("openai").unwrap();
+    let account = ProviderAccountId::new("acct_api_test").unwrap();
+    let caps = ModelCapabilities::new([OperationKind::Generate].into(), None)
+        .with_generation_protocol(GENAI_PROTOCOL);
+    let group = caps.clone().with_reasoning_variants(BTreeMap::from([(
+        "medium".into(),
+        ReasoningModelVariant {
+            model: UpstreamModelId::new("family-medium").unwrap(),
+            accounts: BTreeSet::from([account]),
+        },
+    )]));
+    let settings = source
+        .snapshot()
+        .settings()
+        .clone()
+        .with_model_mappings(BTreeMap::from([("family-alias".into(), "family".into())]));
+    let snapshot = RuntimeSnapshot::new(
+        ConfigRevision::new(1).unwrap(),
+        settings,
+        vec![provider.clone()],
+        [
+            ("family", group),
+            ("family-medium", caps.clone()),
+            ("image", caps),
+        ]
+        .into_iter()
+        .map(|(id, capabilities)| {
+            ProviderModel::new(
+                provider.clone(),
+                UpstreamModelId::new(id).unwrap(),
+                capabilities,
+            )
+        })
+        .collect(),
+        vec![source.policy().clone()],
+    )
+    .unwrap();
+    let payload = RawJsonPayload::new(
+        GENAI_PROTOCOL,
+        bytes::Bytes::from_static(br#"{"displayName":"Image"}"#),
+    )
+    .unwrap();
+    let router = api_router(Arc::new(Execution {
+        client: Some(super::super::authenticated_client_from_snapshot(
+            KEY, snapshot,
+        )),
+        catalog: Some(Ok(vec![PublicModelDescriptor::Native {
+            model: PublicModelId::new("image").unwrap(),
+            payload,
+        }])),
+        ..Default::default()
+    }))
+    .await;
+    let (_, body) = query(&router, "/v1beta/models", true).await;
+    let models = body["models"].as_array().unwrap();
+    for name in ["family", "family-alias", "image"] {
+        let entry = models
+            .iter()
+            .find(|entry| entry["name"] == format!("models/{name}"))
+            .unwrap();
+        assert_eq!(
+            entry["supportedGenerationMethods"],
+            json!(["generateContent", "streamGenerateContent"])
+        );
+        let (status, detail) = query(&router, &format!("/v1beta/models/{name}"), true).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(entry, &detail);
+    }
+    assert_eq!(
+        models
+            .iter()
+            .find(|entry| entry["name"] == "models/image")
+            .unwrap()["displayName"],
+        "Image"
+    );
+}
+
+#[tokio::test]
+async fn snapshot_directory_survives_missing_or_empty_native_metadata() {
+    let empty_name = gateway_core::operation::RawJsonPayload::new(
+        GENAI_PROTOCOL,
+        Bytes::from_static(br#"{"displayName":""}"#),
+    )
+    .unwrap();
+    for catalog in [
+        Err(ProviderCatalogUnavailable),
+        Ok(vec![PublicModelDescriptor::Native {
+            model: PublicModelId::new("model-a").unwrap(),
+            payload: empty_name,
+        }]),
+    ] {
+        let router = api_router(Arc::new(Execution {
+            client: Some(client()),
+            catalog: Some(catalog),
+            ..Default::default()
+        }))
+        .await;
+        let (status, list) = query(&router, "/v1beta/models", true).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, detail) = query(&router, "/v1beta/models/model-a", true).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail["displayName"], "model-a");
+        assert_eq!(list["models"][0], detail);
+    }
+}
+
+#[tokio::test]
 async fn google_key_pagination_preserves_authorized_rank_and_legacy_order() {
     use gateway_core::{account::ProviderAccountId, routing::AccountModelMetadata};
     use std::collections::BTreeMap;

@@ -238,6 +238,43 @@ impl CatalogService {
         Ok(models.into_values().collect())
     }
 
+    pub(crate) async fn client_model_catalog(
+        &self,
+        scope: &gateway_core::account::scope::FrozenAccountScope,
+    ) -> Result<Vec<gateway_core::routing::ProviderModelDescriptor>, ProviderError> {
+        use gateway_core::{
+            operation::RawJsonPayload,
+            routing::{ProviderModelContent, ProviderModelDescriptor},
+        };
+        let mut entries = Vec::new();
+        for (accounts, catalog) in self.catalogs().await? {
+            for (id, mut model) in catalog.models {
+                let model_id = UpstreamModelId::new(id).map_err(|_| unsent(Kind::Protocol))?;
+                // 旧缓存也可能包含额度，原生目录不能暴露账号额度
+                model.0.remove("quotaInfo");
+                let body = serde_json::to_vec(&model).map_err(|_| unsent(Kind::Protocol))?;
+                let payload =
+                    RawJsonPayload::new(gateway_protocol::genai::GENAI_PROTOCOL, body.into())
+                        .map_err(|_| unsent(Kind::Protocol))?;
+                for account in accounts
+                    .iter()
+                    .filter(|account| scope.allows(&account.account_id))
+                {
+                    entries.push(ProviderModelDescriptor {
+                        model: model_id.clone(),
+                        content: ProviderModelContent::Native(payload.clone()),
+                        source_account: Some(account.account_id.clone()),
+                    });
+                }
+            }
+        }
+        // 同名模型保留各账号完整对象，由 Core 根据冻结映射和授权选择来源
+        entries.sort_by(|left, right| {
+            (&left.source_account, &left.model).cmp(&(&right.source_account, &right.model))
+        });
+        Ok(entries)
+    }
+
     pub(crate) async fn account_models(
         &self,
         id: &ProviderAccountId,
@@ -293,7 +330,7 @@ impl CatalogService {
     ) -> Result<ProviderModels, ProviderAdminError> {
         // 模型目录只拥有能力事实，易变的额度由独立快照保存
         for model in catalog.models.values_mut() {
-            model.quota = None;
+            model.0.remove("quotaInfo");
         }
         let observed = AccountCatalogObservation {
             account_id: account.id().clone(),
@@ -318,13 +355,11 @@ impl CatalogService {
 
 fn account_metadata(model: Model) -> AccountModelMetadata {
     let description = model
-        .description
-        .as_deref()
+        .text("description")
         .map(str::trim)
         .filter(|s| !s.is_empty());
     let tag = model
-        .tag_description
-        .as_deref()
+        .text("tagDescription")
         .map(str::trim)
         .filter(|s| !s.is_empty());
     let description = match (description, tag) {
@@ -332,14 +367,18 @@ fn account_metadata(model: Model) -> AccountModelMetadata {
         _ => description.or(tag).map(str::to_owned),
     };
     // AGY 只声明一个上下文窗口，默认值与可覆盖上限都取 maxTokens
-    let context_window = model.context_window.filter(|n| *n > 0);
+    let context_window = model.positive_integer("maxTokens");
     AccountModelMetadata {
         catalog_order: None,
         description,
         context_window_tokens: context_window,
         max_context_window_tokens: context_window,
-        max_output_tokens: model.max_output_tokens.filter(|n| *n > 0),
-        image_input: model.supports_images == Some(true),
+        max_output_tokens: model.positive_integer("maxOutputTokens"),
+        image_input: model
+            .0
+            .get("supportsImages")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true),
     }
 }
 
@@ -352,10 +391,10 @@ fn admin_models(
         .into_iter()
         .map(|(id, m)| {
             Ok(ProviderModel {
-                name: if m.name.is_empty() {
+                name: if m.name().is_empty() {
                     id.clone()
                 } else {
-                    m.name
+                    m.name().to_owned()
                 },
                 id: UpstreamModelId::new(id).map_err(|_| error(AdminKind::Invalid))?,
             })

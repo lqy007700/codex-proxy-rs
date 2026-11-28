@@ -270,7 +270,7 @@ GenAI 短路径使用 `Authorization: Bearer <Client Key>` 或 `x-goog-api-key: 
 - 上游目录声明的模型分组可使用基础模型名，并通过 `generationConfig.thinkingConfig.thinkingLevel` 指定档位。普通生成与计数缺少或不支持的档位时返回 400，完整型号与指向完整型号的模型映射保持原目标
 - 使用基础模型名调用 `generateContent` 时，唯一工具为 `googleSearch`（兼容 `google_search`）且未提供 `thinkingConfig` 的请求可直接使用目录中的专用搜索型号，搜索选项随请求发送。同一个账号和授权该账号的同一个分组均须允许调用至少一个分组成员与专用搜索型号
 - 常规生成与 Token 计数将 Antigravity 画像的系统提示放在客户端指令之前，保留客户端规则、工具说明和系统指令扩展字段。出站统一使用 `systemInstruction`，两种拼写同时出现时优先使用驼峰名称。独立联网搜索使用专用提示
-- GenAI 模型列表按当前 Key 可调用的上游目录顺序展示。原生 SSE 在两帧之间保持静默，首帧前失败沿用 HTTP 错误状态
+- GenAI 模型列表按当前 Key 可调用的上游目录顺序展示，目录项可包含可用的上游模型描述与限制。原生 SSE 在两帧之间保持静默，首帧前失败沿用 HTTP 错误状态
 - Responses 显式选择联网搜索时，使用当前 Key 与账号均可调用的搜索模型。正文引用可随 JSON 或 SSE 返回，`include` 可请求完整来源列表
 - Antigravity 的 Responses WebSocket 预热在网关内完成。生成成功后客户端重连，并在下一轮携带完整上下文
 - 会话亲和使用 `X-Http-Session-Id`，缺失时使用 `X-Session-Id`；转换入口沿用 Codex 与 Claude Code 会话解析，绑定按 Client Key、模型和入站协议隔离，共用 `openaiAccountAffinity` 设置

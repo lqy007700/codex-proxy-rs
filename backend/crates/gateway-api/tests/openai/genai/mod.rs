@@ -21,7 +21,7 @@ use gateway_core::{
     error::GatewayError,
     event::{GatewayEvent, ProtocolWireEvent, ProviderEvent, ResponseMeta},
     operation::Operation,
-    routing::PublicModelId,
+    routing::{ProviderCatalogUnavailable, PublicModelDescriptor, PublicModelId},
 };
 use gateway_protocol::genai::GENAI_PROTOCOL;
 use serde_json::{Value, json};
@@ -37,6 +37,7 @@ const BODY: &str = r#"{ "contents":[{"role":"user","parts":[{"text":"Read record
 #[derive(Default)]
 struct Execution {
     client: Option<AuthenticatedClient>,
+    catalog: Option<Result<Vec<PublicModelDescriptor>, ProviderCatalogUnavailable>>,
     session: Mutex<Option<Session>>,
     seen: Mutex<Option<PreparedExecutionRequest>>,
 }
@@ -60,6 +61,14 @@ impl ExecutionService for Execution {
     }
     fn public_models(&self, _: &AuthenticatedClient) -> Vec<PublicModelId> {
         vec![]
+    }
+    fn client_model_catalog<'a>(
+        &'a self,
+        _: &'a AuthenticatedClient,
+        _: &'a str,
+        _: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<PublicModelDescriptor>, ProviderCatalogUnavailable>> {
+        Box::pin(async move { self.catalog.clone().unwrap_or(Ok(Vec::new())) })
     }
     fn contains_public_model(&self, _: &AuthenticatedClient, _: &PublicModelId) -> bool {
         true

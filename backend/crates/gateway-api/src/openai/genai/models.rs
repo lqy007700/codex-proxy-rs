@@ -10,6 +10,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use gateway_core::{
     engine::execution::AuthenticatedClient,
     operation::{GenerateRequest, Operation, ProtocolPayload, RawJsonPayload, TokenCountRequest},
+    routing::PublicModelDescriptor,
 };
 use gateway_protocol::genai::GENAI_PROTOCOL;
 use serde::{Deserialize, Serialize};
@@ -84,33 +85,42 @@ async fn query_response(
     };
     let mut input = RequestInput::query(endpoint.to_owned(), model.clone(), &headers);
     input.protocol = GENAI_PROTOCOL.to_owned();
-    middleware::query_response(
-        service.execution(),
-        client,
-        input,
-        move |client| async move {
-            match catalog(&client) {
-                Ok(models) => match model {
-                    Some(model) => models
-                        .into_iter()
-                        .find(|value| value["name"] == format!("models/{model}"))
-                        .map_or_else(
-                            || error(StatusCode::NOT_FOUND, "Requested model was not found."),
-                            success,
-                        ),
-                    None => paginate(models, query),
-                },
-                Err(()) => error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "Model catalog is unavailable.",
-                ),
-            }
-        },
-    )
+    let execution = service.execution();
+    middleware::query_response(execution.clone(), client, input, move |client| async move {
+        match catalog(execution.as_ref(), &client).await {
+            Ok(models) => match model {
+                Some(model) => models
+                    .into_iter()
+                    .find(|value| value["name"] == format!("models/{model}"))
+                    .map_or_else(
+                        || error(StatusCode::NOT_FOUND, "Requested model was not found."),
+                        success,
+                    ),
+                None => paginate(models, query),
+            },
+            Err(()) => error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Model catalog is unavailable.",
+            ),
+        }
+    })
     .await
 }
 
-fn catalog(client: &AuthenticatedClient) -> Result<Vec<Value>, ()> {
+async fn catalog(
+    execution: &dyn gateway_core::engine::execution::ExecutionService,
+    client: &AuthenticatedClient,
+) -> Result<Vec<Value>, ()> {
+    let entries = execution
+        .client_model_catalog(client, GENAI_PROTOCOL, "")
+        .await
+        .unwrap_or_default();
+    let mut native = std::collections::BTreeMap::new();
+    for entry in entries {
+        if let PublicModelDescriptor::Native { model, payload } = entry {
+            native.insert(model, payload);
+        }
+    }
     let generate = Operation::Generate(
         GenerateRequest::from_protocol_payload(
             ProtocolPayload::json_object(GENAI_PROTOCOL, Map::new()).map_err(|_| ())?,
@@ -132,16 +142,28 @@ fn catalog(client: &AuthenticatedClient) -> Result<Vec<Value>, ()> {
         .into_iter()
         .filter(|model| super::valid_segment(model.as_str()))
         .map(|model| {
+            // 可选目录元数据缺失时仍提供冻结快照中的可执行模型
+            let mut object = native
+                .remove(&model)
+                .filter(|payload| payload.protocol() == GENAI_PROTOCOL)
+                .and_then(|payload| {
+                    serde_json::from_slice::<Map<String, Value>>(payload.body()).ok()
+                })
+                .unwrap_or_default();
             let mut methods = vec!["generateContent", "streamGenerateContent"];
             if counted.binary_search(&model).is_ok() {
                 methods.push("countTokens");
             }
-            // 上游尚未提供完整 Gemini 元数据，未知版本与 Token 上限保持缺失
-            json!({
-                "name": format!("models/{}", model.as_str()),
-                "displayName": model.as_str(),
-                "supportedGenerationMethods": methods,
-            })
+            if !object
+                .get("displayName")
+                .and_then(Value::as_str)
+                .is_some_and(|name| !name.trim().is_empty())
+            {
+                object.insert("displayName".into(), json!(model.as_str()));
+            }
+            object.insert("name".into(), json!(format!("models/{}", model.as_str())));
+            object.insert("supportedGenerationMethods".into(), json!(methods));
+            Value::Object(object)
         })
         .collect())
 }
