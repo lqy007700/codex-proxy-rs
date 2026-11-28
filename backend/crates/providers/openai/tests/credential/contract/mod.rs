@@ -3,6 +3,7 @@
 mod capacity;
 mod cooldown_reads;
 mod scheduling_projection;
+mod token_count;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;

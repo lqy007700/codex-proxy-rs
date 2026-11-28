@@ -750,6 +750,7 @@ pub(super) enum Script {
 pub(super) struct ScriptedProvider {
     provider_name: &'static str,
     pub(super) local_prewarm: bool,
+    pub(super) newapi_admission: Option<bool>,
     profile_generation: AtomicUsize,
     default_profile_calls: AtomicUsize,
     default_profile: Mutex<Option<gateway_core::account::OpaqueProviderData>>,
@@ -774,10 +775,11 @@ impl ScriptedProvider {
     }
 
     /// 双 Provider 计划需要第二个 Provider 实例扮演跨候选推进的目标。
-    fn named(provider_name: &'static str, scripts: Vec<Script>) -> Self {
+    pub(super) fn named(provider_name: &'static str, scripts: Vec<Script>) -> Self {
         Self {
             provider_name,
             local_prewarm: false,
+            newapi_admission: None,
             profile_generation: AtomicUsize::new(1),
             default_profile_calls: AtomicUsize::new(0),
             default_profile: Mutex::new(None),
@@ -855,6 +857,9 @@ impl Provider for ScriptedProvider {
         request: ProviderRequest,
         context: AttemptContext,
     ) -> Result<ProviderStream, ProviderError> {
+        if let Some(switched) = self.newapi_admission {
+            context.record_newapi_token_affinity_admission(switched);
+        }
         self.operations
             .lock()
             .expect("operations lock")

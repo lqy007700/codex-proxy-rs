@@ -2036,9 +2036,15 @@ New API 已识别 Token 无会话标识时也可建立主绑定；会话绑定�
 | `GET` | `/api/admin/affinity/sessions` | 查询绑定类型与版本 |
 | `GET` | `/api/admin/affinity/sources` | 查询稳定身份来源 |
 | `POST` | `/api/admin/affinity/sources/save` | 保存 `{ id, name, enabled }`，`id` 为 UUID，改名保留原 ID |
+| `GET` | `/api/admin/affinity/newapi-rule` | 查询全局默认及指定 Token 的持久覆盖 |
+| `POST` | `/api/admin/affinity/newapi-rule` | 保存默认规则、保存 Token 覆盖或删除覆盖 |
 | `POST` | `/api/admin/affinity/preview` | 冻结明确选择的绑定与版本，创建 15 分钟预览 |
 | `POST` | `/api/admin/affinity/apply` | 提交 `{ operationId }`，逐项执行或恢复原操作结果 |
 | `GET` | `/api/admin/affinity/operations` | 最近 50 条预览及逐项结果 |
+
+规则查询不带参数时返回全局默认；查询 Token 时同时提供 `sourceId`、`userId`、`tokenId`，响应包含 `default` 和可为空的 `overrideConfig`，不要求存在活动绑定。规则包含 `enabled`、`requestLimit` 和可为空的 `targetAccount`，默认关闭、阈值为 50；阈值须为正整数，启用须指定目标账号
+
+写入使用 `{identity, clientKeyId, config}`：`identity` 为 `{sourceId,userId,tokenId}` 时写入 Token 覆盖，`config: null` 删除覆盖并恢复继承；`identity: null` 时写入全局默认且 `config` 不能为空。Token 指定目标时须提供当前 `clientKeyId`，目标须在该 Key 的启用普通 OpenAI 账号范围内；运行时仍按当前 Key 权限和账号状态选择。Token 覆盖是完整规则，即使显式关闭也优先于全局默认。持久规则随配置修订发布，不随 Redis 绑定过期
 
 绑定查询可组合 `bindingScope`（`token` / `session`）、`mode`（`direct` / `newApi`）、`sourceId`、`clientKeyId`、`userId`、`tokenId`、
 `provider`、`accountId`、`reference`、`requestId`、`status`（`bound` / `pending` / `primary` / `spillover`）及 `cursor`。
@@ -2258,7 +2264,10 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 - `strict`（严格）：同一会话共用账号，后代请求等待当前账号并跟随根请求换号
 
 New API 已识别 Token 在 `preferred` 与 `strict` 下额外保留一个主账号偏好，跨窗口及无会话标识请求均可使用。
-仅首次 attempt、无续接或重放的普通请求可以认领或迁移 Token 主绑定，并优先主账号；主账号不支持模型、繁忙或冷却时，允许在当前 Key 授权范围内临时分流，保留主绑定。
+启用 [New API Token 切换规则](#账号亲和管理)后，按 Token 主绑定计数成功准入的逻辑请求，同一请求的重试不重复计数；达到阈值后的下一个请求开始指定目标账号，后续请求持续使用该目标。
+目标不可用时按现有权限、状态与容量检查返回错误，不切换其他账号或 Provider；允许的同账号重试仍按原有规则执行，旧原生续接的 owner 与目标不同时要求客户端以完整历史开始新链。
+计数和切换状态随 Token 绑定 TTL 到期或丢失而重置，规则配置本身保留。规则关闭、切换前及 `relaxed` 模式沿用普通调度，包括允许的临时容量分流；挂起的管理指令仍按其原有优先级处理
+普通调度下，仅首次 attempt、无续接或重放的普通请求可以认领或迁移 Token 主绑定，并优先主账号；主账号不支持模型、繁忙或冷却时，允许在当前 Key 授权范围内临时分流，保留主绑定。
 所有候选均不可用时按原有错误或排队规则结束，不修改主绑定，也不替换请求模型。
 主账号已删除、停用、封禁、凭据明确过期或无效、移出当前范围或不再是普通账号时，下次安全新链可迁移到可用普通账号。
 确认有效额度耗尽且重置时间缺失，或重置时刻距当前时间超过请求冻结的排队等待时限时，也允许迁移；重置前后仍在该宽限内时只临时分流。

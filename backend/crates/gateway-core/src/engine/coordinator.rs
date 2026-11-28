@@ -24,8 +24,8 @@ use crate::engine::{
     AccountAttemptContext, AttemptContext, AttemptRecord, AttemptTransport, AttemptTrigger,
     CommitRequirement, ContinuationAttempt, CoordinatedEvent, EngineError, ExecutionOutcome,
     ExecutionStore, GatewayEngine, IntermediateFailure, ModelRequestFailureObservation,
-    ModelRequestFinalization, ModelRequestId, NewModelRequest, ProviderAccountStateOwner,
-    RequestAttemptContext, UpstreamSendState,
+    ModelRequestFinalization, ModelRequestId, NewApiTokenAffinity, NewModelRequest,
+    ProviderAccountStateOwner, RequestAttemptContext, UpstreamSendState,
 };
 use crate::error::{
     ContinuationRecoveryDisposition, GatewayError, GatewayErrorKind, ProviderError,
@@ -55,6 +55,7 @@ enum AccountSelection {
 
 pub(super) struct CoordinationExtensions {
     caller_identity: Option<crate::policy::CallerIdentity>,
+    newapi_token_affinity_rule: Option<crate::policy::NewApiTokenAffinityRule>,
     caller_token_name: Option<String>,
     response_control: Option<super::response_control::ResponseControl>,
     continuation: Option<ContinuationBinding>,
@@ -71,6 +72,13 @@ pub(super) struct CoordinationExtensions {
 }
 
 impl CoordinationExtensions {
+    pub(super) fn with_newapi_token_affinity_rule(
+        mut self,
+        rule: Option<crate::policy::NewApiTokenAffinityRule>,
+    ) -> Self {
+        self.newapi_token_affinity_rule = rule;
+        self
+    }
     pub(super) fn with_caller_token_name(mut self, name: Option<String>) -> Self {
         self.caller_token_name = name;
         self
@@ -104,6 +112,7 @@ impl CoordinationExtensions {
         Self {
             continuation,
             caller_identity: None,
+            newapi_token_affinity_rule: None,
             caller_token_name: None,
             response_control: None,
             observation,
@@ -267,6 +276,7 @@ where
     ) -> Result<ResponseExecutionSession<S>, EngineError> {
         let CoordinationExtensions {
             caller_identity,
+            newapi_token_affinity_rule,
             caller_token_name,
             response_control,
             continuation,
@@ -340,6 +350,7 @@ where
             caller_identity: caller_identity
                 .unwrap_or_else(|| crate::policy::CallerIdentity::direct(&client_api_key_ref)),
             caller_token_name,
+            newapi_token_affinity: newapi_token_affinity_rule.map(NewApiTokenAffinity::new),
             client_api_key_ref,
             concurrency_wait_budget: ConcurrencyWaitBudget::default(),
             connection_budget: super::connection::ConnectionBudget::default(),
@@ -506,6 +517,7 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     request_id: ModelRequestId,
     client_api_key_ref: crate::policy::ClientApiKeyId,
     caller_identity: crate::policy::CallerIdentity,
+    newapi_token_affinity: Option<NewApiTokenAffinity>,
     caller_token_name: Option<String>,
     concurrency_wait_budget: ConcurrencyWaitBudget,
     connection_budget: super::connection::ConnectionBudget,
@@ -1241,6 +1253,7 @@ where
         let context = AttemptContext::new(
             RequestAttemptContext::new(self.request_id.clone(), self.client_api_key_ref.clone())
                 .with_caller_identity(self.caller_identity.clone())
+                .with_newapi_token_affinity(self.newapi_token_affinity.clone())
                 .with_caller_token_name(self.caller_token_name.clone())
                 .with_account_error_protection(
                     (!self.account_selection.is_diagnostic()
@@ -1349,7 +1362,9 @@ where
                         error = original.with_client_recovery_from(error);
                         self.last_retryable_failure_events.clear();
                     }
-                    let connection_fallback = self.connection_rotation.is_some()
+                    let target_admitted = self.newapi_token_target_admitted();
+                    let connection_fallback = !target_admitted
+                        && self.connection_rotation.is_some()
                         && self
                             .last_retryable_failure
                             .as_ref()
@@ -1366,15 +1381,17 @@ where
                                 | ProviderErrorKind::ConcurrencyQueueFull
                                 | ProviderErrorKind::ConcurrencyQueueTimeout
                         );
-                    let continuation_retry = !error.retry_is_prohibited()
+                    let continuation_retry = !target_admitted
+                        && !error.retry_is_prohibited()
                         && self.prepare_unavailable_native_continuation_replay(&error);
                     let unavailable_retry_account = pinned_account.as_ref().filter(|_| {
-                        is_transient_account_retry
+                        !target_admitted
+                            && is_transient_account_retry
                             && !continuation_retry
                             && !connection_fallback
                             && self.can_rotate_unavailable_retry_account(&error)
                     });
-                    let selection_recovery = !error.retry_is_prohibited()
+                    let selection_recovery = !target_admitted && !error.retry_is_prohibited()
                         && self.last_retryable_failure.as_ref().is_none_or(|failure| matches!(
                             failure.pre_delivery_retry(),
                             Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
@@ -1409,7 +1426,7 @@ where
                             self.candidate_index = 0;
                             true
                         } else { false };
-                    let candidate_retry = !error.retry_is_prohibited() && !continuation_retry
+                    let candidate_retry = !target_admitted && !error.retry_is_prohibited() && !continuation_retry
                         && !selection_recovery && !self.account_recovery.is_fallback()
                         && !connection_fallback
                         && unavailable_retry_account.is_none()
@@ -1734,6 +1751,13 @@ where
         })
     }
 
+    // 仅已准入切换目标的请求禁止恢复换号，切换前仍沿用普通调度
+    fn newapi_token_target_admitted(&self) -> bool {
+        self.newapi_token_affinity
+            .as_ref()
+            .is_some_and(|affinity| affinity.admission.get() == Some(&true))
+    }
+
     fn advance_provider_candidate(&mut self) -> bool {
         let Some(next) = self.candidate_index.checked_add(1) else {
             return false;
@@ -1881,7 +1905,9 @@ where
                 attempt_send_state,
                 provider_proved_replay_safe,
             );
-        let account_rotation_retry = !execution_effect_observed
+        let target_admitted = self.newapi_token_target_admitted();
+        let account_rotation_retry = !target_admitted
+            && !execution_effect_observed
             && self.account_selection.required_account().is_none()
             && self.continuation_attempt == ContinuationAttempt::None
             && !self.replay_barrier_reached
@@ -1947,7 +1973,8 @@ where
             }
             _ => None,
         };
-        let can_rotate_connection = connection_retry_requested
+        let can_rotate_connection = !target_admitted
+            && connection_retry_requested
             && self.account_selection.required_account().is_none()
             && self.routing_attempts < self.plan.max_attempts().get()
             && self.has_account_rotation_budget();
@@ -2071,7 +2098,9 @@ where
             if budget_exhausted
                 || self.routing_attempts.saturating_add(1) >= self.plan.max_attempts().get()
             {
-                self.account_recovery.enter_fallback();
+                if !target_admitted {
+                    self.account_recovery.enter_fallback();
+                }
                 retry_same = false;
             }
             // 本地业务同账号重试固定等待一秒；上游明确等待仍优先，跨账号不继承旧账号退避
@@ -2082,7 +2111,9 @@ where
             };
             if retry_same {
                 transient_retry = Some(delay);
-            } else if !self.account_recovery.is_fallback() || self.has_fallback_account() {
+            } else if !target_admitted
+                && (!self.account_recovery.is_fallback() || self.has_fallback_account())
+            {
                 rotation_delay = Some(delay);
                 if self.account_recovery.is_fallback() {
                     self.candidate_index = 0;
@@ -2102,7 +2133,8 @@ where
                 .contains(current.metadata.provider_account_id());
         // 业务恢复由两个独立尝试预算约束；其他恢复仍按实际账号变化限制换号
         // RetryThenReturnError 耗尽后直接交付错误，不能落入 ordinary_retry 的换号兜底
-        let rotation_retry = !continuation_retry
+        let rotation_retry = !target_admitted
+            && !continuation_retry
             && !same_account_retry
             && transient_retry.is_none()
             && !is_return_error_retry(&error)
@@ -2455,6 +2487,7 @@ where
                         .retry_after()
                         .is_some_and(|delay| delay > self.plan.max_retry_after())
                     && !error.retry_is_prohibited()
+                    && !self.newapi_token_target_admitted()
                     && self.has_account_rotation_budget() =>
             {
                 self.continuation_attempt = ContinuationAttempt::RotateForClientReplay;
@@ -2484,7 +2517,7 @@ where
             // 两个排除臂都必然换号；预算耗尽后不再排除当前账号做跨账号续写重放，
             // 落回不可重试路径以原始上游错误终态。
             ContinuationAttempt::ReplayOwner | ContinuationAttempt::ReplayAny
-                if !self.has_account_rotation_budget() =>
+                if self.newapi_token_target_admitted() || !self.has_account_rotation_budget() =>
             {
                 return false;
             }

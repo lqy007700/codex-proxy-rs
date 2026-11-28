@@ -26,6 +26,15 @@ pub trait AffinityBindingStore: Send + Sync {
 
 #[async_trait]
 pub trait AffinityJournalStore: Send + Sync {
+    async fn newapi_affinity(
+        &self,
+        identity: Option<&gateway_core::policy::NewApiTokenIdentity>,
+    ) -> Result<NewApiAffinityView, AdminError>;
+    async fn save_newapi_affinity(
+        &self,
+        context: &MutationContext,
+        update: &NewApiAffinityUpdate,
+    ) -> Result<Revision, AdminError>;
     async fn sources(&self) -> Result<Vec<IdentitySource>, AdminError>;
     async fn save_source(
         &self,

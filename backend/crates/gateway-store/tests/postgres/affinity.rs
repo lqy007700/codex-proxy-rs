@@ -11,6 +11,129 @@ use gateway_core::{
 };
 use gateway_store::postgres::PgAffinityJournal;
 
+#[tokio::test]
+async fn token_configuration_survives_without_redis_and_obeys_scope_revision_and_audit() {
+    use gateway_core::policy::{NewApiTokenAffinityConfig, NewApiTokenIdentity};
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = super::TestDatabase::create("newapi_affinity_config").await else {
+        return;
+    };
+    let journal = PgAffinityJournal::new(database.pool.clone());
+    assert_eq!(
+        journal.newapi_affinity(None).await.unwrap().default,
+        NewApiTokenAffinityConfig::default()
+    );
+    let identity = NewApiTokenIdentity {
+        source_id: uuid::Uuid::new_v4().to_string(),
+        user_id: "11".into(),
+        token_id: "22".into(),
+    };
+    journal
+        .save_source(
+            &context(),
+            IdentitySource {
+                id: identity.source_id.clone(),
+                name: "source".into(),
+                enabled: true,
+            },
+        )
+        .await
+        .unwrap();
+    sqlx::query("insert into client_api_keys(id,name,key,created_at,updated_at,identity_policy_json) values('key_fixture','fixture','synthetic-affinity-key',now(),now(),$1)")
+        .bind(serde_json::json!({"mode":"newApi","sourceId":identity.source_id,"allowUnidentified":false})).execute(&database.pool).await.unwrap();
+    for id in ["acct_a", "acct_b"] {
+        sqlx::query("insert into provider_accounts(id,provider_kind,name,authentication_kind,provider_credentials_json,has_refresh_token,credential_observed_at,created_at,updated_at) values($1,'openai',$1,'oauth','{}',false,now(),now(),now())").bind(id).execute(&database.pool).await.unwrap();
+    }
+    let default_update = NewApiAffinityUpdate {
+        identity: None,
+        client_key_id: None,
+        config: Some(NewApiTokenAffinityConfig {
+            enabled: true,
+            request_limit: 50,
+            target_account: Some("acct_b".into()),
+        }),
+    };
+    journal
+        .save_newapi_affinity(&context(), &default_update)
+        .await
+        .unwrap();
+    sqlx::query("insert into account_groups(id,name,enabled,created_at,updated_at,color) values('grp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','scope',true,now(),now(),'#123456FF')").execute(&database.pool).await.unwrap();
+    sqlx::query("insert into account_group_accounts(account_group_id,provider_account_id,created_at) values('grp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','acct_a',now())").execute(&database.pool).await.unwrap();
+    sqlx::query("insert into client_api_key_groups(client_api_key_id,account_group_id,created_at) values('key_fixture','grp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',now())").execute(&database.pool).await.unwrap();
+    let mut update = NewApiAffinityUpdate {
+        identity: Some(identity.clone()),
+        client_key_id: Some("key_fixture".into()),
+        config: Some(NewApiTokenAffinityConfig {
+            enabled: true,
+            request_limit: 3,
+            target_account: Some("acct_b".into()),
+        }),
+    };
+    assert!(
+        journal
+            .save_newapi_affinity(&context(), &update)
+            .await
+            .is_err()
+    );
+    update.config.as_mut().unwrap().target_account = Some("acct_a".into());
+    let before = PgRuntimeSnapshotRepository::new(database.pool.clone())
+        .load_runtime_snapshot()
+        .await
+        .unwrap();
+    let revision = journal
+        .save_newapi_affinity(&context(), &update)
+        .await
+        .unwrap();
+    let view = journal.newapi_affinity(Some(&identity)).await.unwrap();
+    assert_eq!(view.default, default_update.config.unwrap());
+    assert_eq!(view.override_config, update.config);
+    let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+        .load_runtime_snapshot()
+        .await
+        .unwrap();
+    assert!(snapshot.config_revision.get() > before.config_revision.get());
+    assert_eq!(snapshot.config_revision.get(), revision.get());
+    assert_eq!(
+        snapshot.newapi_overrides.get(&identity),
+        update.config.as_ref()
+    );
+    assert!(!before.newapi_overrides.contains_key(&identity));
+    let bad_actor = MutationContext {
+        actor: MutationActor::AdminSession {
+            admin_user_id: "missing-admin".into(),
+        },
+        request_id: "bad-audit".into(),
+    };
+    update.config = None;
+    assert!(
+        journal
+            .save_newapi_affinity(&bad_actor, &update)
+            .await
+            .is_err()
+    );
+    assert!(
+        journal
+            .newapi_affinity(Some(&identity))
+            .await
+            .unwrap()
+            .override_config
+            .is_some()
+    );
+    journal
+        .save_newapi_affinity(&context(), &update)
+        .await
+        .unwrap();
+    assert!(
+        journal
+            .newapi_affinity(Some(&identity))
+            .await
+            .unwrap()
+            .override_config
+            .is_none()
+    );
+    database.close().await;
+}
+
 fn context() -> MutationContext {
     MutationContext {
         actor: MutationActor::System,

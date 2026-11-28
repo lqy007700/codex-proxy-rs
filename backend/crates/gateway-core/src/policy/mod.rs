@@ -3,9 +3,13 @@
 //! Client API Key 冻结账号分组权限；模型名称不参与权限判断
 
 mod caller;
+mod newapi_affinity;
 pub use caller::{
     CallerIdentity, CallerIdentityError, CallerIdentityPolicy, ForwardedCallerHeaders,
     normalize_caller_token_name,
+};
+pub use newapi_affinity::{
+    NewApiTokenAffinityConfig, NewApiTokenAffinityRule, NewApiTokenIdentity,
 };
 
 mod client_version;

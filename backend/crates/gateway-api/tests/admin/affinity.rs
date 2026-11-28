@@ -15,6 +15,12 @@ async fn every_affinity_route_requires_admin_and_reports_unavailable_optional_se
         ("GET", "sessions", ""),
         ("GET", "sources", ""),
         ("GET", "operations", ""),
+        ("GET", "newapi-rule", ""),
+        (
+            "POST",
+            "newapi-rule",
+            r#"{"identity":null,"clientKeyId":null,"config":{"enabled":false,"requestLimit":50,"targetAccount":null}}"#,
+        ),
         (
             "POST",
             "sources/save",
@@ -117,6 +123,26 @@ impl AffinityBindingStore for NamedBindings {
 }
 #[async_trait]
 impl AffinityJournalStore for NamedBindings {
+    async fn newapi_affinity(
+        &self,
+        identity: Option<&gateway_core::policy::NewApiTokenIdentity>,
+    ) -> Result<NewApiAffinityView, AdminError> {
+        Ok(NewApiAffinityView {
+            default: Default::default(),
+            override_config: identity.map(|_| gateway_core::policy::NewApiTokenAffinityConfig {
+                enabled: false,
+                request_limit: 7,
+                target_account: None,
+            }),
+        })
+    }
+    async fn save_newapi_affinity(
+        &self,
+        _: &MutationContext,
+        _: &NewApiAffinityUpdate,
+    ) -> Result<Revision, AdminError> {
+        Ok(Revision::new(1).unwrap())
+    }
     async fn sources(&self) -> Result<Vec<IdentitySource>, AdminError> {
         panic!("unused sources")
     }
@@ -155,6 +181,35 @@ impl AffinityJournalStore for NamedBindings {
     ) -> Result<AffinityItemResult, AdminError> {
         panic!("unused audit mutation")
     }
+}
+
+#[tokio::test]
+async fn newapi_rule_api_reads_by_identity_and_rejects_invalid_configuration() {
+    let store = Arc::new(NamedBindings);
+    let fixture = AdminTestFixture::with_affinity(AffinityStorePorts {
+        bindings: store.clone(),
+        journal: store,
+    })
+    .await;
+    fixture.auth.insert_session("valid-session");
+    let router = crate::openai::api_router_with_admin(fixture.services);
+    let response = router.clone().oneshot(Request::builder()
+        .uri("/api/admin/affinity/newapi-rule?sourceId=b7bb7de9-7b06-4caa-8070-352af86a8a4a&userId=1&tokenId=2")
+        .header(header::COOKIE, "cpr_session=valid-session")
+        .body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["data"]["default"]["requestLimit"], 50);
+    assert_eq!(body["data"]["overrideConfig"]["requestLimit"], 7);
+    let response = router.oneshot(Request::builder().method("POST")
+        .uri("/api/admin/affinity/newapi-rule")
+        .header(header::COOKIE, "cpr_session=valid-session")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"identity":null,"clientKeyId":null,"config":{"enabled":true,"requestLimit":0,"targetAccount":null}}"#)).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

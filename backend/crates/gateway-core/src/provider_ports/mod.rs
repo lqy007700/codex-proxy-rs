@@ -13,7 +13,8 @@ pub use affinity::{
     ProviderAccountAdmission, ProviderAffinityScope, ProviderRoundRobinAdmission,
     ProviderSessionAffinityKey, ProviderSessionAffinityPort, ProviderSessionAlias,
     ProviderSessionBinding, ProviderSessionClaim, ProviderSessionExclusionPort,
-    ProviderSessionExclusions, ProviderSessionObservation, SessionBindingDirective,
+    ProviderSessionExclusions, ProviderSessionObservation, ProviderTokenRequestAdmission,
+    ProviderTokenRequestState, SessionBindingDirective,
 };
 mod session_affinity;
 pub use session_affinity::ProviderSessionAffinityState;

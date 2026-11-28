@@ -6,7 +6,8 @@ use gateway_core::account::ProviderAccountId;
 use gateway_core::policy::ClientApiKeyId;
 use gateway_core::provider_ports::{
     ProviderSessionAffinityKey, ProviderSessionAffinityPort, ProviderSessionBinding,
-    ProviderStoreError, ProviderStoreErrorKind,
+    ProviderStoreError, ProviderStoreErrorKind, ProviderTokenRequestAdmission,
+    ProviderTokenRequestState,
 };
 use gateway_core::routing::ProviderKind;
 use redis::aio::ConnectionManager;
@@ -24,6 +25,11 @@ const COMPARE_AND_BIND_SCRIPT: &str = r#"
 local current = redis.call('GET', KEYS[1])
 if (not current and ARGV[1] == '') or current == ARGV[1] then
   redis.call('PSETEX', KEYS[1], tonumber(ARGV[3]), ARGV[2])
+  if not current then
+    redis.call('DEL', KEYS[1] .. ':request-count')
+  elseif redis.call('EXISTS', KEYS[1] .. ':request-count') == 1 then
+    redis.call('PEXPIRE', KEYS[1] .. ':request-count', ARGV[3])
+  end
   return 1
 end
 return 0
@@ -39,8 +45,34 @@ for i = 1, #KEYS - 1 do
 end
 for i = 1, #KEYS - 1 do
   redis.call('PSETEX', KEYS[i], ARGV[3 * i + 3], ARGV[3 * i + 2])
+  if ARGV[3 * i + 1] == '' then
+    redis.call('DEL', KEYS[i] .. ':request-count')
+  elseif redis.call('EXISTS', KEYS[i] .. ':request-count') == 1 then
+    redis.call('PEXPIRE', KEYS[i] .. ':request-count', ARGV[3 * i + 3])
+  end
 end
 redis.call('PSETEX', KEYS[#KEYS], ARGV[3], ARGV[2])
+return 1
+"#;
+
+// 请求标记与计数必须和全部绑定及可选游标共同比较，失败时不续期
+const ADMIT_TOKEN_REQUEST_SCRIPT: &str = r#"
+if (redis.call('GET', KEYS[1]) or '') ~= ARGV[1] then return 0 end
+if (redis.call('GET', KEYS[2]) or '') ~= ARGV[2] then return 0 end
+local n = tonumber(ARGV[6])
+local has_cursor = ARGV[7] == '1'
+for i = 1, n do
+  if (redis.call('GET', KEYS[2 + i]) or '') ~= ARGV[7 + 3 * i - 2] then return 0 end
+end
+if has_cursor and (redis.call('GET', KEYS[3 + n]) or '0') ~= ARGV[8 + 3 * n] then return 0 end
+redis.call('PSETEX', KEYS[1], ARGV[5], ARGV[3])
+redis.call('PSETEX', KEYS[2], ARGV[5], ARGV[4])
+for i = 1, n do
+  redis.call('PSETEX', KEYS[2 + i], ARGV[7 + 3 * i], ARGV[7 + 3 * i - 1])
+end
+if has_cursor then
+  redis.call('PSETEX', KEYS[3 + n], ARGV[10 + 3 * n], ARGV[9 + 3 * n])
+end
 return 1
 "#;
 
@@ -94,6 +126,21 @@ impl RedisProviderSessionAffinityRepository {
             connection,
             namespace: namespace(key_namespace)?,
         })
+    }
+
+    fn token_request_keys(
+        &self,
+        provider: &ProviderKind,
+        token: &ProviderSessionAffinityKey,
+        request_id: &str,
+    ) -> Result<(String, String), ProviderStoreError> {
+        let binding = self.key(provider, token)?;
+        let request = resource_fingerprint("provider token request", request_id)
+            .map_err(|_| provider_invalid("encode token request key"))?;
+        Ok((
+            format!("{binding}:request-count"),
+            format!("{binding}:request:{request}"),
+        ))
     }
 
     fn cursor_key(
@@ -268,6 +315,125 @@ impl ProviderSessionAffinityPort for RedisProviderSessionAffinityRepository {
                 .invoke_async(&mut self.connection.clone())
                 .await
                 .map_err(|source| crate::provider_unavailable("admit round robin account", source))
+        })
+    }
+
+    fn load_token_request_state<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        token_key: &'a ProviderSessionAffinityKey,
+        request_id: &'a str,
+    ) -> futures::future::BoxFuture<'a, Result<ProviderTokenRequestState, ProviderStoreError>> {
+        Box::pin(async move {
+            let (count_key, request_key) =
+                self.token_request_keys(provider, token_key, request_id)?;
+            let (count, switched): (Option<String>, Option<String>) = redis::cmd("MGET")
+                .arg(count_key)
+                .arg(request_key)
+                .query_async(&mut self.connection.clone())
+                .await
+                .map_err(|error| crate::provider_unavailable("load token request state", error))?;
+            let (count, latched) = match count {
+                None => (None, false),
+                Some(value) => {
+                    let (number, flag) = value
+                        .split_once(':')
+                        .ok_or_else(|| provider_invalid("decode token request phase"))?;
+                    let count = number
+                        .parse::<u32>()
+                        .map_err(|_| provider_invalid("decode token request count"))?;
+                    let latched = match flag {
+                        "0" => false,
+                        "1" => true,
+                        _ => return Err(provider_invalid("decode token request phase")),
+                    };
+                    (Some(count), latched)
+                }
+            };
+            let switched = switched
+                .map(|value| match value.as_str() {
+                    "0" => Ok(false),
+                    "1" => Ok(true),
+                    _ => Err(provider_invalid("decode token request marker")),
+                })
+                .transpose()?;
+            Ok(ProviderTokenRequestState {
+                count,
+                latched,
+                switched,
+            })
+        })
+    }
+
+    fn admit_token_request<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        admission: ProviderTokenRequestAdmission<'a>,
+    ) -> futures::future::BoxFuture<'a, Result<bool, ProviderStoreError>> {
+        Box::pin(async move {
+            let (count_key, request_key) =
+                self.token_request_keys(provider, admission.token_key, admission.request_id)?;
+            let script = redis::Script::new(ADMIT_TOKEN_REQUEST_SCRIPT);
+            let mut invocation = script.prepare_invoke();
+            invocation
+                .key(count_key)
+                .key(request_key)
+                .arg(
+                    admission
+                        .expected
+                        .count
+                        .map(|value| format!("{value}:{}", u8::from(admission.expected.latched)))
+                        .unwrap_or_default(),
+                )
+                .arg(
+                    admission
+                        .expected
+                        .switched
+                        .map(|value| if value { "1" } else { "0" })
+                        .unwrap_or(""),
+                )
+                .arg(format!(
+                    "{}:{}",
+                    admission.next_count,
+                    u8::from(admission.latched)
+                ))
+                .arg(if admission.switched { "1" } else { "0" })
+                .arg(session_affinity_ttl_millis(admission.ttl)?)
+                .arg(admission.claims.len())
+                .arg(if admission.cursor.is_some() { "1" } else { "0" });
+            for claim in admission.claims {
+                let binding =
+                    if admission.preserve_token_directive && claim.key == admission.token_key {
+                        claim
+                            .expected
+                            .cloned()
+                            .ok_or_else(|| provider_invalid("preserve token directive"))?
+                    } else {
+                        next_binding(claim.expected, claim.account)?
+                    };
+                invocation
+                    .key(self.key(provider, claim.key)?)
+                    .arg(
+                        claim
+                            .expected
+                            .map(BindingRecord::encode)
+                            .transpose()?
+                            .unwrap_or_default(),
+                    )
+                    .arg(BindingRecord::encode(&binding)?)
+                    .arg(session_affinity_ttl_millis(claim.ttl)?);
+            }
+            if let Some((client_key, cursor)) = admission.cursor {
+                invocation
+                    .key(self.cursor_key(provider, client_key)?)
+                    .arg(cursor)
+                    .arg(cursor.wrapping_add(1))
+                    .arg(CURSOR_TTL_MILLIS);
+            }
+            invocation
+                .invoke_async(&mut self.connection.clone())
+                .await
+                .map_err(|error| crate::provider_unavailable("admit token request", error))
         })
     }
 

@@ -25,6 +25,9 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
         insert into client_api_key_budget_windows values('restore_key',now(),now()+interval '1 day',now(),now()+interval '7 days',2.5,9.5);
         insert into client_api_key_charge_events(request_id,client_api_key_id,amount_usd,completed_at) values('native_a','restore_key',2.5,now());
         insert into plugin_update_sources(plugin_id,source_json) values('backup.test','{}');
+        insert into caller_identity_sources(id,name,enabled) values('b7bb7de9-7b06-4caa-8070-352af86a8a4a','backup source',true);
+        update newapi_token_affinity_default set enabled=true,request_limit=50,target_account='acct_backup';
+        insert into newapi_token_affinity_overrides(source_id,user_id,token_id,enabled,request_limit,target_account) values('b7bb7de9-7b06-4caa-8070-352af86a8a4a','1','2',false,7,null);
         insert into plugin_artifacts(sha256,plugin_id,version,metadata_json,source_json,archive,accepted_at) values(repeat('a',64),'backup.test','1.0.0','{}','{}',decode('010203','hex'),now());
         update runtime_settings set usage_retention_days=3;
         update model_requests set cost_source='provider_reported',cost_amount=0.5,cost_currency='USD';
@@ -197,6 +200,12 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
                 .await
                 .unwrap();
         assert_eq!(retention_days, 3);
+        let default_rule: (bool, i64, Option<String>) = sqlx::query_as("select enabled, request_limit, target_account from newapi_token_affinity_default where singleton")
+            .fetch_one(&database.pool).await.unwrap();
+        assert_eq!(default_rule, (true, 50, Some("acct_backup".into())));
+        let override_rule: (bool, i64, Option<String>) = sqlx::query_as("select enabled, request_limit, target_account from newapi_token_affinity_overrides where source_id='b7bb7de9-7b06-4caa-8070-352af86a8a4a' and user_id='1' and token_id='2'")
+            .fetch_one(&database.pool).await.unwrap();
+        assert_eq!(override_rule, (false, 7, None));
         let allow_credits: bool = sqlx::query_scalar(
             "select allow_credits from provider_accounts where id='backup_credits'",
         )

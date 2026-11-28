@@ -27,6 +27,11 @@ pub struct RuntimeSnapshotData {
     pub account_groups: Vec<SnapshotAccountGroupData>,
     pub provider_accounts: Vec<SnapshotProviderAccountData>,
     pub group_memberships: Vec<SnapshotGroupMembershipData>,
+    pub newapi_default: gateway_core::policy::NewApiTokenAffinityConfig,
+    pub newapi_overrides: BTreeMap<
+        gateway_core::policy::NewApiTokenIdentity,
+        gateway_core::policy::NewApiTokenAffinityConfig,
+    >,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +99,8 @@ impl RuntimeSnapshotRepository for PgRuntimeSnapshotRepository {
         let account_groups = load_account_groups(&mut transaction).await?;
         let provider_accounts = load_provider_accounts(&mut transaction).await?;
         let group_memberships = load_group_memberships(&mut transaction).await?;
+        let (newapi_default, newapi_overrides) =
+            load_newapi_affinity_snapshot(&mut transaction).await?;
         transaction
             .commit()
             .await
@@ -109,6 +116,8 @@ impl RuntimeSnapshotRepository for PgRuntimeSnapshotRepository {
             account_groups,
             provider_accounts,
             group_memberships,
+            newapi_default,
+            newapi_overrides,
         })
     }
 
@@ -126,6 +135,48 @@ impl RuntimeSnapshotRepository for PgRuntimeSnapshotRepository {
         })?;
         revision_from_i64(revision)
     }
+}
+
+async fn load_newapi_affinity_snapshot(
+    transaction: &mut Transaction<'_, Postgres>,
+) -> StoreResult<(
+    gateway_core::policy::NewApiTokenAffinityConfig,
+    BTreeMap<
+        gateway_core::policy::NewApiTokenIdentity,
+        gateway_core::policy::NewApiTokenAffinityConfig,
+    >,
+)> {
+    use gateway_core::policy::{NewApiTokenAffinityConfig, NewApiTokenIdentity};
+    let default: (bool, i64, Option<String>) = sqlx::query_as("select enabled, request_limit, target_account from newapi_token_affinity_default where singleton")
+        .fetch_one(&mut **transaction).await.map_err(|e| postgres_unavailable("load New API default", e))?;
+    let convert = |(enabled, request_limit, target_account): (bool, i64, Option<String>)| {
+        let config = NewApiTokenAffinityConfig {
+            enabled,
+            request_limit: u32::try_from(request_limit)
+                .map_err(|_| invalid("invalid New API request limit"))?,
+            target_account,
+        };
+        if !config.is_valid() {
+            return Err(invalid("invalid New API affinity config"));
+        }
+        Ok(config)
+    };
+    let default = convert(default)?;
+    let rows: Vec<(String, String, String, bool, i64, Option<String>)> = sqlx::query_as("select source_id, user_id, token_id, enabled, request_limit, target_account from newapi_token_affinity_overrides")
+        .fetch_all(&mut **transaction).await.map_err(|e| postgres_unavailable("load New API overrides", e))?;
+    let mut overrides = BTreeMap::new();
+    for (source_id, user_id, token_id, enabled, request_limit, target_account) in rows {
+        let identity = NewApiTokenIdentity {
+            source_id,
+            user_id,
+            token_id,
+        };
+        if !identity.is_valid() {
+            return Err(invalid("invalid New API identity"));
+        }
+        overrides.insert(identity, convert((enabled, request_limit, target_account))?);
+    }
+    Ok((default, overrides))
 }
 
 impl SnapshotStorePort for PgRuntimeSnapshotRepository {
@@ -202,7 +253,8 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                 account_groups,
                 provider_accounts,
                 group_memberships,
-            ))
+            )
+            .with_newapi_token_affinity(data.newapi_default, data.newapi_overrides))
         })
     }
 

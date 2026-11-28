@@ -6,6 +6,9 @@ export type CallerIdentity = { mode: 'direct', keyId: string } | { mode: 'newApi
 export type AffinityScope = 'session' | 'token'
 export type BindingDirective = { action: 'clear' } | { action: 'reassign' } | { action: 'target', accountId: string }
 export interface IdentitySource { id: string, name: string, enabled: boolean }
+export interface NewApiTokenIdentity { sourceId: string, userId: string, tokenId: string }
+export interface NewApiAffinityConfig { enabled: boolean, requestLimit: number, targetAccount: string | null }
+export interface NewApiAffinityView { default: NewApiAffinityConfig, overrideConfig: NewApiAffinityConfig | null }
 export interface AffinitySession {
   tokenName?: string | null
   reference: string
@@ -70,6 +73,22 @@ export function saveIdentitySource(data: IdentitySource) {
     url: '/api/admin/affinity/sources/save',
     method: 'POST',
     data,
+  })
+}
+export function getNewApiAffinityRule(identity: NewApiTokenIdentity | null, options: RequestOptions = {}) {
+  return request<NewApiAffinityView>({
+    url: '/api/admin/affinity/newapi-rule',
+    method: 'GET',
+    params: identity ?? undefined,
+    ...options,
+  })
+}
+export function saveNewApiAffinityRule(data: { identity: NewApiTokenIdentity | null, clientKeyId: string | null, config: NewApiAffinityConfig | null }) {
+  return request<{ saved: boolean }>({
+    url: '/api/admin/affinity/newapi-rule',
+    method: 'POST',
+    data,
+    retry: false,
   })
 }
 export function previewAffinity(data: { operationId: string, directive: BindingDirective, selection: { provider: string, reference: string, revision: string }[] }) {

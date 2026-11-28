@@ -29,7 +29,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
@@ -317,6 +317,21 @@ pub struct ModelRouteScope<'a> {
     pub model: &'a str,
 }
 
+#[derive(Debug, Clone)]
+struct NewApiTokenAffinity {
+    rule: crate::policy::NewApiTokenAffinityRule,
+    admission: Arc<OnceLock<bool>>,
+}
+
+impl NewApiTokenAffinity {
+    fn new(rule: crate::policy::NewApiTokenAffinityRule) -> Self {
+        Self {
+            rule,
+            admission: Arc::new(OnceLock::new()),
+        }
+    }
+}
+
 /// Provider 每次执行可见的 request-local context
 #[derive(Debug, Clone)]
 pub struct RequestAttemptContext {
@@ -335,6 +350,7 @@ pub struct RequestAttemptContext {
     request_id: ModelRequestId,
     client_api_key_ref: ClientApiKeyId,
     caller_identity: Option<crate::policy::CallerIdentity>,
+    newapi_token_affinity: Option<NewApiTokenAffinity>,
     caller_token_name: Option<String>,
     timing_started_at: Instant,
     trace: crate::diagnostics::TraceContext,
@@ -352,6 +368,20 @@ pub struct RequestAttemptContext {
 }
 
 impl RequestAttemptContext {
+    #[must_use]
+    pub fn with_newapi_token_affinity_rule(
+        mut self,
+        rule: Option<crate::policy::NewApiTokenAffinityRule>,
+    ) -> Self {
+        self.newapi_token_affinity = rule.map(NewApiTokenAffinity::new);
+        self
+    }
+
+    fn with_newapi_token_affinity(mut self, affinity: Option<NewApiTokenAffinity>) -> Self {
+        self.newapi_token_affinity = affinity;
+        self
+    }
+
     #[must_use]
     pub fn with_caller_token_name(mut self, name: Option<String>) -> Self {
         self.caller_token_name = name;
@@ -480,6 +510,7 @@ impl RequestAttemptContext {
             request_id,
             client_api_key_ref,
             caller_identity: None,
+            newapi_token_affinity: None,
             caller_token_name: None,
             request_profile: None,
             pricing: Arc::default(),
@@ -637,6 +668,30 @@ pub struct AttemptContext {
 }
 
 impl AttemptContext {
+    #[must_use]
+    pub fn newapi_token_affinity_rule(&self) -> Option<&crate::policy::NewApiTokenAffinityRule> {
+        self.request
+            .newapi_token_affinity
+            .as_ref()
+            .map(|state| &state.rule)
+    }
+
+    /// 返回当前逻辑请求首次成功准入时的切换结果
+    #[must_use]
+    pub fn newapi_token_affinity_admission(&self) -> Option<bool> {
+        self.request
+            .newapi_token_affinity
+            .as_ref()
+            .and_then(|state| state.admission.get().copied())
+    }
+
+    /// 跨 attempt 保留首次成功准入结果，后续记录不能覆盖
+    pub fn record_newapi_token_affinity_admission(&self, switched: bool) {
+        if let Some(state) = &self.request.newapi_token_affinity {
+            let _ = state.admission.set(switched);
+        }
+    }
+
     #[must_use]
     pub fn caller_token_name(&self) -> Option<&str> {
         self.request.caller_token_name.as_deref()

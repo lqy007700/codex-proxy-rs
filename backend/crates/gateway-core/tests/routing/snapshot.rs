@@ -26,6 +26,88 @@ use gateway_core::routing::{
 use gateway_core::settings::SettingsValues;
 
 #[test]
+fn newapi_rule_uses_identity_override_before_default_and_freezes_configuration() {
+    use gateway_core::policy::{CallerIdentity, NewApiTokenAffinityConfig, NewApiTokenIdentity};
+    use gateway_core::routing::RuntimeSnapshot;
+
+    let identity = NewApiTokenIdentity {
+        source_id: "b7bb7de9-7b06-4caa-8070-352af86a8a4a".into(),
+        user_id: "1".into(),
+        token_id: "2".into(),
+    };
+    let caller = CallerIdentity::NewApi {
+        source_id: identity.source_id.clone(),
+        user_id: identity.user_id.clone(),
+        token_id: identity.token_id.clone(),
+    };
+    let default = NewApiTokenAffinityConfig {
+        enabled: true,
+        request_limit: 50,
+        target_account: Some("acct_default".into()),
+    };
+    let override_config = NewApiTokenAffinityConfig {
+        enabled: false,
+        request_limit: 7,
+        target_account: None,
+    };
+    let snapshot = RuntimeSnapshot::new(
+        ConfigRevision::new(1).unwrap(),
+        SettingsValues::new(0, "smart", BTreeMap::new(), None, None),
+        vec![],
+        vec![],
+        vec![],
+    )
+    .unwrap()
+    .with_newapi_token_affinity(
+        default.clone(),
+        BTreeMap::from([(identity.clone(), override_config)]),
+    );
+    assert!(snapshot.newapi_token_affinity_rule(&caller).is_none());
+    let inherited = snapshot
+        .clone()
+        .with_newapi_token_affinity(default, BTreeMap::new());
+    assert_eq!(
+        inherited
+            .newapi_token_affinity_rule(&caller)
+            .unwrap()
+            .request_limit
+            .get(),
+        50
+    );
+    assert!(snapshot.newapi_token_affinity_rule(&caller).is_none());
+    assert!(
+        inherited
+            .newapi_token_affinity_rule(&CallerIdentity::Direct {
+                key_id: "key_a".into()
+            })
+            .is_none()
+    );
+    assert!(
+        !NewApiTokenAffinityConfig {
+            enabled: true,
+            request_limit: 0,
+            target_account: Some("acct_x".into())
+        }
+        .is_valid()
+    );
+    assert!(
+        !NewApiTokenAffinityConfig {
+            enabled: true,
+            request_limit: 1,
+            target_account: None
+        }
+        .is_valid()
+    );
+    assert!(
+        !NewApiTokenIdentity {
+            user_id: "01".into(),
+            ..identity
+        }
+        .is_valid()
+    );
+}
+
+#[test]
 fn reasoning_groups_resolve_before_account_and_group_model_policies() {
     use gateway_core::{
         account::{

@@ -30,6 +30,56 @@ fn provider_session_affinity_key_debug_is_opaque() {
 }
 
 #[test]
+fn newapi_token_primary_reference_preserves_existing_identity_and_isolation() {
+    use gateway_core::policy::CallerIdentity;
+
+    let caller = CallerIdentity::NewApi {
+        source_id: "src".into(),
+        user_id: "user".into(),
+        token_id: "token".into(),
+    };
+    let key = ProviderSessionAffinityKey::newapi_token_primary(&caller).unwrap();
+    assert_eq!(
+        key.expose_to_store(),
+        "2ce684dbbf12ecd7f1b984f9d0571c9252fbdab6da19c03cb4ed86e8d0cd14c5"
+    );
+    for other in [
+        CallerIdentity::NewApi {
+            source_id: "src2".into(),
+            user_id: "user".into(),
+            token_id: "token".into(),
+        },
+        CallerIdentity::NewApi {
+            source_id: "src".into(),
+            user_id: "other".into(),
+            token_id: "token".into(),
+        },
+        CallerIdentity::NewApi {
+            source_id: "src".into(),
+            user_id: "user".into(),
+            token_id: "other".into(),
+        },
+    ] {
+        assert_ne!(
+            ProviderSessionAffinityKey::newapi_token_primary(&other),
+            Some(key.clone())
+        );
+    }
+    assert!(
+        ProviderSessionAffinityKey::newapi_token_primary(&CallerIdentity::Direct {
+            key_id: "key".into()
+        })
+        .is_none()
+    );
+    assert!(
+        ProviderSessionAffinityKey::newapi_token_primary(&CallerIdentity::Unidentified {
+            request_id: "request".into()
+        })
+        .is_none()
+    );
+}
+
+#[test]
 fn oauth_pending_ttl_rejects_zero_and_more_than_thirty_minutes() {
     let provider = ProviderKind::new("fixture").expect("valid provider");
     let flow = OAuthPendingBinding::try_new("flow").expect("valid flow");

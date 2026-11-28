@@ -25,6 +25,48 @@ impl AffinityService {
         Self { stores, snapshot }
     }
 
+    pub async fn newapi_affinity(
+        &self,
+        identity: Option<&gateway_core::policy::NewApiTokenIdentity>,
+    ) -> Result<NewApiAffinityView, AdminError> {
+        if identity.is_some_and(|identity| !identity.is_valid()) {
+            return Err(AdminError::invalid("New API 身份无效"));
+        }
+        self.stores.journal.newapi_affinity(identity).await
+    }
+
+    pub async fn save_newapi_affinity(
+        &self,
+        context: &MutationContext,
+        update: NewApiAffinityUpdate,
+    ) -> Result<(), AdminError> {
+        if update
+            .identity
+            .as_ref()
+            .is_some_and(|identity| !identity.is_valid())
+            || update
+                .config
+                .as_ref()
+                .is_some_and(|config| !config.is_valid())
+            || (update.identity.is_none() && update.config.is_none())
+            || (update.identity.is_some()
+                && update
+                    .config
+                    .as_ref()
+                    .is_some_and(|config| config.target_account.is_some())
+                && update.client_key_id.as_deref().is_none_or(str::is_empty))
+        {
+            return Err(AdminError::invalid("New API 规则无效"));
+        }
+        let revision = self
+            .stores
+            .journal
+            .save_newapi_affinity(context, &update)
+            .await?;
+        publish_committed(self.snapshot.as_ref(), revision).await?;
+        Ok(())
+    }
+
     pub async fn list(&self, query: &AffinityQuery) -> Result<AffinityPage, AdminError> {
         for value in [
             &query.cursor,

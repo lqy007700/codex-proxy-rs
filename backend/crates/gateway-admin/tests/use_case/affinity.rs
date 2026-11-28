@@ -101,6 +101,19 @@ impl AffinityBindingStore for Stores {
 }
 #[async_trait]
 impl AffinityJournalStore for Stores {
+    async fn newapi_affinity(
+        &self,
+        _: Option<&gateway_core::policy::NewApiTokenIdentity>,
+    ) -> Result<NewApiAffinityView, AdminError> {
+        unreachable!("unexpected rule lookup")
+    }
+    async fn save_newapi_affinity(
+        &self,
+        _: &MutationContext,
+        _: &NewApiAffinityUpdate,
+    ) -> Result<Revision, AdminError> {
+        unreachable!("invalid rule reached storage")
+    }
     async fn sources(&self) -> Result<Vec<IdentitySource>, AdminError> {
         Ok(vec![])
     }
@@ -212,6 +225,64 @@ fn fixture() -> (Arc<Stores>, AffinityService) {
         Arc::new(super::NoopSnapshot),
     );
     (stores, service)
+}
+
+#[tokio::test]
+async fn newapi_rules_reject_invalid_identity_limits_and_missing_target_before_storage() {
+    use gateway_admin::model::AdminErrorKind;
+    use gateway_core::policy::{NewApiTokenAffinityConfig, NewApiTokenIdentity};
+    let (_, service) = fixture();
+    let identity = NewApiTokenIdentity {
+        source_id: uuid::Uuid::new_v4().to_string(),
+        user_id: "1".into(),
+        token_id: "2".into(),
+    };
+    let mut update = NewApiAffinityUpdate {
+        identity: Some(identity),
+        client_key_id: None,
+        config: Some(NewApiTokenAffinityConfig {
+            enabled: true,
+            request_limit: 50,
+            target_account: None,
+        }),
+    };
+    assert_eq!(
+        service
+            .save_newapi_affinity(&context(), update.clone())
+            .await
+            .unwrap_err()
+            .kind(),
+        AdminErrorKind::Invalid
+    );
+    update.config.as_mut().unwrap().target_account = Some("acct_a".into());
+    assert_eq!(
+        service
+            .save_newapi_affinity(&context(), update.clone())
+            .await
+            .unwrap_err()
+            .kind(),
+        AdminErrorKind::Invalid
+    );
+    update.client_key_id = Some("key_a".into());
+    update.config.as_mut().unwrap().request_limit = 0;
+    assert_eq!(
+        service
+            .save_newapi_affinity(&context(), update.clone())
+            .await
+            .unwrap_err()
+            .kind(),
+        AdminErrorKind::Invalid
+    );
+    update.identity.as_mut().unwrap().token_id = "01".into();
+    update.config = None;
+    assert_eq!(
+        service
+            .save_newapi_affinity(&context(), update)
+            .await
+            .unwrap_err()
+            .kind(),
+        AdminErrorKind::Invalid
+    );
 }
 async fn preview(
     service: &AffinityService,

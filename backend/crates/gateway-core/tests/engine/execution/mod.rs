@@ -1,6 +1,7 @@
 //! 执行服务的准入、预算、请求记录与终结行为测试
 
 mod account_mappings;
+mod newapi_affinity;
 mod outbound;
 use gateway_core::engine::probe::AccountProbeTarget;
 use gateway_core::routing::extensions::ExtensionSetReference;

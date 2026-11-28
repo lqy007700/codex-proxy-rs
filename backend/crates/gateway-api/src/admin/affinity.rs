@@ -7,7 +7,9 @@ use axum::{
     extract::State,
     routing::{get, post},
 };
-use gateway_admin::model::affinity::{AffinityPreviewRequest, AffinityQuery, IdentitySource};
+use gateway_admin::model::affinity::{
+    AffinityPreviewRequest, AffinityQuery, IdentitySource, NewApiAffinityUpdate, NewApiAffinityView,
+};
 use serde::{Deserialize, Serialize};
 
 fn service<S: SessionState>(state: &S) -> Result<&gateway_admin::AffinityService, AdminError> {
@@ -66,6 +68,58 @@ pub fn router<S: SessionState + Clone + Send + Sync + 'static>() -> Router<S> {
         .route("/api/admin/affinity/preview", post(preview::<S>))
         .route("/api/admin/affinity/apply", post(apply::<S>))
         .route("/api/admin/affinity/operations", get(history::<S>))
+        .route(
+            "/api/admin/affinity/newapi-rule",
+            get(newapi_rule::<S>).post(save_newapi_rule::<S>),
+        )
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NewApiRuleQuery {
+    source_id: Option<String>,
+    user_id: Option<String>,
+    token_id: Option<String>,
+}
+
+async fn newapi_rule<S: SessionState + Send + Sync>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+    AdminQuery(query): AdminQuery<NewApiRuleQuery>,
+) -> Result<Json<AdminEnvelope<NewApiAffinityView>>, AdminError> {
+    let identity = match (query.source_id, query.user_id, query.token_id) {
+        (None, None, None) => None,
+        (Some(source_id), Some(user_id), Some(token_id)) => {
+            Some(gateway_core::policy::NewApiTokenIdentity {
+                source_id,
+                user_id,
+                token_id,
+            })
+        }
+        _ => {
+            return Err(map(gateway_admin::model::AdminError::invalid(
+                "New API 身份无效",
+            )));
+        }
+    };
+    Ok(response(
+        service(&state)?
+            .newapi_affinity(identity.as_ref())
+            .await
+            .map_err(map)?,
+    ))
+}
+
+async fn save_newapi_rule<S: SessionState + Send + Sync>(
+    auth: AdminAuth,
+    State(state): State<S>,
+    AdminJson(update): AdminJson<NewApiAffinityUpdate>,
+) -> Result<Json<AdminEnvelope<Saved>>, AdminError> {
+    service(&state)?
+        .save_newapi_affinity(&auth.context().mutation_context(), update)
+        .await
+        .map_err(map)?;
+    Ok(response(Saved { saved: true }))
 }
 
 async fn list<S: SessionState + Send + Sync>(

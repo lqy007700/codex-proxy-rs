@@ -2,6 +2,21 @@
 
 use chrono::{DateTime, Utc};
 use gateway_core::{policy::CallerIdentity, provider_ports::SessionBindingDirective};
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NewApiAffinityUpdate {
+    pub identity: Option<gateway_core::policy::NewApiTokenIdentity>,
+    pub client_key_id: Option<String>,
+    pub config: Option<gateway_core::policy::NewApiTokenAffinityConfig>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewApiAffinityView {
+    pub default: gateway_core::policy::NewApiTokenAffinityConfig,
+    pub override_config: Option<gateway_core::policy::NewApiTokenAffinityConfig>,
+}
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

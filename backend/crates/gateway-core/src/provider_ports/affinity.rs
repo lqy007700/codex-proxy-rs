@@ -3,6 +3,7 @@
 use super::{ProviderStoreError, ProviderStoreErrorKind};
 use crate::{account::ProviderAccountId, identity::ProviderKind};
 use futures::future::BoxFuture;
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, fmt, time::Duration};
 
 /// Provider 从原始会话锚点派生的不可逆亲和键
@@ -10,6 +11,25 @@ use std::{collections::BTreeSet, fmt, time::Duration};
 pub struct ProviderSessionAffinityKey(String);
 
 impl ProviderSessionAffinityKey {
+    /// 可信 New API Token 的稳定主绑定引用，供数据面与管理配置共用
+    #[must_use]
+    pub fn newapi_token_primary(caller: &crate::policy::CallerIdentity) -> Option<Self> {
+        if !matches!(caller, crate::policy::CallerIdentity::NewApi { .. }) {
+            return None;
+        }
+        let mut hasher = Sha256::new();
+        hasher.update(b"codex-session-affinity-v1\0newapi-token-primary\0");
+        hasher.update(caller.session_namespace().as_bytes());
+        let hash = hasher.finalize();
+        let mut value = String::with_capacity(hash.len() * 2);
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        for byte in hash {
+            value.push(char::from(HEX[usize::from(byte >> 4)]));
+            value.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+        Some(Self(value))
+    }
+
     pub fn try_new(value: impl Into<String>) -> Result<Self, ProviderStoreError> {
         let value = value.into();
         if value.is_empty()
@@ -167,6 +187,28 @@ impl<'a> ProviderAccountAdmission<'a> {
     }
 }
 
+/// Token 次数和本次逻辑请求的准入结果，空计数兼容旧绑定
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProviderTokenRequestState {
+    pub count: Option<u32>,
+    pub latched: bool,
+    pub switched: Option<bool>,
+}
+
+/// 同时认领 Token、会话、计数和可选轮询位置
+pub struct ProviderTokenRequestAdmission<'a> {
+    pub token_key: &'a ProviderSessionAffinityKey,
+    pub request_id: &'a str,
+    pub expected: ProviderTokenRequestState,
+    pub next_count: u32,
+    pub latched: bool,
+    pub switched: bool,
+    pub preserve_token_directive: bool,
+    pub ttl: Duration,
+    pub claims: &'a [ProviderSessionClaim<'a>],
+    pub cursor: Option<(&'a crate::policy::ClientApiKeyId, u64)>,
+}
+
 /// 客户端作用域内的会话账号绑定，原始会话身份由 Provider 哈希后传入
 pub trait ProviderSessionAffinityPort: Send + Sync {
     fn observe<'a>(
@@ -245,6 +287,35 @@ pub trait ProviderSessionAffinityPort: Send + Sync {
                     .await
                 }
             }
+        })
+    }
+
+    /// 不支持计数的存储必须关闭此功能
+    fn load_token_request_state<'a>(
+        &'a self,
+        _provider: &'a ProviderKind,
+        _token_key: &'a ProviderSessionAffinityKey,
+        _request_id: &'a str,
+    ) -> BoxFuture<'a, Result<ProviderTokenRequestState, ProviderStoreError>> {
+        Box::pin(async {
+            Err(ProviderStoreError::new(
+                ProviderStoreErrorKind::Unavailable,
+                "load token request state",
+            ))
+        })
+    }
+
+    /// 只有所有快照一致时才共同写入绑定、计数、请求标记和游标
+    fn admit_token_request<'a>(
+        &'a self,
+        _provider: &'a ProviderKind,
+        _admission: ProviderTokenRequestAdmission<'a>,
+    ) -> BoxFuture<'a, Result<bool, ProviderStoreError>> {
+        Box::pin(async {
+            Err(ProviderStoreError::new(
+                ProviderStoreErrorKind::Unavailable,
+                "admit token request",
+            ))
         })
     }
 

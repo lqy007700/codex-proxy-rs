@@ -22,14 +22,14 @@ use gateway_core::provider_ports::{
     ProviderRoundRobinAdmission, ProviderSchedulingLeaseRequest, ProviderScopedCooldown,
     ProviderSessionAffinityKey, ProviderSessionAffinityPort, ProviderSessionBinding,
     ProviderSessionClaim, ProviderSessionExclusionPort, ProviderSessionExclusions,
-    ProviderStoreError,
+    ProviderStoreError, ProviderTokenRequestAdmission,
 };
 use gateway_core::routing::ProviderKind;
 use secrecy::ExposeSecret;
 use thiserror::Error;
 use url::Url;
 
-use super::affinity::{CodexSessionAffinity, derive_newapi_token_affinity};
+use super::affinity::CodexSessionAffinity;
 use super::api_key::ApiKeyProtocol;
 use super::catalog::CodexCredentialCatalogService;
 use super::codec::CodexRuntimeAuthentication;
@@ -500,13 +500,14 @@ impl CodexCredentialSelector {
             && request
                 .session_affinity_observation
                 .is_some_and(CodexSessionAffinity::follow_only);
+        let mut rule_target_selected = false;
         let result = tokio::select! {
             biased;
             () = request.attempt.cancellation().cancelled() => Err(CredentialSelectionError::Cancelled),
-            result = self.select_inner_loop(request, cyber_policy_session_key, model, follow_only) => result,
+            result = self.select_inner_loop(request, cyber_policy_session_key, model, follow_only, &mut rule_target_selected) => result,
         };
         result.map_err(|error| {
-            if follow_only
+            if (follow_only || rule_target_selected)
                 && !matches!(
                     error,
                     CredentialSelectionError::SessionBound(_)
@@ -529,6 +530,7 @@ impl CodexCredentialSelector {
         cyber_policy_session_key: Option<&ProviderSessionAffinityKey>,
         model: CodexSelectionModel<'_>,
         follow_only: bool,
+        rule_target_selected: &mut bool,
     ) -> Result<CodexCredentialLease, CredentialSelectionError> {
         let adapter_model = match model {
             CodexSelectionModel::Requested(model) if request.managed_upstream => Some(
@@ -547,8 +549,17 @@ impl CodexCredentialSelector {
             .account_selection_policy()
             .openai_account_affinity();
         let token_key = (!diagnostic && affinity_mode != AccountAffinity::Relaxed)
-            .then(|| derive_newapi_token_affinity(&request.attempt.caller_identity()))
+            .then(|| {
+                ProviderSessionAffinityKey::newapi_token_primary(&request.attempt.caller_identity())
+            })
             .flatten();
+        let token_rule = token_key.as_ref().and_then(|_| {
+            (!request.guardian
+                && (request.attempt.required_account().is_none()
+                    || request.attempt.newapi_token_affinity_admission().is_some()))
+            .then(|| request.attempt.newapi_token_affinity_rule())
+            .flatten()
+        });
         let mut queue_policy = request.attempt.account_selection_policy().queue_policy();
         if follow_only {
             // 关闭普通账号排队不能放开后代线程换号，沿用队列时间设置并保留有界人数
@@ -652,11 +663,57 @@ impl CodexCredentialSelector {
         let mut snapshot_retries = 0;
         let mut defer_token_directive = false;
         'capacity: loop {
+            let prior_rule_admission =
+                token_rule.and_then(|_| request.attempt.newapi_token_affinity_admission());
             let token_snapshot = if let Some(key) = token_key.as_ref() {
                 self.lookup_session_affinity(key).await?
             } else {
                 None
             };
+            // 挂起的管理指令保留优先级，成功放行的请求仍计数
+            let rule = token_rule;
+            let token_request_state = if let (Some(key), Some(_)) = (token_key.as_ref(), rule) {
+                Some(
+                    tokio::time::timeout(
+                        SESSION_AFFINITY_TIMEOUT,
+                        self.session_affinity.load_token_request_state(
+                            &self.provider_kind,
+                            key,
+                            request.attempt.request_id().as_str(),
+                        ),
+                    )
+                    .await
+                    .map_err(binding_store_error)?
+                    .map_err(binding_store_error)?,
+                )
+            } else {
+                None
+            };
+            let switched = prior_rule_admission.unwrap_or_else(|| {
+                rule.zip(token_request_state).is_some_and(|(rule, state)| {
+                    if token_snapshot.is_none()
+                        || token_snapshot
+                            .as_ref()
+                            .is_some_and(|binding| binding.directive().is_some())
+                    {
+                        false
+                    } else {
+                        state.switched.unwrap_or_else(|| {
+                            state.latched
+                                || state.count.unwrap_or_default() >= rule.request_limit.get()
+                        })
+                    }
+                })
+            });
+            let rule_target = rule.filter(|_| switched).map(|rule| &rule.target_account);
+            *rule_target_selected = rule_target.is_some();
+            if let Some(target) = rule_target
+                && continuation_account
+                    .as_ref()
+                    .is_some_and(|owner| owner != target)
+            {
+                return Err(CredentialSelectionError::ContinuationOwnerChanged);
+            }
             let binding_snapshot = if let Some(key) = binding_key {
                 self.lookup_session_affinity(key).await?
             } else {
@@ -689,6 +746,7 @@ impl CodexCredentialSelector {
             }
             // 只有安全新链可以迁移主绑定；恢复轮询、保底和旧 owner 不改写用户偏好
             let token_selection = token_key.is_some()
+                && prior_rule_admission.is_none()
                 && !defer_token_directive
                 && request.attempt.attempt_index().get() == 1
                 && request.attempt.continuation_attempt() == ContinuationAttempt::None
@@ -704,6 +762,7 @@ impl CodexCredentialSelector {
                 .queued_key()
                 .filter(|&queued| {
                     !force_full
+                        && rule_target.is_none()
                         && queued_binding == binding
                         && request.attempt.request_policy_context().is_none()
                         && (pinned_account.as_ref() == Some(queued)
@@ -728,7 +787,9 @@ impl CodexCredentialSelector {
                         && (token_key.is_none() || token_snapshot.is_some())
                 });
             let (projection, projection_fill) = match (projection_key.as_ref(), healthy_binding) {
-                (Some(key), Some(_)) if !force_full && queued_account.is_none() => {
+                (Some(key), Some(_))
+                    if !force_full && queued_account.is_none() && rule_target.is_none() =>
+                {
                     self.scheduling_projection.read(key).await
                 }
                 _ => (None, None),
@@ -747,6 +808,7 @@ impl CodexCredentialSelector {
             let accounts = if let Some(target) = pinned_account
                 .as_ref()
                 .or(queued_account.as_ref())
+                .or(rule_target)
                 .or(projected_account)
             {
                 self.repository
@@ -1004,7 +1066,8 @@ impl CodexCredentialSelector {
                 refresh_candidates = true;
                 continue 'capacity;
             }
-            let follow_only = follow_only && image_primary_to_keep.is_none();
+            let follow_only =
+                follow_only && image_primary_to_keep.is_none() && rule_target.is_none();
             // 借号不认领或迁移 Token 主绑定，显式管理员指令仍由原逻辑处理
             let token_selection =
                 token_selection && (image_primary_to_keep.is_none() || token_directive.is_some());
@@ -1075,6 +1138,7 @@ impl CodexCredentialSelector {
             // 成功分配游标只服务安全新链；已有主绑定、等待与恢复继续使用原策略
             let use_assignment_cursor = policy.strategy()
                 == gateway_core::account::RotationStrategy::RoundRobin
+                && prior_rule_admission.is_none()
                 && !diagnostic
                 && !follow_only
                 && !request.guardian
@@ -1235,6 +1299,14 @@ impl CodexCredentialSelector {
                     gateway_core::provider_ports::SessionBindingDirective::Clear => {}
                 }
             }
+            if let Some(target) = rule_target {
+                excluded.extend(
+                    candidates
+                        .iter()
+                        .filter(|candidate| candidate.account.id() != target)
+                        .map(|candidate| candidate.account.id().clone()),
+                );
+            }
             if let Some(state) = cyber_policy_scope
                 .as_ref()
                 .and_then(|scope| scope.state.as_ref())
@@ -1293,8 +1365,9 @@ impl CodexCredentialSelector {
             };
 
             loop {
-                let preferred = pinned_account
-                    .clone()
+                let preferred = rule_target
+                    .cloned()
+                    .or_else(|| pinned_account.clone())
                     .or_else(|| affinity.preferred_account().cloned());
                 let mut context = AccountSelectionContext {
                     policy,
@@ -1433,7 +1506,10 @@ impl CodexCredentialSelector {
                         defer_token_directive = true;
                         continue 'capacity;
                     }
-                    if follow_only && let Some(binding) = binding.as_ref() {
+                    if follow_only
+                        && rule_target.is_none()
+                        && let Some(binding) = binding.as_ref()
+                    {
                         // 如果整个候选池共用本请求已排除的入口，等待根线程迁移也没有可用出口
                         if !candidates.is_empty()
                             && candidates.iter().all(|candidate| {
@@ -1519,6 +1595,9 @@ impl CodexCredentialSelector {
                 };
                 affinity.observe_preferred_selection(selection.preferred());
                 let selected = selection.candidate();
+                if rule_target.is_some_and(|target| target != selected.account.id()) {
+                    return Err(CredentialSelectionError::NoEligibleCredential);
+                }
                 // 管理员挂起指令属于发送边界，插件的显式选号也不能绕过
                 if binding_snapshot
                     .iter()
@@ -1610,9 +1689,152 @@ impl CodexCredentialSelector {
                             .and_then(|scope| scope.scheduling_role(account.id()))
                             .unwrap_or_else(|| account.scheduling_role())
                             == gateway_core::account::AccountSchedulingRole::Regular;
+                        let rule_admitted = if rule.is_some() && prior_rule_admission.is_some() {
+                            // 已准入的逻辑请求不再认领或续期当前绑定，过期后也不能创建新一轮
+                            true
+                        } else if let (Some(rule), Some(state), Some(key)) =
+                            (rule, token_request_state, token_key.as_ref())
+                        {
+                            // 过期重建从零开始，重试复用标记，计数饱和于 u32::MAX
+                            let count = if token_snapshot.is_some() {
+                                state.count.unwrap_or_default()
+                            } else {
+                                0
+                            };
+                            let next_count = if token_snapshot.is_some() && state.switched.is_some()
+                            {
+                                count
+                            } else {
+                                count.saturating_add(1)
+                            };
+                            let cursor = assignment_cursor
+                                .filter(|_| {
+                                    !selection.is_policy_choice()
+                                        && selection.preferred() != PreferredAccountSelection::Hit
+                                        && regular_account
+                                })
+                                .map(|cursor| (request.attempt.client_api_key_ref(), cursor));
+                            let preserve_token_directive = token_snapshot
+                                .as_ref()
+                                .is_some_and(|binding| binding.directive().is_some())
+                                && (!token_selection
+                                    || defer_token_directive
+                                    || state.switched.is_some());
+                            // 已准入的旧请求只能续期当前绑定，不能把新主账号改回去
+                            let primary = if token_snapshot
+                                .as_ref()
+                                .is_some_and(|binding| binding.directive().is_some())
+                            {
+                                if preserve_token_directive {
+                                    token_snapshot.as_ref().unwrap().account_id()
+                                } else {
+                                    account.id()
+                                }
+                            } else if switched {
+                                &rule.target_account
+                            } else if let Some(primary) = token_snapshot.as_ref() {
+                                if state.switched.is_none()
+                                    && token_selection
+                                    && primary.account_id() != account.id()
+                                    && self
+                                        .current_primary_migration_reason(request.attempt, primary)
+                                        .await?
+                                        .is_some()
+                                {
+                                    account.id()
+                                } else {
+                                    primary.account_id()
+                                }
+                            } else {
+                                image_primary_to_keep.unwrap_or_else(|| account.id())
+                            };
+                            let mut claims = vec![ProviderSessionClaim {
+                                key,
+                                expected: token_snapshot.as_ref(),
+                                account: primary,
+                                ttl: policy.openai_session_affinity_ttl(),
+                            }];
+                            if let Some(session_key) = binding_key.filter(|_| {
+                                regular_account
+                                    && normal_admission
+                                    && !(state.latched && state.switched == Some(false))
+                            }) {
+                                let session_account = if switched {
+                                    account.id()
+                                } else if let Some(primary) = image_primary_to_keep {
+                                    primary
+                                } else if state.switched.is_some() {
+                                    binding
+                                        .as_ref()
+                                        .map_or(account.id(), ProviderSessionBinding::account_id)
+                                } else if let Some(primary) = binding
+                                    .as_ref()
+                                    .filter(|_| affinity_mode == AccountAffinity::Preferred)
+                                {
+                                    if token_selection
+                                        && primary.account_id() != account.id()
+                                        && self
+                                            .current_primary_migration_reason(
+                                                request.attempt,
+                                                primary,
+                                            )
+                                            .await?
+                                            .is_some()
+                                    {
+                                        account.id()
+                                    } else {
+                                        primary.account_id()
+                                    }
+                                } else {
+                                    account.id()
+                                };
+                                claims.push(ProviderSessionClaim {
+                                    key: session_key,
+                                    expected: binding_snapshot.as_ref(),
+                                    account: session_account,
+                                    ttl: policy.openai_session_affinity_ttl(),
+                                });
+                            }
+                            let admitted = tokio::time::timeout(
+                                SESSION_AFFINITY_TIMEOUT,
+                                self.session_affinity.admit_token_request(
+                                    &self.provider_kind,
+                                    ProviderTokenRequestAdmission {
+                                        token_key: key,
+                                        request_id: request.attempt.request_id().as_str(),
+                                        expected: state,
+                                        next_count,
+                                        latched: (token_snapshot.is_some() && state.latched)
+                                            || switched,
+                                        switched: state.switched.unwrap_or(switched),
+                                        preserve_token_directive,
+                                        ttl: policy.openai_session_affinity_ttl(),
+                                        claims: &claims,
+                                        cursor,
+                                    },
+                                ),
+                            )
+                            .await
+                            .map_err(binding_store_error)?
+                            .map_err(binding_store_error)?;
+                            if !admitted {
+                                guard.release().await?;
+                                if request.attempt.deadline().is_elapsed() {
+                                    return Err(CredentialSelectionError::AccountSnapshotChanged);
+                                }
+                                continue 'capacity;
+                            }
+                            request.attempt.record_newapi_token_affinity_admission(
+                                state.switched.unwrap_or(switched),
+                            );
+                            true
+                        } else {
+                            false
+                        };
                         let round_robin_admitted = if let Some(cursor) =
                             assignment_cursor.filter(|_| {
-                                !selection.is_policy_choice()
+                                !rule_admitted
+                                    && !selection.is_policy_choice()
                                     && selection.preferred() != PreferredAccountSelection::Hit
                                     && regular_account
                             }) {
@@ -1668,6 +1890,7 @@ impl CodexCredentialSelector {
                         // 分流和恢复只续期已有偏好；缺失绑定不能由增量或保底认领
                         if let Some(key) = token_key.as_ref().filter(|_| {
                             !round_robin_admitted
+                                && !rule_admitted
                                 && regular_account
                                 && (token_selection
                                     || token_snapshot
@@ -1731,7 +1954,8 @@ impl CodexCredentialSelector {
                             )
                             .await?;
                         }
-                        let session_migration_reason = if regular_account
+                        let session_migration_reason = if !rule_admitted
+                            && regular_account
                             && request.attempt.attempt_index().get() == 1
                             && request.attempt.continuation_attempt() == ContinuationAttempt::None
                             && matches!(
@@ -1756,6 +1980,7 @@ impl CodexCredentialSelector {
                         };
                         if let Some(key) = binding_key.filter(|_| {
                             !round_robin_admitted
+                                && !rule_admitted
                                 && regular_account
                                 && (normal_admission
                                     || binding_snapshot

@@ -224,6 +224,9 @@ pub struct SnapshotFacts {
     account_groups: Vec<SnapshotAccountGroupFacts>,
     provider_accounts: Vec<SnapshotProviderAccountFacts>,
     group_memberships: Vec<SnapshotAccountGroupMemberFacts>,
+    newapi_default: crate::policy::NewApiTokenAffinityConfig,
+    newapi_overrides:
+        BTreeMap<crate::policy::NewApiTokenIdentity, crate::policy::NewApiTokenAffinityConfig>,
 }
 
 impl SnapshotFacts {
@@ -245,7 +248,23 @@ impl SnapshotFacts {
             account_groups,
             provider_accounts,
             group_memberships,
+            newapi_default: Default::default(),
+            newapi_overrides: BTreeMap::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_newapi_token_affinity(
+        mut self,
+        default: crate::policy::NewApiTokenAffinityConfig,
+        overrides: BTreeMap<
+            crate::policy::NewApiTokenIdentity,
+            crate::policy::NewApiTokenAffinityConfig,
+        >,
+    ) -> Self {
+        self.newapi_default = default;
+        self.newapi_overrides = overrides;
+        self
     }
 
     #[must_use]
@@ -681,6 +700,7 @@ async fn compile_runtime_snapshot(
             .with_account_directory(account_directory)
             .with_exhaustive_provider_catalogs(exhaustive_provider_catalogs)
             .with_model_catalog_accounts(catalog_accounts)
+            .with_newapi_token_affinity(facts.newapi_default, facts.newapi_overrides)
     })
 }
 
@@ -700,9 +720,37 @@ pub struct RuntimeSnapshot {
     model_catalog_accounts: Arc<ModelCatalogAccounts>,
     account_directory: Arc<RuntimeAccountDirectory>,
     client_policies: Arc<BTreeMap<ClientApiKeyId, ClientPolicy>>,
+    newapi_default: crate::policy::NewApiTokenAffinityConfig,
+    newapi_overrides:
+        Arc<BTreeMap<crate::policy::NewApiTokenIdentity, crate::policy::NewApiTokenAffinityConfig>>,
 }
 
 impl RuntimeSnapshot {
+    #[must_use]
+    pub fn newapi_token_affinity_rule(
+        &self,
+        caller: &crate::policy::CallerIdentity,
+    ) -> Option<crate::policy::NewApiTokenAffinityRule> {
+        let identity = crate::policy::NewApiTokenIdentity::from_caller(caller)?;
+        self.newapi_overrides
+            .get(&identity)
+            .unwrap_or(&self.newapi_default)
+            .effective_rule()
+    }
+
+    #[must_use]
+    pub fn with_newapi_token_affinity(
+        mut self,
+        default: crate::policy::NewApiTokenAffinityConfig,
+        overrides: BTreeMap<
+            crate::policy::NewApiTokenIdentity,
+            crate::policy::NewApiTokenAffinityConfig,
+        >,
+    ) -> Self {
+        self.newapi_default = default;
+        self.newapi_overrides = Arc::new(overrides);
+        self
+    }
     /// 设置事实与编译结果共享快照寿命，读取时不从执行策略反向拼装
     #[must_use]
     pub fn settings(&self) -> &SettingsValues {
@@ -946,6 +994,8 @@ impl RuntimeSnapshot {
             model_catalog_accounts: Arc::default(),
             account_directory: Arc::new(RuntimeAccountDirectory::default()),
             client_policies: Arc::new(client_policy_map),
+            newapi_default: Default::default(),
+            newapi_overrides: Arc::default(),
         })
     }
 

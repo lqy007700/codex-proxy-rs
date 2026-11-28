@@ -1043,6 +1043,8 @@ pub(crate) struct MemorySessionAffinity {
     initial_claim_barrier: Option<Arc<tokio::sync::Barrier>>,
     aliases: Mutex<BTreeMap<(String, String), gateway_core::provider_ports::ProviderSessionAlias>>,
     assignment_cursors: Mutex<BTreeMap<(String, String), u64>>,
+    token_counts: Mutex<BTreeMap<(String, String), (u32, bool)>>,
+    token_requests: Mutex<BTreeMap<(String, String, String), bool>>,
     bindings:
         Mutex<BTreeMap<(String, String), gateway_core::provider_ports::ProviderSessionBinding>>,
     lookups: Mutex<Vec<String>>,
@@ -1114,6 +1116,12 @@ impl MemorySessionAffinity {
 
     pub(crate) fn binding_count(&self) -> usize {
         self.bindings.lock().expect("session affinity lock").len()
+    }
+
+    pub(crate) fn expire_all_bindings(&self) {
+        self.bindings.lock().unwrap().clear();
+        self.token_counts.lock().unwrap().clear();
+        self.token_requests.lock().unwrap().clear();
     }
 
     pub(crate) fn bindings_snapshot(
@@ -1340,6 +1348,112 @@ impl ProviderSessionAffinityPort for MemorySessionAffinity {
                 self.renewal_ttls.lock().unwrap().push(claim.ttl);
             }
             cursors.insert(cursor_key, admission.cursor.wrapping_add(1));
+            Ok(true)
+        })
+    }
+
+    fn load_token_request_state<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        token_key: &'a ProviderSessionAffinityKey,
+        request_id: &'a str,
+    ) -> BoxFuture<
+        'a,
+        Result<gateway_core::provider_ports::ProviderTokenRequestState, ProviderStoreError>,
+    > {
+        Box::pin(async move {
+            let provider = provider.as_str().to_owned();
+            let token = token_key.expose_to_store().to_owned();
+            let count = self
+                .token_counts
+                .lock()
+                .unwrap()
+                .get(&(provider.clone(), token.clone()))
+                .copied();
+            Ok(gateway_core::provider_ports::ProviderTokenRequestState {
+                count: count.map(|value| value.0),
+                latched: count.is_some_and(|value| value.1),
+                switched: self
+                    .token_requests
+                    .lock()
+                    .unwrap()
+                    .get(&(provider, token, request_id.to_owned()))
+                    .copied(),
+            })
+        })
+    }
+
+    fn admit_token_request<'a>(
+        &'a self,
+        provider: &'a ProviderKind,
+        admission: gateway_core::provider_ports::ProviderTokenRequestAdmission<'a>,
+    ) -> BoxFuture<'a, Result<bool, ProviderStoreError>> {
+        Box::pin(async move {
+            let mut bindings = self.bindings.lock().unwrap();
+            let mut counts = self.token_counts.lock().unwrap();
+            let mut requests = self.token_requests.lock().unwrap();
+            let mut cursors = self.assignment_cursors.lock().unwrap();
+            let token = (
+                provider.as_str().to_owned(),
+                admission.token_key.expose_to_store().to_owned(),
+            );
+            let request = (
+                token.0.clone(),
+                token.1.clone(),
+                admission.request_id.to_owned(),
+            );
+            if counts.get(&token).copied()
+                != admission
+                    .expected
+                    .count
+                    .map(|count| (count, admission.expected.latched))
+                || requests.get(&request).copied() != admission.expected.switched
+                || admission.claims.iter().any(|claim| {
+                    bindings.get(&(token.0.clone(), claim.key.expose_to_store().to_owned()))
+                        != claim.expected
+                })
+                || admission.cursor.is_some_and(|(key, cursor)| {
+                    *cursors
+                        .get(&(token.0.clone(), key.as_str().to_owned()))
+                        .unwrap_or(&0)
+                        != cursor
+                })
+            {
+                return Ok(false);
+            }
+            for claim in admission.claims {
+                let binding = if admission.preserve_token_directive
+                    && claim.key == admission.token_key
+                {
+                    claim.expected.cloned().unwrap()
+                } else {
+                    claim
+                        .expected
+                        .filter(|binding| {
+                            binding.account_id() == claim.account && binding.directive().is_none()
+                        })
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            gateway_core::provider_ports::ProviderSessionBinding::new(
+                                claim.account.clone(),
+                                uuid::Uuid::new_v4().simple().to_string(),
+                            )
+                            .unwrap()
+                        })
+                };
+                bindings.insert(
+                    (token.0.clone(), claim.key.expose_to_store().to_owned()),
+                    binding,
+                );
+            }
+            if let Some((key, cursor)) = admission.cursor {
+                cursors.insert(
+                    (token.0.clone(), key.as_str().to_owned()),
+                    cursor.wrapping_add(1),
+                );
+            }
+            counts.insert(token, (admission.next_count, admission.latched));
+            requests.insert(request, admission.switched);
             Ok(true)
         })
     }

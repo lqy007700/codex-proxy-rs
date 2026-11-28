@@ -59,7 +59,7 @@ impl CallerIdentityPolicy {
 }
 
 // 使用规范十进制字符串，避免 01 与 1 成为两份身份，也不经过浮点数或 JS 整数
-fn valid_id(value: &str) -> bool {
+pub(super) fn valid_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 20
         && !value.starts_with('0')

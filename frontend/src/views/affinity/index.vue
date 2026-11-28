@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
-import type { AffinityFilters, AffinityOperation, AffinitySession, BindingDirective, IdentitySource } from '@/api/modules/affinity'
+import type { AffinityFilters, AffinityOperation, AffinitySession, BindingDirective, IdentitySource, NewApiTokenIdentity } from '@/api/modules/affinity'
 import { defineTableColumns, ZButton, ZCard, ZDialog, ZFormItem, ZInput, ZSegmented, ZSelect, ZSwitch, ZTable, ZTag } from '@codex-proxy/ui'
 import { ChevronDown } from '@lucide/vue'
 import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
@@ -13,6 +13,7 @@ import { useRequestState } from '@/composables/useRequestState'
 import { accountIdentityLabel } from '@/utils/accountIdentity'
 import { affinityTargetDisabled } from '@/utils/affinity'
 import { generateRequestId } from '@/utils/operation'
+import NewApiRuleDialog from './components/NewApiRuleDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -55,6 +56,11 @@ const accountQuery = useRequestState()
 const { loading: accountsLoading, error: accountsError } = accountQuery
 const source = reactive<IdentitySource>({ id: '', name: '', enabled: true })
 const showSource = ref(false)
+const showRule = ref(false)
+const ruleMode = ref<'default' | 'token' | 'lookup'>('default')
+const ruleIdentity = shallowRef<NewApiTokenIdentity | null>(null)
+const ruleClientKeyId = ref<string | null>(null)
+const ruleLabel = ref('')
 const sourceNames = computed(() => new Map(sources.value.map(item => [item.id, item.name])))
 interface AccountAffinityRow {
   account: Account
@@ -221,6 +227,22 @@ const accountColumns = defineTableColumns<AccountAffinityRow>([
 ])
 function canManage(session: AffinitySession) {
   return session.observation.bindingScope === 'token'
+}
+function openRule(mode: 'default' | 'lookup', session?: never): void
+function openRule(mode: 'token', session: AffinitySession): void
+function openRule(mode: 'default' | 'lookup' | 'token', session?: AffinitySession) {
+  const caller = session?.observation.caller
+  if (mode === 'token' && (!session || !canManage(session) || caller?.mode !== 'newApi'))
+    return
+  ruleMode.value = mode
+  ruleIdentity.value = caller?.mode === 'newApi'
+    ? { sourceId: caller.sourceId, userId: caller.userId, tokenId: caller.tokenId }
+    : null
+  ruleClientKeyId.value = session?.observation.clientKeyId ?? null
+  ruleLabel.value = session
+    ? `${callerLabel(session)} · ${bindingContext(session)}`
+    : ''
+  showRule.value = true
 }
 function key(session: AffinitySession) {
   return `${session.provider}:${session.reference}`
@@ -594,6 +616,12 @@ function openTokenView(session: AffinitySession) {
   <div class="w-full">
     <AppPageHeader title="账号亲和" description="管理 New API Key 与 CPR 主账号的绑定">
       <template #actions>
+        <ZButton :disabled="saving" @click="openRule('lookup')">
+          查询 Token 规则
+        </ZButton>
+        <ZButton :disabled="saving" @click="openRule('default')">
+          全局切换规则
+        </ZButton>
         <ZButton :loading="loading" :disabled="saving" @click="refresh">
           刷新
         </ZButton>
@@ -774,6 +802,9 @@ function openTokenView(session: AffinitySession) {
             </template>
             <template #actions="{ row }">
               <div class="flex flex-wrap gap-1">
+                <ZButton v-if="canManage(row) && row.observation.caller.mode === 'newApi'" size="small" :disabled="saving || loading" :aria-label="`配置 ${callerLabel(row)} 的切换规则`" @click="openRule('token', row)">
+                  切换规则
+                </ZButton>
                 <ZButton size="small" :disabled="saving || loading" :aria-label="`更换 ${callerLabel(row)} 的主账号`" @click="openOperation([row], 'target')">
                   更换主账号
                 </ZButton>
@@ -796,6 +827,7 @@ function openTokenView(session: AffinitySession) {
         </template>
       </template>
     </ZCard>
+    <NewApiRuleDialog v-model="showRule" :mode="ruleMode" :identity="ruleIdentity" :client-key-id="ruleClientKeyId" :label="ruleLabel" />
     <ZDialog ref="operationDialog" v-model="showOperation" :title="operationTitle" width="48rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
       <template v-if="!operation">
         <p class="mt-0 text-z-sm text-z-text-secondary">

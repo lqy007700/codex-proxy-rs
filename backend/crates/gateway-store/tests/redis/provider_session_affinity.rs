@@ -178,6 +178,153 @@ async fn affinity_repository() -> Option<(
 }
 
 #[tokio::test]
+async fn token_request_count_claims_and_cursor_are_atomic_and_expire() {
+    use gateway_core::policy::ClientApiKeyId;
+    use gateway_core::provider_ports::{ProviderSessionClaim, ProviderTokenRequestAdmission};
+    let Some((repo, _, _)) = affinity_repository().await else {
+        return;
+    };
+    let provider = ProviderKind::new("openai").unwrap();
+    let token = ProviderSessionAffinityKey::try_new("token-count").unwrap();
+    let session = ProviderSessionAffinityKey::try_new("token-session").unwrap();
+    let client = ClientApiKeyId::new("count-key").unwrap();
+    let account = ProviderAccountId::new("acct_a").unwrap();
+    let ttl = Duration::from_millis(300);
+    let initial = repo
+        .load_token_request_state(&provider, &token, "request-1")
+        .await
+        .unwrap();
+    let claims = [
+        ProviderSessionClaim {
+            key: &token,
+            expected: None,
+            account: &account,
+            ttl,
+        },
+        ProviderSessionClaim {
+            key: &session,
+            expected: None,
+            account: &account,
+            ttl,
+        },
+    ];
+    let make = || ProviderTokenRequestAdmission {
+        token_key: &token,
+        request_id: "request-1",
+        expected: initial,
+        next_count: 1,
+        latched: false,
+        switched: false,
+        preserve_token_directive: false,
+        ttl,
+        claims: &claims,
+        cursor: Some((&client, 0)),
+    };
+    let (one, two) = tokio::join!(
+        repo.admit_token_request(&provider, make()),
+        repo.admit_token_request(&provider, make())
+    );
+    assert_ne!(one.unwrap(), two.unwrap());
+    assert_eq!(
+        repo.round_robin_cursor(&provider, &client).await.unwrap(),
+        1
+    );
+    let state = repo
+        .load_token_request_state(&provider, &token, "request-1")
+        .await
+        .unwrap();
+    assert_eq!((state.count, state.switched), (Some(1), Some(false)));
+    let token_binding = repo.load(&provider, &token).await.unwrap().unwrap();
+    let session_binding = repo.load(&provider, &session).await.unwrap().unwrap();
+    let retry_claims = [
+        ProviderSessionClaim {
+            key: &token,
+            expected: Some(&token_binding),
+            account: &account,
+            ttl,
+        },
+        ProviderSessionClaim {
+            key: &session,
+            expected: Some(&session_binding),
+            account: &account,
+            ttl,
+        },
+    ];
+    assert!(
+        repo.admit_token_request(
+            &provider,
+            ProviderTokenRequestAdmission {
+                token_key: &token,
+                request_id: "request-1",
+                expected: state,
+                next_count: 1,
+                latched: false,
+                switched: false,
+                preserve_token_directive: false,
+                ttl,
+                claims: &retry_claims,
+                cursor: None,
+            }
+        )
+        .await
+        .unwrap()
+    );
+    assert_eq!(
+        repo.load_token_request_state(&provider, &token, "request-2")
+            .await
+            .unwrap()
+            .count,
+        Some(1)
+    );
+    let next_state = repo
+        .load_token_request_state(&provider, &token, "request-2")
+        .await
+        .unwrap();
+    let other = ProviderAccountId::new("acct_b").unwrap();
+    repo.compare_and_bind(&provider, &session, Some(&session_binding), &other, ttl)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        !repo
+            .admit_token_request(
+                &provider,
+                ProviderTokenRequestAdmission {
+                    token_key: &token,
+                    request_id: "request-2",
+                    expected: next_state,
+                    next_count: 2,
+                    latched: true,
+                    switched: true,
+                    preserve_token_directive: false,
+                    ttl,
+                    claims: &retry_claims,
+                    cursor: Some((&client, 1)),
+                }
+            )
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        repo.load_token_request_state(&provider, &token, "request-2")
+            .await
+            .unwrap(),
+        next_state
+    );
+    assert_eq!(
+        repo.round_robin_cursor(&provider, &client).await.unwrap(),
+        1
+    );
+    tokio::time::sleep(Duration::from_millis(450)).await;
+    assert!(repo.load(&provider, &token).await.unwrap().is_none());
+    let expired = repo
+        .load_token_request_state(&provider, &token, "request-2")
+        .await
+        .unwrap();
+    assert_eq!((expired.count, expired.switched), (None, None));
+}
+
+#[tokio::test]
 async fn turn_alias_cannot_be_reassigned_and_follows_session_migration() {
     let Some((repo, _, _)) = affinity_repository().await else {
         return;
