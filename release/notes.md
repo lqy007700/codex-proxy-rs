@@ -1,16 +1,11 @@
-# v3.57.1+lqy007700.v1
+# v3.57.2+lqy007700.v1
 
-本版选择性移植上游 `v3.57.1`（`eece08a4a`）的 OpenAI WebSocket 连接复用与 Antigravity 独立搜索修复
-
-## OpenAI
-
-- WebSocket 连接按响应字段和流事件字段的排除设置复用，避免沿用上一请求的排除设置
-- 预热保留握手返回的模型目录 ETag，在该连接上首次实际生成时交付
+本版选择性移植上游 `v3.57.2` 的 Antigravity GenAI 模型目录和 OpenAI 请求头透传改进
 
 ## Antigravity
 
-- 原生非流式独立 Google Search 可使用分组模型名，省略 `thinkingConfig`，并沿用搜索选项和账号授权规则
+- GenAI 模型目录按上游顺序展示当前 Key 可调用的模型，包含已声明的生图模型，并保留可用的上游描述与限制
 
-## 升级
+## OpenAI
 
-- 本版沿用数据库迁移 `0064`
+- Responses HTTP 和 Live 请求按业务头规则透传 `x-codex-turn-id`，保留同名头的多个值
