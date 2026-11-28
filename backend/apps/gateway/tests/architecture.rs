@@ -26,7 +26,7 @@ pub(super) const WORKSPACE_MEMBERS: &[&str] = &[
 #[test]
 fn workspace_member_list_matches_the_frozen_dag_scope() {
     let metadata = cargo_metadata_json();
-    let root = backend_root();
+    let root = metadata_workspace_root(metadata);
     let actual: BTreeSet<_> = metadata["packages"]
         .as_array()
         .expect("Cargo packages")
@@ -35,7 +35,7 @@ fn workspace_member_list_matches_the_frozen_dag_scope() {
             Path::new(package["manifest_path"].as_str().expect("package manifest"))
                 .parent()
                 .expect("package directory")
-                .strip_prefix(&root)
+                .strip_prefix(root)
                 .expect("workspace member path")
                 .to_path_buf()
         })
@@ -618,8 +618,9 @@ fn adapter_public_module_surfaces_match_allowlist() {
 #[test]
 fn workspace_modules_follow_conventional_file_layout() {
     let targets = test_source_roots();
+    let root = metadata_workspace_root(cargo_metadata_json());
     for member in WORKSPACE_MEMBERS {
-        let member_root = backend_root().join(member);
+        let member_root = root.join(member);
         let src = member_root.join("src");
         assert_module_tree(&src, &["lib.rs", "main.rs"]);
         assert_directory_modules_have_children(&src, &["lib.rs", "main.rs"]);
@@ -666,8 +667,9 @@ enum ModuleLayout {
 #[test]
 fn integration_tests_mirror_production_module_tree() {
     let targets = test_source_roots();
+    let root = metadata_workspace_root(cargo_metadata_json());
     for member in WORKSPACE_MEMBERS {
-        let member_root = backend_root().join(member);
+        let member_root = root.join(member);
         let tests_root = member_root.join("tests");
         if !tests_root.is_dir() {
             continue;
@@ -887,10 +889,22 @@ fn cargo_metadata_json() -> &'static serde_json::Value {
     })
 }
 
+// Cargo 元数据中的工作区与包路径使用相同格式，避免 Windows 规范路径前缀影响比较
+fn metadata_workspace_root(metadata: &serde_json::Value) -> &Path {
+    Path::new(
+        metadata["workspace_root"]
+            .as_str()
+            .expect("Cargo workspace root"),
+    )
+}
+
 /// 复用 Cargo 解析后的实际包名，覆盖重命名依赖与平台条件，排除测试和构建依赖
 fn dependency_names(member: &str) -> Vec<String> {
-    let manifest = backend_root().join(member).join("Cargo.toml");
-    let package = cargo_metadata_json()["packages"]
+    let metadata = cargo_metadata_json();
+    let manifest = metadata_workspace_root(metadata)
+        .join(member)
+        .join("Cargo.toml");
+    let package = metadata["packages"]
         .as_array()
         .expect("Cargo packages")
         .iter()

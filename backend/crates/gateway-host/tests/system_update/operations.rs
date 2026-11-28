@@ -91,8 +91,11 @@ async fn assert_system_operations_rejected(service: &ProcessSystemOperations, re
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn restart_should_wait_for_service_release_before_starting_replacement() {
+    use gateway_admin::model::system::SystemOperationKind;
+
     let fixture = Fixture::new();
     let replacement_marker = fixture.root.path().join("replacement-ran");
     fixture.write_executable(

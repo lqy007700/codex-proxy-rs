@@ -95,6 +95,8 @@ async fn shutdown_with_pending_request(trigger: ShutdownTrigger) {
     let address = reservation.local_addr().unwrap();
     let mut config = configuration(directory.path());
     config.listen.port = address.port();
+    // Windows 拒绝环回连接可能超过一秒，确认监听关闭前保留 worker 收尾预算。
+    config.worker_shutdown_timeout_seconds = 10;
     config.system_update.deployment_mode = "docker".to_owned();
     config.system_update.build_type = "source".to_owned();
     config.system_update.self_restart_enabled = true;

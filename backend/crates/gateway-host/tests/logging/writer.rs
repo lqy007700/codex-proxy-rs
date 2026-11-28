@@ -169,7 +169,9 @@ fn request_dump_retention_uses_elapsed_time_across_compression_and_restart() {
                 now.date_naive()
             ));
             fs::write(&path, format!("seed-{segment}\n")).unwrap();
-            fs::File::open(&path)
+            fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
                 .unwrap()
                 .set_modified(modified.into())
                 .unwrap();
@@ -285,7 +287,9 @@ fn seed_log(path: &Path, date: chrono::NaiveDate, body: &str) {
     let modified = gateway_core::time::DeploymentTimeZone::default()
         .date_start(date)
         .unwrap();
-    fs::File::open(path)
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path)
         .unwrap()
         .set_modified(SystemTime::from(modified))
         .unwrap();

@@ -28,12 +28,15 @@ fn config_loader_should_resolve_paths_relative_to_config_file() {
 #[test]
 fn config_loader_should_share_resolved_assets_with_system_update() {
     const CHILD_ENV: &str = "CPR_TEST_UPDATE_ASSETS_CHILD";
+    const ASSET_ENV: &str = "CPR_WEB_DIST_DIR";
     let Ok(case) = std::env::var(CHILD_ENV) else {
-        // 使用子进程覆盖无环境变量、Docker 路径和相对路径，避免污染并行测试
+        // 使用子进程覆盖无环境变量、绝对路径和相对路径，避免污染并行测试
+        let directory = tempfile::tempdir().expect("absolute asset path base");
+        let absolute_assets = directory.path().join("web/dist");
         for (case, web_dist) in [
             ("binary", None),
-            ("docker", Some("/app/web/dist")),
-            ("relative", Some("../custom/dist")),
+            ("absolute", Some(absolute_assets.as_path())),
+            ("relative", Some(std::path::Path::new("../custom/dist"))),
         ] {
             let mut child = Command::new(std::env::current_exe().expect("test executable"));
             child
@@ -42,9 +45,9 @@ fn config_loader_should_share_resolved_assets_with_system_update() {
                     "bootstrap::config::config_loader_should_share_resolved_assets_with_system_update",
                 ])
                 .env(CHILD_ENV, case)
-                .env_remove("CPR_WEB_DIST_DIR");
+                .env_remove(ASSET_ENV);
             if let Some(web_dist) = web_dist {
-                child.env("CPR_WEB_DIST_DIR", web_dist);
+                child.env(ASSET_ENV, web_dist);
             }
             let output = child.output().expect("isolated configuration test");
             assert!(
@@ -60,9 +63,11 @@ fn config_loader_should_share_resolved_assets_with_system_update() {
     document["api"]["asset_directory"] = serde_json::json!("../web/dist");
     let (config, directory) = parse_config(&document.to_string()).expect("binary configuration");
     let assets = match case.as_str() {
-        "docker" => std::path::PathBuf::from("/app/web/dist"),
-        "relative" => directory.path().join("deploy/../custom/dist"),
-        _ => directory.path().join("deploy/../web/dist"),
+        "absolute" => std::env::var_os(ASSET_ENV)
+            .expect("absolute asset path")
+            .into(),
+        "relative" => directory.path().join("deploy").join("../custom/dist"),
+        _ => directory.path().join("deploy").join("../web/dist"),
     };
     let debug = format!("{config:?}");
     assert!(debug.contains(&format!("asset_directory: {assets:?}")));
@@ -71,9 +76,15 @@ fn config_loader_should_share_resolved_assets_with_system_update() {
 
 #[test]
 fn config_loader_should_reject_missing_runtime_data_dir() {
-    let config = valid_config().replace("  runtime_data_dir: '../.runtime/data'\n", "");
-
-    assert!(parse_config(&config).is_err());
+    let mut document = valid_config_document();
+    assert!(
+        document["host"]
+            .as_object_mut()
+            .unwrap()
+            .remove("runtime_data_dir")
+            .is_some()
+    );
+    assert_rejected(document.to_string());
 }
 
 #[test]
@@ -240,7 +251,15 @@ fn config_loader_should_report_startup_configuration_diagnostics() {
 
 #[test]
 fn config_loader_should_reject_missing_explicit_fields() {
-    assert_rejected(valid_config().replace("  request_id_header: 'x-request-id'\n", ""));
+    let mut document = valid_config_document();
+    assert!(
+        document["api"]
+            .as_object_mut()
+            .unwrap()
+            .remove("request_id_header")
+            .is_some()
+    );
+    assert_rejected(document.to_string());
 }
 
 #[test]

@@ -18,8 +18,7 @@ use std::time::Duration;
 use flate2::{Compression, write::GzEncoder};
 use futures::StreamExt as _;
 use gateway_admin::model::system::{
-    SystemOperationAccepted, SystemOperationKind, SystemOperationStatus, SystemUpdateEventLevel,
-    SystemUpdateStatus,
+    SystemOperationAccepted, SystemOperationStatus, SystemUpdateEventLevel, SystemUpdateStatus,
 };
 use gateway_admin::ports::system::{
     SystemOperationError, SystemOperationErrorKind, SystemOperations,
